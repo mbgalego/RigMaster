@@ -76,6 +76,9 @@ export class TilemapManager {
   public collisionBodies: MatterJS.BodyType[] = [];
   public dockZones: Array<{ x: number; y: number; width: number; height: number; requiredAngle: number; id: string }> = [];
 
+  // Per-tile collision body tracking for incremental updates (avoids O(map) rebuilds on each paint)
+  private tileBodies: (MatterJS.BodyType | null)[][] = [];
+
   private tileContainer: Phaser.GameObjects.Container;
   private tileSprites: (Phaser.GameObjects.Image | null)[][] = [];
 
@@ -737,6 +740,7 @@ export class TilemapManager {
     if (col < 0 || col >= this.cols || row < 0 || row >= this.rows) return;
     if (!TILE_DEFINITIONS[tileType]) return;
 
+    const oldTile = this.grid[row][col];
     this.grid[row][col] = tileType;
     const oldSprite = this.tileSprites[row]?.[col];
     if (oldSprite) oldSprite.destroy();
@@ -749,12 +753,87 @@ export class TilemapManager {
     this.tileContainer.add(newSprite);
     this.tileSprites[row][col] = newSprite;
 
-    this.rebuildCollisions();
+    // Incremental physics update: only the painted tile changes its bodies
+    this.removeTileBodies(col, row);
+    const size = this.tileSize;
+    this.applyTileBody(col, row, tileType, col * size + size / 2, row * size + size / 2);
+
+    // Traffic lights own their physics; only rescan when one was added/removed
+    if (oldTile === 'traffic_light' || tileType === 'traffic_light') {
+      TrafficLightSystem.getInstance(this.scene).rebuild(this.grid, this.tileSize);
+    }
   }
 
   public getTile(col: number, row: number): string {
     if (col < 0 || col >= this.cols || row < 0 || row >= this.rows) return 'asphalt';
     return this.grid[row][col] || 'asphalt';
+  }
+
+  /**
+   * Creates the physics body (or dock zone) for a single tile, if its definition requires one.
+   */
+  private applyTileBody(col: number, row: number, tileId: string, posX: number, posY: number) {
+    if (!this.tileBodies[row]) this.tileBodies[row] = new Array(this.cols).fill(null);
+
+    const def = TILE_DEFINITIONS[tileId];
+    if (!def) return;
+
+    if (tileId === 'traffic_light') {
+      // European traffic light post and dynamic lane obstacle barrier are managed by TrafficLightSystem
+      return;
+    }
+
+    if (def.isSolid) {
+      const bodyW = def.colliderSize ? def.colliderSize.w : this.tileSize;
+      const bodyH = def.colliderSize ? def.colliderSize.h : this.tileSize;
+
+      // Create static solid Matter.js body with precise neon collision outline
+      const body = this.scene.matter.add.rectangle(posX, posY, bodyW, bodyH, {
+        isStatic: true,
+        friction: 0.8,
+        restitution: 0.1,
+        label: `obstacle_${tileId}`,
+        collisionFilter: {
+          category: 0x0001,
+          mask: 0xffff,
+        },
+        render: {
+          visible: true,
+          lineColor: 0xffaa00,
+          lineOpacity: 0.9,
+          fillColor: 0xff5500,
+          fillOpacity: 0.25,
+        },
+      }) as unknown as MatterJS.BodyType;
+
+      this.tileBodies[row][col] = body;
+      this.collisionBodies.push(body);
+    } else if (def.category === 'dock') {
+      // Dock bay zone detection
+      this.dockZones.push({
+        x: posX,
+        y: posY,
+        width: this.tileSize,
+        height: this.tileSize,
+        requiredAngle: 0,
+        id: `dock_${col}_${row}`,
+      });
+    }
+  }
+
+  /**
+   * Removes the physics body and dock zone belonging to a single tile.
+   */
+  private removeTileBodies(col: number, row: number) {
+    if (!this.tileBodies[row]) this.tileBodies[row] = new Array(this.cols).fill(null);
+
+    const existing = this.tileBodies[row][col];
+    if (existing) {
+      this.scene.matter.world.remove(existing);
+      this.tileBodies[row][col] = null;
+      this.collisionBodies = this.collisionBodies.filter((b) => b !== existing);
+    }
+    this.dockZones = this.dockZones.filter((d) => d.id !== `dock_${col}_${row}`);
   }
 
   public rebuildCollisions() {
@@ -765,58 +844,17 @@ export class TilemapManager {
     });
     this.collisionBodies = [];
     this.dockZones = [];
+    this.tileBodies = [];
 
     const size = this.tileSize;
 
     for (let r = 0; r < this.rows; r++) {
+      this.tileBodies[r] = new Array(this.cols).fill(null);
       for (let c = 0; c < this.cols; c++) {
         const tileId = this.grid[r][c];
-        const def = TILE_DEFINITIONS[tileId];
-        if (!def) continue;
-
         const posX = c * size + size / 2;
         const posY = r * size + size / 2;
-
-        if (tileId === 'traffic_light') {
-          // European traffic light post and dynamic lane obstacle barrier are managed by TrafficLightSystem
-          continue;
-        }
-
-        if (def.isSolid) {
-          const bodyW = def.colliderSize ? def.colliderSize.w : size;
-          const bodyH = def.colliderSize ? def.colliderSize.h : size;
-
-          // Create static solid Matter.js body with precise neon collision outline
-          const body = this.scene.matter.add.rectangle(posX, posY, bodyW, bodyH, {
-            isStatic: true,
-            friction: 0.8,
-            restitution: 0.1,
-            label: `obstacle_${tileId}`,
-            collisionFilter: {
-              category: 0x0001,
-              mask: 0xffff,
-            },
-            render: {
-              visible: true,
-              lineColor: 0xffaa00,
-              lineOpacity: 0.9,
-              fillColor: 0xff5500,
-              fillOpacity: 0.25,
-            },
-          }) as unknown as MatterJS.BodyType;
-
-          this.collisionBodies.push(body);
-        } else if (def.category === 'dock') {
-          // Dock bay zone detection
-          this.dockZones.push({
-            x: posX,
-            y: posY,
-            width: size,
-            height: size,
-            requiredAngle: 0,
-            id: `dock_${c}_${r}`,
-          });
-        }
+        this.applyTileBody(c, r, tileId, posX, posY);
       }
     }
 
