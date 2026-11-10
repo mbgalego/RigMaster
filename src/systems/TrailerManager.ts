@@ -90,6 +90,8 @@ export class TrailerManager {
     const noseAngle = Math.PI; // nose (kingpin) faces south
 
     const lead = new Trailer(this.scene, { x, y, angle: noseAngle, type });
+    // Sync the drawn container with the body angle (constructor only sets the body)
+    lead.setPosition(x, y, noseAngle);
     this.applyParkedFilter(lead);
     this.loose.push(lead);
 
@@ -101,6 +103,7 @@ export class TrailerManager {
         angle: noseAngle,
         type: 'bitrem_pup',
       });
+      pup.setPosition(x, y - (lead.length / 2 + 155 / 2 + 12), noseAngle);
       this.applyParkedFilter(pup);
       this.loose.push(pup);
     }

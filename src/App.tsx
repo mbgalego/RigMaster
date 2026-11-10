@@ -91,8 +91,22 @@ export default function App() {
     fragileHealth: 100,
     weather: 'clear',
     activeLicenseExam: null,
-    coupling: { prompt: null, blocked: null, coupledName: null, notice: null },
+    coupling: { prompt: null, blocked: null, coupledName: null, notice: null, noticeSeq: 0 },
   });
+
+  // Toast notifications (coupling feedback) — triggered by noticeSeq changes
+  const [toasts, setToasts] = useState<Array<{ id: number; text: string }>>([]);
+  const toastIdRef = useRef(0);
+  const noticeSeq = telemetry.coupling?.noticeSeq ?? 0;
+
+  useEffect(() => {
+    const n = telemetry.coupling?.notice;
+    if (!n) return;
+    const id = ++toastIdRef.current;
+    setToasts((t) => [...t.slice(-2), { id, text: n }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2800);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [noticeSeq]);
 
   const [activeExam, setActiveExam] = useState<ExamStatus | null>(null);
 
@@ -1232,16 +1246,12 @@ export default function App() {
       )}
 
       {/* TRAILER COUPLING PROMPT (bottom-center, above touch controls) */}
-      {!isEditorMode && !modalOpen && telemetry.coupling && (telemetry.coupling.prompt || telemetry.coupling.blocked || telemetry.coupling.notice) && (
+      {!isEditorMode && !modalOpen && telemetry.coupling && (telemetry.coupling.prompt || telemetry.coupling.blocked) && (
         <div className="absolute inset-x-0 bottom-32 sm:bottom-36 z-30 flex justify-center pointer-events-none px-4">
           <div className="flex items-center gap-2 px-4 py-2 rounded-lg border backdrop-blur-md shadow-lg max-w-md">
             {telemetry.coupling.blocked ? (
               <span className="text-xs font-bold text-amber-300 border-amber-500/50 bg-amber-950/70 px-3 py-1.5 rounded-md">
                 🔒 {telemetry.coupling.blocked}
-              </span>
-            ) : telemetry.coupling.notice ? (
-              <span className="text-xs font-bold text-cyan-200 bg-slate-900/70 border border-cyan-500/40 px-3 py-1.5 rounded-md">
-                {telemetry.coupling.notice}
               </span>
             ) : (
               <span className="text-xs font-bold text-white bg-slate-900/70 border border-cyan-500/50 px-3 py-1.5 rounded-md">
@@ -1249,6 +1259,20 @@ export default function App() {
               </span>
             )}
           </div>
+        </div>
+      )}
+
+      {/* TOASTS (coupling feedback notifications) */}
+      {!isEditorMode && (
+        <div className="absolute top-14 inset-x-0 z-40 flex flex-col items-center gap-2 pointer-events-none px-4">
+          {toasts.map((t) => (
+            <div
+              key={t.id}
+              className="px-4 py-2 rounded-lg bg-slate-900/90 border border-cyan-500/50 shadow-lg shadow-cyan-500/20 text-xs font-bold text-cyan-100"
+            >
+              {t.text}
+            </div>
+          ))}
         </div>
       )}
 

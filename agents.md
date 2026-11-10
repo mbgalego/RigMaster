@@ -39,7 +39,14 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.7.0** (Versão Atual)
+### **v1.7.1** (Versão Atual)
+- **Correção: Atrelado Estacionado Desenhado ao Contrário:**
+  - Causa: o corpo Matter nascia com ângulo π (nariz a sul) mas o container de desenho ficava com rotação 0 — visualmente o atrelado mostrava o nariz a norte e as rodas para o parque, e o engate parecia acontecer **do lado errado** (na traseira com rodas). `TrailerManager.spawnAt` sincroniza agora o container via `setPosition(x, y, π)` após a criação (lead e pup) — o nariz desenhado coincide com o kingpin físico.
+- **HUD: Toasters + Botão Ícone junto ao (P):**
+  - Notificações de acoplamento passam a **toasts** empilháveis no topo-centro (auto-dismiss 2,8s), disparadas por um contador `coupling.noticeSeq` (permite repetir a mesma mensagem em ações consecutivas).
+  - A indicação de acoplamento no TouchControls passou a **botão circular ícone-only (🔗)** colocado **junto ao travão de mão (P)**, sem texto: ciano pulsante (acoplar disponível), vermelho (desacoplar), âmbar (bloqueado por licença). O banner contextual de fundo mantém-se para o prompt/bloqueio.
+
+### **v1.7.0**
 - **Nova Feature: Acoplamento de Atrelados (Desacoplar / Recoplar em Condução Livre):**
   - `systems/TrailerManager.ts` (novo): detém todos os atrelados **livres** do mapa (estacionados nos parques ou abandonados após desacoplamento). Atrelados estacionados são corpos **estáticos** (não empurráveis); ao acoplar tornam-se dinâmicos com o filtro de colisão do conjunto (`group −1, mask 0x0001`) e ao desacoplar congelam de novo onde ficaram, prontos a reacoplar.
   - **Parques de Atrelados**: 4 novos tiles `trailer_parking_c / _ce / _h / _x` (categoria `parking`, não-sólidos, textura procedural com baia tracejada, silhueta e badge da classe) — cada um gera um atrelado estacionado com o nariz voltado a sul (o trator recua para a frente dele; o parque H gera também o pup atrás). Presets e mapa procedural recebem parques: spawn+Porto+Estaleiro+Industrial+Histórico+pátio central, Academia (4 classes) e Porto Oceânico (4 classes); helper `placeTrailerPad` garante a aproximação livre a sul.

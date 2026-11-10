@@ -27,6 +27,7 @@ export class MainScene extends Phaser.Scene {
   // Trailer coupling (free-drive fifth wheel): transient action notice (toast)
   private couplingNotice: string | null = null;
   private couplingNoticeUntil: number = 0;
+  private couplingNoticeSeq: number = 0;
 
   // Environmental layers
   private weatherGraphics!: Phaser.GameObjects.Graphics;
@@ -73,6 +74,7 @@ export class MainScene extends Phaser.Scene {
       blocked: string | null;      // candidate nearby but its license is locked
       coupledName: string | null;  // cargo of the trailer currently coupled
       notice: string | null;       // transient toast from coupling actions
+      noticeSeq: number;           // increments on every notice (toast trigger)
     };
   } = {
     speedKmh: 0,
@@ -88,7 +90,7 @@ export class MainScene extends Phaser.Scene {
     fragileHealth: 100,
     weather: 'clear',
     activeLicenseExam: null,
-    coupling: { prompt: null, blocked: null, coupledName: null, notice: null },
+    coupling: { prompt: null, blocked: null, coupledName: null, notice: null, noticeSeq: 0 },
   };
 
   constructor() {
@@ -323,6 +325,7 @@ export class MainScene extends Phaser.Scene {
 
   private setCouplingNotice(msg: string) {
     this.couplingNotice = msg;
+    this.couplingNoticeSeq++;
     this.couplingNoticeUntil = this.time.now + 2600;
   }
 
@@ -521,6 +524,7 @@ export class MainScene extends Phaser.Scene {
         blocked: null,
         coupledName: this.pupTrailer.cargoName,
         notice,
+        noticeSeq: this.couplingNoticeSeq,
       };
     }
 
@@ -533,6 +537,7 @@ export class MainScene extends Phaser.Scene {
             blocked: null,
             coupledName: this.trailer.cargoName,
             notice,
+            noticeSeq: this.couplingNoticeSeq,
           };
         }
       }
@@ -541,23 +546,31 @@ export class MainScene extends Phaser.Scene {
         blocked: null,
         coupledName: this.trailer.cargoName,
         notice,
+        noticeSeq: this.couplingNoticeSeq,
       };
     }
 
     const hitch = this.getTruckHitch();
     const cand = mgr.findCouplable(hitch.x, hitch.y, this.truck.body.angle, 85, 28, ['bitrem_pup']);
     if (!cand) {
-      return { prompt: null, blocked: null, coupledName: null, notice };
+      return { prompt: null, blocked: null, coupledName: null, notice, noticeSeq: this.couplingNoticeSeq };
     }
     const lic = TRAILER_TYPE_TO_LICENSE[cand.trailer.type];
     if (!this.licenseSystem.isUnlocked(lic)) {
-      return { prompt: null, blocked: `${cand.trailer.cargoName} — requer licença ${lic}`, coupledName: null, notice };
+      return {
+        prompt: null,
+        blocked: `${cand.trailer.cargoName} — requer licença ${lic}`,
+        coupledName: null,
+        notice,
+        noticeSeq: this.couplingNoticeSeq,
+      };
     }
     return {
       prompt: stopped ? `Acoplar: ${cand.trailer.cargoName} (C)` : `Acoplar: ${cand.trailer.cargoName} — pare primeiro`,
       blocked: null,
       coupledName: null,
       notice,
+      noticeSeq: this.couplingNoticeSeq,
     };
   }
 
