@@ -21,7 +21,6 @@ export class EditorScene extends Phaser.Scene {
 
   // Pinch-to-zoom tracking for touch devices
   private prevPinchDist: number = 0;
-  private isPinching: boolean = false;
 
   // Active cursor tile position
   public cursorCol: number = 0;
@@ -115,7 +114,6 @@ export class EditorScene extends Phaser.Scene {
 
       // Two-Finger Pinch / Pan Detection on Touch Screens
       if (p1.isDown && p2.isDown) {
-        this.isPinching = true;
         this.prevPinchDist = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
         this.lastDragX = (p1.x + p2.x) / 2;
         this.lastDragY = (p1.y + p2.y) / 2;
@@ -194,7 +192,6 @@ export class EditorScene extends Phaser.Scene {
       if (!p1.isDown && !p2.isDown) {
         this.isPointerDown = false;
         this.isDraggingPan = false;
-        this.isPinching = false;
         this.prevPinchDist = 0;
       }
     };
@@ -215,8 +212,15 @@ export class EditorScene extends Phaser.Scene {
     });
   }
 
-  private handlePaintPointer(_pointer: Phaser.Input.Pointer) {
+  private handlePaintPointer(pointer: Phaser.Input.Pointer) {
     const tm = this.mainScene.tilemapManager;
+
+    // Always derive the tile directly from the pointer position (never rely on the cached
+    // cursor from pointermove — a fresh tap on touch screens would paint a stale tile).
+    const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+    this.cursorCol = Math.floor(worldPoint.x / tm.tileSize);
+    this.cursorRow = Math.floor(worldPoint.y / tm.tileSize);
+
     if (this.cursorCol < 0 || this.cursorCol >= tm.cols || this.cursorRow < 0 || this.cursorRow >= tm.rows) {
       return;
     }
@@ -280,6 +284,14 @@ export class EditorScene extends Phaser.Scene {
     if (cursors?.right.isDown) this.cameras.main.scrollX += panSpeed;
     if (cursors?.up.isDown) this.cameras.main.scrollY -= panSpeed;
     if (cursors?.down.isDown) this.cameras.main.scrollY += panSpeed;
+
+    // Keep the MainScene camera perfectly in sync with the editor camera. Both scenes render
+    // the same world (tiles + grid overlay), so mismatched scroll/zoom made painted tiles land
+    // away from the cursor and pinned mobile pan/zoom to the fitted view. After this, painting
+    // lands exactly under the cursor and the whole map pans/zooms on every device.
+    const mainCam = this.mainScene.cameras.main;
+    mainCam.setZoom(this.cameras.main.zoom);
+    mainCam.setScroll(this.cameras.main.scrollX, this.cameras.main.scrollY);
   }
 
   public zoomIn() {
