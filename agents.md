@@ -38,7 +38,13 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.6.1** (Versão Atual)
+### **v1.6.2** (Versão Atual)
+- **Luzes de Marcha Atrás (Brancas) no Trator:**
+  - Substituição dos dois pontinhos brancos por lâmpadas de reversão reais: halo branco + núcleo incandescente (estilo das luzes de travão) e dois feixes de flood light brancos projetados para trás da cabeça tratora, ativados por `isReversing` (vLong < -2 px/s).
+- **HUD: Indicador de Semáforo Removido:**
+  - Eliminado o widget de 3 lâmpadas do HUD superior (estado do semáforo próximo). Campo `trafficLight` removido da telemetria do `MainScene` e o método `getNearestLight` do `TrafficLightSystem` (órfão) removido.
+
+### **v1.6.1**
 - **Minimapa HUD do Mapa Completo:**
   - Vista geral no canto superior direito em coordenadas de ecrã (`scrollFactor 0`), rasterizada a 2 px/tile: base desenhada numa textura canvas apenas quando `mapVersion` muda (pintura/import/preset = 1 redraw); overlay por frame com retângulo da câmara ativa (condiz em modo condução e editor, câmaras sincronizadas por frame), marcador seta do camião e marcador pulsante ciano da doca do exame.
   - Escala adaptativa (~26% da menor dimensão do ecrã, clamp 0.5–1.6x); reposiciona-se em resize. Custo por frame constante: um retângulo da vista, uma seta e um círculo.

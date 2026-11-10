@@ -499,30 +499,6 @@ export class TrafficLightSystem {
     }
   }
 
-  /**
-   * Queries the state and distance of the nearest traffic light relative to the player's truck.
-   */
-  public getNearestLight(truckX: number, truckY: number): { state: TrafficLightState; distPx: number } | null {
-    if (this.lights.length === 0) return null;
-
-    let nearest: TrafficLightData | null = null;
-    let minDist = Infinity;
-
-    for (const light of this.lights) {
-      const d = Phaser.Math.Distance.Between(truckX, truckY, light.stopBarX, light.stopBarY);
-      if (d < minDist) {
-        minDist = d;
-        nearest = light;
-      }
-    }
-
-    if (!nearest) return null;
-    return {
-      state: nearest.state,
-      distPx: Math.round(minDist),
-    };
-  }
-
   public destroyPhysics() {
     const world = this.scene.matter?.world;
     if (!world) return;

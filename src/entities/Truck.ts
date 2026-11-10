@@ -447,9 +447,29 @@ export class Truck {
     }
 
     if (this.isReversing) {
-      g.fillStyle(0xffffff, 0.9);
-      g.fillCircle(-hw + 16, hl - 2, 3);
-      g.fillCircle(hw - 16, hl - 2, 3);
+      // Reverse white flood light cones projecting behind the rig
+      g.fillStyle(0xffffff, 0.13);
+      g.beginPath();
+      g.moveTo(-hw + 16, hl);
+      g.lineTo(-hw + 38, hl + 190);
+      g.lineTo(-hw - 22, hl + 190);
+      g.closePath();
+      g.fillPath();
+
+      g.beginPath();
+      g.moveTo(hw - 16, hl);
+      g.lineTo(hw + 22, hl + 190);
+      g.lineTo(hw - 38, hl + 190);
+      g.closePath();
+      g.fillPath();
+
+      // Reverse lamps: bright halo + hot core (like the brake lamps)
+      g.fillStyle(0xffffff, 0.45);
+      g.fillCircle(-hw + 16, hl - 2, 7);
+      g.fillCircle(hw - 16, hl - 2, 7);
+      g.fillStyle(0xffffff, 1);
+      g.fillCircle(-hw + 16, hl - 2, 3.5);
+      g.fillCircle(hw - 16, hl - 2, 3.5);
     }
   }
 

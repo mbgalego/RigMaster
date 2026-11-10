@@ -5,7 +5,7 @@ import { Kingpin, ArticulationTelemetry } from '../physics/Kingpin';
 import { TilemapManager, TILE_DEFINITIONS } from '../editor/TilemapManager';
 import { LicenseSystem, LicenseExam, LicenseId } from '../systems/LicenseSystem';
 import { GarageSystem, WeatherModifier } from '../systems/GarageSystem';
-import { TrafficLightSystem, TrafficLightState } from '../systems/TrafficLightSystem';
+import { TrafficLightSystem } from '../systems/TrafficLightSystem';
 
 export class MainScene extends Phaser.Scene {
   public truck!: Truck;
@@ -63,7 +63,6 @@ export class MainScene extends Phaser.Scene {
     fragileHealth: number;
     weather: WeatherModifier;
     activeLicenseExam: any;
-    trafficLight?: { state: TrafficLightState; distPx: number } | null;
   } = {
     speedKmh: 0,
     steeringDeg: 0,
@@ -78,7 +77,6 @@ export class MainScene extends Phaser.Scene {
     fragileHealth: 100,
     weather: 'clear',
     activeLicenseExam: null,
-    trafficLight: null,
   };
 
   constructor() {
@@ -400,12 +398,6 @@ export class MainScene extends Phaser.Scene {
         );
       }
 
-      // Query Nearest European Traffic Light within 320px
-      const nearestTL = TrafficLightSystem.getInstance(this).getNearestLight(
-        this.truck.body.position.x,
-        this.truck.body.position.y
-      );
-
       // Update Telemetry Cache
       this.telemetry = {
         speedKmh: this.truck.speedKmh,
@@ -421,7 +413,6 @@ export class MainScene extends Phaser.Scene {
         fragileHealth: Math.round(this.trailer?.fragileHealth || 100),
         weather: this.garageSystem.getActiveModifier(),
         activeLicenseExam: this.licenseSystem.getActiveExam(),
-        trafficLight: nearestTL && nearestTL.distPx < 320 ? nearestTL : null,
       };
 
       // Sound Updates

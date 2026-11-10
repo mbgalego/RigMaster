@@ -382,42 +382,7 @@ export default function App() {
                   <AlertTriangle className="w-3 h-3 text-red-400" /> JACKKNIFE
                 </span>
               </>
-            )}
-            {telemetry.trafficLight && (
-              <>
-                <div className="w-px h-3 bg-white/20" />
-                <div
-                  className="flex items-center gap-1 bg-black/70 border border-slate-700/80 px-1.5 py-0.5 rounded-full"
-                  title={`Semáforo a ${telemetry.trafficLight.distPx}px (${telemetry.trafficLight.state})`}
-                >
-                  {/* Red Light */}
-                  <div
-                    className={`w-2 h-2 rounded-full transition-colors ${
-                      telemetry.trafficLight.state === 'RED' || telemetry.trafficLight.state === 'RED_YELLOW'
-                        ? 'bg-red-500 shadow-[0_0_6px_#ef4444]'
-                        : 'bg-red-950/40'
-                    }`}
-                  />
-                  {/* Amber Light */}
-                  <div
-                    className={`w-2 h-2 rounded-full transition-colors ${
-                      telemetry.trafficLight.state === 'YELLOW' || telemetry.trafficLight.state === 'RED_YELLOW'
-                        ? 'bg-amber-400 shadow-[0_0_6px_#f59e0b]'
-                        : 'bg-amber-950/40'
-                    }`}
-                  />
-                  {/* Green Light */}
-                  <div
-                    className={`w-2 h-2 rounded-full transition-colors ${
-                      telemetry.trafficLight.state === 'GREEN'
-                        ? 'bg-emerald-400 shadow-[0_0_6px_#10b981]'
-                        : 'bg-emerald-950/40'
-                    }`}
-                  />
-                </div>
-              </>
-            )}
-            {vehicleConfig === 'fragile_glass' && (
+            )}            {vehicleConfig === 'fragile_glass' && (
               <>
                 <div className="w-px h-3 bg-white/20" />
                 <span className="text-[10px] font-mono text-emerald-400 font-bold">
