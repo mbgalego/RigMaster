@@ -3,6 +3,7 @@ import {
   initGame,
   getMainScene,
   getEditorScene,
+  getGame,
   destroyGame,
 } from './main';
 import { MainScene } from './scenes/MainScene';
@@ -135,6 +136,17 @@ export default function App() {
       }
     }, 60);
 
+    // Keep the Phaser canvas from stealing pointer events while any HTML modal is open,
+    // so buttons like "Continuar" on the exam result popup can actually be clicked.
+    const syncCanvasPointerEvents = () => {
+      const game = getGame();
+      const canvas = game?.canvas as HTMLCanvasElement | undefined;
+      if (canvas) {
+        canvas.style.pointerEvents = modalOpen ? 'none' : 'auto';
+      }
+    };
+    syncCanvasPointerEvents();
+
     return () => {
       clearInterval(interval);
       unsubLic();
@@ -142,6 +154,15 @@ export default function App() {
       destroyGame();
     };
   }, []);
+
+  // Keep the Phaser canvas from stealing pointer events while any HTML modal is open
+  useEffect(() => {
+    const game = getGame();
+    const canvas = game?.canvas as HTMLCanvasElement | undefined;
+    if (canvas) {
+      canvas.style.pointerEvents = modalOpen ? 'none' : 'auto';
+    }
+  }, [modalOpen]);
 
   // Mode Switch
   const handleToggleMode = () => {
