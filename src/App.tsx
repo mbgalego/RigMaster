@@ -94,6 +94,15 @@ export default function App() {
 
   const [activeExam, setActiveExam] = useState<ExamStatus | null>(null);
 
+  // When any modal/overlay is open, the Phaser canvas must not capture pointer events,
+  // otherwise clicks/taps on HTML buttons (e.g. "Continuar" do exame) are swallowed by the game.
+  const modalOpen = Boolean(
+    showLicenseModal ||
+      showGarageModal ||
+      showJsonModal ||
+      (activeExam && (activeExam.active || activeExam.isPassed || activeExam.isFailed))
+  );
+
   // Initialize Phaser
   useEffect(() => {
     if (!gameContainerRef.current) return;
@@ -307,7 +316,7 @@ export default function App() {
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-[#0c0f17] font-sans text-slate-100 select-none">
       {/* Phaser Canvas Viewport */}
-      <div ref={gameContainerRef} className="w-full h-full cursor-crosshair" />
+      <div ref={gameContainerRef} className={`w-full h-full cursor-crosshair ${modalOpen ? 'pointer-events-none' : ''}`} />
 
       {/* TOP COMPACT INDUSTRIAL APP BAR */}
       <header className="absolute top-0 left-0 right-0 h-12 bg-slate-950/85 backdrop-blur-md border-b border-cyan-500/30 px-2 sm:px-4 flex items-center justify-between z-30 shadow-lg shadow-black/50">
@@ -663,7 +672,7 @@ export default function App() {
 
             <button
               onClick={() => LicenseSystem.getInstance().cancelExam()}
-              className="w-full py-2.5 rounded bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-sm transition"
+              className="w-full py-2.5 rounded bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-sm transition pointer-events-auto"
             >
               Continuar
             </button>
