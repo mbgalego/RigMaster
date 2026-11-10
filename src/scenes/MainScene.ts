@@ -6,6 +6,7 @@ import { TilemapManager, TILE_DEFINITIONS } from '../editor/TilemapManager';
 import { LicenseSystem, LicenseExam, LicenseId } from '../systems/LicenseSystem';
 import { GarageSystem, WeatherModifier } from '../systems/GarageSystem';
 import { TrafficLightSystem } from '../systems/TrafficLightSystem';
+import { TrailerManager, TRAILER_TYPE_TO_LICENSE, CouplingCandidate } from '../systems/TrailerManager';
 
 export class MainScene extends Phaser.Scene {
   public truck!: Truck;
@@ -20,8 +21,12 @@ export class MainScene extends Phaser.Scene {
 
   public isEditorMode: boolean = false;
   public debugMatter: boolean = true;
-  public currentVehicleConfig: 'solo' | 'standard' | 'long_cargo' | 'bitrem' | 'fragile_glass' = 'standard';
+  public currentVehicleConfig: 'solo' | 'standard' | 'long_cargo' | 'bitrem' | 'fragile_glass' = 'solo';
   private preEditorZoom: number = 1.0;
+
+  // Trailer coupling (free-drive fifth wheel): transient action notice (toast)
+  private couplingNotice: string | null = null;
+  private couplingNoticeUntil: number = 0;
 
   // Environmental layers
   private weatherGraphics!: Phaser.GameObjects.Graphics;
@@ -63,6 +68,12 @@ export class MainScene extends Phaser.Scene {
     fragileHealth: number;
     weather: WeatherModifier;
     activeLicenseExam: any;
+    coupling: {
+      prompt: string | null;       // contextual action ("Acoplar: X (C)")
+      blocked: string | null;      // candidate nearby but its license is locked
+      coupledName: string | null;  // cargo of the trailer currently coupled
+      notice: string | null;       // transient toast from coupling actions
+    };
   } = {
     speedKmh: 0,
     steeringDeg: 0,
@@ -77,6 +88,7 @@ export class MainScene extends Phaser.Scene {
     fragileHealth: 100,
     weather: 'clear',
     activeLicenseExam: null,
+    coupling: { prompt: null, blocked: null, coupledName: null, notice: null },
   };
 
   constructor() {
@@ -135,6 +147,9 @@ export class MainScene extends Phaser.Scene {
       this.input.keyboard.on('keydown-R', () => {
         this.resetVehicleToSpawn();
       });
+
+      // Couple / decouple trailers with C
+      this.input.keyboard.on('keydown-C', () => this.tryCoupleOrDecouple());
     }
 
     // 6. Sound Synthesis Init on First User Interaction
@@ -293,6 +308,259 @@ export class MainScene extends Phaser.Scene {
     this.playAirBrakeHiss();
   }
 
+  // ==========================================
+  // TRAILER COUPLING (free-drive fifth wheel)
+  // ==========================================
+
+  /** World position of the tractor's fifth-wheel hitch (35px behind the cab center). */
+  private getTruckHitch(): { x: number; y: number } {
+    const a = this.truck.body.angle;
+    return {
+      x: this.truck.body.position.x - Math.sin(a) * 35,
+      y: this.truck.body.position.y + Math.cos(a) * 35,
+    };
+  }
+
+  private setCouplingNotice(msg: string) {
+    this.couplingNotice = msg;
+    this.couplingNoticeUntil = this.time.now + 2600;
+  }
+
+  /**
+   * C key / HUD button. Decoupling wins when something is coupled (the bitrem pup
+   * comes off first); otherwise the nearest aligned parked trailer is coupled,
+   * gated by its license class. Everything requires the rig to be (almost) stopped.
+   */
+  public tryCoupleOrDecouple() {
+    if (!this.truck || this.isEditorMode) return;
+    const stopped = Math.abs(this.truck.speedKmh) < 3;
+    const mgr = TrailerManager.getInstance(this);
+
+    // 1. Bitrem pup coupled -> it comes off first
+    if (this.pupTrailer) {
+      if (!stopped) {
+        this.setCouplingNotice('Pare totalmente para desacoplar');
+        return;
+      }
+      this.decoupleTrailer(true);
+      this.setCouplingNotice('Bitrem traseiro desacoplado');
+      return;
+    }
+
+    // 2. Lead coupled
+    if (this.trailer) {
+      // Bitrem lead without pup: prefer coupling a nearby pup, else decouple
+      if (this.trailer.type === 'bitrem_lead') {
+        const cand = mgr.findCouplablePup(this.trailer);
+        if (cand) {
+          if (!stopped) {
+            this.setCouplingNotice('Pare totalmente para acoplar o bitrem traseiro');
+            return;
+          }
+          if (!this.licenseSystem.isUnlocked(TRAILER_TYPE_TO_LICENSE[cand.trailer.type])) {
+            this.setCouplingNotice(`Requer licença ${TRAILER_TYPE_TO_LICENSE[cand.trailer.type]}`);
+            return;
+          }
+          this.couplePup(cand);
+          return;
+        }
+      }
+      if (!stopped) {
+        this.setCouplingNotice('Pare totalmente para desacoplar');
+        return;
+      }
+      this.decoupleTrailer(false);
+      this.setCouplingNotice('Atrelado desacoplado');
+      return;
+    }
+
+    // 3. Solo tractor -> couple the nearest parked trailer (pups only go behind a lead)
+    const hitch = this.getTruckHitch();
+    const cand = mgr.findCouplable(hitch.x, hitch.y, this.truck.body.angle, 85, 28, ['bitrem_pup']);
+    if (!cand) {
+      this.setCouplingNotice('Nenhum atrelado alinhado — recue até à frente dele');
+      return;
+    }
+    if (!stopped) {
+      this.setCouplingNotice('Pare totalmente para acoplar');
+      return;
+    }
+    const lic = TRAILER_TYPE_TO_LICENSE[cand.trailer.type];
+    if (!this.licenseSystem.isUnlocked(lic)) {
+      this.setCouplingNotice(`${cand.trailer.cargoName} — requer licença ${lic}`);
+      return;
+    }
+    this.coupleTrailer(cand);
+  }
+
+  /** Rear fifth-wheel world point of a bitrem lead (same offset the pup Kingpin uses). */
+  private getLeadRearHitch(lead: Trailer): { x: number; y: number } {
+    const a = lead.body.angle;
+    const offY = lead.length / 2 - 18;
+    return {
+      x: lead.body.position.x - Math.sin(a) * offY,
+      y: lead.body.position.y + Math.cos(a) * offY,
+    };
+  }
+
+  /** Attaches a parked trailer to the tractor's fifth wheel (mirrors spawnVehicleRig params). */
+  private coupleTrailer(cand: CouplingCandidate) {
+    const t = cand.trailer;
+    const mgr = TrailerManager.getInstance(this);
+
+    mgr.prepareForCoupling(t);
+    mgr.adopt(t);
+
+    const angle = this.truck.body.angle;
+    const hitch = this.getTruckHitch();
+    const bx = -Math.sin(angle);
+    const by = Math.cos(angle);
+    // Park the trailer exactly one kingpin distance behind the hitch
+    t.setPosition(hitch.x + bx * t.kingpinDist, hitch.y + by * t.kingpinDist, angle);
+
+    let trailerOffY: number;
+    let jackknife: number;
+    if (t.type === 'long_cargo') {
+      trailerOffY = -t.length / 2 + 35;
+      jackknife = 72;
+    } else if (t.type === 'bitrem_lead') {
+      trailerOffY = -t.length / 2 + 25;
+      jackknife = 75;
+    } else {
+      trailerOffY = -t.length / 2 + 30;
+      jackknife = 75;
+    }
+
+    this.trailer = t;
+    this.kingpin = new Kingpin(this, this.truck.body, t.body, t.length, {
+      parentOffset: { x: 0, y: 35 },
+      trailerOffset: { x: 0, y: trailerOffY },
+      jackknifeLimitDeg: jackknife,
+      mechanicalLockDeg: 95,
+    });
+
+    // Keep reset-spawn offsets consistent with the manually built rig
+    this.currentVehicleConfig =
+      t.type === 'long_cargo' ? 'long_cargo' :
+      t.type === 'bitrem_lead' ? 'bitrem' :
+      t.type === 'fragile_glass' ? 'fragile_glass' : 'standard';
+
+    this.setCouplingNotice(`Acoplado: ${t.cargoName}`);
+  }
+
+  /** Attaches a pup to the rear fifth wheel of the coupled bitrem lead. */
+  private couplePup(cand: CouplingCandidate) {
+    const lead = this.trailer!;
+    const t = cand.trailer;
+    const mgr = TrailerManager.getInstance(this);
+
+    mgr.prepareForCoupling(t);
+    mgr.adopt(t);
+
+    const rear = this.getLeadRearHitch(lead);
+    const a = lead.body.angle;
+    const bx = -Math.sin(a);
+    const by = Math.cos(a);
+    t.setPosition(rear.x + bx * t.kingpinDist, rear.y + by * t.kingpinDist, a);
+
+    this.pupTrailer = t;
+    this.pupKingpin = new Kingpin(this, lead.body, t.body, t.length, {
+      parentOffset: { x: 0, y: lead.length / 2 - 18 },
+      trailerOffset: { x: 0, y: -t.length / 2 + 25 },
+      jackknifeLimitDeg: 75,
+      mechanicalLockDeg: 95,
+    });
+
+    this.setCouplingNotice(`Acoplado: ${t.cargoName}`);
+  }
+
+  /**
+   * Detaches the pup (or the lead trailer), parks it clear of the rig and freezes
+   * it back into a static, couplable-later body.
+   */
+  private decoupleTrailer(isPup: boolean) {
+    const t = isPup ? this.pupTrailer : this.trailer;
+    if (!t) return;
+    const parentBody = isPup ? this.trailer!.body : this.truck.body;
+    const offY = isPup ? (this.trailer!.length / 2 - 18) : 35;
+    const a = parentBody.angle;
+    const hx = parentBody.position.x - Math.sin(a) * offY;
+    const hy = parentBody.position.y + Math.cos(a) * offY;
+    const bx = -Math.sin(a);
+    const by = Math.cos(a);
+
+    // They overlap at the fifth wheel while coupled: park the trailer clear
+    // of the parent BEFORE restoring its truck-facing collision mask.
+    const parkDist = t.kingpinDist + 45;
+    t.setPosition(hx + bx * parkDist, hy + by * parkDist, t.body.angle);
+
+    if (isPup) {
+      this.pupKingpin?.destroy();
+      this.pupKingpin = null;
+      this.pupTrailer = null;
+    } else {
+      this.kingpin?.destroy();
+      this.kingpin = null;
+      this.trailer = null;
+    }
+
+    t.isReversing = false;
+    t.update(16, false); // reset lamps to idle
+    TrailerManager.getInstance(this).release(t);
+  }
+
+  /** Builds the coupling HUD state (contextual prompt / blocked reason / notice). */
+  private computeCouplingState(time: number): MainScene['telemetry']['coupling'] {
+    const mgr = TrailerManager.getInstance(this);
+    const stopped = Math.abs(this.truck.speedKmh) < 3;
+    const notice = time < this.couplingNoticeUntil ? this.couplingNotice : null;
+
+    if (this.pupTrailer) {
+      return {
+        prompt: stopped ? `Desacoplar: ${this.pupTrailer.cargoName} (C)` : null,
+        blocked: null,
+        coupledName: this.pupTrailer.cargoName,
+        notice,
+      };
+    }
+
+    if (this.trailer) {
+      if (this.trailer.type === 'bitrem_lead' && !this.pupTrailer) {
+        const cand = mgr.findCouplablePup(this.trailer);
+        if (cand) {
+          return {
+            prompt: stopped ? `Acoplar: ${cand.trailer.cargoName} (C)` : `Acoplar: ${cand.trailer.cargoName} — pare primeiro`,
+            blocked: null,
+            coupledName: this.trailer.cargoName,
+            notice,
+          };
+        }
+      }
+      return {
+        prompt: stopped ? `Desacoplar: ${this.trailer.cargoName} (C)` : null,
+        blocked: null,
+        coupledName: this.trailer.cargoName,
+        notice,
+      };
+    }
+
+    const hitch = this.getTruckHitch();
+    const cand = mgr.findCouplable(hitch.x, hitch.y, this.truck.body.angle, 85, 28, ['bitrem_pup']);
+    if (!cand) {
+      return { prompt: null, blocked: null, coupledName: null, notice };
+    }
+    const lic = TRAILER_TYPE_TO_LICENSE[cand.trailer.type];
+    if (!this.licenseSystem.isUnlocked(lic)) {
+      return { prompt: null, blocked: `${cand.trailer.cargoName} — requer licença ${lic}`, coupledName: null, notice };
+    }
+    return {
+      prompt: stopped ? `Acoplar: ${cand.trailer.cargoName} (C)` : `Acoplar: ${cand.trailer.cargoName} — pare primeiro`,
+      blocked: null,
+      coupledName: null,
+      notice,
+    };
+  }
+
   public toggleEditorMode() {
     this.isEditorMode = !this.isEditorMode;
     if (this.isEditorMode) {
@@ -413,6 +681,7 @@ export class MainScene extends Phaser.Scene {
         fragileHealth: Math.round(this.trailer?.fragileHealth || 100),
         weather: this.garageSystem.getActiveModifier(),
         activeLicenseExam: this.licenseSystem.getActiveExam(),
+        coupling: this.computeCouplingState(time),
       };
 
       // Sound Updates
@@ -747,6 +1016,12 @@ export class MainScene extends Phaser.Scene {
       g.strokeCircle(ex, ey, 5);
       g.fillStyle(0x22d3ee, pulse);
       g.fillCircle(ex, ey, 2.5);
+    }
+
+    // Parked / loose trailers (white dots)
+    for (const t of TrailerManager.getInstance(this).loose) {
+      g.fillStyle(0xe2e8f0, 0.95);
+      g.fillRect(toMapX(t.body.position.x) - 1.5, toMapY(t.body.position.y) - 1.5, 3, 3);
     }
 
     // Truck arrow marker

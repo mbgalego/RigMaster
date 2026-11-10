@@ -91,9 +91,11 @@ export class Truck {
       restitution: 0.0,
       angle: spawnAngle,
       label: 'truck_cab',
+      // mask includes 0x0004 so the tractor can physically push free-standing
+      // (parked/decoupled) trailers; coupled trailers switch back to mask 0x0001.
       collisionFilter: {
         category: 0x0002,
-        mask: 0x0001,
+        mask: 0x0005,
         group: -1,
       },
       render: {

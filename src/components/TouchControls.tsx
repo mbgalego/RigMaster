@@ -1,11 +1,14 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { getMainScene } from '../main';
+import type { MainScene } from '../scenes/MainScene';
 
 interface TouchControlsProps {
   visible: boolean;
+  coupling?: MainScene['telemetry']['coupling'];
+  onCouple?: () => void;
 }
 
-export const TouchControls: React.FC<TouchControlsProps> = ({ visible }) => {
+export const TouchControls: React.FC<TouchControlsProps> = ({ visible, coupling, onCouple }) => {
   const wheelRef = useRef<HTMLDivElement>(null);
   const [wheelAngleDeg, setWheelAngleDeg] = useState<number>(0);
   const [isDraggingWheel, setIsDraggingWheel] = useState<boolean>(false);
@@ -196,8 +199,43 @@ export const TouchControls: React.FC<TouchControlsProps> = ({ visible }) => {
 
   if (!visible) return null;
 
+  const couplingAction = coupling?.prompt || coupling?.blocked || coupling?.notice;
+
   return (
     <div className="absolute inset-x-0 bottom-0 pointer-events-none z-30 select-none pb-4 px-3 sm:px-6 flex justify-between items-end">
+      {/* ======================================================== */}
+      {/* TOPO DIREITA: BOTÃO DE ACOPLAR / DESACOPLAR              */}
+      {/* ======================================================== */}
+      {couplingAction && (
+        <div className="absolute right-3 sm:right-6 bottom-56 sm:bottom-64 flex flex-col items-end gap-2 pointer-events-auto">
+          <button
+            type="button"
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onCouple?.();
+            }}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onCouple?.();
+            }}
+            style={{ touchAction: 'none' }}
+            className={`px-3 py-2 rounded-lg text-xs font-black border backdrop-blur-md shadow-lg transition select-none touch-none flex items-center gap-1.5 ${
+              coupling?.blocked
+                ? 'bg-amber-950/80 text-amber-300 border-amber-500/50'
+                : coupling?.prompt?.startsWith('Desacoplar')
+                  ? 'bg-red-950/70 text-red-200 border-red-500/50'
+                  : 'bg-cyan-900/80 text-cyan-200 border-cyan-500/60 shadow-cyan-500/30'
+            }`}
+            title="Acoplar / Desacoplar Atrelado (C)"
+          >
+            <span className="text-base leading-none">🔗</span>
+            <span className="max-w-[180px] sm:max-w-xs text-left leading-tight">{couplingAction.replace(' (C)', '')}</span>
+          </button>
+        </div>
+      )}
+
       {/* ======================================================== */}
       {/* ESQUERDA: VOLANTE INTERATIVO (20% MAIOR, SEMI-TRANSPARENTE) */}
       {/* ======================================================== */}

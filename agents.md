@@ -17,7 +17,7 @@ src/
 ├── main.ts                 # Ponto de entrada do Phaser e exportação de instâncias de cenas
 ├── App.tsx                 # Interface React / HUD minimalista, dock do editor e controlos
 ├── components/
-│   └── TouchControls.tsx   # Volante rotativo (+/-270°), switch de marcha D/R e pedais táteis
+│   └── TouchControls.tsx   # Volante rotativo (+/-270°), switch de marcha D/R, pedais táteis e botão de acoplamento
 ├── entities/
 │   ├── Truck.ts            # Trator 4x2 com física de inércia, torque diesel e pneus sem derrapagem
 │   └── Trailer.ts          # Atrelados (Standard, Pá Eólica, Bitrem Lead/Pup, Vidro Sensível)
@@ -25,6 +25,7 @@ src/
 │   └── Kingpin.ts          # Conexão de articulação 5th-wheel, cálculo de Tail Swing e Off-tracking
 ├── systems/
 │   ├── LicenseSystem.ts    # Gestor de Licenças de Perícia (C, CE, H, X) e temporizadores de exame
+│   ├── TrailerManager.ts   # Atrelados livres/estacionados nos parques, acoplamento e gating por licença
 │   ├── GarageSystem.ts     # Hubs Regionais (Porto, Estaleiro, Industrial, Histórico) e biomas
 │   └── TrafficLightSystem.ts # Semáforos europeus de 4 tempos com barreiras físicas de faixa
 ├── editor/
@@ -38,7 +39,17 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.6.9** (Versão Atual)
+### **v1.7.0** (Versão Atual)
+- **Nova Feature: Acoplamento de Atrelados (Desacoplar / Recoplar em Condução Livre):**
+  - `systems/TrailerManager.ts` (novo): detém todos os atrelados **livres** do mapa (estacionados nos parques ou abandonados após desacoplamento). Atrelados estacionados são corpos **estáticos** (não empurráveis); ao acoplar tornam-se dinâmicos com o filtro de colisão do conjunto (`group −1, mask 0x0001`) e ao desacoplar congelam de novo onde ficaram, prontos a reacoplar.
+  - **Parques de Atrelados**: 4 novos tiles `trailer_parking_c / _ce / _h / _x` (categoria `parking`, não-sólidos, textura procedural com baia tracejada, silhueta e badge da classe) — cada um gera um atrelado estacionado com o nariz voltado a sul (o trator recua para a frente dele; o parque H gera também o pup atrás). Presets e mapa procedural recebem parques: spawn+Porto+Estaleiro+Industrial+Histórico+pátio central, Academia (4 classes) e Porto Oceânico (4 classes); helper `placeTrailerPad` garante a aproximação livre a sul.
+  - **Mecânica (tecla `C` / botão 🔗 no HUD e TouchControls)**: candidato válido = ponto de engate do trator a ≤85px do kingpin do atrelado com ângulos alinhados (±28°) e conjunto parado (<3 km/h). O desacoplamento estaciona o atrelado a `kingpinDist+45px` para trás antes de restaurar a máscara de colisão (evita empurrão por sobreposição). No bitrem, o pup sai primeiro e entra em último; o pup só acopla à quinta roda traseira do dianteiro.
+  - **Gating por licença**: C→standard, C+E→pá eólica, H→bitrem (par), X→vidro frágil; prompt HUD mostra `🔒 requer licença X` quando bloqueado.
+  - **Colisões**: máscara do trator 4x2 `0x0001→0x0005` para poder empurrar atrelados livres (cat 0x0004); atrelados livres usam `group 0, mask 0x0003` (colidem com trator e obstáculos, não entre si).
+  - **HUD**: telemetria `coupling { prompt, blocked, coupledName, notice }` com banner inferior-centro, botão tátil dedicado e pontos brancos dos atrelados livres no minimapa. Editor ganha o separador de categoria "parking".
+  - **Condução livre começa solo** (`currentVehicleConfig 'solo'`); os exames continuam a gerar o conjunto completo automaticamente (`spawnVehicleRig`) — inalterados.
+
+### **v1.6.9**
 - **Correção: Z-Order das Rodas do Trator (dianteiras vs. traseiras):**
   - Dianteiras direcionais voltaram a desenhar-se **por baixo** da carroçaria (parcialmente escondidas, geometria original 8×20 em ±(hw+1)), via `wheelGraphics`; os duplos traseiros 4x2 mantêm-se **por cima** da carroçaria via novo `rearWheelsGraphics` (interior ±(hw−3), exterior saliente ±(hw+5)), ambos com rotação manual por trig (sem transforms de canvas).
 

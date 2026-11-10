@@ -71,7 +71,7 @@ export default function App() {
   const [hubs, setHubs] = useState<HubData[]>([]);
   const [activeWeather, setActiveWeather] = useState<WeatherModifier>('clear');
   const [selectedBrush, setSelectedBrush] = useState<string>('road_straight_h');
-  const [brushCategory, setBrushCategory] = useState<'all' | 'road' | 'dock' | 'obstacle' | 'biome'>('all');
+  const [brushCategory, setBrushCategory] = useState<'all' | 'road' | 'dock' | 'parking' | 'obstacle' | 'biome'>('all');
   const [editorTool, setEditorTool] = useState<'paint' | 'pan' | 'erase'>('paint');
   const [isPaletteOpen, setIsPaletteOpen] = useState<boolean>(true);
   const [isPaintingSpawn, setIsPaintingSpawn] = useState<boolean>(false);
@@ -91,6 +91,7 @@ export default function App() {
     fragileHealth: 100,
     weather: 'clear',
     activeLicenseExam: null,
+    coupling: { prompt: null, blocked: null, coupledName: null, notice: null },
   });
 
   const [activeExam, setActiveExam] = useState<ExamStatus | null>(null);
@@ -813,7 +814,7 @@ export default function App() {
 
               {/* Horizontally Scrollable Category Tabs */}
               <div className="flex gap-1 mb-2 text-[10px] overflow-x-auto pb-1">
-                {(['all', 'road', 'dock', 'obstacle', 'biome'] as const).map((cat) => (
+                {(['all', 'road', 'dock', 'parking', 'obstacle', 'biome'] as const).map((cat) => (
                   <button
                     key={cat}
                     onClick={() => setBrushCategory(cat)}
@@ -1230,8 +1231,32 @@ export default function App() {
         </div>
       )}
 
+      {/* TRAILER COUPLING PROMPT (bottom-center, above touch controls) */}
+      {!isEditorMode && !modalOpen && telemetry.coupling && (telemetry.coupling.prompt || telemetry.coupling.blocked || telemetry.coupling.notice) && (
+        <div className="absolute inset-x-0 bottom-32 sm:bottom-36 z-30 flex justify-center pointer-events-none px-4">
+          <div className="flex items-center gap-2 px-4 py-2 rounded-lg border backdrop-blur-md shadow-lg max-w-md">
+            {telemetry.coupling.blocked ? (
+              <span className="text-xs font-bold text-amber-300 border-amber-500/50 bg-amber-950/70 px-3 py-1.5 rounded-md">
+                🔒 {telemetry.coupling.blocked}
+              </span>
+            ) : telemetry.coupling.notice ? (
+              <span className="text-xs font-bold text-cyan-200 bg-slate-900/70 border border-cyan-500/40 px-3 py-1.5 rounded-md">
+                {telemetry.coupling.notice}
+              </span>
+            ) : (
+              <span className="text-xs font-bold text-white bg-slate-900/70 border border-cyan-500/50 px-3 py-1.5 rounded-md">
+                🔗 {telemetry.coupling.prompt}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* TOUCH CONTROLS (STEERING WHEEL LEFT, THROTTLE & BRAKE RIGHT) */}
-      <TouchControls visible={!isEditorMode && showTouchControls} />
+      <TouchControls visible={!isEditorMode && showTouchControls} coupling={telemetry.coupling} onCouple={() => {
+        const scene = getMainScene();
+        if (scene) scene.tryCoupleOrDecouple();
+      }} />
     </div>
   );
 }
