@@ -148,26 +148,48 @@ export const TouchControls: React.FC<TouchControlsProps> = ({ visible }) => {
   };
 
   // Pedal Press Handlers
+  // Pointer capture keeps onPointerUp firing even if the finger/mouse slides off the pedal,
+  // preventing a stuck throttle/brake when the release happens outside the button bounds.
   const handleThrottleDown = (e: React.PointerEvent) => {
     e.preventDefault();
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      // Ignore
+    }
     setThrottlePressed(true);
     updateThrottle(1.0);
   };
 
   const handleThrottleUp = (e: React.PointerEvent) => {
     e.preventDefault();
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      // Ignore
+    }
     setThrottlePressed(false);
     updateThrottle(0);
   };
 
   const handleBrakeDown = (e: React.PointerEvent) => {
     e.preventDefault();
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      // Ignore
+    }
     setBrakePressed(true);
     updateBrake(1.0);
   };
 
   const handleBrakeUp = (e: React.PointerEvent) => {
     e.preventDefault();
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      // Ignore
+    }
     setBrakePressed(false);
     updateBrake(0);
   };
