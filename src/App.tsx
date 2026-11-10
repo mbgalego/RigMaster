@@ -161,14 +161,6 @@ export default function App() {
     const canvas = game?.canvas as HTMLCanvasElement | undefined;
     if (canvas) {
       canvas.style.pointerEvents = modalOpen ? 'none' : 'auto';
-      // Debug: log pointer-events state changes
-      if (modalOpen) {
-        console.log('[DEBUG] canvas pointer-events set to NONE (modal open)');
-      } else {
-        console.log('[DEBUG] canvas pointer-events set to AUTO (modal closed)');
-      }
-    } else {
-      console.warn('[DEBUG] Phaser canvas not found when modalOpen=', modalOpen);
     }
   }, [modalOpen]);
 
@@ -700,10 +692,7 @@ export default function App() {
             )}
 
             <button
-              onClick={(e) => {
-                console.log('[DEBUG] Continuar button clicked!');
-                LicenseSystem.getInstance().cancelExam();
-              }}
+              onClick={() => LicenseSystem.getInstance().cancelExam()}
               className="w-full py-2.5 rounded bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-sm transition pointer-events-auto"
             >
               Continuar

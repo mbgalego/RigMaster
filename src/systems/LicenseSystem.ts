@@ -226,6 +226,9 @@ export class LicenseSystem {
 
   public cancelExam() {
     this.activeExamStatus.active = false;
+    this.activeExamStatus.isPassed = false;
+    this.activeExamStatus.isFailed = false;
+    this.activeExamStatus.failReason = null;
     this.notify();
   }
 
