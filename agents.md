@@ -38,7 +38,11 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.6.8** (Versão Atual)
+### **v1.6.9** (Versão Atual)
+- **Correção: Z-Order das Rodas do Trator (dianteiras vs. traseiras):**
+  - Dianteiras direcionais voltaram a desenhar-se **por baixo** da carroçaria (parcialmente escondidas, geometria original 8×20 em ±(hw+1)), via `wheelGraphics`; os duplos traseiros 4x2 mantêm-se **por cima** da carroçaria via novo `rearWheelsGraphics` (interior ±(hw−3), exterior saliente ±(hw+5)), ambos com rotação manual por trig (sem transforms de canvas).
+
+### **v1.6.8**
 - **Correção: Par Duplo Traseiro Legível:**
   - Causa: a carroçaria era desenhada por cima das rodas no container, escondendo o pneu interior do par — só o exterior aparecia (uma "roda única" muito saliente). `wheelGraphics` passou a desenhar **sobre** `cabGraphics`; os dois pneus de cada lado são agora visíveis (interior encostado à carroçaria em ±(hw−3), exterior saliente 9px em ±(hw+5)), 8×24 px com separação por contorno.
 

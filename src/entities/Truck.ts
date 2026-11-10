@@ -17,6 +17,8 @@ export class Truck {
   public container: Phaser.GameObjects.Container;
   public cabGraphics: Phaser.GameObjects.Graphics;
   public wheelGraphics: Phaser.GameObjects.Graphics;
+  // Rear dual tires draw ABOVE the chassis so both tires of each pair stay visible
+  public rearWheelsGraphics: Phaser.GameObjects.Graphics;
   public lightsGraphics: Phaser.GameObjects.Graphics;
 
   public width: number;
@@ -107,10 +109,11 @@ export class Truck {
     this.container.setDepth(10);
 
     this.wheelGraphics = scene.add.graphics();
+    this.rearWheelsGraphics = scene.add.graphics();
     this.cabGraphics = scene.add.graphics();
     this.lightsGraphics = scene.add.graphics();
 
-    this.container.add([this.cabGraphics, this.wheelGraphics, this.lightsGraphics]);
+    this.container.add([this.wheelGraphics, this.cabGraphics, this.rearWheelsGraphics, this.lightsGraphics]);
 
     this.setupInput();
     this.setupCollisions();
@@ -377,7 +380,9 @@ export class Truck {
 
   private drawWheels() {
     const g = this.wheelGraphics;
+    const gRear = this.rearWheelsGraphics;
     g.clear();
+    gRear.clear();
 
     const hw = this.width / 2;
     const frontY = -this.length / 2 + 20;
@@ -389,7 +394,11 @@ export class Truck {
      * (save/translateCanvas/rotateCanvas), which proved unreliable for per-frame
      * redraws under the Phaser 4 renderer.
      */
-    const drawTire = (x: number, y: number, angle: number, tw: number, th: number, lineColor: number) => {
+    const drawTire = (
+      ctx: Phaser.GameObjects.Graphics,
+      x: number, y: number, angle: number,
+      tw: number, th: number, lineColor: number, withHub: boolean
+    ) => {
       const c = Math.cos(angle);
       const s = Math.sin(angle);
       const corners = [
@@ -399,32 +408,33 @@ export class Truck {
         { x: -tw / 2, y: th / 2 },
       ].map((p) => ({ x: x + p.x * c - p.y * s, y: y + p.x * s + p.y * c }));
 
-      g.fillStyle(0x0f172a, 1);
-      g.lineStyle(1.5, lineColor, 0.85);
-      g.beginPath();
-      g.moveTo(corners[0].x, corners[0].y);
-      g.lineTo(corners[1].x, corners[1].y);
-      g.lineTo(corners[2].x, corners[2].y);
-      g.lineTo(corners[3].x, corners[3].y);
-      g.closePath();
-      g.fillPath();
-      g.strokePath();
+      ctx.fillStyle(0x0f172a, 1);
+      ctx.lineStyle(1.5, lineColor, 0.85);
+      ctx.beginPath();
+      ctx.moveTo(corners[0].x, corners[0].y);
+      ctx.lineTo(corners[1].x, corners[1].y);
+      ctx.lineTo(corners[2].x, corners[2].y);
+      ctx.lineTo(corners[3].x, corners[3].y);
+      ctx.closePath();
+      ctx.fillPath();
+      ctx.strokePath();
 
-      // Hub detail
-      g.fillStyle(0x475569, 1);
-      g.fillCircle(x, y, Math.min(tw, th) * 0.22);
+      if (withHub) {
+        ctx.fillStyle(0x475569, 1);
+        ctx.fillCircle(x, y, Math.min(tw, th) * 0.22);
+      }
     };
 
-    // Steered front axle (single tires)
-    drawTire(-hw - 2, frontY, this.currentSteerAngle, 9, 22, 0x00f0ff);
-    drawTire(hw + 2, frontY, this.currentSteerAngle, 9, 22, 0x00f0ff);
+    // Steered front axle (single tires) — partially hidden under the chassis, as before
+    drawTire(g, -hw - 1, frontY, this.currentSteerAngle, 8, 20, 0x00f0ff, false);
+    drawTire(g, hw + 1, frontY, this.currentSteerAngle, 8, 20, 0x00f0ff, false);
 
-    // Rear drive axle (4x2): dual tires per side — both visible, drawn over the
-    // chassis edge so the inner tire reads as a real second tire, not a hidden sliver
-    drawTire(-hw - 3, rearY, 0, 8, 24, 0x64748b);
-    drawTire(hw - 3, rearY, 0, 8, 24, 0x64748b);
-    drawTire(-hw + 5, rearY, 0, 8, 24, 0x64748b);
-    drawTire(hw + 5, rearY, 0, 8, 24, 0x64748b);
+    // Rear drive axle (4x2): dual tires per side, drawn ABOVE the chassis edge so
+    // both tires of each pair stay visible
+    drawTire(gRear, -hw - 3, rearY, 0, 8, 24, 0x64748b, true);
+    drawTire(gRear, hw - 3, rearY, 0, 8, 24, 0x64748b, true);
+    drawTire(gRear, -hw + 5, rearY, 0, 8, 24, 0x64748b, true);
+    drawTire(gRear, hw + 5, rearY, 0, 8, 24, 0x64748b, true);
   }
 
   private drawLights() {
