@@ -38,7 +38,14 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.6.0** (Versão Atual)
+### **v1.6.1** (Versão Atual)
+- **Minimapa HUD do Mapa Completo:**
+  - Vista geral no canto superior direito em coordenadas de ecrã (`scrollFactor 0`), rasterizada a 2 px/tile: base desenhada numa textura canvas apenas quando `mapVersion` muda (pintura/import/preset = 1 redraw); overlay por frame com retângulo da câmara ativa (condiz em modo condução e editor, câmaras sincronizadas por frame), marcador seta do camião e marcador pulsante ciano da doca do exame.
+  - Escala adaptativa (~26% da menor dimensão do ecrã, clamp 0.5–1.6x); reposiciona-se em resize. Custo por frame constante: um retângulo da vista, uma seta e um círculo.
+  - Alternável com a tecla `M` (desktop). O editor ignora paint/erase quando o pointer está sobre o minimapa (`isPointerOverMinimap`) para não pintar tiles escondidos por baixo dele.
+  - `TilemapManager.mapVersion` (contador incrementado em `setTile`/`afterGridReplaced`) como sinal de invalidez.
+
+### **v1.6.0**
 - **Mapas 20x Maiores (108×80 tiles = 8.640 tiles, 13.824×10.240 px) com Performance Constante:**
   - Renderização nativa por Tilemap do Phaser: todas as texturas procedurais são marcadas num único *atlas* (`tile_atlas`) e o terreno usa um `TilemapLayer` com *culling* automático por câmara — o custo de desenho é proporcional aos tiles visíveis, não ao tamanho do mapa.
   - **Física por chunks (streaming):** corpos Matter estáticos só existem nos chunks (8×8 tiles) num raio de 2 chunks do camião (`updateActiveChunks`); fora do raio, sólidos são apenas dados na grelha. Chunks são reavaliados apenas quando o camião muda de centro de chunk.

@@ -34,6 +34,13 @@ export class MainScene extends Phaser.Scene {
   // Road-snapped world position of the current exam dock (the real pass target)
   private examDockWorld: LicenseExam['targetDock'] | null = null;
 
+  // Minimap (full-map HUD overview with live camera viewport & truck marker)
+  private minimapImage: Phaser.GameObjects.Image | null = null;
+  private minimapOverlay: Phaser.GameObjects.Graphics | null = null;
+  private minimapScale: number = 1;
+  private minimapVisible: boolean = true;
+  private lastMinimapVersion: number = -1;
+
   // Audio Context (Procedural synthesized audio)
   private audioCtx: AudioContext | null = null;
   private engineOsc: OscillatorNode | null = null;
@@ -109,6 +116,9 @@ export class MainScene extends Phaser.Scene {
     this.weatherGraphics = this.add.graphics();
     this.weatherGraphics.setDepth(20);
     this.weatherGraphics.setScrollFactor(0); // Fixed to screen
+
+    // 4b. Minimap HUD (top-right overview of the whole map)
+    this.createMinimap();
 
     // 5. Keyboard Hotkeys
     if (this.input.keyboard) {
@@ -421,6 +431,9 @@ export class MainScene extends Phaser.Scene {
     // Always update European Traffic Light state machine cycle
     TrafficLightSystem.getInstance(this).update(delta);
 
+    // Minimap HUD (base texture redraws only when the map changed; overlay is cheap)
+    this.updateMinimap(time);
+
     // Render Weather Environment
     this.renderWeather(time, delta);
   }
@@ -586,6 +599,175 @@ export class MainScene extends Phaser.Scene {
     g.lineStyle(2, 0x22d3ee, 0.5);
     g.strokeRect(td.x - td.width / 2, td.y - td.height / 2, td.width, td.height);
     this.examTargetLabel.setPosition(td.x, td.y - td.height / 2 - 34);
+  }
+
+  // ==========================================
+  // MINIMAP (full-map HUD overview)
+  // ==========================================
+
+  private static readonly MINIMAP_PX_PER_TILE = 2;
+
+  private createMinimap() {
+    const tm = this.tilemapManager;
+    const mmW = tm.cols * MainScene.MINIMAP_PX_PER_TILE;
+    const mmH = tm.rows * MainScene.MINIMAP_PX_PER_TILE;
+
+    // Adaptive display scale: ~26% of the smaller viewport dimension, clamped
+    this.minimapScale = Phaser.Math.Clamp(
+      (Math.min(this.scale.width, this.scale.height) * 0.26) / mmW,
+      0.5, 1.6
+    );
+
+    if (this.textures.exists('minimap_base')) this.textures.remove('minimap_base');
+    const texture = this.textures.createCanvas('minimap_base', mmW, mmH);
+    if (!texture) return;
+
+    this.minimapImage = this.add.image(0, 0, 'minimap_base')
+      .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(120)
+      .setAlpha(0.92)
+      .setScale(this.minimapScale);
+    this.minimapOverlay = this.add.graphics().setScrollFactor(0).setDepth(121);
+
+    this.repositionMinimap();
+    this.lastMinimapVersion = -1;
+
+    // Toggle with M (desktop)
+    if (this.input.keyboard) {
+      this.input.keyboard.on('keydown-M', () => this.toggleMinimap());
+    }
+    this.scale.on('resize', () => this.repositionMinimap());
+
+    // Paint immediately so the first rendered frame already shows it
+    this.updateMinimap(0);
+  }
+
+  private repositionMinimap() {
+    if (!this.minimapImage) return;
+    const mmW = this.tilemapManager.cols * MainScene.MINIMAP_PX_PER_TILE;
+    this.minimapScale = Phaser.Math.Clamp(
+      (Math.min(this.scale.width, this.scale.height) * 0.26) / mmW,
+      0.5, 1.6
+    );
+    this.minimapImage.setScale(this.minimapScale);
+    // Below the 48px HTML top bar, right edge with a small margin
+    this.minimapImage.setPosition(this.scale.width - this.minimapImage.displayWidth - 10, 58);
+  }
+
+  private toggleMinimap() {
+    this.minimapVisible = !this.minimapVisible;
+    if (this.minimapImage) this.minimapImage.setVisible(this.minimapVisible);
+    this.lastMinimapVersion = -1; // forces redraw when turned back on
+  }
+
+  /**
+   * Screen-space rect covered by the minimap; the editor uses it to avoid painting
+   * tiles underneath it.
+   */
+  public isPointerOverMinimap(pointer: Phaser.Input.Pointer): boolean {
+    if (!this.minimapVisible || !this.minimapImage) return false;
+    const m = 5; // small tolerance for the border glow
+    return (
+      pointer.x >= this.minimapImage.x - m &&
+      pointer.y >= this.minimapImage.y - m &&
+      pointer.x <= this.minimapImage.x + this.minimapImage.displayWidth + m &&
+      pointer.y <= this.minimapImage.y + this.minimapImage.displayHeight + m
+    );
+  }
+
+  private updateMinimap(time: number) {
+    if (!this.minimapOverlay || !this.minimapImage) return;
+    if (!this.minimapVisible) {
+      this.minimapOverlay.clear();
+      return;
+    }
+    if (this.lastMinimapVersion !== this.tilemapManager.mapVersion) {
+      this.lastMinimapVersion = this.tilemapManager.mapVersion;
+      this.redrawMinimapBase();
+    }
+    this.drawMinimapOverlay(time);
+  }
+
+  /**
+   * Rasterizes the whole grid into a small canvas texture (2px per tile). Only runs
+   * when the map version changed — painting/import/preset trigger exactly one redraw.
+   */
+  private redrawMinimapBase() {
+    const texture = this.textures.get('minimap_base') as Phaser.Textures.CanvasTexture | null;
+    if (!texture) return;
+    const ctx = texture.getContext();
+    const px = MainScene.MINIMAP_PX_PER_TILE;
+    const cols = this.tilemapManager.cols;
+    const rows = this.tilemapManager.rows;
+
+    ctx.fillStyle = '#131822'; // asphalt base
+    ctx.fillRect(0, 0, cols * px, rows * px);
+
+    for (let r = 0; r < rows; r++) {
+      const row = this.tilemapManager.grid[r];
+      for (let c = 0; c < cols; c++) {
+        const tileId = row[c];
+        if (!tileId || tileId === 'asphalt') continue;
+        const def = TILE_DEFINITIONS[tileId];
+        if (!def) continue;
+        let color = def.color;
+        if (def.category === 'dock') color = '#eab308';
+        else if (tileId === 'traffic_light') color = '#16a34a';
+        ctx.fillStyle = color;
+        ctx.fillRect(c * px, r * px, px, px);
+      }
+    }
+    texture.refresh();
+  }
+
+  private drawMinimapOverlay(time: number) {
+    const g = this.minimapOverlay;
+    const img = this.minimapImage;
+    const tm = this.tilemapManager;
+    if (!g || !img) return;
+    g.clear();
+
+    const worldW = tm.cols * tm.tileSize;
+    const worldH = tm.rows * tm.tileSize;
+    const toMapX = (wx: number) => img.x + (wx / worldW) * img.displayWidth;
+    const toMapY = (wy: number) => img.y + (wy / worldH) * img.displayHeight;
+
+    // Cyan border glow
+    g.lineStyle(2, 0x22d3ee, 0.9);
+    g.strokeRect(img.x - 1, img.y - 1, img.displayWidth + 2, img.displayHeight + 2);
+
+    // Camera viewport rectangle (works in drive & editor mode — the cameras are synced)
+    const view = this.cameras.main.worldView;
+    g.lineStyle(1.5, 0xfacc15, 0.85);
+    g.strokeRect(
+      toMapX(view.x),
+      toMapY(view.y),
+      (view.width / worldW) * img.displayWidth,
+      (view.height / worldH) * img.displayHeight
+    );
+
+    // Exam target marker (pulsing cyan)
+    if (this.examDockWorld) {
+      const ex = toMapX(this.examDockWorld.x);
+      const ey = toMapY(this.examDockWorld.y);
+      const pulse = 0.55 + Math.sin(time * 0.005) * 0.35;
+      g.lineStyle(2, 0x22d3ee, pulse);
+      g.strokeCircle(ex, ey, 5);
+      g.fillStyle(0x22d3ee, pulse);
+      g.fillCircle(ex, ey, 2.5);
+    }
+
+    // Truck arrow marker
+    const tx = toMapX(this.truck.body.position.x);
+    const ty = toMapY(this.truck.body.position.y);
+    const ang = this.truck.body.angle;
+    const size = 7;
+    const p1 = { x: tx + Math.cos(ang) * size, y: ty + Math.sin(ang) * size };
+    const p2 = { x: tx + Math.cos(ang + 2.5) * size * 0.75, y: ty + Math.sin(ang + 2.5) * size * 0.75 };
+    const p3 = { x: tx + Math.cos(ang - 2.5) * size * 0.75, y: ty + Math.sin(ang - 2.5) * size * 0.75 };
+    g.fillStyle(0xfb923c, 1);
+    g.fillTriangle(p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
   }
 
   private renderWeather(time: number, delta: number) {

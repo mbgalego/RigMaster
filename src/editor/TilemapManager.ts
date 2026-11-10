@@ -78,6 +78,8 @@ export class TilemapManager {
   public spawnPoint: { x: number; y: number; angle: number } = { x: 1216, y: 1088, angle: 0 };
 
   public grid: string[][] = [];
+  // Monotonic counter bumped on every grid change (drives minimap redraws)
+  public mapVersion: number = 0;
   // Collision bodies & dock zones currently ACTIVE (only chunks near the truck are materialized)
   public collisionBodies: MatterJS.BodyType[] = [];
   public dockZones: Array<{ x: number; y: number; width: number; height: number; requiredAngle: number; id: string }> = [];
@@ -1108,6 +1110,7 @@ export class TilemapManager {
    * Physics is NOT materialized for the whole map — chunks activate near the truck.
    */
   private afterGridReplaced() {
+    this.mapVersion++;
     const world = this.scene.matter.world;
     for (const bodies of this.chunkBodies.values()) {
       for (const b of bodies) world.remove(b);
@@ -1129,6 +1132,7 @@ export class TilemapManager {
 
     const oldTile = this.grid[row][col];
     this.grid[row][col] = tileType;
+    this.mapVersion++;
 
     // Native tilemap repaint (one tile — O(1))
     this.layer.putTileAt(this.gidOf(tileType), col, row);

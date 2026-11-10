@@ -217,6 +217,9 @@ export class EditorScene extends Phaser.Scene {
   }
 
   private handlePaintPointer(pointer: Phaser.Input.Pointer) {
+    // Never paint through the minimap HUD overlay
+    if (this.mainScene.isPointerOverMinimap(pointer)) return;
+
     const tm = this.mainScene.tilemapManager;
 
     // Always derive the tile directly from the pointer position (never rely on the cached
