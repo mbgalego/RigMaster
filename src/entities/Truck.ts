@@ -383,34 +383,47 @@ export class Truck {
     const frontY = -this.length / 2 + 20;
     const rearY = this.length / 2 - 20;
 
-    const drawPivotedWheel = (x: number, y: number, angle: number) => {
-      g.save();
-      g.translateCanvas(x, y);
-      g.rotateCanvas(angle);
+    /**
+     * Draws a tire centered at (x,y) rotated by `angle` rad around its center.
+     * Corners are rotated manually with trigonometry — no canvas transform state
+     * (save/translateCanvas/rotateCanvas), which proved unreliable for per-frame
+     * redraws under the Phaser 4 renderer.
+     */
+    const drawTire = (x: number, y: number, angle: number, tw: number, th: number, lineColor: number) => {
+      const c = Math.cos(angle);
+      const s = Math.sin(angle);
+      const corners = [
+        { x: -tw / 2, y: -th / 2 },
+        { x: tw / 2, y: -th / 2 },
+        { x: tw / 2, y: th / 2 },
+        { x: -tw / 2, y: th / 2 },
+      ].map((p) => ({ x: x + p.x * c - p.y * s, y: y + p.x * s + p.y * c }));
+
       g.fillStyle(0x0f172a, 1);
-      g.lineStyle(1.5, 0x00f0ff, 0.7);
-      g.fillRoundedRect(-4, -10, 8, 20, 2);
-      g.strokeRoundedRect(-4, -10, 8, 20, 2);
-      g.restore();
+      g.lineStyle(1.5, lineColor, 0.85);
+      g.beginPath();
+      g.moveTo(corners[0].x, corners[0].y);
+      g.lineTo(corners[1].x, corners[1].y);
+      g.lineTo(corners[2].x, corners[2].y);
+      g.lineTo(corners[3].x, corners[3].y);
+      g.closePath();
+      g.fillPath();
+      g.strokePath();
+
+      // Hub detail
+      g.fillStyle(0x475569, 1);
+      g.fillCircle(x, y, Math.min(tw, th) * 0.22);
     };
 
-    drawPivotedWheel(-hw - 1, frontY, this.currentSteerAngle);
-    drawPivotedWheel(hw + 1, frontY, this.currentSteerAngle);
+    // Steered front axle (single tires, salient)
+    drawTire(-hw - 2, frontY, this.currentSteerAngle, 9, 22, 0x00f0ff);
+    drawTire(hw + 2, frontY, this.currentSteerAngle, 9, 22, 0x00f0ff);
 
     // Rear drive axle (4x2): dual tires per side, clearly salient beyond the chassis edge
-    const drawFixedWheel = (x: number, y: number) => {
-      g.fillStyle(0x0f172a, 1);
-      g.lineStyle(1.5, 0x64748b, 0.8);
-      g.fillRoundedRect(-5, -13, 10, 26, 3);
-      g.strokeRoundedRect(-5, -13, 10, 26, 3);
-    };
-
-    // Inner dual tires (tucked against the chassis edge)
-    drawFixedWheel(-hw + 5, rearY);
-    drawFixedWheel(hw - 5, rearY);
-    // Outer dual tires (10px beyond the body edge)
-    drawFixedWheel(-hw - 5, rearY);
-    drawFixedWheel(hw + 5, rearY);
+    drawTire(-hw + 5, rearY, 0, 10, 26, 0x64748b);
+    drawTire(hw - 5, rearY, 0, 10, 26, 0x64748b);
+    drawTire(-hw - 5, rearY, 0, 10, 26, 0x64748b);
+    drawTire(hw + 5, rearY, 0, 10, 26, 0x64748b);
   }
 
   private drawLights() {

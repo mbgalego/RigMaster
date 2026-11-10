@@ -38,7 +38,11 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.6.6** (Versão Atual)
+### **v1.6.7** (Versão Atual)
+- **Correção: Rodas do Trator Invisíveis (Phaser 4):**
+  - `drawWheels` redesenhava as rodas a cada frame com `save()/translateCanvas()/rotateCanvas()/restore()` — sob o renderer do Phaser 4 o estado de transformação não sobrevivia de forma fiável a `clear()` por frame, e as rodas deixavam de aparecer (as luzes, desenhadas no mesmo ciclo sem transforms, apareciam). As rodas são agora desenhadas com cantos rodados manualmente (trig) e um detalhe de cubo; dianteiras 9×22 salientes, duplos traseiros 10×26 salientes.
+
+### **v1.6.6**
 - **Correção de Profundidade do Acoplamento:**
   - O atrelado desenhava-se **por baixo** do trator (`depth 9` vs `10`), escondendo a traseira do camião e a quinta roda. Os atrelados passam a `depth 11` (o pup do bitrem a `12`, acima do dianteiro) — o atrelado aparece agora corretamente **por cima** da traseira do trator.
 - **Pneus Duplos Traseiros Mais Visíveis:**
