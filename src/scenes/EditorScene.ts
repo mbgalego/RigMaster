@@ -48,8 +48,12 @@ export class EditorScene extends Phaser.Scene {
     this.cameras.main.setBounds(-worldW * 0.35, -worldH * 0.35, worldW * 1.7, worldH * 1.7);
     this.cameras.main.stopFollow();
 
-    // Initial camera: auto-fit to show almost the entire map
-    this.fitEntireMap();
+    // Seamless handoff: start the editor camera exactly where the drive camera is looking
+    // (around the truck). The user edits the real map where they are — no fitted "minimap"
+    // view. [Ver Tudo] (fitEntireMap) remains available for a full-map overview.
+    const mainCam = this.mainScene.cameras.main;
+    this.cameras.main.setZoom(Phaser.Math.Clamp(mainCam.zoom, EditorScene.MIN_ZOOM, EditorScene.MAX_ZOOM));
+    this.cameras.main.centerOn(mainCam.midPoint.x, mainCam.midPoint.y);
 
     this.gridGraphics = this.add.graphics();
     this.gridGraphics.setDepth(100);

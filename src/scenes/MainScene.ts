@@ -21,6 +21,7 @@ export class MainScene extends Phaser.Scene {
   public isEditorMode: boolean = false;
   public debugMatter: boolean = true;
   public currentVehicleConfig: 'solo' | 'standard' | 'long_cargo' | 'bitrem' | 'fragile_glass' = 'standard';
+  private preEditorZoom: number = 1.0;
 
   // Environmental layers
   private weatherGraphics!: Phaser.GameObjects.Graphics;
@@ -285,13 +286,21 @@ export class MainScene extends Phaser.Scene {
   public toggleEditorMode() {
     this.isEditorMode = !this.isEditorMode;
     if (this.isEditorMode) {
-      // Detach follow: while editing, the MainScene camera mirrors the EditorScene camera
-      // so the tilemap visuals match the grid overlay/painting cursor.
+      // Detach follow AND drop the camera bounds: while editing, the MainScene camera is
+      // driven by the EditorScene (synced every frame) and must roam/zoom freely. Keeping
+      // the map-sized bounds made Phaser re-center the camera whenever the fitted view
+      // exceeded them, which drifted the tiles away from the editor grid overlay.
+      this.preEditorZoom = this.cameras.main.zoom;
       this.cameras.main.stopFollow();
+      this.cameras.main.removeBounds();
       this.scene.launch('EditorScene');
       this.scene.bringToTop('EditorScene');
     } else {
       this.scene.stop('EditorScene');
+      const worldW = this.tilemapManager.cols * this.tilemapManager.tileSize;
+      const worldH = this.tilemapManager.rows * this.tilemapManager.tileSize;
+      this.cameras.main.setBounds(0, 0, worldW, worldH);
+      this.cameras.main.setZoom(this.preEditorZoom);
       this.cameras.main.startFollow(this.truck.container, true, 0.1, 0.1);
     }
   }

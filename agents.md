@@ -40,9 +40,9 @@ src/
 
 ### **v1.5.1** (Versão Atual)
 - **Correção do Offset do Editor (Clique ≠ Posição de Pintura):**
-  - Causa raiz: `MainScene` e `EditorScene` tinham câmaras independentes (a principal seguia o camião) — a grelha/sede do cursor eram desenhadas com uma câmara e os tiles renderizados com outra.
-  - A câmara principal é agora sincronizada com a câmara do editor em cada frame (`EditorScene.update`), o zoom da roda do rato em modo condução é ignorado em modo editor e `handlePaintPointer` calcula o tile diretamente do pointer (taps em touch deixam de usar posição obsoleta).
-  - Resolve também o "quadrado amarelo" em mobile: a borda amarela é o limite do mapa; agora pan/zoom funcionam sobre o mapa efetivo em qualquer ecrã.
+  - Causa raiz: `MainScene` e `EditorScene` tinham câmaras independentes (a principal seguia o camião e mantinha os *bounds* do mapa) — a grelha/sede do cursor eram desenhadas com uma câmara e os tiles renderizados com outra, e o Phaser re-centrava a câmara principal sempre que a vista ultrapassava os bounds.
+  - Entrar no editor passa a ser um *handoff* sem salto: a câmara do editor começa exatamente onde a de condução estava (em volta do camião, zoom ~100%), eliminando a vista de "minimapa". Os *bounds* da câmara principal são removidos em modo editor (e repostos ao sair) para o sync por frame ser exato.
+  - Edita-se diretamente o mapa real onde o camião está; **[Ver Tudo]** (`fitEntireMap`) mantém-se para enquadrar o mapa inteiro. `handlePaintPointer` calcula o tile diretamente do pointer (taps em touch deixam de usar posição obsoleta).
 - **Correção do Fluxo de Exames (Auto-bloqueio e Doca-Alvo):**
   - Iniciar um exame já não é bloqueado pelo próprio gate de licença: `handleSelectVehicle` recebe `force` e o exame atribui o veículo diretamente (C+E, H e X voltam a ser alcançáveis).
   - A validação de acostagem usa apenas a `targetDock` do exame (raio + tolerância angular próprios), a doca-alvo é pintada fisicamente no arranque do exame (com limpeza de vizinhos sólidos) e assinalada com marcador pulsante "DOCA DO EXAME".
