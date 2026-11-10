@@ -1,0 +1,6 @@
+{
+  "name": "RigMaster: Paint & Drive Simulator",
+  "description": "Simulador top-down de manobras de camião e atrelados com física Matter.js, sistema híbrido de licenças, garagens e editor de mapas Paint & Drive.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

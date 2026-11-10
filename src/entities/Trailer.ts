@@ -1,0 +1,354 @@
+import Phaser from 'phaser';
+
+export type TrailerType = 'standard' | 'long_cargo' | 'bitrem_lead' | 'bitrem_pup' | 'fragile_glass';
+
+export interface TrailerConfig {
+  x: number;
+  y: number;
+  angle?: number;
+  type?: TrailerType;
+  cargoName?: string;
+  mass?: number;
+  width?: number;
+  length?: number;
+}
+
+export class Trailer {
+  public scene: Phaser.Scene;
+  public body: MatterJS.BodyType;
+  public container: Phaser.GameObjects.Container;
+  public graphics: Phaser.GameObjects.Graphics;
+  public lightsGraphics: Phaser.GameObjects.Graphics;
+
+  public type: TrailerType;
+  public width: number;
+  public length: number;
+  public cargoName: string;
+  public rearAxleY: number;
+  public rearOverhang: number;
+
+  public isFragile: boolean = false;
+  public fragileHealth: number = 100;
+  public maxGForce: number = 0;
+  public impactCount: number = 0;
+
+  public kingpinDist: number = 80;
+  public wheelbase: number = 141.6;
+  public vx: number = 0;
+  public vy: number = 0;
+  public omega: number = 0;
+  public prevHitchX: number = 0;
+  public prevHitchY: number = 0;
+  public hasPrevHitch: boolean = false;
+
+  constructor(scene: Phaser.Scene, config: TrailerConfig) {
+    this.scene = scene;
+    this.type = config.type || 'standard';
+
+    if (this.type === 'long_cargo') {
+      this.width = config.width || 46;
+      this.length = config.length || 310;
+      this.cargoName = config.cargoName || 'Pá Eólica 62m (C+E)';
+    } else if (this.type === 'bitrem_lead' || this.type === 'bitrem_pup') {
+      this.width = config.width || 46;
+      this.length = config.length || 155;
+      this.cargoName = config.cargoName || (this.type === 'bitrem_lead' ? 'Bitrem Dianteiro (H)' : 'Bitrem Traseiro (H)');
+    } else if (this.type === 'fragile_glass') {
+      this.width = config.width || 46;
+      this.length = config.length || 220;
+      this.cargoName = config.cargoName || 'Vidro Especial / Óptica (X)';
+      this.isFragile = true;
+    } else {
+      this.width = config.width || 46;
+      this.length = config.length || 220;
+      this.cargoName = config.cargoName || 'Atrelado Standard 13.6m (C)';
+    }
+
+    const spawnX = config.x;
+    const spawnY = config.y;
+    const spawnAngle = config.angle || 0;
+
+    this.rearAxleY = this.length * 0.28;
+    this.rearOverhang = (this.length / 2) - this.rearAxleY;
+
+    if (this.type === 'long_cargo') {
+      this.kingpinDist = (this.length / 2) - 35;
+    } else if (this.type === 'bitrem_lead' || this.type === 'bitrem_pup') {
+      this.kingpinDist = (this.length / 2) - 25;
+    } else {
+      this.kingpinDist = (this.length / 2) - 30;
+    }
+    this.wheelbase = this.kingpinDist + this.rearAxleY;
+
+    // Realistic mass for authentic heavy trailer inertia
+    let trailerMass = 85;
+    if (this.type === 'long_cargo') trailerMass = 120;
+    if (this.type === 'bitrem_lead' || this.type === 'bitrem_pup') trailerMass = 55;
+
+    const matter = scene.matter;
+    this.body = matter.add.rectangle(spawnX, spawnY, this.width, this.length, {
+      mass: trailerMass,
+      frictionAir: 0.05,
+      friction: 0.8,
+      restitution: 0.0,
+      angle: spawnAngle,
+      label: `trailer_${this.type}`,
+      collisionFilter: {
+        category: 0x0004,
+        mask: 0x0001,
+        group: -1,
+      },
+      render: {
+        visible: false,
+      },
+    }) as unknown as MatterJS.BodyType;
+
+    this.container = scene.add.container(spawnX, spawnY);
+    this.container.setDepth(9);
+
+    this.graphics = scene.add.graphics();
+    this.lightsGraphics = scene.add.graphics();
+    this.container.add([this.graphics, this.lightsGraphics]);
+
+    this.setupCollisionTracking();
+    this.drawTrailer();
+  }
+
+  private setupCollisionTracking() {
+    this.scene.matter.world.on('collisionstart', (event: any) => {
+      for (const pair of event.pairs) {
+        if (pair.bodyA === this.body || pair.bodyB === this.body) {
+          const other = pair.bodyA === this.body ? pair.bodyB : pair.bodyA;
+          if (other.label && (other.label.startsWith('truck') || other.label.startsWith('trailer'))) continue;
+
+          this.impactCount++;
+          const impact = Math.hypot(this.body.velocity.x, this.body.velocity.y);
+          this.maxGForce = Math.max(this.maxGForce, impact);
+          if (this.isFragile) {
+            const damage = Math.min(Math.max(impact * 8, 10), 30);
+            this.fragileHealth = Math.max(0, this.fragileHealth - damage);
+          }
+
+          // If trailer impacts obstacle, stop truck motion
+          if (this.scene && (this.scene as any).truck) {
+            (this.scene as any).truck.currentSpeed = -(this.scene as any).truck.currentSpeed * 0.15;
+          }
+        }
+      }
+    });
+  }
+
+  /**
+   * Kinematic articulated tracking around fifth wheel hitch point.
+   * Models authentic off-tracking, tail-swing, and reversing kinematics with 100% tire grip.
+   */
+  public followHitch(
+    hitchX: number,
+    hitchY: number,
+    hitchVx: number,
+    hitchVy: number,
+    parentAngle: number,
+    delta: number,
+    isBraking: boolean = false
+  ) {
+    if (!this.body) return;
+
+    const angle = this.body.angle;
+    const fwdX = Math.sin(angle);
+    const fwdY = -Math.cos(angle);
+    const latX = Math.cos(angle);
+    const latY = Math.sin(angle);
+
+    // Decompose fifth-wheel hitch velocity in trailer's local frame
+    const vHitchLong = hitchVx * fwdX + hitchVy * fwdY;
+    const vHitchLat  = hitchVx * latX + hitchVy * latY;
+
+    // Fixed rear axle kinematics: trailer rotates around rear wheels without lateral tire scrub
+    let omegaT = vHitchLat / this.wheelbase;
+
+    // Only in active reverse backing up at extreme angle (> 95 deg) does physical apron contact limit folding
+    const isReversing = vHitchLong < -1.5;
+    if (isReversing) {
+      let diff = this.body.angle - parentAngle;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      const maxLockRad = Phaser.Math.DegToRad(95);
+
+      if (diff > maxLockRad && omegaT > 0) {
+        omegaT = 0;
+      } else if (diff < -maxLockRad && omegaT < 0) {
+        omegaT = 0;
+      }
+    }
+
+    // Trailer center of mass linear velocity (px/s)
+    const trailerVx = fwdX * vHitchLong + latX * (vHitchLat * (this.rearAxleY / this.wheelbase));
+    const trailerVy = fwdY * vHitchLong + latY * (vHitchLat * (this.rearAxleY / this.wheelbase));
+
+    const dt = Math.max(Math.min(delta / 1000, 0.033), 0.001);
+    this.vx = trailerVx;
+    this.vy = trailerVy;
+    this.omega = omegaT;
+
+    // Apply displacement per frame to Matter.js body
+    this.scene.matter.body.setVelocity(this.body, { x: trailerVx * dt, y: trailerVy * dt });
+    this.scene.matter.body.setAngularVelocity(this.body, omegaT * dt);
+
+    // Micro-stabilize kingpin position onto fifth-wheel pin without lateral tire sliding
+    const curPinX = this.body.position.x + Math.sin(this.body.angle) * this.kingpinDist;
+    const curPinY = this.body.position.y - Math.cos(this.body.angle) * this.kingpinDist;
+    const errX = hitchX - curPinX;
+    const errY = hitchY - curPinY;
+    const errDist = Math.hypot(errX, errY);
+
+    if (errDist > 25) {
+      // Discontinuity (reset/spawn): snap directly
+      this.scene.matter.body.setPosition(this.body, {
+        x: this.body.position.x + errX,
+        y: this.body.position.y + errY,
+      });
+    } else if (errDist > 0.1) {
+      // Decompose error: longitudinal along rolling direction, lateral by subtle axle rotation
+      const errLong = errX * fwdX + errY * fwdY;
+      const errLat = errX * latX + errY * latY;
+
+      // Longitudinal pull along tires
+      this.scene.matter.body.setPosition(this.body, {
+        x: this.body.position.x + fwdX * errLong * 0.5,
+        y: this.body.position.y + fwdY * errLong * 0.5,
+      });
+
+      // Lateral alignment by rotating kingpin towards fifth wheel, avoiding tire slide
+      const rotAdj = (errLat / this.wheelbase) * 0.4;
+      this.scene.matter.body.setAngle(this.body, this.body.angle + rotAdj);
+    }
+
+    this.container.setPosition(this.body.position.x, this.body.position.y);
+    this.container.setRotation(this.body.angle);
+    this.drawTrailerLights(isBraking);
+  }
+
+  public update(delta: number, isBraking: boolean = false, surfaceGrip: number = 1.0) {
+    if (!this.body) return;
+    this.drawTrailerLights(isBraking);
+  }
+
+  private drawTrailer() {
+    const g = this.graphics;
+    g.clear();
+
+    const w = this.width;
+    const l = this.length;
+    const hw = w / 2;
+    const hl = l / 2;
+
+    if (this.type === 'long_cargo') {
+      g.fillStyle(0x0f172a, 1);
+      g.lineStyle(2, 0xf97316, 0.9);
+      g.fillRoundedRect(-hw, -hl, w, l, 4);
+      g.strokeRoundedRect(-hw, -hl, w, l, 4);
+
+      g.fillStyle(0xf8fafc, 0.95);
+      g.beginPath();
+      g.moveTo(-hw + 8, -hl + 10);
+      g.lineTo(hw - 8, -hl + 10);
+      g.lineTo(4, hl - 20);
+      g.lineTo(-4, hl - 20);
+      g.closePath();
+      g.fillPath();
+
+      g.fillStyle(0xf97316, 1);
+      for (let y = -hl + 40; y < hl - 40; y += 45) {
+        g.fillRect(-10, y, 20, 6);
+      }
+    } else if (this.type === 'fragile_glass') {
+      g.fillStyle(0x022c22, 1);
+      g.lineStyle(2, 0x10b981, 0.9);
+      g.fillRoundedRect(-hw, -hl, w, l, 6);
+      g.strokeRoundedRect(-hw, -hl, w, l, 6);
+
+      g.fillStyle(0x06b6d4, 0.5);
+      g.lineStyle(1.5, 0x67e8f9, 0.9);
+      g.fillRoundedRect(-hw + 6, -hl + 15, w - 12, l - 30, 4);
+      g.strokeRoundedRect(-hw + 6, -hl + 15, w - 12, l - 30, 4);
+    } else if (this.type === 'bitrem_lead') {
+      g.fillStyle(0x18181b, 1);
+      g.lineStyle(2, 0xa855f7, 0.9);
+      g.fillRoundedRect(-hw, -hl, w, l, 6);
+      g.strokeRoundedRect(-hw, -hl, w, l, 6);
+
+      g.fillStyle(0x3b0764, 0.9);
+      g.fillRoundedRect(-hw + 4, -hl + 10, w - 8, l - 48, 4);
+
+      // Fifth wheel at rear
+      g.fillStyle(0x09090b, 1);
+      g.lineStyle(2, 0xfacc15, 0.95);
+      g.fillCircle(0, hl - 18, 11);
+      g.strokeCircle(0, hl - 18, 11);
+    } else {
+      // Standard
+      g.fillStyle(0x0f172a, 1);
+      g.lineStyle(2, 0xec4899, 0.9);
+      g.fillRoundedRect(-hw, -hl, w, l, 6);
+      g.strokeRoundedRect(-hw, -hl, w, l, 6);
+
+      g.fillStyle(0x1e293b, 1);
+      g.fillRoundedRect(-hw + 4, -hl + 8, w - 8, l - 16, 4);
+    }
+
+    // Rear bumper
+    g.fillStyle(0x020617, 1);
+    g.lineStyle(1.5, 0x94a3b8, 0.8);
+    g.fillRect(-hw + 2, hl - 6, w - 4, 6);
+    g.strokeRect(-hw + 2, hl - 6, w - 4, 6);
+
+    // Wheels
+    const drawTrailerWheel = (x: number, y: number) => {
+      g.fillStyle(0x020617, 1);
+      g.lineStyle(1, 0x64748b, 0.7);
+      g.fillRoundedRect(x - 4, y - 9, 8, 18, 2);
+      g.strokeRoundedRect(x - 4, y - 9, 8, 18, 2);
+    };
+
+    const axleY = this.rearAxleY;
+    drawTrailerWheel(-hw - 2, axleY - 14);
+    drawTrailerWheel(-hw - 2, axleY + 14);
+    drawTrailerWheel(hw + 2, axleY - 14);
+    drawTrailerWheel(hw + 2, axleY + 14);
+  }
+
+  private drawTrailerLights(isBraking: boolean) {
+    const g = this.lightsGraphics;
+    g.clear();
+
+    const hw = this.width / 2;
+    const hl = this.length / 2;
+
+    if (isBraking) {
+      g.fillStyle(0xff0055, 1);
+      g.fillCircle(-hw + 8, hl - 2, 5);
+      g.fillCircle(hw - 8, hl - 2, 5);
+    } else {
+      g.fillStyle(0xb91c1c, 0.85);
+      g.fillCircle(-hw + 8, hl - 2, 3);
+      g.fillCircle(hw - 8, hl - 2, 3);
+    }
+  }
+
+  public setPosition(x: number, y: number, angle: number = 0) {
+    this.hasPrevHitch = false;
+    this.scene.matter.body.setPosition(this.body, { x, y });
+    this.scene.matter.body.setAngle(this.body, angle);
+    this.scene.matter.body.setVelocity(this.body, { x: 0, y: 0 });
+    this.scene.matter.body.setAngularVelocity(this.body, 0);
+    this.container.setPosition(x, y);
+    this.container.setRotation(angle);
+  }
+
+  public destroy() {
+    this.container.destroy();
+    if (this.scene.matter && this.scene.matter.world) {
+      this.scene.matter.world.remove(this.body);
+    }
+  }
+}

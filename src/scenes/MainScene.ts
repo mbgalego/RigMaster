@@ -1,0 +1,564 @@
+import Phaser from 'phaser';
+import { Truck } from '../entities/Truck';
+import { Trailer, TrailerType } from '../entities/Trailer';
+import { Kingpin, ArticulationTelemetry } from '../physics/Kingpin';
+import { TilemapManager } from '../editor/TilemapManager';
+import { LicenseSystem } from '../systems/LicenseSystem';
+import { GarageSystem, WeatherModifier } from '../systems/GarageSystem';
+import { TrafficLightSystem, TrafficLightState } from '../systems/TrafficLightSystem';
+
+export class MainScene extends Phaser.Scene {
+  public truck!: Truck;
+  public trailer: Trailer | null = null;
+  public pupTrailer: Trailer | null = null; // For Bitrem B-Double second trailer
+  public kingpin: Kingpin | null = null;
+  public pupKingpin: Kingpin | null = null;
+
+  public tilemapManager!: TilemapManager;
+  public licenseSystem!: LicenseSystem;
+  public garageSystem!: GarageSystem;
+
+  public isEditorMode: boolean = false;
+  public debugMatter: boolean = true;
+  public currentVehicleConfig: 'solo' | 'standard' | 'long_cargo' | 'bitrem' | 'fragile_glass' = 'standard';
+
+  // Environmental layers
+  private weatherGraphics!: Phaser.GameObjects.Graphics;
+  private rainParticles: Array<{ x: number; y: number; speed: number; length: number }> = [];
+
+  // Audio Context (Procedural synthesized audio)
+  private audioCtx: AudioContext | null = null;
+  private engineOsc: OscillatorNode | null = null;
+  private engineGain: GainNode | null = null;
+  private soundEnabled: boolean = true;
+  private lastReverseBeepTime: number = 0;
+
+  // Latest Telemetry Cache for React / HUD
+  public telemetry: {
+    speedKmh: number;
+    steeringDeg: number;
+    articulationDeg: number;
+    isJackknifed: boolean;
+    isMechanicalLocked: boolean;
+    jackknifeSeverity: number;
+    tailSwingPx: number;
+    offTrackingPx: number;
+    collisions: number;
+    fragileHealth: number;
+    weather: WeatherModifier;
+    activeLicenseExam: any;
+    trafficLight?: { state: TrafficLightState; distPx: number } | null;
+  } = {
+    speedKmh: 0,
+    steeringDeg: 0,
+    articulationDeg: 0,
+    isJackknifed: false,
+    isMechanicalLocked: false,
+    jackknifeSeverity: 0,
+    tailSwingPx: 0,
+    offTrackingPx: 0,
+    collisions: 0,
+    fragileHealth: 100,
+    weather: 'clear',
+    activeLicenseExam: null,
+    trafficLight: null,
+  };
+
+  constructor() {
+    super({ key: 'MainScene' });
+  }
+
+  public create() {
+    this.licenseSystem = LicenseSystem.getInstance();
+    this.garageSystem = GarageSystem.getInstance();
+
+    // 1. Build World & Tilemap
+    this.tilemapManager = new TilemapManager(this, 24, 18);
+
+    // Set world physics bounds
+    const worldW = this.tilemapManager.cols * this.tilemapManager.tileSize;
+    const worldH = this.tilemapManager.rows * this.tilemapManager.tileSize;
+    this.matter.world.setBounds(0, 0, worldW, worldH, 64, true, true, true, true);
+
+    // 2. Spawn Vehicle Rig
+    this.spawnVehicleRig(this.currentVehicleConfig);
+
+    // 3. Camera Setup
+    this.cameras.main.setBounds(0, 0, worldW, worldH);
+    this.cameras.main.startFollow(this.truck.container, true, 0.1, 0.1);
+    this.cameras.main.setZoom(1.0);
+
+    // Mouse wheel camera zoom
+    this.input.on('wheel', (pointer: any, gameObjects: any, deltaX: number, deltaY: number) => {
+      const newZoom = Phaser.Math.Clamp(this.cameras.main.zoom - deltaY * 0.001, 0.45, 1.8);
+      this.cameras.main.setZoom(newZoom);
+    });
+
+    // 4. Weather Overlay
+    this.weatherGraphics = this.add.graphics();
+    this.weatherGraphics.setDepth(20);
+    this.weatherGraphics.setScrollFactor(0); // Fixed to screen
+
+    // 5. Keyboard Hotkeys
+    if (this.input.keyboard) {
+      // Toggle Editor Mode with Tab
+      this.input.keyboard.on('keydown-TAB', (event: KeyboardEvent) => {
+        event.preventDefault();
+        this.toggleEditorMode();
+      });
+
+      // Toggle Debug Wireframe with P
+      this.input.keyboard.on('keydown-P', () => {
+        this.togglePhysicsDebug();
+      });
+
+      // Reset Truck Spawn with R
+      this.input.keyboard.on('keydown-R', () => {
+        this.resetVehicleToSpawn();
+      });
+    }
+
+    // 6. Sound Synthesis Init on First User Interaction
+    this.input.keyboard?.once('keydown', () => this.initSyntheticAudio());
+    this.input.once('pointerdown', () => this.initSyntheticAudio());
+
+    // Listen to garage system weather updates
+    this.garageSystem.subscribe(() => {
+      const grip = this.garageSystem.getSurfaceGrip();
+      this.truck.setSurfaceGrip(grip);
+    });
+  }
+
+  public spawnVehicleRig(configType: 'solo' | 'standard' | 'long_cargo' | 'bitrem' | 'fragile_glass') {
+    this.currentVehicleConfig = configType;
+
+    // Destroy existing trailers and joints
+    if (this.pupKingpin) {
+      this.pupKingpin.destroy();
+      this.pupKingpin = null;
+    }
+    if (this.pupTrailer) {
+      this.pupTrailer.destroy();
+      this.pupTrailer = null;
+    }
+    if (this.kingpin) {
+      this.kingpin.destroy();
+      this.kingpin = null;
+    }
+    if (this.trailer) {
+      this.trailer.destroy();
+      this.trailer = null;
+    }
+
+    const spawn = this.tilemapManager.spawnPoint;
+    const spawnAngleRad = Phaser.Math.DegToRad(spawn.angle || 0);
+
+    if (!this.truck) {
+      this.truck = new Truck(this, {
+        x: spawn.x,
+        y: spawn.y,
+        angle: spawnAngleRad,
+        surfaceGrip: this.garageSystem.getSurfaceGrip(),
+      });
+    } else {
+      this.truck.setPosition(spawn.x, spawn.y, spawnAngleRad);
+    }
+
+    if (configType === 'solo') {
+      return;
+    }
+
+    const backwardX = -Math.sin(spawnAngleRad);
+    const backwardY = Math.cos(spawnAngleRad);
+
+    if (configType === 'standard' || configType === 'fragile_glass') {
+      const isFragile = configType === 'fragile_glass';
+      const offset = 115;
+      const tx = spawn.x + backwardX * offset;
+      const ty = spawn.y + backwardY * offset;
+
+      this.trailer = new Trailer(this, {
+        x: tx,
+        y: ty,
+        angle: spawnAngleRad,
+        type: isFragile ? 'fragile_glass' : 'standard',
+      });
+
+      this.kingpin = new Kingpin(this, this.truck.body, this.trailer.body, this.trailer.length, {
+        parentOffset: { x: 0, y: 35 },
+        trailerOffset: { x: 0, y: -this.trailer.length / 2 + 30 },
+        jackknifeLimitDeg: 75,
+        mechanicalLockDeg: 95,
+      });
+    } else if (configType === 'long_cargo') {
+      const offset = 155;
+      const tx = spawn.x + backwardX * offset;
+      const ty = spawn.y + backwardY * offset;
+
+      this.trailer = new Trailer(this, {
+        x: tx,
+        y: ty,
+        angle: spawnAngleRad,
+        type: 'long_cargo',
+      });
+
+      this.kingpin = new Kingpin(this, this.truck.body, this.trailer.body, this.trailer.length, {
+        parentOffset: { x: 0, y: 35 },
+        trailerOffset: { x: 0, y: -this.trailer.length / 2 + 35 },
+        jackknifeLimitDeg: 72,
+        mechanicalLockDeg: 95,
+      });
+    } else if (configType === 'bitrem') {
+      const leadOffset = 87.5;
+      const lx = spawn.x + backwardX * leadOffset;
+      const ly = spawn.y + backwardY * leadOffset;
+
+      this.trailer = new Trailer(this, {
+        x: lx,
+        y: ly,
+        angle: spawnAngleRad,
+        type: 'bitrem_lead',
+      });
+
+      this.kingpin = new Kingpin(this, this.truck.body, this.trailer.body, this.trailer.length, {
+        parentOffset: { x: 0, y: 35 },
+        trailerOffset: { x: 0, y: -this.trailer.length / 2 + 25 },
+        jackknifeLimitDeg: 75,
+        mechanicalLockDeg: 95,
+      });
+
+      const pupOffset = 112;
+      const px = lx + backwardX * pupOffset;
+      const py = ly + backwardY * pupOffset;
+
+      this.pupTrailer = new Trailer(this, {
+        x: px,
+        y: py,
+        angle: spawnAngleRad,
+        type: 'bitrem_pup',
+      });
+
+      this.pupKingpin = new Kingpin(this, this.trailer.body, this.pupTrailer.body, this.pupTrailer.length, {
+        parentOffset: { x: 0, y: this.trailer.length / 2 - 18 },
+        trailerOffset: { x: 0, y: -this.pupTrailer.length / 2 + 25 },
+        jackknifeLimitDeg: 75,
+        mechanicalLockDeg: 95,
+      });
+    }
+  }
+
+  public resetVehicleToSpawn() {
+    const spawn = this.tilemapManager.spawnPoint;
+    const spawnAngleRad = Phaser.Math.DegToRad(spawn.angle || 0);
+    const backwardX = -Math.sin(spawnAngleRad);
+    const backwardY = Math.cos(spawnAngleRad);
+
+    this.truck.setPosition(spawn.x, spawn.y, spawnAngleRad);
+
+    if (this.trailer) {
+      let offset = 115;
+      if (this.currentVehicleConfig === 'long_cargo') offset = 155;
+      if (this.currentVehicleConfig === 'bitrem') offset = 87.5;
+
+      const tx = spawn.x + backwardX * offset;
+      const ty = spawn.y + backwardY * offset;
+      this.trailer.setPosition(tx, ty, spawnAngleRad);
+
+      if (this.pupTrailer) {
+        const px = tx + backwardX * 112;
+        const py = ty + backwardY * 112;
+        this.pupTrailer.setPosition(px, py, spawnAngleRad);
+      }
+    }
+
+    this.playAirBrakeHiss();
+  }
+
+  public toggleEditorMode() {
+    this.isEditorMode = !this.isEditorMode;
+    if (this.isEditorMode) {
+      this.scene.launch('EditorScene');
+      this.scene.bringToTop('EditorScene');
+    } else {
+      this.scene.stop('EditorScene');
+      this.cameras.main.startFollow(this.truck.container, true, 0.1, 0.1);
+    }
+  }
+
+  public togglePhysicsDebug() {
+    this.debugMatter = !this.debugMatter;
+    if (this.matter.world.debugGraphic) {
+      this.matter.world.debugGraphic.setVisible(this.debugMatter);
+    }
+  }
+
+  public update(time: number, delta: number) {
+    const dt = delta / 1000;
+
+    // When not in editor mode, update vehicle driving physics
+    if (!this.isEditorMode) {
+      this.truck.update(delta);
+
+      let artTelemetry: ArticulationTelemetry = {
+        angleDeg: 0,
+        angleRad: 0,
+        isJackknifed: false,
+        isMechanicalLocked: false,
+        jackknifeSeverity: 0,
+        tailSwingOffsetPx: 0,
+        tailSwingWorldPos: { x: 0, y: 0 },
+        offTrackingDeltaPx: 0,
+        offTrackingWorldPos: { x: 0, y: 0 },
+      };
+
+      if (this.trailer && this.kingpin) {
+        const truckAngle = this.truck.body.angle;
+        const truckHitchX = this.truck.body.position.x - Math.sin(truckAngle) * 35;
+        const truckHitchY = this.truck.body.position.y + Math.cos(truckAngle) * 35;
+        const truckVx = this.truck.vx;
+        const truckVy = this.truck.vy;
+        const truckOmega = this.truck.omega;
+        const hitchVx = truckVx - truckOmega * (Math.cos(truckAngle) * 35);
+        const hitchVy = truckVy - truckOmega * (Math.sin(truckAngle) * 35);
+
+        this.trailer.followHitch(truckHitchX, truckHitchY, hitchVx, hitchVy, truckAngle, delta, this.truck.isBraking);
+        artTelemetry = this.kingpin.update(this.truck.isReversing, this.truck.speedKmh);
+        this.kingpin.renderDebug(artTelemetry, this.debugMatter);
+      }
+
+      if (this.pupTrailer && this.pupKingpin && this.trailer) {
+        const leadAngle = this.trailer.body.angle;
+        const leadHitchDist = this.trailer.length / 2 - 18;
+        const pupHitchX = this.trailer.body.position.x - Math.sin(leadAngle) * leadHitchDist;
+        const pupHitchY = this.trailer.body.position.y + Math.cos(leadAngle) * leadHitchDist;
+        const leadVx = this.trailer.vx;
+        const leadVy = this.trailer.vy;
+        const leadOmega = this.trailer.omega;
+        const pupHitchVx = leadVx - leadOmega * (Math.cos(leadAngle) * leadHitchDist);
+        const pupHitchVy = leadVy - leadOmega * (Math.sin(leadAngle) * leadHitchDist);
+
+        this.pupTrailer.followHitch(pupHitchX, pupHitchY, pupHitchVx, pupHitchVy, leadAngle, delta, this.truck.isBraking);
+        const pupTelemetry = this.pupKingpin.update(this.truck.isReversing, this.truck.speedKmh);
+        this.pupKingpin.renderDebug(pupTelemetry, this.debugMatter);
+      }
+
+      // Check Docking Sensor Proximity
+      const inDock = this.checkDockAlignment();
+
+      // Update Active License Exam
+      const activeExam = this.licenseSystem.getActiveExam();
+      if (activeExam.active) {
+        this.licenseSystem.updateExam(
+          dt,
+          this.truck.collisionCount + (this.trailer?.impactCount || 0),
+          artTelemetry.isJackknifed,
+          inDock.inZone,
+          inDock.alignmentDeg,
+          this.trailer?.fragileHealth || 100
+        );
+      }
+
+      // Query Nearest European Traffic Light within 320px
+      const nearestTL = TrafficLightSystem.getInstance(this).getNearestLight(
+        this.truck.body.position.x,
+        this.truck.body.position.y
+      );
+
+      // Update Telemetry Cache
+      this.telemetry = {
+        speedKmh: this.truck.speedKmh,
+        steeringDeg: Math.round(Phaser.Math.RadToDeg(this.truck.currentSteerAngle)),
+        articulationDeg: Math.round(artTelemetry.angleDeg),
+        isJackknifed: artTelemetry.isJackknifed,
+        isMechanicalLocked: artTelemetry.isMechanicalLocked,
+        jackknifeSeverity: artTelemetry.jackknifeSeverity,
+        tailSwingPx: Math.round(artTelemetry.tailSwingOffsetPx),
+        offTrackingPx: Math.round(artTelemetry.offTrackingDeltaPx),
+        collisions: this.truck.collisionCount + (this.trailer?.impactCount || 0),
+        fragileHealth: Math.round(this.trailer?.fragileHealth || 100),
+        weather: this.garageSystem.getActiveModifier(),
+        activeLicenseExam: this.licenseSystem.getActiveExam(),
+        trafficLight: nearestTL && nearestTL.distPx < 320 ? nearestTL : null,
+      };
+
+      // Sound Updates
+      this.updateSyntheticAudio(time);
+    }
+
+    // Always update European Traffic Light state machine cycle
+    TrafficLightSystem.getInstance(this).update(delta);
+
+    // Render Weather Environment
+    this.renderWeather(time);
+  }
+
+  private checkDockAlignment(): { inZone: boolean; alignmentDeg: number } {
+    const docks = this.tilemapManager.dockZones;
+    const checkBody = this.trailer?.body || this.truck.body;
+
+    for (const dock of docks) {
+      const dist = Phaser.Math.Distance.Between(checkBody.position.x, checkBody.position.y, dock.x, dock.y);
+      if (dist < 70) {
+        let diffDeg = Phaser.Math.RadToDeg(checkBody.angle) - dock.requiredAngle;
+        while (diffDeg > 180) diffDeg -= 360;
+        while (diffDeg < -180) diffDeg += 360;
+        return { inZone: true, alignmentDeg: Math.round(diffDeg) };
+      }
+    }
+    return { inZone: false, alignmentDeg: 999 };
+  }
+
+  private renderWeather(time: number) {
+    const g = this.weatherGraphics;
+    g.clear();
+
+    const w = this.scale.width;
+    const h = this.scale.height;
+    const weather = this.garageSystem.getActiveModifier();
+
+    if (weather === 'night') {
+      // Night Darkness Mask (Deep midnight blue tint)
+      g.fillStyle(0x020617, 0.78);
+      g.fillRect(0, 0, w, h);
+    } else if (weather === 'fog') {
+      // Atmospheric Fog (Milky cyan-gray haze with undulating alpha)
+      const fogAlpha = 0.55 + Math.sin(time * 0.001) * 0.08;
+      g.fillStyle(0x334155, fogAlpha);
+      g.fillRect(0, 0, w, h);
+    } else if (weather === 'rain') {
+      // Rain Streaks & Water Sheen
+      g.fillStyle(0x0284c7, 0.12);
+      g.fillRect(0, 0, w, h);
+
+      // Rain drop simulation
+      if (this.rainParticles.length < 90) {
+        for (let i = 0; i < 90; i++) {
+          this.rainParticles.push({
+            x: Phaser.Math.Between(0, w),
+            y: Phaser.Math.Between(0, h),
+            speed: Phaser.Math.Between(550, 850),
+            length: Phaser.Math.Between(15, 28),
+          });
+        }
+      }
+
+      g.lineStyle(1.5, 0x93c5fd, 0.45);
+      for (const drop of this.rainParticles) {
+        drop.y += drop.speed * 0.016;
+        drop.x -= 2;
+        if (drop.y > h) {
+          drop.y = -10;
+          drop.x = Phaser.Math.Between(0, w);
+        }
+        g.lineBetween(drop.x, drop.y, drop.x - 4, drop.y + drop.length);
+      }
+    }
+  }
+
+  // ==========================================
+  // PROCEDURAL WEB AUDIO SYNTHESIS
+  // ==========================================
+  private initSyntheticAudio() {
+    if (this.audioCtx) return;
+    try {
+      const AudioClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioClass) return;
+      this.audioCtx = new AudioClass();
+
+      // Master Engine Oscillator (Diesel low rumbling frequency)
+      this.engineOsc = this.audioCtx.createOscillator();
+      this.engineOsc.type = 'sawtooth';
+      this.engineOsc.frequency.setValueAtTime(38, this.audioCtx.currentTime);
+
+      this.engineGain = this.audioCtx.createGain();
+      this.engineGain.gain.setValueAtTime(0.04, this.audioCtx.currentTime);
+
+      // Lowpass filter for deep diesel engine body
+      const filter = this.audioCtx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(140, this.audioCtx.currentTime);
+
+      this.engineOsc.connect(filter);
+      filter.connect(this.engineGain);
+      this.engineGain.connect(this.audioCtx.destination);
+
+      this.engineOsc.start();
+    } catch (e) {
+      // Ignore audio restriction
+    }
+  }
+
+  private updateSyntheticAudio(time: number) {
+    if (!this.audioCtx || !this.engineOsc || !this.engineGain || !this.soundEnabled) return;
+
+    if (this.audioCtx.state === 'suspended') {
+      this.audioCtx.resume();
+    }
+
+    // Engine RPM Pitch based on truck speed & throttle
+    const speedRatio = Math.min(this.truck.speedKmh / 65, 1.0);
+    const targetFreq = 34 + speedRatio * 48 + (this.truck.isAccelerating ? 12 : 0);
+    this.engineOsc.frequency.setTargetAtTime(targetFreq, this.audioCtx.currentTime, 0.1);
+
+    // Reverse Beep Warning
+    if (this.truck.isReversing && time - this.lastReverseBeepTime > 650) {
+      this.lastReverseBeepTime = time;
+      this.playReverseBeep();
+    }
+  }
+
+  private playReverseBeep() {
+    if (!this.audioCtx || !this.soundEnabled) return;
+    try {
+      const osc = this.audioCtx.createOscillator();
+      const gain = this.audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1050, this.audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.06, this.audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + 0.18);
+      osc.connect(gain);
+      gain.connect(this.audioCtx.destination);
+      osc.start();
+      osc.stop(this.audioCtx.currentTime + 0.2);
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  public playAirBrakeHiss() {
+    if (!this.audioCtx || !this.soundEnabled) return;
+    try {
+      // White noise buffer for pneumatic air brake release
+      const bufferSize = this.audioCtx.sampleRate * 0.35;
+      const buffer = this.audioCtx.createBuffer(1, bufferSize, this.audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+      const noise = this.audioCtx.createBufferSource();
+      noise.buffer = buffer;
+
+      const filter = this.audioCtx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(1800, this.audioCtx.currentTime);
+
+      const gain = this.audioCtx.createGain();
+      gain.gain.setValueAtTime(0.08, this.audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + 0.35);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.audioCtx.destination);
+      noise.start();
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  public setSoundEnabled(enabled: boolean) {
+    this.soundEnabled = enabled;
+    if (this.engineGain && this.audioCtx) {
+      this.engineGain.gain.setValueAtTime(enabled ? 0.04 : 0, this.audioCtx.currentTime);
+    }
+  }
+}
