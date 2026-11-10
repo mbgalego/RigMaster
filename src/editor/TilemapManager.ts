@@ -8,7 +8,9 @@ export interface MapDataJSON {
   rows: number;
   tileSize: number;
   spawn: { x: number; y: number; angle: number };
-  grid: string[][];
+  // v1: dense string matrix; v2: flat run-length pairs [tileId, count][]
+  grid?: string[][];
+  gridRLE?: [string, number][];
   docks: Array<{ x: number; y: number; requiredAngle: number; id: string }>;
 }
 
@@ -64,38 +66,60 @@ export const TILE_DEFINITIONS: Record<string, TileDefinition> = {
 
 export const TILE_THUMBNAILS: Record<string, string> = {};
 
+// Stable order used for atlas slots & tile indices (never reorder — invalidates saved maps)
+const TILE_ORDER = Object.keys(TILE_DEFINITIONS);
+
 export class TilemapManager {
   public scene: Phaser.Scene;
   public tileSize: number = 128;
-  public cols: number = 24;
-  public rows: number = 18;
-  public mapName: string = 'Circuito Regional Principal';
-  public spawnPoint: { x: number; y: number; angle: number } = { x: 384, y: 384, angle: 0 };
+  public cols: number = 108;   // 20x area vs the original 24x18 (8,640 tiles)
+  public rows: number = 80;
+  public mapName: string = 'Região Metropolitana Procedural';
+  public spawnPoint: { x: number; y: number; angle: number } = { x: 1216, y: 1088, angle: 0 };
 
   public grid: string[][] = [];
+  // Monotonic counter bumped on every grid change (drives minimap redraws)
+  public mapVersion: number = 0;
+  // Collision bodies & dock zones currently ACTIVE (only chunks near the truck are materialized)
   public collisionBodies: MatterJS.BodyType[] = [];
   public dockZones: Array<{ x: number; y: number; width: number; height: number; requiredAngle: number; id: string }> = [];
 
-  // Per-tile collision body tracking for incremental updates (avoids O(map) rebuilds on each paint)
-  private tileBodies: (MatterJS.BodyType | null)[][] = [];
+  // Native Phaser tilemap: a single layer with automatic camera culling. Rendering cost
+  // stays constant no matter how big the map grows (only visible tiles are drawn).
+  private tilemap!: Phaser.Tilemaps.Tilemap;
+  private layer!: Phaser.Tilemaps.TilemapLayer;
 
-  private tileContainer: Phaser.GameObjects.Container;
-  private tileSprites: (Phaser.GameObjects.Image | null)[][] = [];
+  // Tile id -> atlas gid (0 = empty slot never used; gids start at 1)
+  private tileGid: Record<string, number> = {};
 
-  constructor(scene: Phaser.Scene, cols: number = 24, rows: number = 18) {
+  // Physics chunking: static bodies exist only for chunks near the truck
+  private static readonly CHUNK_TILES = 8;
+  private static readonly CHUNK_RADIUS = 2; // 5x5 chunks materialized around the truck
+  private activeChunkKeys: Set<string> = new Set();
+  private chunkBodies: Map<string, MatterJS.BodyType[]> = new Map();
+  private chunkDocks: Map<string, TilemapManager['dockZones']> = new Map();
+  private lastChunkCX: number = Number.NaN;
+  private lastChunkCY: number = Number.NaN;
+
+  constructor(scene: Phaser.Scene, cols: number = 108, rows: number = 80) {
     this.scene = scene;
     this.cols = cols;
     this.rows = rows;
 
-    this.tileContainer = scene.add.container(0, 0);
-    this.tileContainer.setDepth(1);
-
     this.generateProceduralTextures();
+    this.buildAtlasTexture();
+    this.buildTilemapLayer();
     this.initDefaultGrid();
   }
 
+  // ======================================================================
+  // TEXTURES
+  // ======================================================================
+
   /**
-   * Generates crisp, procedural canvas textures for all 128x128 tiles.
+   * Generates crisp, procedural 128x128 canvas textures for every tile type.
+   * Each texture is kept standalone (used for editor thumbnails) and also stamped
+   * into a shared atlas consumed by the Phaser TilemapLayer.
    */
   private generateProceduralTextures() {
     const size = this.tileSize;
@@ -169,8 +193,8 @@ export class TilemapManager {
             ctx.beginPath();
             ctx.moveTo(x, 0);
             ctx.lineTo(x, 8);
-            ctx.moveTo(x, size - 8);
-            ctx.lineTo(x, size);
+            ctx.moveTo(x, size);
+            ctx.lineTo(x, size - 8);
             ctx.stroke();
           }
           // Dashed center line
@@ -595,145 +619,511 @@ export class TilemapManager {
   }
 
   /**
-   * Initializes default connected logistics map with 4 regional hubs and docks.
+   * Stamps every standalone tile texture into one atlas so the TilemapLayer can
+   * reference all tile types from a single tileset image. Slot order is stable
+   * (TILE_ORDER) so saved maps keep valid tile indices.
+   */
+  private buildAtlasTexture() {
+    const size = this.tileSize;
+    const count = TILE_ORDER.length;
+    const slotsPerRow = Math.ceil(Math.sqrt(count));
+    const atlasRows = Math.ceil(count / slotsPerRow);
+
+    if (this.scene.textures.exists('tile_atlas')) return;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = slotsPerRow * size;
+    canvas.height = atlasRows * size;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    TILE_ORDER.forEach((tileKey, i) => {
+      const col = i % slotsPerRow;
+      const row = Math.floor(i / slotsPerRow);
+      const srcTexture = this.scene.textures.get(`tile_${tileKey}`);
+      const srcCanvas = srcTexture?.getSourceImage?.();
+      if (srcCanvas) {
+        ctx.drawImage(srcCanvas as CanvasImageSource, col * size, row * size);
+      }
+      // gid 1-based: index 0 is reserved (blank) by Phaser tilemaps
+      this.tileGid[tileKey] = i + 1;
+    });
+
+    this.scene.textures.addCanvas('tile_atlas', canvas);
+  }
+
+  /**
+   * Creates the native Phaser tilemap + single ground layer with automatic
+   * per-camera culling.
+   */
+  private buildTilemapLayer() {
+    this.tilemap = this.scene.make.tilemap({
+      tileWidth: this.tileSize,
+      tileHeight: this.tileSize,
+      width: this.cols,
+      height: this.rows,
+    });
+    const tileset = this.tilemap.addTilesetImage('tiles', 'tile_atlas', this.tileSize, this.tileSize, 0, 0, 1);
+    if (!tileset) throw new Error('Failed to create tileset from atlas texture');
+    const layer = this.tilemap.createBlankLayer('ground', tileset, 0, 0);
+    if (!layer) throw new Error('Failed to create tilemap ground layer');
+    this.layer = layer;
+    this.layer.setDepth(1);
+  }
+
+  private gidOf(tileId: string): number {
+    return this.tileGid[tileId] || 0;
+  }
+
+  /**
+   * Pushes the current grid into the tile layer (initial fill / preset load / import).
+   */
+  private refreshLayer() {
+    if (!this.layer) return;
+    this.layer.setSize(this.cols, this.rows);
+    for (let r = 0; r < this.rows; r++) {
+      for (let c = 0; c < this.cols; c++) {
+        this.layer.putTileAt(this.gidOf(this.grid[r][c] || 'asphalt'), c, r, false);
+      }
+    }
+  }
+
+  // ======================================================================
+  // MAP GENERATION (PROCEDURAL + PRESETS)
+  // ======================================================================
+
+  /**
+   * Deterministic PRNG (mulberry32) so generated maps are identical every session
+   * and saved exam coordinates stay valid.
+   */
+  private mulberry32(seed: number) {
+    let a = seed >>> 0;
+    return () => {
+      a |= 0; a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  private fill(tileId: string, r0: number, r1: number, c0: number, c1: number) {
+    for (let r = Math.max(0, r0); r <= Math.min(this.rows - 1, r1); r++) {
+      for (let c = Math.max(0, c0); c <= Math.min(this.cols - 1, c1); c++) {
+        this.grid[r][c] = tileId;
+      }
+    }
+  }
+
+  private hLine(row: number, c0: number, c1: number, tileId: string) {
+    for (let c = Math.max(0, c0); c <= Math.min(this.cols - 1, c1); c++) this.grid[row][c] = tileId;
+  }
+
+  private vLine(col: number, r0: number, r1: number, tileId: string) {
+    for (let r = Math.max(0, r0); r <= Math.min(this.rows - 1, r1); r++) this.grid[r][col] = tileId;
+  }
+
+  /**
+   * Initializes the default big regional map: a full arterial grid connecting
+   * the 4 regional hub biomes (Porto, Estaleiro, Industrial, Histórico),
+   * procedurally decorated but 100% deterministic.
    */
   public initDefaultGrid() {
+    this.mapName = 'Região Metropolitana Procedural';
     this.grid = [];
-    this.tileSprites = [];
-
     for (let r = 0; r < this.rows; r++) {
-      this.grid[r] = [];
-      this.tileSprites[r] = [];
-      for (let c = 0; c < this.cols; c++) {
-        // Outer boundaries have warehouse or water barriers
-        if (r === 0 || r === this.rows - 1 || c === 0 || c === this.cols - 1) {
-          this.grid[r][c] = (r === 0 && c < 6) ? 'dock_water_edge' : 'building_warehouse';
-        } else {
-          this.grid[r][c] = 'asphalt';
+      this.grid[r] = new Array(this.cols).fill('asphalt');
+    }
+
+    const rand = this.mulberry32(20260111);
+
+    // Solid outer boundary
+    this.fill('building_warehouse', 0, this.rows - 1, 0, 0);
+    this.fill('building_warehouse', 0, this.rows - 1, this.cols - 1, this.cols - 1);
+    this.fill('building_warehouse', 0, 0, 0, this.cols - 1);
+    this.fill('building_warehouse', this.rows - 1, this.rows - 1, 0, this.cols - 1);
+
+    // --- Arterial grid ---
+    const vArterials = [9, 27, 45, 63, 81, 99];
+    const hArterials = [8, 24, 40, 56, 72];
+    for (const c of vArterials) this.vLine(c, 0, this.rows - 1, 'road_straight_v');
+    for (const r of hArterials) this.hLine(r, 0, this.cols - 1, 'road_straight_h');
+    for (const r of hArterials) {
+      for (const c of vArterials) {
+        this.grid[r][c] = 'road_intersection';
+        // Pedestrian crossings approaching each intersection
+        if (c - 2 > 0) this.grid[r][c - 2] = 'pedestrian_crossing';
+        if (r - 2 > 0) this.grid[r - 2][c] = 'pedestrian_crossing';
+      }
+    }
+
+    // Sidewalks flanking every arterial
+    for (const c of vArterials) {
+      for (let r = 1; r < this.rows - 1; r++) {
+        if (this.grid[r][c - 1] === 'asphalt') this.grid[r][c - 1] = 'sidewalk';
+        if (this.grid[r][c + 1] === 'asphalt') this.grid[r][c + 1] = 'sidewalk';
+      }
+    }
+    for (const r of hArterials) {
+      for (let c = 1; c < this.cols - 1; c++) {
+        if (this.grid[r - 1]?.[c] === 'asphalt') this.grid[r - 1][c] = 'sidewalk';
+        if (this.grid[r + 1]?.[c] === 'asphalt') this.grid[r + 1][c] = 'sidewalk';
+      }
+    }
+
+    // Traffic lights at alternating intersections (sidewalk corners)
+    let idx = 0;
+    for (const r of hArterials) {
+      for (const c of vArterials) {
+        if (idx % 2 === 0) {
+          this.grid[r - 1][c - 1] = 'traffic_light';
+          this.grid[r + 1][c + 1] = 'traffic_light';
+        }
+        idx++;
+      }
+    }
+
+    // Lamp posts & road signs along arterials (deterministic placement)
+    for (const c of vArterials) {
+      for (let r = 4; r < this.rows - 4; r += 6) {
+        const pick = rand();
+        if (this.grid[r][c - 1] === 'sidewalk') this.grid[r][c - 1] = pick < 0.8 ? 'street_lamp_post' : 'sign_speed_30';
+      }
+    }
+    for (const r of hArterials) {
+      for (let c = 4; c < this.cols - 4; c += 6) {
+        const pick = rand();
+        if (this.grid[r - 1][c] === 'sidewalk') this.grid[r - 1][c] = pick < 0.8 ? 'street_lamp_post' : pick < 0.9 ? 'sign_stop' : 'sign_yield';
+      }
+    }
+
+    // --- Hub 1: Porto (top-left, next to the water) ---
+    this.fill('dock_water_edge', 0, 2, 0, 13);
+    for (let c = 2; c <= 10; c += 4) this.grid[3][c] = 'port_crane';
+    this.fill('shipping_container_blue', 4, 4, 3, 5);
+    this.fill('shipping_container_red', 4, 4, 7, 9);
+    this.fill('dock_standard', 5, 6, 4, 8);
+    this.fill('gantry_rail', 6, 6, 10, 12);
+
+    // --- Hub 2: Estaleiro (top-right) ---
+    this.fill('container_stack_high', 2, 3, 86, 89);
+    this.fill('container_stack_high', 2, 3, 92, 95);
+    this.fill('shipping_container_blue', 5, 5, 88, 92);
+    this.fill('shipping_container_red', 5, 5, 93, 96);
+    this.fill('dock_standard', 4, 5, 84, 86);
+    this.fill('industrial_hazard_stripes', 6, 6, 87, 95);
+
+    // --- Hub 3: Zona Industrial (bottom-right) ---
+    this.fill('chemical_silo', 66, 67, 92, 93);
+    this.fill('chemical_silo', 69, 70, 92, 93);
+    this.fill('overhead_pipe', 68, 68, 92, 100);
+    this.fill('factory_dock', 66, 67, 95, 97);
+    this.fill('building_warehouse', 62, 63, 84, 90);
+    this.fill('industrial_hazard_stripes', 64, 64, 84, 97);
+
+    // --- Hub 4: Centro Histórico (bottom-left) ---
+    this.fill('cobblestone_narrow', 66, 74, 3, 7);
+    this.fill('granite_bollard', 68, 68, 3, 7);
+    this.fill('ancient_archway', 71, 71, 3, 7);
+    this.fill('dock_standard', 73, 74, 4, 6);
+
+    // Jersey barrier maneuvering challenges scattered mid-map (deterministic)
+    this.fill('jersey_barrier', 30, 32, 33, 33);
+    this.fill('jersey_barrier', 44, 46, 55, 55);
+    this.fill('jersey_barrier', 16, 18, 70, 70);
+    this.fill('jersey_barrier', 58, 60, 20, 20);
+
+    // Decorative building blocks between arterials
+    for (let r = 2; r < this.rows - 2; r += 8) {
+      for (let c = 2; c < this.cols - 2; c += 9) {
+        if (rand() < 0.35 && this.regionClear(r, c, 2, 2)) {
+          this.fill('building_warehouse', r, r + 1, c, c + 1);
         }
       }
     }
 
-    // Create main road network connecting the 4 regional hubs:
-    // Top Horizontal Arterial (r = 3)
-    for (let c = 3; c < this.cols - 3; c++) this.grid[3][c] = 'road_straight_h';
-    // Bottom Horizontal Arterial (r = 13)
-    for (let c = 3; c < this.cols - 3; c++) this.grid[13][c] = 'road_straight_h';
-    // Left Vertical Arterial (c = 3)
-    for (let r = 3; r <= 13; r++) this.grid[r][3] = 'road_straight_v';
-    // Right Vertical Arterial (c = this.cols - 4)
-    const rightCol = this.cols - 4;
-    for (let r = 3; r <= 13; r++) this.grid[r][rightCol] = 'road_straight_v';
-
-    // Intersections at the corners of arterial
-    this.grid[3][3] = 'road_intersection';
-    this.grid[3][rightCol] = 'road_intersection';
-    this.grid[13][3] = 'road_intersection';
-    this.grid[13][rightCol] = 'road_intersection';
-
-    // Center Crossroad (r = 8)
-    for (let c = 3; c <= rightCol; c++) this.grid[8][c] = 'road_straight_h';
-    for (let r = 3; r <= 13; r++) this.grid[r][10] = 'road_straight_v';
-    this.grid[8][3] = 'road_intersection';
-    this.grid[8][rightCol] = 'road_intersection';
-    this.grid[8][10] = 'road_intersection';
-    this.grid[3][10] = 'road_intersection';
-    this.grid[13][10] = 'road_intersection';
-
-    // Pedestrian Zebra Crossings before intersections
-    this.grid[3][5] = 'pedestrian_crossing';
-    this.grid[3][rightCol - 2] = 'pedestrian_crossing';
-    this.grid[13][5] = 'pedestrian_crossing';
-    this.grid[13][rightCol - 2] = 'pedestrian_crossing';
-    this.grid[6][10] = 'pedestrian_crossing';
-    this.grid[11][10] = 'pedestrian_crossing';
-
-    // Sidewalks along avenue borders and building blocks
-    for (let c = 4; c < rightCol; c++) {
-      if (this.grid[2][c] === 'asphalt') this.grid[2][c] = 'sidewalk';
-      if (this.grid[14][c] === 'asphalt') this.grid[14][c] = 'sidewalk';
-    }
-    for (let r = 4; r < 13; r++) {
-      if (this.grid[r][2] === 'asphalt') this.grid[r][2] = 'sidewalk';
-      if (this.grid[r][rightCol + 1] === 'asphalt') this.grid[r][rightCol + 1] = 'sidewalk';
+    // Guarantee the arterial grid is intact after decoration
+    for (const c of vArterials) this.vLine(c, 0, this.rows - 1, 'road_straight_v');
+    for (const r of hArterials) this.hLine(r, 0, this.cols - 1, 'road_straight_h');
+    for (const r of hArterials) {
+      for (const c of vArterials) this.grid[r][c] = 'road_intersection';
     }
 
-    // Traffic Lights (Semáforos) at major junctions with hit boxes
-    this.grid[2][2] = 'traffic_light';
-    this.grid[2][rightCol + 1] = 'traffic_light';
-    this.grid[14][2] = 'traffic_light';
-    this.grid[14][rightCol + 1] = 'traffic_light';
-    this.grid[7][9] = 'traffic_light';
-    this.grid[9][11] = 'traffic_light';
+    this.spawnPoint = { x: 9 * this.tileSize + 64, y: 8 * this.tileSize + 64, angle: 0 };
 
-    // Street Lamp Posts (Postes de Iluminação) with hit boxes
-    this.grid[2][6] = 'street_lamp_post';
-    this.grid[2][14] = 'street_lamp_post';
-    this.grid[14][6] = 'street_lamp_post';
-    this.grid[14][14] = 'street_lamp_post';
-    this.grid[6][2] = 'street_lamp_post';
-    this.grid[10][2] = 'street_lamp_post';
-    this.grid[6][rightCol + 1] = 'street_lamp_post';
-    this.grid[10][rightCol + 1] = 'street_lamp_post';
-
-    // Road Signs (Sinais de Trânsito: STOP, Cedência, Limite 30)
-    this.grid[2][4] = 'sign_stop';
-    this.grid[14][4] = 'sign_stop';
-    this.grid[2][8] = 'sign_speed_30';
-    this.grid[14][8] = 'sign_speed_30';
-    this.grid[7][4] = 'sign_yield';
-    this.grid[9][4] = 'sign_yield';
-
-    // 1. Porto Hub Biome (Top-Left)
-    this.grid[1][1] = 'port_crane';
-    this.grid[1][2] = 'dock_water_edge';
-    this.grid[2][1] = 'shipping_container_blue';
-    this.grid[2][2] = 'shipping_container_red';
-    this.grid[2][3] = 'dock_standard';
-
-    // 2. Estaleiro Hub Biome (Top-Right)
-    this.grid[1][rightCol - 1] = 'container_stack_high';
-    this.grid[1][rightCol] = 'container_stack_high';
-    this.grid[2][rightCol] = 'dock_standard';
-
-    // 3. Zona Industrial Hub Biome (Bottom-Right)
-    this.grid[14][rightCol] = 'chemical_silo';
-    this.grid[14][rightCol - 1] = 'factory_dock';
-    this.grid[15][rightCol] = 'chemical_silo';
-
-    // 4. Centro Histórico Biome (Bottom-Left)
-    this.grid[11][1] = 'granite_bollard';
-    this.grid[12][1] = 'cobblestone_narrow';
-    this.grid[12][2] = 'cobblestone_narrow';
-    this.grid[14][3] = 'dock_standard';
-
-    // Obstacles to challenge maneuvering
-    this.grid[5][6] = 'jersey_barrier';
-    this.grid[6][6] = 'jersey_barrier';
-    this.grid[10][15] = 'jersey_barrier';
-    this.grid[11][15] = 'jersey_barrier';
-
-    this.spawnPoint = { x: 3 * 128 + 64, y: 3 * 128 + 64, angle: 0 };
-
-    this.renderAllTiles();
-    this.rebuildCollisions();
+    this.afterGridReplaced();
   }
 
-  public renderAllTiles() {
-    this.tileContainer.removeAll(true);
-    for (let r = 0; r < this.rows; r++) {
-      this.tileSprites[r] = [];
-      for (let c = 0; c < this.cols; c++) {
-        const tileKey = this.grid[r][c] || 'asphalt';
-        const img = this.scene.add.image(
-          c * this.tileSize + this.tileSize / 2,
-          r * this.tileSize + this.tileSize / 2,
-          `tile_${tileKey}`
-        );
-        this.tileContainer.add(img);
-        this.tileSprites[r][c] = img;
+  /** True when the (2r+1 x 2c+1) region starting at (r,c) has no road/sidewalk tiles. */
+  private regionClear(r0: number, c0: number, rh: number, cw: number): boolean {
+    for (let r = r0; r <= r0 + rh; r++) {
+      for (let c = c0; c <= c0 + cw; c++) {
+        const t = this.grid[r]?.[c];
+        if (!t || t.startsWith('road_') || t === 'sidewalk' || t === 'pedestrian_crossing' || t === 'traffic_light' || t.startsWith('dock_')) return false;
       }
     }
+    return true;
+  }
+
+  private loadAcademyPreset() {
+    this.mapName = 'Academia de Licenças (C, C+E, H, X)';
+    this.grid = [];
+    for (let r = 0; r < this.rows; r++) {
+      this.grid[r] = new Array(this.cols).fill('asphalt');
+    }
+
+    // Solid boundary
+    this.fill('building_warehouse', 0, 0, 0, this.cols - 1);
+    this.fill('building_warehouse', this.rows - 1, this.rows - 1, 0, this.cols - 1);
+    this.fill('building_warehouse', 0, this.rows - 1, 0, 0);
+    this.fill('building_warehouse', 0, this.rows - 1, this.cols - 1, this.cols - 1);
+
+    // Wide perimeter test track
+    this.hLine(4, 4, this.cols - 5, 'road_straight_h');
+    this.hLine(this.rows - 5, 4, this.cols - 5, 'road_straight_h');
+    this.vLine(4, 4, this.rows - 5, 'road_straight_v');
+    this.vLine(this.cols - 5, 4, this.rows - 5, 'road_straight_v');
+    this.grid[4][4] = 'road_intersection';
+    this.grid[4][this.cols - 5] = 'road_intersection';
+    this.grid[this.rows - 5][4] = 'road_intersection';
+    this.grid[this.rows - 5][this.cols - 5] = 'road_intersection';
+
+    // Off-tracking hairpin curve with tight obstacle cones
+    this.fill('jersey_barrier', 20, 22, 40, 40);
+    this.fill('jersey_barrier', 30, 32, 60, 60);
+
+    // Reverse bay dock surrounded by barriers for Bitrem Class H
+    this.fill('building_warehouse', 45, 45, 62, 62);
+    this.fill('building_warehouse', 45, 45, 64, 64);
+    this.grid[45][63] = 'dock_standard';
+
+    // Wet / Sensitive cargo zone for Class X
+    this.grid[30][30] = 'dock_standard';
+
+    // Mid track connector roads
+    this.hLine(24, 4, this.cols - 5, 'road_straight_h');
+    this.vLine(54, 4, this.rows - 5, 'road_straight_v');
+    this.grid[24][54] = 'road_intersection';
+
+    this.spawnPoint = { x: 6 * this.tileSize + 64, y: 6 * this.tileSize + 64, angle: 90 };
+    this.afterGridReplaced();
+  }
+
+  private loadHarborPreset() {
+    this.mapName = 'Terminal de Carga Oceânica';
+    this.grid = [];
+    for (let r = 0; r < this.rows; r++) {
+      this.grid[r] = new Array(this.cols).fill('asphalt');
+    }
+
+    // Ocean along the top third
+    this.fill('dock_water_edge', 0, 12, 0, this.cols - 1);
+    this.fill('building_warehouse', this.rows - 1, this.rows - 1, 0, this.cols - 1);
+    this.fill('building_warehouse', 0, this.rows - 1, 0, 0);
+    this.fill('building_warehouse', 0, this.rows - 1, this.cols - 1, this.cols - 1);
+
+    // Massive cranes and container stacks along the quay
+    for (let c = 4; c < this.cols - 4; c += 8) {
+      this.grid[14][c] = 'port_crane';
+      this.fill('shipping_container_blue', 17, 17, c, c + 1);
+      this.fill('shipping_container_red', 17, 17, c + 2, c + 3);
+    }
+
+    // Docks along the quay
+    for (let c = 8; c < this.cols - 8; c += 16) this.grid[15][c] = 'dock_standard';
+    for (let c = 16; c < this.cols - 8; c += 24) this.grid[15][c] = 'dock_standard';
+
+    // Road grid
+    this.hLine(24, 1, this.cols - 2, 'road_straight_h');
+    this.hLine(40, 1, this.cols - 2, 'road_straight_h');
+    this.hLine(56, 1, this.cols - 2, 'road_straight_h');
+    for (let c = 12; c < this.cols - 1; c += 16) this.vLine(c, 13, this.rows - 2, 'road_straight_v');
+    for (let c = 12; c < this.cols - 1; c += 16) this.grid[24][c] = 'road_intersection';
+    for (let c = 12; c < this.cols - 1; c += 16) this.grid[40][c] = 'road_intersection';
+
+    // Container yard in the south
+    for (let c = 20; c < this.cols - 6; c += 5) {
+      this.fill('shipping_container_blue', 46, 46, c, c);
+      this.fill('shipping_container_red', 48, 48, c, c);
+    }
+
+    this.spawnPoint = { x: 6 * this.tileSize + 64, y: 24 * this.tileSize + 64, angle: 90 };
+    this.afterGridReplaced();
+  }
+
+  public loadPreset(presetKey: string) {
+    if (presetKey === 'license_academy') {
+      this.loadAcademyPreset();
+    } else if (presetKey === 'harbor_challenge') {
+      this.loadHarborPreset();
+    } else {
+      this.initDefaultGrid();
+    }
+  }
+
+  // ======================================================================
+  // PHYSICS (CHUNKED)
+  // ======================================================================
+
+  private chunkKey(cx: number, cy: number): string {
+    return `${cx}_${cy}`;
+  }
+
+  /**
+   * Materializes static collision bodies & dock zones only for chunks around the
+   * given world position (the truck). Everything else stays as pure grid data, so
+   * physics cost is constant regardless of map size.
+   */
+  public updateActiveChunks(centerX: number, centerY: number) {
+    const chunkPx = TilemapManager.CHUNK_TILES * this.tileSize;
+    const cx = Math.floor(centerX / chunkPx);
+    const cy = Math.floor(centerY / chunkPx);
+    if (cx === this.lastChunkCX && cy === this.lastChunkCY) return;
+    this.lastChunkCX = cx;
+    this.lastChunkCY = cy;
+
+    const R = TilemapManager.CHUNK_RADIUS;
+    const wanted = new Set<string>();
+    const chunksCx: number[] = [];
+    const chunksCy: number[] = [];
+    for (let dy = -R; dy <= R; dy++) {
+      for (let dx = -R; dx <= R; dx++) {
+        const key = this.chunkKey(cx + dx, cy + dy);
+        wanted.add(key);
+        chunksCx.push(cx + dx);
+        chunksCy.push(cy + dy);
+      }
+    }
+
+    // Dematerialize chunks no longer wanted
+    for (const key of Array.from(this.activeChunkKeys)) {
+      if (wanted.has(key)) continue;
+      const bodies = this.chunkBodies.get(key);
+      if (bodies) {
+        for (const b of bodies) this.scene.matter.world.remove(b);
+        this.chunkBodies.delete(key);
+      }
+      this.chunkDocks.delete(key);
+      this.activeChunkKeys.delete(key);
+    }
+
+    // Materialize newly wanted chunks
+    for (let i = 0; i < wanted.size; i++) {
+      const key = this.chunkKey(chunksCx[i], chunksCy[i]);
+      if (this.activeChunkKeys.has(key)) continue;
+      this.activeChunkKeys.add(key);
+
+      const bodies: MatterJS.BodyType[] = [];
+      const docks: TilemapManager['dockZones'] = [];
+      const r0 = chunksCy[i] * TilemapManager.CHUNK_TILES;
+      const c0 = chunksCx[i] * TilemapManager.CHUNK_TILES;
+      for (let r = r0; r < r0 + TilemapManager.CHUNK_TILES; r++) {
+        for (let c = c0; c < c0 + TilemapManager.CHUNK_TILES; c++) {
+          if (r < 0 || r >= this.rows || c < 0 || c >= this.cols) continue;
+          const tileId = this.grid[r][c];
+          const def = TILE_DEFINITIONS[tileId];
+          if (!def || tileId === 'traffic_light') continue; // managed by TrafficLightSystem
+
+          const posX = c * this.tileSize + this.tileSize / 2;
+          const posY = r * this.tileSize + this.tileSize / 2;
+
+          if (def.isSolid) {
+            const bodyW = def.colliderSize ? def.colliderSize.w : this.tileSize;
+            const bodyH = def.colliderSize ? def.colliderSize.h : this.tileSize;
+            const body = this.scene.matter.add.rectangle(posX, posY, bodyW, bodyH, {
+              isStatic: true,
+              friction: 0.8,
+              restitution: 0.1,
+              label: `obstacle_${tileId}`,
+              collisionFilter: { category: 0x0001, mask: 0xffff },
+              render: {
+                visible: true,
+                lineColor: 0xffaa00,
+                lineOpacity: 0.9,
+                fillColor: 0xff5500,
+                fillOpacity: 0.25,
+              },
+            }) as unknown as MatterJS.BodyType;
+            bodies.push(body);
+          } else if (def.category === 'dock') {
+            docks.push({
+              x: posX, y: posY,
+              width: this.tileSize, height: this.tileSize,
+              requiredAngle: 0,
+              id: `dock_${c}_${r}`,
+            });
+          }
+        }
+      }
+
+      this.chunkBodies.set(key, bodies);
+      this.chunkDocks.set(key, docks);
+      this.collisionBodies = bodies; // exposed for debug/destroy of the latest chunk set
+    }
+
+    // Rebuild the flat active dock list from all active chunks
+    this.dockZones = [];
+    for (const docks of this.chunkDocks.values()) {
+      this.dockZones.push(...docks);
+    }
+    this.collisionBodies = [];
+    for (const bodies of this.chunkBodies.values()) {
+      this.collisionBodies.push(...bodies);
+    }
+  }
+
+  /**
+   * Removes the chunk-materialized body & dock for a single tile (used by setTile).
+   */
+  private removeTilePhysics(col: number, row: number) {
+    const chunkPx = TilemapManager.CHUNK_TILES * this.tileSize;
+    const key = this.chunkKey(Math.floor((col * this.tileSize) / chunkPx), Math.floor((row * this.tileSize) / chunkPx));
+    const bodies = this.chunkBodies.get(key);
+    if (bodies) {
+      const before = bodies.length;
+      for (let i = bodies.length - 1; i >= 0; i--) {
+        const b = bodies[i];
+        const bx = b.position?.x ?? 0;
+        const by = b.position?.y ?? 0;
+        const bc = Math.floor(bx / this.tileSize);
+        const br = Math.floor(by / this.tileSize);
+        if (bc === col && br === row) {
+          this.scene.matter.world.remove(b);
+          bodies.splice(i, 1);
+        }
+      }
+      if (before !== bodies.length) {
+        this.collisionBodies = [];
+        for (const list of this.chunkBodies.values()) this.collisionBodies.push(...list);
+      }
+    }
+    if (this.chunkDocks.has(key)) {
+      const docks = this.chunkDocks.get(key)!;
+      const filtered = docks.filter((d) => d.id !== `dock_${col}_${row}`);
+      this.chunkDocks.set(key, filtered);
+      this.dockZones = [];
+      for (const list of this.chunkDocks.values()) this.dockZones.push(...list);
+    }
+  }
+
+  /**
+   * Full data reset: clears all materialized bodies and rebuilds layer + traffic lights.
+   * Physics is NOT materialized for the whole map — chunks activate near the truck.
+   */
+  private afterGridReplaced() {
+    this.mapVersion++;
+    const world = this.scene.matter.world;
+    for (const bodies of this.chunkBodies.values()) {
+      for (const b of bodies) world.remove(b);
+    }
+    this.chunkBodies.clear();
+    this.chunkDocks.clear();
+    this.activeChunkKeys.clear();
+    this.collisionBodies = [];
+    this.dockZones = [];
+    this.lastChunkCX = Number.NaN; // force chunk refresh next update
+
+    this.refreshLayer();
+    TrafficLightSystem.getInstance(this.scene).rebuild(this.grid, this.tileSize);
   }
 
   public setTile(col: number, row: number, tileType: string) {
@@ -742,21 +1132,61 @@ export class TilemapManager {
 
     const oldTile = this.grid[row][col];
     this.grid[row][col] = tileType;
-    const oldSprite = this.tileSprites[row]?.[col];
-    if (oldSprite) oldSprite.destroy();
+    this.mapVersion++;
 
-    const newSprite = this.scene.add.image(
-      col * this.tileSize + this.tileSize / 2,
-      row * this.tileSize + this.tileSize / 2,
-      `tile_${tileType}`
-    );
-    this.tileContainer.add(newSprite);
-    this.tileSprites[row][col] = newSprite;
+    // Native tilemap repaint (one tile — O(1))
+    this.layer.putTileAt(this.gidOf(tileType), col, row);
 
-    // Incremental physics update: only the painted tile changes its bodies
-    this.removeTileBodies(col, row);
-    const size = this.tileSize;
-    this.applyTileBody(col, row, tileType, col * size + size / 2, row * size + size / 2);
+    // Incremental physics update for the painted tile (only if its chunk is active)
+    this.removeTilePhysics(col, row);
+    if (this.activeChunkKeys.size > 0) {
+      const def = TILE_DEFINITIONS[tileType];
+      const posX = col * this.tileSize + this.tileSize / 2;
+      const posY = row * this.tileSize + this.tileSize / 2;
+      if (def && tileType !== 'traffic_light' && def.isSolid) {
+        const bodyW = def.colliderSize ? def.colliderSize.w : this.tileSize;
+        const bodyH = def.colliderSize ? def.colliderSize.h : this.tileSize;
+        const chunkPx = TilemapManager.CHUNK_TILES * this.tileSize;
+        const key = this.chunkKey(Math.floor(posX / chunkPx), Math.floor(posY / chunkPx));
+        if (this.activeChunkKeys.has(key)) {
+          const body = this.scene.matter.add.rectangle(posX, posY, bodyW, bodyH, {
+            isStatic: true,
+            friction: 0.8,
+            restitution: 0.1,
+            label: `obstacle_${tileType}`,
+            collisionFilter: { category: 0x0001, mask: 0xffff },
+            render: {
+              visible: true,
+              lineColor: 0xffaa00,
+              lineOpacity: 0.9,
+              fillColor: 0xff5500,
+              fillOpacity: 0.25,
+            },
+          }) as unknown as MatterJS.BodyType;
+          if (!this.chunkBodies.has(key)) this.chunkBodies.set(key, []);
+          this.chunkBodies.get(key)!.push(body);
+          this.collisionBodies.push(body);
+        }
+      } else if (def && def.category === 'dock') {
+        const chunkPx = TilemapManager.CHUNK_TILES * this.tileSize;
+        const key = this.chunkKey(Math.floor(posX / chunkPx), Math.floor(posY / chunkPx));
+        if (this.activeChunkKeys.has(key)) {
+          if (!this.chunkDocks.has(key)) this.chunkDocks.set(key, []);
+          this.chunkDocks.get(key)!.push({
+            x: posX, y: posY,
+            width: this.tileSize, height: this.tileSize,
+            requiredAngle: 0,
+            id: `dock_${col}_${row}`,
+          });
+          this.dockZones.push({
+            x: posX, y: posY,
+            width: this.tileSize, height: this.tileSize,
+            requiredAngle: 0,
+            id: `dock_${col}_${row}`,
+          });
+        }
+      }
+    }
 
     // Traffic lights own their physics; only rescan when one was added/removed
     if (oldTile === 'traffic_light' || tileType === 'traffic_light') {
@@ -770,130 +1200,132 @@ export class TilemapManager {
   }
 
   /**
-   * Creates the physics body (or dock zone) for a single tile, if its definition requires one.
+   * Kept for API compatibility: legacy callers expected a full physics rebuild.
+   * With chunked physics the map data is already the source of truth.
    */
-  private applyTileBody(col: number, row: number, tileId: string, posX: number, posY: number) {
-    if (!this.tileBodies[row]) this.tileBodies[row] = new Array(this.cols).fill(null);
-
-    const def = TILE_DEFINITIONS[tileId];
-    if (!def) return;
-
-    if (tileId === 'traffic_light') {
-      // European traffic light post and dynamic lane obstacle barrier are managed by TrafficLightSystem
-      return;
-    }
-
-    if (def.isSolid) {
-      const bodyW = def.colliderSize ? def.colliderSize.w : this.tileSize;
-      const bodyH = def.colliderSize ? def.colliderSize.h : this.tileSize;
-
-      // Create static solid Matter.js body with precise neon collision outline
-      const body = this.scene.matter.add.rectangle(posX, posY, bodyW, bodyH, {
-        isStatic: true,
-        friction: 0.8,
-        restitution: 0.1,
-        label: `obstacle_${tileId}`,
-        collisionFilter: {
-          category: 0x0001,
-          mask: 0xffff,
-        },
-        render: {
-          visible: true,
-          lineColor: 0xffaa00,
-          lineOpacity: 0.9,
-          fillColor: 0xff5500,
-          fillOpacity: 0.25,
-        },
-      }) as unknown as MatterJS.BodyType;
-
-      this.tileBodies[row][col] = body;
-      this.collisionBodies.push(body);
-    } else if (def.category === 'dock') {
-      // Dock bay zone detection
-      this.dockZones.push({
-        x: posX,
-        y: posY,
-        width: this.tileSize,
-        height: this.tileSize,
-        requiredAngle: 0,
-        id: `dock_${col}_${row}`,
-      });
-    }
-  }
-
-  /**
-   * Removes the physics body and dock zone belonging to a single tile.
-   */
-  private removeTileBodies(col: number, row: number) {
-    if (!this.tileBodies[row]) this.tileBodies[row] = new Array(this.cols).fill(null);
-
-    const existing = this.tileBodies[row][col];
-    if (existing) {
-      this.scene.matter.world.remove(existing);
-      this.tileBodies[row][col] = null;
-      this.collisionBodies = this.collisionBodies.filter((b) => b !== existing);
-    }
-    this.dockZones = this.dockZones.filter((d) => d.id !== `dock_${col}_${row}`);
-  }
-
   public rebuildCollisions() {
-    // Remove existing Matter static bodies
-    const world = this.scene.matter.world;
-    this.collisionBodies.forEach((body) => {
-      world.remove(body);
-    });
-    this.collisionBodies = [];
-    this.dockZones = [];
-    this.tileBodies = [];
-
-    const size = this.tileSize;
-
-    for (let r = 0; r < this.rows; r++) {
-      this.tileBodies[r] = new Array(this.cols).fill(null);
-      for (let c = 0; c < this.cols; c++) {
-        const tileId = this.grid[r][c];
-        const posX = c * size + size / 2;
-        const posY = r * size + size / 2;
-        this.applyTileBody(c, r, tileId, posX, posY);
-      }
-    }
-
-    // Rebuild and synchronize European TrafficLight state machines and dynamic lane obstacles
-    TrafficLightSystem.getInstance(this.scene).rebuild(this.grid, this.tileSize);
+    this.afterGridReplaced();
   }
+
+  // ======================================================================
+  // JSON EXPORT / IMPORT (RLE for compact files on huge maps)
+  // ======================================================================
 
   public exportJSON(): string {
+    // Run-length encode the grid: a mostly-uniform big map compresses ~100x
+    const runs: [string, number][] = [];
+    let current = '';
+    let count = 0;
+    for (let r = 0; r < this.rows; r++) {
+      for (let c = 0; c < this.cols; c++) {
+        const t = this.grid[r][c];
+        if (t === current) {
+          count++;
+        } else {
+          if (count > 0) runs.push([current, count]);
+          current = t;
+          count = 1;
+        }
+      }
+    }
+    if (count > 0) runs.push([current, count]);
+
     const data: MapDataJSON = {
-      version: 1,
+      version: 2,
       name: this.mapName,
       cols: this.cols,
       rows: this.rows,
       tileSize: this.tileSize,
       spawn: this.spawnPoint,
-      grid: this.grid,
-      docks: this.dockZones.map((d) => ({
-        x: d.x,
-        y: d.y,
-        requiredAngle: d.requiredAngle,
-        id: d.id,
-      })),
+      gridRLE: runs,
+      docks: this.getAllDocks().map((d) => ({ x: d.x, y: d.y, requiredAngle: d.requiredAngle, id: d.id })),
     };
     return JSON.stringify(data, null, 2);
+  }
+
+  /** Scans the whole grid and returns every dock zone (data-only, no physics). */
+  private getAllDocks(): Array<{ x: number; y: number; width: number; height: number; requiredAngle: number; id: string }> {
+    const docks: Array<{ x: number; y: number; width: number; height: number; requiredAngle: number; id: string }> = [];
+    for (let r = 0; r < this.rows; r++) {
+      for (let c = 0; c < this.cols; c++) {
+        const def = TILE_DEFINITIONS[this.grid[r][c]];
+        if (def?.category === 'dock') {
+          docks.push({
+            x: c * this.tileSize + this.tileSize / 2,
+            y: r * this.tileSize + this.tileSize / 2,
+            width: this.tileSize,
+            height: this.tileSize,
+            requiredAngle: 0,
+            id: `dock_${c}_${r}`,
+          });
+        }
+      }
+    }
+    return docks;
   }
 
   public importJSON(jsonStr: string): boolean {
     try {
       const data: MapDataJSON = JSON.parse(jsonStr);
-      if (!data.grid || !Array.isArray(data.grid)) return false;
 
-      this.cols = data.cols || data.grid[0]?.length || 24;
-      this.rows = data.rows || data.grid.length || 18;
+      // Validate structure: accept v1 (dense grid) or v2 (run-length encoded)
+      const hasDense = !!data.grid && Array.isArray(data.grid);
+      const hasRLE = !!data.gridRLE && Array.isArray(data.gridRLE);
+      if (!hasDense && !hasRLE) return false;
+
+      let grid: string[][] | null = null;
+
+      if (hasDense) {
+        grid = data.grid!;
+        // Schema validation: every row must exist; unknown tiles fall back to asphalt
+        for (let r = 0; r < grid.length; r++) {
+          if (!Array.isArray(grid[r])) return false;
+          for (let c = 0; c < grid[r].length; c++) {
+            if (!TILE_DEFINITIONS[grid[r][c]]) grid[r][c] = 'asphalt';
+          }
+        }
+      } else {
+        // Decode RLE
+        grid = [];
+        let r = 0; let c = 0;
+        grid[0] = new Array(this.cols).fill('asphalt');
+        for (const [tileId, count] of data.gridRLE!) {
+          const tile = TILE_DEFINITIONS[tileId] ? tileId : 'asphalt';
+          for (let i = 0; i < count; i++) {
+            grid[r][c] = tile;
+            c++;
+            if (c >= this.cols) { c = 0; r++; if (r >= this.rows) break; grid[r] = new Array(this.cols).fill('asphalt'); }
+          }
+          if (r >= this.rows) break;
+        }
+        for (let rr = 0; rr < this.rows; rr++) {
+          if (!grid[rr]) grid[rr] = new Array(this.cols).fill('asphalt');
+        }
+      }
+
+      const newCols = hasDense ? (data.cols || grid[0]?.length || this.cols) : this.cols;
+      const newRows = hasDense ? (data.rows || grid.length || this.rows) : this.rows;
+
+      if (newCols !== this.cols || newRows !== this.rows) {
+        this.cols = newCols;
+        this.rows = newRows;
+        // Rebuild the native tilemap at the new dimensions
+        this.tilemap.removeLayer(this.layer);
+        this.tilemap.destroy();
+        this.buildTilemapLayer();
+      }
+
+      this.cols = newCols;
+      this.rows = newRows;
       this.mapName = data.name || 'Mapa Importado';
-      this.grid = data.grid;
+      this.grid = grid.slice(0, this.rows);
+      for (let r = 0; r < this.rows; r++) {
+        if (!this.grid[r]) this.grid[r] = new Array(this.cols).fill('asphalt');
+        this.grid[r] = this.grid[r].slice(0, this.cols);
+      }
       if (data.spawn) this.spawnPoint = data.spawn;
 
-      this.renderAllTiles();
-      this.rebuildCollisions();
+      this.afterGridReplaced();
       return true;
     } catch (e) {
       console.error('Failed to parse map JSON:', e);
@@ -901,99 +1333,11 @@ export class TilemapManager {
     }
   }
 
-  public loadPreset(presetKey: string) {
-    if (presetKey === 'license_academy') {
-      this.loadAcademyPreset();
-    } else if (presetKey === 'harbor_challenge') {
-      this.loadHarborPreset();
-    } else {
-      this.initDefaultGrid();
-    }
-  }
-
-  private loadAcademyPreset() {
-    this.mapName = 'Academia de Licenças (C, C+E, H, X)';
-    this.grid = [];
-    for (let r = 0; r < this.rows; r++) {
-      this.grid[r] = [];
-      for (let c = 0; c < this.cols; c++) {
-        if (r === 0 || r === this.rows - 1 || c === 0 || c === this.cols - 1) {
-          this.grid[r][c] = 'building_warehouse';
-        } else {
-          this.grid[r][c] = 'asphalt';
-        }
-      }
-    }
-
-    // Wide test track
-    for (let c = 2; c < this.cols - 2; c++) {
-      this.grid[2][c] = 'road_straight_h';
-      this.grid[this.rows - 3][c] = 'road_straight_h';
-    }
-    for (let r = 2; r < this.rows - 2; r++) {
-      this.grid[r][2] = 'road_straight_v';
-      this.grid[r][this.cols - 3] = 'road_straight_v';
-    }
-
-    // Off-tracking hairpin curve with tight obstacle cones
-    this.grid[5][8] = 'jersey_barrier';
-    this.grid[6][8] = 'jersey_barrier';
-    this.grid[7][8] = 'jersey_barrier';
-
-    // Reverse bay dock surrounded by barriers for Bitrem Class H
-    this.grid[9][16] = 'building_warehouse';
-    this.grid[9][18] = 'building_warehouse';
-    this.grid[9][17] = 'dock_standard';
-
-    // Wet / Sensitive cargo zone for Class X
-    this.grid[13][10] = 'dock_standard';
-
-    this.spawnPoint = { x: 384, y: 384, angle: 90 };
-    this.renderAllTiles();
-    this.rebuildCollisions();
-  }
-
-  private loadHarborPreset() {
-    this.mapName = 'Terminal de Carga Oceânica';
-    this.grid = [];
-    for (let r = 0; r < this.rows; r++) {
-      this.grid[r] = [];
-      for (let c = 0; c < this.cols; c++) {
-        if (r < 3) {
-          this.grid[r][c] = 'dock_water_edge';
-        } else if (r === this.rows - 1 || c === 0 || c === this.cols - 1) {
-          this.grid[r][c] = 'building_warehouse';
-        } else {
-          this.grid[r][c] = 'asphalt';
-        }
-      }
-    }
-
-    // Massive cranes and container stacks
-    for (let c = 2; c < this.cols - 2; c += 4) {
-      this.grid[3][c] = 'port_crane';
-      this.grid[5][c] = 'shipping_container_blue';
-      this.grid[5][c + 1] = 'shipping_container_red';
-    }
-
-    // Docks along the quay
-    this.grid[4][6] = 'dock_standard';
-    this.grid[4][14] = 'dock_standard';
-
-    // Central road
-    for (let c = 1; c < this.cols - 1; c++) {
-      this.grid[8][c] = 'road_straight_h';
-      this.grid[12][c] = 'road_straight_h';
-    }
-
-    this.spawnPoint = { x: 256, y: 8 * 128 + 64, angle: 90 };
-    this.renderAllTiles();
-    this.rebuildCollisions();
-  }
-
   public destroy() {
     this.collisionBodies.forEach((b) => this.scene.matter.world.remove(b));
+    this.collisionBodies = [];
     TrafficLightSystem.getInstance(this.scene).destroy();
-    this.tileContainer.destroy();
+    this.layer?.destroy();
+    this.tilemap?.destroy();
   }
 }

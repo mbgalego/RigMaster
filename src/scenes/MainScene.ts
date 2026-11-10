@@ -5,7 +5,7 @@ import { Kingpin, ArticulationTelemetry } from '../physics/Kingpin';
 import { TilemapManager, TILE_DEFINITIONS } from '../editor/TilemapManager';
 import { LicenseSystem, LicenseExam, LicenseId } from '../systems/LicenseSystem';
 import { GarageSystem, WeatherModifier } from '../systems/GarageSystem';
-import { TrafficLightSystem, TrafficLightState } from '../systems/TrafficLightSystem';
+import { TrafficLightSystem } from '../systems/TrafficLightSystem';
 
 export class MainScene extends Phaser.Scene {
   public truck!: Truck;
@@ -31,6 +31,15 @@ export class MainScene extends Phaser.Scene {
   private examTargetMarker: Phaser.GameObjects.Graphics | null = null;
   private examTargetLabel: Phaser.GameObjects.Text | null = null;
   private preparedExamId: LicenseId | null = null;
+  // Road-snapped world position of the current exam dock (the real pass target)
+  private examDockWorld: LicenseExam['targetDock'] | null = null;
+
+  // Minimap (full-map HUD overview with live camera viewport & truck marker)
+  private minimapImage: Phaser.GameObjects.Image | null = null;
+  private minimapOverlay: Phaser.GameObjects.Graphics | null = null;
+  private minimapScale: number = 1;
+  private minimapVisible: boolean = true;
+  private lastMinimapVersion: number = -1;
 
   // Audio Context (Procedural synthesized audio)
   private audioCtx: AudioContext | null = null;
@@ -54,7 +63,6 @@ export class MainScene extends Phaser.Scene {
     fragileHealth: number;
     weather: WeatherModifier;
     activeLicenseExam: any;
-    trafficLight?: { state: TrafficLightState; distPx: number } | null;
   } = {
     speedKmh: 0,
     steeringDeg: 0,
@@ -69,7 +77,6 @@ export class MainScene extends Phaser.Scene {
     fragileHealth: 100,
     weather: 'clear',
     activeLicenseExam: null,
-    trafficLight: null,
   };
 
   constructor() {
@@ -81,7 +88,7 @@ export class MainScene extends Phaser.Scene {
     this.garageSystem = GarageSystem.getInstance();
 
     // 1. Build World & Tilemap
-    this.tilemapManager = new TilemapManager(this, 24, 18);
+    this.tilemapManager = new TilemapManager(this);
 
     // Set world physics bounds
     const worldW = this.tilemapManager.cols * this.tilemapManager.tileSize;
@@ -107,6 +114,9 @@ export class MainScene extends Phaser.Scene {
     this.weatherGraphics = this.add.graphics();
     this.weatherGraphics.setDepth(20);
     this.weatherGraphics.setScrollFactor(0); // Fixed to screen
+
+    // 4b. Minimap HUD (top-right overview of the whole map)
+    this.createMinimap();
 
     // 5. Keyboard Hotkeys
     if (this.input.keyboard) {
@@ -318,6 +328,13 @@ export class MainScene extends Phaser.Scene {
     // Keep exam target dock (marker + painted dock tile) in sync with the active exam
     this.syncExamTarget(time);
 
+    // Stream physics around the player: materialize static tile bodies & traffic light
+    // bodies only near the truck — everything else stays as pure grid data.
+    if (this.truck) {
+      this.tilemapManager.updateActiveChunks(this.truck.body.position.x, this.truck.body.position.y);
+      TrafficLightSystem.getInstance(this).updateProximity(this.truck.body.position.x, this.truck.body.position.y);
+    }
+
     // When not in editor mode, update vehicle driving physics
     if (!this.isEditorMode) {
       this.truck.update(delta);
@@ -381,12 +398,6 @@ export class MainScene extends Phaser.Scene {
         );
       }
 
-      // Query Nearest European Traffic Light within 320px
-      const nearestTL = TrafficLightSystem.getInstance(this).getNearestLight(
-        this.truck.body.position.x,
-        this.truck.body.position.y
-      );
-
       // Update Telemetry Cache
       this.telemetry = {
         speedKmh: this.truck.speedKmh,
@@ -402,7 +413,6 @@ export class MainScene extends Phaser.Scene {
         fragileHealth: Math.round(this.trailer?.fragileHealth || 100),
         weather: this.garageSystem.getActiveModifier(),
         activeLicenseExam: this.licenseSystem.getActiveExam(),
-        trafficLight: nearestTL && nearestTL.distPx < 320 ? nearestTL : null,
       };
 
       // Sound Updates
@@ -412,6 +422,9 @@ export class MainScene extends Phaser.Scene {
     // Always update European Traffic Light state machine cycle
     TrafficLightSystem.getInstance(this).update(delta);
 
+    // Minimap HUD (base texture redraws only when the map changed; overlay is cheap)
+    this.updateMinimap(time);
+
     // Render Weather Environment
     this.renderWeather(time, delta);
   }
@@ -419,10 +432,12 @@ export class MainScene extends Phaser.Scene {
   private checkDockAlignment(): { inZone: boolean; alignmentDeg: number } {
     const checkBody = this.trailer?.body || this.truck.body;
 
-    // During an exam only the exam's target dock counts for the pass condition
+    // During an exam only the exam's target dock counts for the pass condition.
+    // Uses the road-snapped placement prepared at exam start (authored coordinates may
+    // fall inside buildings/water on big procedural maps).
     const exam = this.licenseSystem.getActiveExam();
     if (exam.active && exam.licenseId) {
-      const td = this.licenseSystem.getLicense(exam.licenseId).exam.targetDock;
+      const td = this.examDockWorld || this.licenseSystem.getLicense(exam.licenseId).exam.targetDock;
       const dist = Phaser.Math.Distance.Between(checkBody.position.x, checkBody.position.y, td.x, td.y);
       const radius = Math.max(td.width, td.height) / 2 + 25;
       if (dist < radius) {
@@ -464,9 +479,12 @@ export class MainScene extends Phaser.Scene {
         this.preparedExamId = exam.licenseId;
         this.prepareExamTargetDock(lic.exam.targetDock);
       }
-      this.renderExamTargetMarker(lic.exam.targetDock, time);
+      if (this.examDockWorld) {
+        this.renderExamTargetMarker(this.examDockWorld, time);
+      }
     } else if (this.preparedExamId) {
       this.preparedExamId = null;
+      this.examDockWorld = null;
       this.examTargetMarker?.destroy();
       this.examTargetMarker = null;
       this.examTargetLabel?.destroy();
@@ -475,13 +493,19 @@ export class MainScene extends Phaser.Scene {
   }
 
   /**
-   * The exam's targetDock coordinates are authored independently of the preset maps, so the
-   * dock tile is painted on exam start and solid neighbours are cleared to guarantee approach.
+   * The exam's targetDock coordinates are authored independently of the preset maps (and on
+   * procedural maps they can fall inside buildings or water), so the dock is snapped to the
+   * nearest drivable road tile before being painted; solid neighbours are cleared to
+   * guarantee approach. The snapped world position becomes the real exam target.
    */
   private prepareExamTargetDock(td: LicenseExam['targetDock']) {
     const tm = this.tilemapManager;
-    const col = Math.floor(td.x / tm.tileSize);
-    const row = Math.floor(td.y / tm.tileSize);
+    const spot = this.findExamDockPlacement(
+      Math.floor(td.x / tm.tileSize),
+      Math.floor(td.y / tm.tileSize)
+    );
+    const col = spot.c;
+    const row = spot.r;
 
     for (let r = row - 1; r <= row + 1; r++) {
       for (let c = col - 1; c <= col + 1; c++) {
@@ -496,6 +520,46 @@ export class MainScene extends Phaser.Scene {
         }
       }
     }
+
+    this.examDockWorld = {
+      x: col * tm.tileSize + tm.tileSize / 2,
+      y: row * tm.tileSize + tm.tileSize / 2,
+      width: tm.tileSize,
+      height: tm.tileSize,
+      requiredAngleDeg: td.requiredAngleDeg,
+      angleToleranceDeg: td.angleToleranceDeg,
+    };
+  }
+
+  /**
+   * Spiral search (Chebyshev rings) from the authored position for the nearest drivable
+   * tile; road-family tiles are preferred so the dock is always reachable via the road grid.
+   */
+  private findExamDockPlacement(col0: number, row0: number): { c: number; r: number } {
+    const tm = this.tilemapManager;
+    const isRoadLike = (t: string) =>
+      t.startsWith('road_') || t === 'asphalt' || t === 'sidewalk' || t === 'pedestrian_crossing' || t === 'cobblestone_narrow';
+
+    let fallback: { c: number; r: number } | null = null;
+    for (let rad = 0; rad <= 16; rad++) {
+      for (let dr = -rad; dr <= rad; dr++) {
+        for (let dc = -rad; dc <= rad; dc++) {
+          if (Math.max(Math.abs(dr), Math.abs(dc)) !== rad) continue; // ring perimeter only
+          const c = col0 + dc;
+          const r = row0 + dr;
+          if (c < 1 || r < 1 || c >= tm.cols - 1 || r >= tm.rows - 1) continue;
+          const tile = tm.getTile(c, r);
+          const def = TILE_DEFINITIONS[tile];
+          if (!def || def.isSolid) continue;
+          if (isRoadLike(tile)) return { c, r };
+          if (!fallback) fallback = { c, r };
+        }
+      }
+    }
+    return fallback || {
+      c: Phaser.Math.Clamp(col0, 1, tm.cols - 2),
+      r: Phaser.Math.Clamp(row0, 1, tm.rows - 2),
+    };
   }
 
   /**
@@ -526,6 +590,175 @@ export class MainScene extends Phaser.Scene {
     g.lineStyle(2, 0x22d3ee, 0.5);
     g.strokeRect(td.x - td.width / 2, td.y - td.height / 2, td.width, td.height);
     this.examTargetLabel.setPosition(td.x, td.y - td.height / 2 - 34);
+  }
+
+  // ==========================================
+  // MINIMAP (full-map HUD overview)
+  // ==========================================
+
+  private static readonly MINIMAP_PX_PER_TILE = 2;
+
+  private createMinimap() {
+    const tm = this.tilemapManager;
+    const mmW = tm.cols * MainScene.MINIMAP_PX_PER_TILE;
+    const mmH = tm.rows * MainScene.MINIMAP_PX_PER_TILE;
+
+    // Adaptive display scale: ~26% of the smaller viewport dimension, clamped
+    this.minimapScale = Phaser.Math.Clamp(
+      (Math.min(this.scale.width, this.scale.height) * 0.26) / mmW,
+      0.5, 1.6
+    );
+
+    if (this.textures.exists('minimap_base')) this.textures.remove('minimap_base');
+    const texture = this.textures.createCanvas('minimap_base', mmW, mmH);
+    if (!texture) return;
+
+    this.minimapImage = this.add.image(0, 0, 'minimap_base')
+      .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(120)
+      .setAlpha(0.92)
+      .setScale(this.minimapScale);
+    this.minimapOverlay = this.add.graphics().setScrollFactor(0).setDepth(121);
+
+    this.repositionMinimap();
+    this.lastMinimapVersion = -1;
+
+    // Toggle with M (desktop)
+    if (this.input.keyboard) {
+      this.input.keyboard.on('keydown-M', () => this.toggleMinimap());
+    }
+    this.scale.on('resize', () => this.repositionMinimap());
+
+    // Paint immediately so the first rendered frame already shows it
+    this.updateMinimap(0);
+  }
+
+  private repositionMinimap() {
+    if (!this.minimapImage) return;
+    const mmW = this.tilemapManager.cols * MainScene.MINIMAP_PX_PER_TILE;
+    this.minimapScale = Phaser.Math.Clamp(
+      (Math.min(this.scale.width, this.scale.height) * 0.26) / mmW,
+      0.5, 1.6
+    );
+    this.minimapImage.setScale(this.minimapScale);
+    // Below the 48px HTML top bar, right edge with a small margin
+    this.minimapImage.setPosition(this.scale.width - this.minimapImage.displayWidth - 10, 58);
+  }
+
+  private toggleMinimap() {
+    this.minimapVisible = !this.minimapVisible;
+    if (this.minimapImage) this.minimapImage.setVisible(this.minimapVisible);
+    this.lastMinimapVersion = -1; // forces redraw when turned back on
+  }
+
+  /**
+   * Screen-space rect covered by the minimap; the editor uses it to avoid painting
+   * tiles underneath it.
+   */
+  public isPointerOverMinimap(pointer: Phaser.Input.Pointer): boolean {
+    if (!this.minimapVisible || !this.minimapImage) return false;
+    const m = 5; // small tolerance for the border glow
+    return (
+      pointer.x >= this.minimapImage.x - m &&
+      pointer.y >= this.minimapImage.y - m &&
+      pointer.x <= this.minimapImage.x + this.minimapImage.displayWidth + m &&
+      pointer.y <= this.minimapImage.y + this.minimapImage.displayHeight + m
+    );
+  }
+
+  private updateMinimap(time: number) {
+    if (!this.minimapOverlay || !this.minimapImage) return;
+    if (!this.minimapVisible) {
+      this.minimapOverlay.clear();
+      return;
+    }
+    if (this.lastMinimapVersion !== this.tilemapManager.mapVersion) {
+      this.lastMinimapVersion = this.tilemapManager.mapVersion;
+      this.redrawMinimapBase();
+    }
+    this.drawMinimapOverlay(time);
+  }
+
+  /**
+   * Rasterizes the whole grid into a small canvas texture (2px per tile). Only runs
+   * when the map version changed — painting/import/preset trigger exactly one redraw.
+   */
+  private redrawMinimapBase() {
+    const texture = this.textures.get('minimap_base') as Phaser.Textures.CanvasTexture | null;
+    if (!texture) return;
+    const ctx = texture.getContext();
+    const px = MainScene.MINIMAP_PX_PER_TILE;
+    const cols = this.tilemapManager.cols;
+    const rows = this.tilemapManager.rows;
+
+    ctx.fillStyle = '#131822'; // asphalt base
+    ctx.fillRect(0, 0, cols * px, rows * px);
+
+    for (let r = 0; r < rows; r++) {
+      const row = this.tilemapManager.grid[r];
+      for (let c = 0; c < cols; c++) {
+        const tileId = row[c];
+        if (!tileId || tileId === 'asphalt') continue;
+        const def = TILE_DEFINITIONS[tileId];
+        if (!def) continue;
+        let color = def.color;
+        if (def.category === 'dock') color = '#eab308';
+        else if (tileId === 'traffic_light') color = '#16a34a';
+        ctx.fillStyle = color;
+        ctx.fillRect(c * px, r * px, px, px);
+      }
+    }
+    texture.refresh();
+  }
+
+  private drawMinimapOverlay(time: number) {
+    const g = this.minimapOverlay;
+    const img = this.minimapImage;
+    const tm = this.tilemapManager;
+    if (!g || !img) return;
+    g.clear();
+
+    const worldW = tm.cols * tm.tileSize;
+    const worldH = tm.rows * tm.tileSize;
+    const toMapX = (wx: number) => img.x + (wx / worldW) * img.displayWidth;
+    const toMapY = (wy: number) => img.y + (wy / worldH) * img.displayHeight;
+
+    // Cyan border glow
+    g.lineStyle(2, 0x22d3ee, 0.9);
+    g.strokeRect(img.x - 1, img.y - 1, img.displayWidth + 2, img.displayHeight + 2);
+
+    // Camera viewport rectangle (works in drive & editor mode — the cameras are synced)
+    const view = this.cameras.main.worldView;
+    g.lineStyle(1.5, 0xfacc15, 0.85);
+    g.strokeRect(
+      toMapX(view.x),
+      toMapY(view.y),
+      (view.width / worldW) * img.displayWidth,
+      (view.height / worldH) * img.displayHeight
+    );
+
+    // Exam target marker (pulsing cyan)
+    if (this.examDockWorld) {
+      const ex = toMapX(this.examDockWorld.x);
+      const ey = toMapY(this.examDockWorld.y);
+      const pulse = 0.55 + Math.sin(time * 0.005) * 0.35;
+      g.lineStyle(2, 0x22d3ee, pulse);
+      g.strokeCircle(ex, ey, 5);
+      g.fillStyle(0x22d3ee, pulse);
+      g.fillCircle(ex, ey, 2.5);
+    }
+
+    // Truck arrow marker
+    const tx = toMapX(this.truck.body.position.x);
+    const ty = toMapY(this.truck.body.position.y);
+    const ang = this.truck.body.angle;
+    const size = 7;
+    const p1 = { x: tx + Math.cos(ang) * size, y: ty + Math.sin(ang) * size };
+    const p2 = { x: tx + Math.cos(ang + 2.5) * size * 0.75, y: ty + Math.sin(ang + 2.5) * size * 0.75 };
+    const p3 = { x: tx + Math.cos(ang - 2.5) * size * 0.75, y: ty + Math.sin(ang - 2.5) * size * 0.75 };
+    g.fillStyle(0xfb923c, 1);
+    g.fillTriangle(p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
   }
 
   private renderWeather(time: number, delta: number) {

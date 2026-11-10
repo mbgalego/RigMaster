@@ -34,6 +34,11 @@ export class TrafficLightSystem {
   private graphics: Phaser.GameObjects.Graphics;
   // Rendering is driven by state changes only; re-render when true
   private needsRender: boolean = true;
+  // Proximity streaming (avoid re-evaluating every frame unless the player moved)
+  private lastProximityX: number = Number.NaN;
+  private lastProximityY: number = Number.NaN;
+  private static readonly PROXIMITY_RADIUS_PX = 2560;
+  private static readonly PROXIMITY_RECHECK_PX = 256;
 
   // European Traffic Light State Durations (ms)
   public static readonly DURATION_GREEN = 7500;
@@ -56,6 +61,8 @@ export class TrafficLightSystem {
 
   /**
    * Scans the tilemap grid and instantiates realistic European TrafficLight objects.
+   * On huge maps this is data-only: physics bodies are materialized later by
+   * updateProximity() only for lights near the player.
    */
   public rebuild(grid: string[][], tileSize: number = 128) {
     this.destroyPhysics();
@@ -73,6 +80,7 @@ export class TrafficLightSystem {
     }
 
     this.needsRender = true;
+    this.lastProximityX = Number.NaN;
     this.renderAll();
   }
 
@@ -154,8 +162,63 @@ export class TrafficLightSystem {
     const initialDuration = phaseGroup === 0 ? 0 : 4000;
     const initialState: TrafficLightState = phaseGroup === 0 ? 'GREEN' : 'RED';
 
+    // Data-only on huge maps: bodies are materialized by updateProximity() when near
+    this.lights.push({
+      id: `tl_${col}_${row}`,
+      col,
+      row,
+      postX,
+      postY,
+      stopBarX,
+      stopBarY,
+      stopBarWidth,
+      stopBarHeight,
+      facing,
+      phaseGroup,
+      state: initialState,
+      timerMs: initialDuration,
+      poleBody: null,
+      laneBarrierBody: null,
+    });
+  }
+
+  /**
+   * Materializes / dematerializes physics bodies for lights near the player, so a map
+   * with hundreds of signals keeps Matter entity counts and debug rendering constant.
+   * Re-evaluates only when the player moved since the last check.
+   */
+  public updateProximity(centerX: number, centerY: number) {
+    if (!Number.isNaN(this.lastProximityX) && !Number.isNaN(this.lastProximityY)) {
+      const moved = Phaser.Math.Distance.Between(centerX, centerY, this.lastProximityX, this.lastProximityY);
+      if (moved < TrafficLightSystem.PROXIMITY_RECHECK_PX) return;
+    }
+    this.lastProximityX = centerX;
+    this.lastProximityY = centerY;
+
+    const radiusSq = TrafficLightSystem.PROXIMITY_RADIUS_PX ** 2;
+    let changed = false;
+
+    for (const light of this.lights) {
+      const dSq =
+        (light.stopBarX - centerX) * (light.stopBarX - centerX) +
+        (light.stopBarY - centerY) * (light.stopBarY - centerY);
+      const isNear = dSq < radiusSq;
+
+      if (isNear && !light.poleBody) {
+        this.materializeLight(light);
+        changed = true;
+      } else if (!isNear && light.poleBody) {
+        this.dematerializeLight(light);
+        changed = true;
+      }
+    }
+
+    if (changed) this.needsRender = true;
+  }
+
+  private materializeLight(light: TrafficLightData) {
     // 1. Slim Physical Pole Collider on sidewalk (so trucks cannot drive through the post)
-    const poleBody = this.scene.matter.add.rectangle(postX, postY, 16, 16, {
+    light.poleBody = this.scene.matter.add.rectangle(light.postX, light.postY, 16, 16, {
       isStatic: true,
       friction: 0.8,
       restitution: 0.1,
@@ -172,8 +235,8 @@ export class TrafficLightSystem {
     // 2. Road Lane Obstacle Barrier Body (Controlled by State Machine)
     // When RED/RED_YELLOW, mask is 0xffff (active solid obstacle)
     // When GREEN/YELLOW, mask is 0x0000 (inactive, vehicles pass freely)
-    const isRedInitially = initialState === 'RED';
-    const laneBarrierBody = this.scene.matter.add.rectangle(stopBarX, stopBarY, stopBarWidth, stopBarHeight, {
+    const isRedInitially = light.state === 'RED' || light.state === 'RED_YELLOW';
+    light.laneBarrierBody = this.scene.matter.add.rectangle(light.stopBarX, light.stopBarY, light.stopBarWidth, light.stopBarHeight, {
       isStatic: true,
       friction: 0.8,
       restitution: 0.05,
@@ -186,24 +249,16 @@ export class TrafficLightSystem {
         visible: false,
       },
     }) as unknown as MatterJS.BodyType;
+  }
 
-    this.lights.push({
-      id: `tl_${col}_${row}`,
-      col,
-      row,
-      postX,
-      postY,
-      stopBarX,
-      stopBarY,
-      stopBarWidth,
-      stopBarHeight,
-      facing,
-      phaseGroup,
-      state: initialState,
-      timerMs: initialDuration,
-      poleBody,
-      laneBarrierBody,
-    });
+  private dematerializeLight(light: TrafficLightData) {
+    const world = this.scene.matter?.world;
+    if (world) {
+      if (light.poleBody) world.remove(light.poleBody);
+      if (light.laneBarrierBody) world.remove(light.laneBarrierBody);
+    }
+    light.poleBody = null;
+    light.laneBarrierBody = null;
   }
 
   /**
@@ -292,6 +347,8 @@ export class TrafficLightSystem {
     g.clear();
 
     for (const light of this.lights) {
+      // Data-only lights far from the player are skipped (nothing materialized)
+      if (!light.poleBody) continue;
       const px = light.postX;
       const py = light.postY;
       const isRedActive = light.state === 'RED' || light.state === 'RED_YELLOW';
@@ -440,30 +497,6 @@ export class TrafficLightSystem {
         g.fillCircle(hx, gY, lensR);
       }
     }
-  }
-
-  /**
-   * Queries the state and distance of the nearest traffic light relative to the player's truck.
-   */
-  public getNearestLight(truckX: number, truckY: number): { state: TrafficLightState; distPx: number } | null {
-    if (this.lights.length === 0) return null;
-
-    let nearest: TrafficLightData | null = null;
-    let minDist = Infinity;
-
-    for (const light of this.lights) {
-      const d = Phaser.Math.Distance.Between(truckX, truckY, light.stopBarX, light.stopBarY);
-      if (d < minDist) {
-        minDist = d;
-        nearest = light;
-      }
-    }
-
-    if (!nearest) return null;
-    return {
-      state: nearest.state,
-      distPx: Math.round(minDist),
-    };
   }
 
   public destroyPhysics() {

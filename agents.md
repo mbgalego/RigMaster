@@ -38,7 +38,60 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.5.1** (Versão Atual)
+### **v1.6.9** (Versão Atual)
+- **Correção: Z-Order das Rodas do Trator (dianteiras vs. traseiras):**
+  - Dianteiras direcionais voltaram a desenhar-se **por baixo** da carroçaria (parcialmente escondidas, geometria original 8×20 em ±(hw+1)), via `wheelGraphics`; os duplos traseiros 4x2 mantêm-se **por cima** da carroçaria via novo `rearWheelsGraphics` (interior ±(hw−3), exterior saliente ±(hw+5)), ambos com rotação manual por trig (sem transforms de canvas).
+
+### **v1.6.8**
+- **Correção: Par Duplo Traseiro Legível:**
+  - Causa: a carroçaria era desenhada por cima das rodas no container, escondendo o pneu interior do par — só o exterior aparecia (uma "roda única" muito saliente). `wheelGraphics` passou a desenhar **sobre** `cabGraphics`; os dois pneus de cada lado são agora visíveis (interior encostado à carroçaria em ±(hw−3), exterior saliente 9px em ±(hw+5)), 8×24 px com separação por contorno.
+
+### **v1.6.7**
+- **Correção: Rodas do Trator Invisíveis (Phaser 4):**
+  - `drawWheels` redesenhava as rodas a cada frame com `save()/translateCanvas()/rotateCanvas()/restore()` — sob o renderer do Phaser 4 o estado de transformação não sobrevivia de forma fiável a `clear()` por frame, e as rodas deixavam de aparecer (as luzes, desenhadas no mesmo ciclo sem transforms, apareciam). As rodas são agora desenhadas com cantos rodados manualmente (trig) e um detalhe de cubo; dianteiras 9×22 salientes, duplos traseiros 10×26 salientes.
+
+### **v1.6.6**
+- **Correção de Profundidade do Acoplamento:**
+  - O atrelado desenhava-se **por baixo** do trator (`depth 9` vs `10`), escondendo a traseira do camião e a quinta roda. Os atrelados passam a `depth 11` (o pup do bitrem a `12`, acima do dianteiro) — o atrelado aparece agora corretamente **por cima** da traseira do trator.
+- **Pneus Duplos Traseiros Mais Visíveis:**
+  - Cada pneu do eixo 4x2 alargado para 10×26 px, com o exterior saliente 10px além da borda da carroçaria (antes 8px) — claramente visível em qualquer zoom.
+
+### **v1.6.5**
+- **Eixo Trator Traseiro 4x2 com Pneus Duplos:**
+  - `Truck.drawWheels`: o eixo traseiro passa a desenhar **2 pneus de cada lado** (interior encostado à carroçaria + exterior saliente), largura 8px cada, tocando-se em ±hw — visual fiel a um trator 4x2, com as rodas traseiras agora claramente salientes como as dianteiras direcionais.
+
+### **v1.6.4**
+- **Luzes de Reversão em Todos os Atrelados:**
+  - `Trailer` agora guarda `isReversing` (espelho do estado do conjunto, calculado em `followHitch` via vHitchLong) e desenha lâmpadas de reversão brancas idênticas às do trator, coladas aos stops traseiros, com lente apagada discreta. Aplica-se a todos os tipos (standard, long_cargo, bitrem dianteiro/traseiro, frágil).
+
+### **v1.6.3**
+- **Luzes de Marcha Atrás Simplificadas (ajuste ao pedido):**
+  - Removidos os cones de luz; as lâmpadas de reversão são agora dois círculos brancos sólidos (raio 5, como os stops acesos) colados aos stops traseiros (±16 px), com estado apagado discreto (cinza) quando a marcha atrás não está engatada.
+
+### **v1.6.2**
+- **Luzes de Marcha Atrás (Brancas) no Trator:**
+  - Substituição dos dois pontinhos brancos por lâmpadas de reversão reais: halo branco + núcleo incandescente (estilo das luzes de travão) e dois feixes de flood light brancos projetados para trás da cabeça tratora, ativados por `isReversing` (vLong < -2 px/s).
+- **HUD: Indicador de Semáforo Removido:**
+  - Eliminado o widget de 3 lâmpadas do HUD superior (estado do semáforo próximo). Campo `trafficLight` removido da telemetria do `MainScene` e o método `getNearestLight` do `TrafficLightSystem` (órfão) removido.
+
+### **v1.6.1**
+- **Minimapa HUD do Mapa Completo:**
+  - Vista geral no canto superior direito em coordenadas de ecrã (`scrollFactor 0`), rasterizada a 2 px/tile: base desenhada numa textura canvas apenas quando `mapVersion` muda (pintura/import/preset = 1 redraw); overlay por frame com retângulo da câmara ativa (condiz em modo condução e editor, câmaras sincronizadas por frame), marcador seta do camião e marcador pulsante ciano da doca do exame.
+  - Escala adaptativa (~26% da menor dimensão do ecrã, clamp 0.5–1.6x); reposiciona-se em resize. Custo por frame constante: um retângulo da vista, uma seta e um círculo.
+  - Alternável com a tecla `M` (desktop). O editor ignora paint/erase quando o pointer está sobre o minimapa (`isPointerOverMinimap`) para não pintar tiles escondidos por baixo dele.
+  - `TilemapManager.mapVersion` (contador incrementado em `setTile`/`afterGridReplaced`) como sinal de invalidez.
+
+### **v1.6.0**
+- **Mapas 20x Maiores (108×80 tiles = 8.640 tiles, 13.824×10.240 px) com Performance Constante:**
+  - Renderização nativa por Tilemap do Phaser: todas as texturas procedurais são marcadas num único *atlas* (`tile_atlas`) e o terreno usa um `TilemapLayer` com *culling* automático por câmara — o custo de desenho é proporcional aos tiles visíveis, não ao tamanho do mapa.
+  - **Física por chunks (streaming):** corpos Matter estáticos só existem nos chunks (8×8 tiles) num raio de 2 chunks do camião (`updateActiveChunks`); fora do raio, sólidos são apenas dados na grelha. Chunks são reavaliados apenas quando o camião muda de centro de chunk.
+  - **Semáforos com proximidade:** `rebuild` é data-only para o mapa todo; `updateProximity` materializa/desmaterializa corpos (poste + barreira) e desenha apenas sinais a <2560px do camião (reavaliado a cada 256px movidos).
+  - Novo mapa default **procedural determinístico** (seed fixa): grelha de artérias com cruzamentos, passadeiras, passeios, ~30 semáforos alternate, postes/sinais, e 4 biomas de hub (Porto, Estaleiro, Zona Industrial, Centro Histórico). Presets Academia e Porto reescalados para o novo tamanho.
+  - DOCAs de exame passam a ser **snap à estrada mais próxima** (`findExamDockPlacement`, busca em anéis) — coordenadas autorais podem calhar em edifícios/água em mapas grandes; a posição snapada é o alvo real (marcador visível e validação de passagem).
+  - Export/import JSON com **run-length encoding** (`gridRLE`, v2) — ficheiros ~100x menores em mapas grandes; o import continua a aceitar v1 (grelha densa) e valida/repara tiles desconhecidos.
+  - Zoom mínimo do editor reduzido para 0.04 (mapa completo cabe em telemóveis).
+
+### **v1.5.1**
   - `cancelExam()` agora reseta `isPassed`/`isFailed`/`failReason` — o modal de resultado de exame fecha ao clicar "Continuar" (antes ficava aberto para sempre).
 - **Correção do Offset do Editor (Clique ≠ Posição de Pintura):**
   - Causa raiz: `MainScene` e `EditorScene` tinham câmaras independentes (a principal seguia o camião e mantinha os *bounds* do mapa) — a grelha/sede do cursor eram desenhadas com uma câmara e os tiles renderizados com outra, e o Phaser re-centrava a câmara principal sempre que a vista ultrapassava os bounds.

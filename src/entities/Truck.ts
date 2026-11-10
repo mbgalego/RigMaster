@@ -17,6 +17,8 @@ export class Truck {
   public container: Phaser.GameObjects.Container;
   public cabGraphics: Phaser.GameObjects.Graphics;
   public wheelGraphics: Phaser.GameObjects.Graphics;
+  // Rear dual tires draw ABOVE the chassis so both tires of each pair stay visible
+  public rearWheelsGraphics: Phaser.GameObjects.Graphics;
   public lightsGraphics: Phaser.GameObjects.Graphics;
 
   public width: number;
@@ -107,10 +109,11 @@ export class Truck {
     this.container.setDepth(10);
 
     this.wheelGraphics = scene.add.graphics();
+    this.rearWheelsGraphics = scene.add.graphics();
     this.cabGraphics = scene.add.graphics();
     this.lightsGraphics = scene.add.graphics();
 
-    this.container.add([this.wheelGraphics, this.cabGraphics, this.lightsGraphics]);
+    this.container.add([this.wheelGraphics, this.cabGraphics, this.rearWheelsGraphics, this.lightsGraphics]);
 
     this.setupInput();
     this.setupCollisions();
@@ -377,35 +380,61 @@ export class Truck {
 
   private drawWheels() {
     const g = this.wheelGraphics;
+    const gRear = this.rearWheelsGraphics;
     g.clear();
+    gRear.clear();
 
     const hw = this.width / 2;
     const frontY = -this.length / 2 + 20;
     const rearY = this.length / 2 - 20;
 
-    const drawPivotedWheel = (x: number, y: number, angle: number) => {
-      g.save();
-      g.translateCanvas(x, y);
-      g.rotateCanvas(angle);
-      g.fillStyle(0x0f172a, 1);
-      g.lineStyle(1.5, 0x00f0ff, 0.7);
-      g.fillRoundedRect(-4, -10, 8, 20, 2);
-      g.strokeRoundedRect(-4, -10, 8, 20, 2);
-      g.restore();
+    /**
+     * Draws a tire centered at (x,y) rotated by `angle` rad around its center.
+     * Corners are rotated manually with trigonometry — no canvas transform state
+     * (save/translateCanvas/rotateCanvas), which proved unreliable for per-frame
+     * redraws under the Phaser 4 renderer.
+     */
+    const drawTire = (
+      ctx: Phaser.GameObjects.Graphics,
+      x: number, y: number, angle: number,
+      tw: number, th: number, lineColor: number, withHub: boolean
+    ) => {
+      const c = Math.cos(angle);
+      const s = Math.sin(angle);
+      const corners = [
+        { x: -tw / 2, y: -th / 2 },
+        { x: tw / 2, y: -th / 2 },
+        { x: tw / 2, y: th / 2 },
+        { x: -tw / 2, y: th / 2 },
+      ].map((p) => ({ x: x + p.x * c - p.y * s, y: y + p.x * s + p.y * c }));
+
+      ctx.fillStyle(0x0f172a, 1);
+      ctx.lineStyle(1.5, lineColor, 0.85);
+      ctx.beginPath();
+      ctx.moveTo(corners[0].x, corners[0].y);
+      ctx.lineTo(corners[1].x, corners[1].y);
+      ctx.lineTo(corners[2].x, corners[2].y);
+      ctx.lineTo(corners[3].x, corners[3].y);
+      ctx.closePath();
+      ctx.fillPath();
+      ctx.strokePath();
+
+      if (withHub) {
+        ctx.fillStyle(0x475569, 1);
+        ctx.fillCircle(x, y, Math.min(tw, th) * 0.22);
+      }
     };
 
-    drawPivotedWheel(-hw - 1, frontY, this.currentSteerAngle);
-    drawPivotedWheel(hw + 1, frontY, this.currentSteerAngle);
+    // Steered front axle (single tires) — partially hidden under the chassis, as before
+    drawTire(g, -hw - 1, frontY, this.currentSteerAngle, 8, 20, 0x00f0ff, false);
+    drawTire(g, hw + 1, frontY, this.currentSteerAngle, 8, 20, 0x00f0ff, false);
 
-    const drawFixedWheel = (x: number, y: number) => {
-      g.fillStyle(0x0f172a, 1);
-      g.lineStyle(1.5, 0x64748b, 0.8);
-      g.fillRoundedRect(-5, -12, 10, 24, 2);
-      g.strokeRoundedRect(-5, -12, 10, 24, 2);
-    };
-
-    drawFixedWheel(-hw - 2, rearY);
-    drawFixedWheel(hw + 2, rearY);
+    // Rear drive axle (4x2): dual tires per side, drawn ABOVE the chassis edge so
+    // both tires of each pair stay visible
+    drawTire(gRear, -hw - 3, rearY, 0, 8, 24, 0x64748b, true);
+    drawTire(gRear, hw - 3, rearY, 0, 8, 24, 0x64748b, true);
+    drawTire(gRear, -hw + 5, rearY, 0, 8, 24, 0x64748b, true);
+    drawTire(gRear, hw + 5, rearY, 0, 8, 24, 0x64748b, true);
   }
 
   private drawLights() {
@@ -447,7 +476,13 @@ export class Truck {
     }
 
     if (this.isReversing) {
-      g.fillStyle(0xffffff, 0.9);
+      // Reverse lamps (white): lit while reverse gear is engaged — same style as the brake lamps
+      g.fillStyle(0xffffff, 1);
+      g.fillCircle(-hw + 16, hl - 2, 5);
+      g.fillCircle(hw - 16, hl - 2, 5);
+    } else {
+      // Unlit reverse lens next to the brake lamps
+      g.fillStyle(0x94a3b8, 0.85);
       g.fillCircle(-hw + 16, hl - 2, 3);
       g.fillCircle(hw - 16, hl - 2, 3);
     }
