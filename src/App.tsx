@@ -161,6 +161,14 @@ export default function App() {
     const canvas = game?.canvas as HTMLCanvasElement | undefined;
     if (canvas) {
       canvas.style.pointerEvents = modalOpen ? 'none' : 'auto';
+      // Debug: log pointer-events state changes
+      if (modalOpen) {
+        console.log('[DEBUG] canvas pointer-events set to NONE (modal open)');
+      } else {
+        console.log('[DEBUG] canvas pointer-events set to AUTO (modal closed)');
+      }
+    } else {
+      console.warn('[DEBUG] Phaser canvas not found when modalOpen=', modalOpen);
     }
   }, [modalOpen]);
 
@@ -663,8 +671,8 @@ export default function App() {
 
       {/* EXAM RESULT POPUP */}
       {activeExam && (activeExam.isPassed || activeExam.isFailed) && (
-        <div className="absolute inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 max-w-md w-full p-6 rounded-xl shadow-2xl text-center">
+        <div className="absolute inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 pointer-events-none">
+          <div className="bg-slate-900 border border-slate-700 max-w-md w-full p-6 rounded-xl shadow-2xl text-center pointer-events-auto">
             {activeExam.isPassed ? (
               <>
                 <div className="w-16 h-16 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-500">
@@ -692,7 +700,10 @@ export default function App() {
             )}
 
             <button
-              onClick={() => LicenseSystem.getInstance().cancelExam()}
+              onClick={(e) => {
+                console.log('[DEBUG] Continuar button clicked!');
+                LicenseSystem.getInstance().cancelExam();
+              }}
               className="w-full py-2.5 rounded bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-sm transition pointer-events-auto"
             >
               Continuar
