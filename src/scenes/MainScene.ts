@@ -2,8 +2,8 @@ import Phaser from 'phaser';
 import { Truck } from '../entities/Truck';
 import { Trailer, TrailerType } from '../entities/Trailer';
 import { Kingpin, ArticulationTelemetry } from '../physics/Kingpin';
-import { TilemapManager } from '../editor/TilemapManager';
-import { LicenseSystem } from '../systems/LicenseSystem';
+import { TilemapManager, TILE_DEFINITIONS } from '../editor/TilemapManager';
+import { LicenseSystem, LicenseExam, LicenseId } from '../systems/LicenseSystem';
 import { GarageSystem, WeatherModifier } from '../systems/GarageSystem';
 import { TrafficLightSystem, TrafficLightState } from '../systems/TrafficLightSystem';
 
@@ -26,6 +26,11 @@ export class MainScene extends Phaser.Scene {
   private weatherGraphics!: Phaser.GameObjects.Graphics;
   private rainParticles: Array<{ x: number; y: number; speed: number; length: number }> = [];
 
+  // Exam target dock handling (marker + guaranteed physical dock at the exam's coordinates)
+  private examTargetMarker: Phaser.GameObjects.Graphics | null = null;
+  private examTargetLabel: Phaser.GameObjects.Text | null = null;
+  private preparedExamId: LicenseId | null = null;
+
   // Audio Context (Procedural synthesized audio)
   private audioCtx: AudioContext | null = null;
   private engineOsc: OscillatorNode | null = null;
@@ -43,6 +48,7 @@ export class MainScene extends Phaser.Scene {
     jackknifeSeverity: number;
     tailSwingPx: number;
     offTrackingPx: number;
+    isReversing: boolean;
     collisions: number;
     fragileHealth: number;
     weather: WeatherModifier;
@@ -57,6 +63,7 @@ export class MainScene extends Phaser.Scene {
     jackknifeSeverity: 0,
     tailSwingPx: 0,
     offTrackingPx: 0,
+    isReversing: false,
     collisions: 0,
     fragileHealth: 100,
     weather: 'clear',
@@ -88,8 +95,9 @@ export class MainScene extends Phaser.Scene {
     this.cameras.main.startFollow(this.truck.container, true, 0.1, 0.1);
     this.cameras.main.setZoom(1.0);
 
-    // Mouse wheel camera zoom
+    // Mouse wheel camera zoom (drive mode only; the editor has its own zoom handler)
     this.input.on('wheel', (pointer: any, gameObjects: any, deltaX: number, deltaY: number) => {
+      if (this.isEditorMode) return;
       const newZoom = Phaser.Math.Clamp(this.cameras.main.zoom - deltaY * 0.001, 0.45, 1.8);
       this.cameras.main.setZoom(newZoom);
     });
@@ -277,6 +285,9 @@ export class MainScene extends Phaser.Scene {
   public toggleEditorMode() {
     this.isEditorMode = !this.isEditorMode;
     if (this.isEditorMode) {
+      // Detach follow: while editing, the MainScene camera mirrors the EditorScene camera
+      // so the tilemap visuals match the grid overlay/painting cursor.
+      this.cameras.main.stopFollow();
       this.scene.launch('EditorScene');
       this.scene.bringToTop('EditorScene');
     } else {
@@ -294,6 +305,9 @@ export class MainScene extends Phaser.Scene {
 
   public update(time: number, delta: number) {
     const dt = delta / 1000;
+
+    // Keep exam target dock (marker + painted dock tile) in sync with the active exam
+    this.syncExamTarget(time);
 
     // When not in editor mode, update vehicle driving physics
     if (!this.isEditorMode) {
@@ -374,6 +388,7 @@ export class MainScene extends Phaser.Scene {
         jackknifeSeverity: artTelemetry.jackknifeSeverity,
         tailSwingPx: Math.round(artTelemetry.tailSwingOffsetPx),
         offTrackingPx: Math.round(artTelemetry.offTrackingDeltaPx),
+        isReversing: this.truck.isReversing,
         collisions: this.truck.collisionCount + (this.trailer?.impactCount || 0),
         fragileHealth: Math.round(this.trailer?.fragileHealth || 100),
         weather: this.garageSystem.getActiveModifier(),
@@ -389,14 +404,28 @@ export class MainScene extends Phaser.Scene {
     TrafficLightSystem.getInstance(this).update(delta);
 
     // Render Weather Environment
-    this.renderWeather(time);
+    this.renderWeather(time, delta);
   }
 
   private checkDockAlignment(): { inZone: boolean; alignmentDeg: number } {
-    const docks = this.tilemapManager.dockZones;
     const checkBody = this.trailer?.body || this.truck.body;
 
-    for (const dock of docks) {
+    // During an exam only the exam's target dock counts for the pass condition
+    const exam = this.licenseSystem.getActiveExam();
+    if (exam.active && exam.licenseId) {
+      const td = this.licenseSystem.getLicense(exam.licenseId).exam.targetDock;
+      const dist = Phaser.Math.Distance.Between(checkBody.position.x, checkBody.position.y, td.x, td.y);
+      const radius = Math.max(td.width, td.height) / 2 + 25;
+      if (dist < radius) {
+        let diffDeg = Phaser.Math.RadToDeg(checkBody.angle) - td.requiredAngleDeg;
+        while (diffDeg > 180) diffDeg -= 360;
+        while (diffDeg < -180) diffDeg += 360;
+        return { inZone: true, alignmentDeg: Math.round(diffDeg) };
+      }
+      return { inZone: false, alignmentDeg: 999 };
+    }
+
+    for (const dock of this.tilemapManager.dockZones) {
       const dist = Phaser.Math.Distance.Between(checkBody.position.x, checkBody.position.y, dock.x, dock.y);
       if (dist < 70) {
         let diffDeg = Phaser.Math.RadToDeg(checkBody.angle) - dock.requiredAngle;
@@ -408,13 +437,96 @@ export class MainScene extends Phaser.Scene {
     return { inZone: false, alignmentDeg: 999 };
   }
 
-  private renderWeather(time: number) {
+  // ==========================================
+  // EXAM TARGET DOCK (MARKER + PHYSICAL DOCK)
+  // ==========================================
+
+  /**
+   * Ensures the active exam has a visible marker and a physically painted dock at its
+   * target coordinates; cleans both up when the exam ends.
+   */
+  private syncExamTarget(time: number) {
+    const exam = this.licenseSystem.getActiveExam();
+
+    if (exam.active && exam.licenseId) {
+      const lic = this.licenseSystem.getLicense(exam.licenseId);
+
+      if (this.preparedExamId !== exam.licenseId) {
+        this.preparedExamId = exam.licenseId;
+        this.prepareExamTargetDock(lic.exam.targetDock);
+      }
+      this.renderExamTargetMarker(lic.exam.targetDock, time);
+    } else if (this.preparedExamId) {
+      this.preparedExamId = null;
+      this.examTargetMarker?.destroy();
+      this.examTargetMarker = null;
+      this.examTargetLabel?.destroy();
+      this.examTargetLabel = null;
+    }
+  }
+
+  /**
+   * The exam's targetDock coordinates are authored independently of the preset maps, so the
+   * dock tile is painted on exam start and solid neighbours are cleared to guarantee approach.
+   */
+  private prepareExamTargetDock(td: LicenseExam['targetDock']) {
+    const tm = this.tilemapManager;
+    const col = Math.floor(td.x / tm.tileSize);
+    const row = Math.floor(td.y / tm.tileSize);
+
+    for (let r = row - 1; r <= row + 1; r++) {
+      for (let c = col - 1; c <= col + 1; c++) {
+        if (c <= 0 || r <= 0 || c >= tm.cols - 1 || r >= tm.rows - 1) continue;
+        const tile = tm.getTile(c, r);
+        if (c === col && r === row) {
+          if (tile !== 'dock_standard' && tile !== 'factory_dock') {
+            tm.setTile(c, r, 'dock_standard');
+          }
+        } else if (TILE_DEFINITIONS[tile]?.isSolid) {
+          tm.setTile(c, r, 'asphalt');
+        }
+      }
+    }
+  }
+
+  /**
+   * Pulsing highlighted outline showing the player where the exam's target dock is.
+   */
+  private renderExamTargetMarker(td: LicenseExam['targetDock'], time: number) {
+    if (!this.examTargetMarker) {
+      this.examTargetMarker = this.add.graphics();
+      this.examTargetMarker.setDepth(12);
+    }
+    if (!this.examTargetLabel) {
+      this.examTargetLabel = this.add.text(td.x, td.y - td.height / 2 - 34, 'DOCA DO EXAME', {
+        fontFamily: 'monospace',
+        fontSize: '22px',
+        color: '#22d3ee',
+        backgroundColor: '#0f172acc',
+        padding: { x: 8, y: 4 },
+      });
+      this.examTargetLabel.setOrigin(0.5);
+      this.examTargetLabel.setDepth(12);
+    }
+
+    const g = this.examTargetMarker;
+    g.clear();
+    const pulse = 0.55 + Math.sin(time * 0.005) * 0.25;
+    g.lineStyle(4, 0x22d3ee, pulse);
+    g.strokeRect(td.x - (td.width + 40) / 2, td.y - (td.height + 40) / 2, td.width + 40, td.height + 40);
+    g.lineStyle(2, 0x22d3ee, 0.5);
+    g.strokeRect(td.x - td.width / 2, td.y - td.height / 2, td.width, td.height);
+    this.examTargetLabel.setPosition(td.x, td.y - td.height / 2 - 34);
+  }
+
+  private renderWeather(time: number, delta: number) {
     const g = this.weatherGraphics;
     g.clear();
 
     const w = this.scale.width;
     const h = this.scale.height;
     const weather = this.garageSystem.getActiveModifier();
+    const dt = Math.min(delta / 1000, 0.05);
 
     if (weather === 'night') {
       // Night Darkness Mask (Deep midnight blue tint)
@@ -444,8 +556,8 @@ export class MainScene extends Phaser.Scene {
 
       g.lineStyle(1.5, 0x93c5fd, 0.45);
       for (const drop of this.rainParticles) {
-        drop.y += drop.speed * 0.016;
-        drop.x -= 2;
+        drop.y += drop.speed * dt;
+        drop.x -= 120 * dt;
         if (drop.y > h) {
           drop.y = -10;
           drop.x = Phaser.Math.Between(0, w);
