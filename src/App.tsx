@@ -80,6 +80,8 @@ export default function App() {
   const [selectedBrush, setSelectedBrush] = useState<string>('road_straight_h');
   const [brushCategory, setBrushCategory] = useState<'all' | 'road' | 'dock' | 'obstacle' | 'biome'>('all');
   const [editorTool, setEditorTool] = useState<'paint' | 'pan' | 'erase'>('paint');
+  const [isPaletteOpen, setIsPaletteOpen] = useState<boolean>(true);
+  const [isPaintingSpawn, setIsPaintingSpawn] = useState<boolean>(false);
 
   // Real-time Telemetry
   const [telemetry, setTelemetry] = useState<MainScene['telemetry']>({
@@ -664,178 +666,264 @@ export default function App() {
 
 
 
-      {/* EDITOR MODE TOOLBAR (PAINT & DRIVE) */}
+      {/* EDITOR MODE: SLEEK LEFT DOCK & SLIDE-OUT FLYOUT CATALOG */}
       {isEditorMode && (
-        <div className="absolute top-16 left-3 sm:left-4 z-20 bg-slate-950/95 backdrop-blur-md border border-amber-500/50 p-3 rounded-xl shadow-2xl w-[320px] sm:w-[370px]">
-          {/* Header with Title and Zoom / Reset Controls */}
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-2.5">
-            <div className="flex items-center gap-1.5">
-              <Layers className="w-4 h-4 text-amber-400" />
-              <span className="text-xs font-bold text-amber-400 tracking-wide">MAP EDITOR</span>
-            </div>
-
-            {/* Floating Zoom & Pan Controls in Header */}
-            <div className="flex items-center gap-1 bg-black/60 border border-slate-800 rounded p-0.5">
-              <button
-                onClick={handleZoomOut}
-                className="p-1 rounded text-slate-300 hover:text-white hover:bg-slate-800 transition"
-                title="Reduzir Zoom (-)"
-              >
-                <ZoomOut className="w-3.5 h-3.5" />
-              </button>
-              <button
-                onClick={handleResetView}
-                className="px-1.5 py-0.5 rounded text-[10px] font-mono text-cyan-400 hover:bg-slate-800 transition font-bold"
-                title="Centrar Mapa / Repor Vista"
-              >
-                100%
-              </button>
-              <button
-                onClick={handleZoomIn}
-                className="p-1 rounded text-slate-300 hover:text-white hover:bg-slate-800 transition"
-                title="Aumentar Zoom (+)"
-              >
-                <ZoomIn className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-
-          {/* Mode Tool Selectors: Pintar | Mover (Pan) | Borracha */}
-          <div className="grid grid-cols-3 gap-1 mb-2.5">
-            <button
-              onClick={() => handleSetEditorTool('paint')}
-              className={`py-1.5 px-2 rounded text-[11px] font-bold flex items-center justify-center gap-1.5 transition border ${
-                editorTool === 'paint'
-                  ? 'bg-amber-500 text-black border-amber-400 shadow-md shadow-amber-500/30'
-                  : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800'
-              }`}
-              title="Pincel para pintar peças no mapa"
-            >
-              <Paintbrush className="w-3.5 h-3.5" /> Pintar
-            </button>
-            <button
-              onClick={() => handleSetEditorTool('pan')}
-              className={`py-1.5 px-2 rounded text-[11px] font-bold flex items-center justify-center gap-1.5 transition border ${
-                editorTool === 'pan'
-                  ? 'bg-cyan-500 text-black border-cyan-400 shadow-md shadow-cyan-500/30'
-                  : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800'
-              }`}
-              title="Mover o mapa livremente (arrastar com rato/dedo)"
-            >
-              <Hand className="w-3.5 h-3.5" /> Mover (Pan)
-            </button>
-            <button
-              onClick={() => handleSetEditorTool('erase')}
-              className={`py-1.5 px-2 rounded text-[11px] font-bold flex items-center justify-center gap-1.5 transition border ${
-                editorTool === 'erase'
-                  ? 'bg-red-500 text-white border-red-400 shadow-md shadow-red-500/30'
-                  : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800'
-              }`}
-              title="Borracha (limpa peças para asfalto base)"
-            >
-              <Eraser className="w-3.5 h-3.5" /> Apagar
-            </button>
-          </div>
-
-          {/* Filter Categories */}
-          <div className="flex gap-1 mb-2 text-[10px] overflow-x-auto pb-1">
-            {(['all', 'road', 'dock', 'obstacle', 'biome'] as const).map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setBrushCategory(cat)}
-                className={`px-2 py-0.5 rounded capitalize font-medium transition whitespace-nowrap ${
-                  brushCategory === cat ? 'bg-amber-500 text-black font-bold' : 'bg-slate-900 text-slate-400 hover:text-white'
-                }`}
-              >
-                {cat === 'all' ? 'Tudo' : cat}
-              </button>
-            ))}
-          </div>
-
-          {/* Tile Grid with Graphical Previews for Each Item */}
-          <div className="grid grid-cols-4 gap-1.5 max-h-60 overflow-y-auto p-1.5 bg-slate-900/60 rounded border border-slate-800 scrollbar-thin scrollbar-thumb-slate-700">
-            {Object.entries(TILE_DEFINITIONS)
-              .filter(([_, def]) => brushCategory === 'all' || def.category === brushCategory)
-              .map(([key, def]) => {
-                const isUnlocked = unlockedTileKeys.includes(key);
-                const isSelected = selectedBrush === key && editorTool === 'paint';
-                const thumbUrl = TILE_THUMBNAILS[key];
-
-                return (
-                  <button
-                    key={key}
-                    disabled={!isUnlocked}
-                    onClick={() => handleSelectBrush(key)}
-                    title={isUnlocked ? `${def.name} (${def.isSolid ? 'Obstáculo sólido' : 'Passagem livre'})` : 'Bloqueado: Conquista o Hub correspondente a 100%!'}
-                    className={`group relative p-1.5 rounded flex flex-col items-center justify-between text-center transition border ${
-                      isSelected
-                        ? 'border-amber-400 bg-amber-500/20 shadow-md shadow-amber-500/30 scale-95'
-                        : isUnlocked
-                        ? 'border-slate-800 bg-slate-950/70 hover:border-amber-400/60 hover:bg-slate-900'
-                        : 'border-slate-900 bg-slate-950/30 opacity-40 cursor-not-allowed'
-                    }`}
-                  >
-                    {/* Item Graphical Texture Preview */}
-                    <div className="relative w-12 h-12 rounded bg-slate-950 border border-white/15 overflow-hidden flex items-center justify-center shadow-inner group-hover:border-amber-400/80 mb-1">
-                      {thumbUrl ? (
-                        <img
-                          src={thumbUrl}
-                          alt={def.name}
-                          className="w-full h-full object-cover"
-                          loading="lazy"
-                        />
-                      ) : (
-                        <div
-                          className="w-full h-full flex items-center justify-center text-[10px] font-mono text-white/70"
-                          style={{ backgroundColor: def.color }}
-                        >
-                          {def.isSolid ? '■' : '☵'}
-                        </div>
-                      )}
-
-                      {/* Small badge for solid physical collider */}
-                      {def.isSolid && (
-                        <span
-                          className="absolute bottom-0.5 right-0.5 w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_4px_#f59e0b]"
-                          title="Com colisão física"
-                        />
-                      )}
-                    </div>
-
-                    <span className="text-[9px] text-slate-300 group-hover:text-white truncate w-full leading-tight font-medium">
-                      {def.name}
-                    </span>
-                  </button>
-                );
-              })}
-          </div>
-
-          {/* Quick Help Hint */}
-          <div className="mt-2 text-[10px] text-slate-400 font-mono flex items-center justify-between px-1">
-            <span>Arrastar com Botão Dir. ou Espaço = Pan</span>
-            <span>Scroll = Zoom</span>
-          </div>
-
-          {/* Editor Action Shortcuts */}
-          <div className="mt-2.5 pt-2 border-t border-slate-800 space-y-1.5">
+        <>
+          {/* 1. SLIM LEFT VERTICAL DOCK / SIDEBAR */}
+          <aside className="absolute left-0 top-12 bottom-0 w-13 sm:w-15 z-30 bg-slate-950/95 backdrop-blur-md border-r border-amber-500/40 flex flex-col items-center py-2.5 px-1 gap-2 shadow-2xl select-none">
+            {/* Tool: Paint / Peças (Toggles the slide-out catalog to the right) */}
             <button
               onClick={() => {
+                if (editorTool === 'paint') {
+                  setIsPaletteOpen(!isPaletteOpen);
+                } else {
+                  handleSetEditorTool('paint');
+                  setIsPaletteOpen(true);
+                }
+                setIsPaintingSpawn(false);
+              }}
+              className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border ${
+                editorTool === 'paint' && !isPaintingSpawn
+                  ? 'bg-amber-500 text-black border-amber-300 shadow-md shadow-amber-500/40'
+                  : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+              }`}
+              title="Pintar / Abrir Catálogo de Peças"
+            >
+              <Paintbrush className="w-4 h-4" />
+              <span className="text-[8px] font-bold mt-0.5">Pintar</span>
+            </button>
+
+            {/* Tool: Pan / Mover (Travel the map with touch or mouse) */}
+            <button
+              onClick={() => {
+                handleSetEditorTool('pan');
+                setIsPaintingSpawn(false);
+              }}
+              className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border ${
+                editorTool === 'pan'
+                  ? 'bg-cyan-500 text-black border-cyan-300 shadow-md shadow-cyan-500/40 animate-pulse'
+                  : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+              }`}
+              title="Mover (Pan) — Arrasta no ecrã para viajar livremente pelo mapa"
+            >
+              <Hand className="w-4 h-4" />
+              <span className="text-[8px] font-bold mt-0.5">Mover</span>
+            </button>
+
+            {/* Tool: Erase / Borracha */}
+            <button
+              onClick={() => {
+                handleSetEditorTool('erase');
+                setIsPaintingSpawn(false);
+              }}
+              className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border ${
+                editorTool === 'erase'
+                  ? 'bg-red-500 text-white border-red-300 shadow-md shadow-red-500/40'
+                  : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+              }`}
+              title="Borracha — Limpa blocos de volta para asfalto"
+            >
+              <Eraser className="w-4 h-4" />
+              <span className="text-[8px] font-bold mt-0.5">Apagar</span>
+            </button>
+
+            {/* Tool: Spawn Point */}
+            <button
+              onClick={() => {
+                setIsPaintingSpawn(true);
                 const edScene = getEditorScene();
                 if (edScene) edScene.setSpawnBrush();
               }}
-              className="w-full py-1.5 px-2 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-700/80 text-xs font-semibold hover:bg-cyan-900 flex items-center justify-center gap-1.5"
+              className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border ${
+                isPaintingSpawn
+                  ? 'bg-emerald-500 text-black border-emerald-300 shadow-md shadow-emerald-500/40 animate-pulse'
+                  : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+              }`}
+              title="Definir Ponto de Spawn do Camião"
             >
-              <Compass className="w-3.5 h-3.5" /> Definir Ponto de Spawn
+              <Compass className="w-4 h-4" />
+              <span className="text-[8px] font-bold mt-0.5">Spawn</span>
             </button>
 
+            {/* Subtle Divider */}
+            <div className="w-8 h-px bg-slate-800 my-1" />
+
+            {/* Navigation: Fit Entire Map (Ver o mapa todo) */}
+            <button
+              onClick={handleResetView}
+              className="w-11 h-11 rounded-lg bg-slate-900/90 text-amber-400 border border-slate-800 hover:bg-slate-800 hover:text-amber-300 flex flex-col items-center justify-center transition"
+              title="Ver Mapa Todo (Ajustar Zoom ao Ecrã)"
+            >
+              <Maximize2 className="w-4 h-4" />
+              <span className="text-[8px] font-bold mt-0.5">Ver Tudo</span>
+            </button>
+
+            {/* Navigation: Zoom In (+) */}
+            <button
+              onClick={handleZoomIn}
+              className="w-11 h-8 rounded-lg bg-slate-900/80 text-slate-300 border border-slate-800 hover:bg-slate-800 hover:text-white flex items-center justify-center transition"
+              title="Aumentar Zoom (+)"
+            >
+              <ZoomIn className="w-3.5 h-3.5" />
+            </button>
+
+            {/* Navigation: Zoom Out (-) */}
+            <button
+              onClick={handleZoomOut}
+              className="w-11 h-8 rounded-lg bg-slate-900/80 text-slate-300 border border-slate-800 hover:bg-slate-800 hover:text-white flex items-center justify-center transition"
+              title="Reduzir Zoom (-)"
+            >
+              <ZoomOut className="w-3.5 h-3.5" />
+            </button>
+
+            {/* Spacer */}
+            <div className="flex-1" />
+
+            {/* Quick Drive Test Button (Tab) */}
             <button
               onClick={handleToggleMode}
-              className="w-full py-2 px-3 rounded bg-amber-500 hover:bg-amber-400 text-black text-xs font-black transition flex items-center justify-center gap-1.5 shadow-lg shadow-amber-500/25"
+              className="w-11 h-12 rounded-lg bg-amber-500 hover:bg-amber-400 text-black border border-amber-300 flex flex-col items-center justify-center transition shadow-lg shadow-amber-500/30"
+              title="Testar Condução Imediata (Tecla Tab)"
             >
-              <Play className="w-4 h-4 fill-black" /> Testar Condução Agora (Tab)
+              <Play className="w-4 h-4 fill-black" />
+              <span className="text-[8px] font-black uppercase mt-0.5">Drive</span>
             </button>
-          </div>
-        </div>
+          </aside>
+
+          {/* 2. SLIDING EXPANDABLE RIGHT FLYOUT: TILE CATALOG */}
+          {editorTool === 'paint' && !isPaintingSpawn && isPaletteOpen && (
+            <div className="absolute left-13 sm:left-15 top-14 bottom-4 z-20 w-72 sm:w-84 max-w-[calc(100vw-4.5rem)] h-[calc(100vh-4.5rem)] flex flex-col bg-slate-950/95 border border-amber-500/40 rounded-r-xl shadow-2xl p-3 backdrop-blur-xl animate-in fade-in slide-in-from-left-2 transition-all">
+              {/* Flyout Header */}
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-2">
+                <div className="flex items-center gap-1.5">
+                  <Layers className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs font-bold text-amber-400 tracking-wider uppercase">Catálogo de Peças</span>
+                </div>
+                {/* Close Button to Tuck Away for 100% Unobstructed Map Editing */}
+                <button
+                  onClick={() => setIsPaletteOpen(false)}
+                  className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                  title="Fechar Menu (Podes reabrir clicando no botão Pintar à esquerda)"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Horizontally Scrollable Category Tabs */}
+              <div className="flex gap-1 mb-2 text-[10px] overflow-x-auto pb-1 scrollbar-none">
+                {(['all', 'road', 'dock', 'obstacle', 'biome'] as const).map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => setBrushCategory(cat)}
+                    className={`px-2.5 py-1 rounded capitalize font-bold transition whitespace-nowrap ${
+                      brushCategory === cat
+                        ? 'bg-amber-500 text-black shadow-sm shadow-amber-500/40'
+                        : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
+                    }`}
+                  >
+                    {cat === 'all' ? 'Tudo' : cat}
+                  </button>
+                ))}
+              </div>
+
+              {/* Scrollable (Deslizante) Tile Grid with Graphical Previews */}
+              <div className="flex-1 overflow-y-auto pr-1 grid grid-cols-3 sm:grid-cols-4 gap-2 scrollbar-thin scrollbar-thumb-amber-500/40">
+                {Object.entries(TILE_DEFINITIONS)
+                  .filter(([_, def]) => brushCategory === 'all' || def.category === brushCategory)
+                  .map(([key, def]) => {
+                    const isUnlocked = unlockedTileKeys.includes(key);
+                    const isSelected = selectedBrush === key;
+                    const thumbUrl = TILE_THUMBNAILS[key];
+
+                    return (
+                      <button
+                        key={key}
+                        disabled={!isUnlocked}
+                        onClick={() => handleSelectBrush(key)}
+                        title={isUnlocked ? `${def.name} (${def.isSolid ? 'Obstáculo sólido' : 'Passagem livre'})` : 'Bloqueado: Domina o Hub correspondente a 100%!'}
+                        className={`group relative p-1.5 rounded flex flex-col items-center justify-between text-center transition border ${
+                          isSelected
+                            ? 'border-amber-400 bg-amber-500/20 shadow-md shadow-amber-500/30 scale-95'
+                            : isUnlocked
+                            ? 'border-slate-800 bg-slate-900/70 hover:border-amber-400/60 hover:bg-slate-900'
+                            : 'border-slate-900 bg-slate-950/30 opacity-40 cursor-not-allowed'
+                        }`}
+                      >
+                        {/* Crisp Graphical Texture Preview */}
+                        <div className="relative w-12 h-12 rounded bg-slate-950 border border-white/15 overflow-hidden flex items-center justify-center shadow-inner group-hover:border-amber-400/80 mb-1">
+                          {thumbUrl ? (
+                            <img
+                              src={thumbUrl}
+                              alt={def.name}
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div
+                              className="w-full h-full flex items-center justify-center text-[10px] font-mono text-white/70"
+                              style={{ backgroundColor: def.color }}
+                            >
+                              {def.isSolid ? '■' : '☵'}
+                            </div>
+                          )}
+
+                          {def.isSolid && (
+                            <span
+                              className="absolute bottom-0.5 right-0.5 w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_4px_#f59e0b]"
+                              title="Com colisão sólida"
+                            />
+                          )}
+                        </div>
+
+                        <span className="text-[9px] text-slate-300 group-hover:text-white truncate w-full leading-tight font-medium">
+                          {def.name}
+                        </span>
+                      </button>
+                    );
+                  })}
+              </div>
+
+              {/* Footer hint */}
+              <div className="mt-2 pt-2 border-t border-slate-800/80 text-[10px] text-slate-400 font-mono text-center">
+                Clica numa peça e clica/arrasta na grelha para pintar
+              </div>
+            </div>
+          )}
+
+          {/* 3. FLOATING STATUS BANNER FOR ACTIVE MODE */}
+          {(editorTool === 'pan' || editorTool === 'erase' || isPaintingSpawn) && (
+            <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 bg-slate-950/95 border border-cyan-400/60 px-3.5 py-1.5 rounded-full shadow-2xl flex items-center gap-2.5 backdrop-blur-md">
+              {editorTool === 'pan' && (
+                <>
+                  <Hand className="w-4 h-4 text-cyan-400 animate-bounce" />
+                  <span className="text-xs font-bold text-cyan-300">MODO MOVER (PAN): Arrasta no ecrã com rato ou toque para viajar pelo mapa</span>
+                </>
+              )}
+              {editorTool === 'erase' && (
+                <>
+                  <Eraser className="w-4 h-4 text-red-400" />
+                  <span className="text-xs font-bold text-red-300">MODO APAGAR: Clica ou arrasta sobre os blocos para limpar para asfalto</span>
+                </>
+              )}
+              {isPaintingSpawn && (
+                <>
+                  <Compass className="w-4 h-4 text-emerald-400 animate-spin" />
+                  <span className="text-xs font-bold text-emerald-300">MODO SPAWN: Clica no mapa para definir o ponto de partida do camião</span>
+                </>
+              )}
+              <button
+                onClick={() => {
+                  handleSetEditorTool('paint');
+                  setIsPaintingSpawn(false);
+                  setIsPaletteOpen(true);
+                }}
+                className="ml-1 text-[10px] font-bold bg-white/10 hover:bg-white/20 px-2 py-0.5 rounded text-white transition"
+              >
+                Voltar a Pintar
+              </button>
+            </div>
+          )}
+        </>
       )}
 
       {/* LICENSE SYSTEM MODAL */}
