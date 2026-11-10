@@ -38,7 +38,13 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.6.5** (Versão Atual)
+### **v1.6.6** (Versão Atual)
+- **Correção de Profundidade do Acoplamento:**
+  - O atrelado desenhava-se **por baixo** do trator (`depth 9` vs `10`), escondendo a traseira do camião e a quinta roda. Os atrelados passam a `depth 11` (o pup do bitrem a `12`, acima do dianteiro) — o atrelado aparece agora corretamente **por cima** da traseira do trator.
+- **Pneus Duplos Traseiros Mais Visíveis:**
+  - Cada pneu do eixo 4x2 alargado para 10×26 px, com o exterior saliente 10px além da borda da carroçaria (antes 8px) — claramente visível em qualquer zoom.
+
+### **v1.6.5**
 - **Eixo Trator Traseiro 4x2 com Pneus Duplos:**
   - `Truck.drawWheels`: o eixo traseiro passa a desenhar **2 pneus de cada lado** (interior encostado à carroçaria + exterior saliente), largura 8px cada, tocando-se em ±hw — visual fiel a um trator 4x2, com as rodas traseiras agora claramente salientes como as dianteiras direcionais.
 

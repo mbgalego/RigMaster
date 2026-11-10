@@ -106,7 +106,9 @@ export class Trailer {
     }) as unknown as MatterJS.BodyType;
 
     this.container = scene.add.container(spawnX, spawnY);
-    this.container.setDepth(9);
+    // Trailers must ride ABOVE the tractor's rear (fifth-wheel coupling view);
+    // the pup rides above the lead trailer of the bitrem.
+    this.container.setDepth(this.type === 'bitrem_pup' ? 12 : 11);
 
     this.graphics = scene.add.graphics();
     this.lightsGraphics = scene.add.graphics();

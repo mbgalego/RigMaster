@@ -397,20 +397,20 @@ export class Truck {
     drawPivotedWheel(-hw - 1, frontY, this.currentSteerAngle);
     drawPivotedWheel(hw + 1, frontY, this.currentSteerAngle);
 
-    // Rear drive axle (4x2): dual tires per side, visibly protruding like the steered fronts
+    // Rear drive axle (4x2): dual tires per side, clearly salient beyond the chassis edge
     const drawFixedWheel = (x: number, y: number) => {
       g.fillStyle(0x0f172a, 1);
       g.lineStyle(1.5, 0x64748b, 0.8);
-      g.fillRoundedRect(-4, -12, 8, 24, 2);
-      g.strokeRoundedRect(-4, -12, 8, 24, 2);
+      g.fillRoundedRect(-5, -13, 10, 26, 3);
+      g.strokeRoundedRect(-5, -13, 10, 26, 3);
     };
 
     // Inner dual tires (tucked against the chassis edge)
-    drawFixedWheel(-hw + 4, rearY);
-    drawFixedWheel(hw - 4, rearY);
-    // Outer dual tires (salient)
-    drawFixedWheel(-hw - 4, rearY);
-    drawFixedWheel(hw + 4, rearY);
+    drawFixedWheel(-hw + 5, rearY);
+    drawFixedWheel(hw - 5, rearY);
+    // Outer dual tires (10px beyond the body edge)
+    drawFixedWheel(-hw - 5, rearY);
+    drawFixedWheel(hw + 5, rearY);
   }
 
   private drawLights() {
