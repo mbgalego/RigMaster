@@ -39,6 +39,7 @@ src/
 ## 2. Histórico de Versões & Changelog
 
 ### **v1.5.1** (Versão Atual)
+  - `cancelExam()` agora reseta `isPassed`/`isFailed`/`failReason` — o modal de resultado de exame fecha ao clicar "Continuar" (antes ficava aberto para sempre).
 - **Correção do Offset do Editor (Clique ≠ Posição de Pintura):**
   - Causa raiz: `MainScene` e `EditorScene` tinham câmaras independentes (a principal seguia o camião e mantinha os *bounds* do mapa) — a grelha/sede do cursor eram desenhadas com uma câmara e os tiles renderizados com outra, e o Phaser re-centrava a câmara principal sempre que a vista ultrapassava os bounds.
   - Entrar no editor passa a ser um *handoff* sem salto: a câmara do editor começa exatamente onde a de condução estava (em volta do camião, zoom ~100%), eliminando a vista de "minimapa". Os *bounds* da câmara principal são removidos em modo editor (e repostos ao sair) para o sync por frame ser exato.
