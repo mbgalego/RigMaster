@@ -38,7 +38,11 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.6.3** (Versão Atual)
+### **v1.6.4** (Versão Atual)
+- **Luzes de Reversão em Todos os Atrelados:**
+  - `Trailer` agora guarda `isReversing` (espelho do estado do conjunto, calculado em `followHitch` via vHitchLong) e desenha lâmpadas de reversão brancas idênticas às do trator, coladas aos stops traseiros, com lente apagada discreta. Aplica-se a todos os tipos (standard, long_cargo, bitrem dianteiro/traseiro, frágil).
+
+### **v1.6.3**
 - **Luzes de Marcha Atrás Simplificadas (ajuste ao pedido):**
   - Removidos os cones de luz; as lâmpadas de reversão são agora dois círculos brancos sólidos (raio 5, como os stops acesos) colados aos stops traseiros (±16 px), com estado apagado discreto (cinza) quando a marcha atrás não está engatada.
 

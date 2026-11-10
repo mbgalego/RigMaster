@@ -37,6 +37,8 @@ export class Trailer {
   public vx: number = 0;
   public vy: number = 0;
   public omega: number = 0;
+  // Mirror of the rig's reversing state (drives the white reverse lamps)
+  public isReversing: boolean = false;
   public prevHitchX: number = 0;
   public prevHitchY: number = 0;
   public hasPrevHitch: boolean = false;
@@ -170,6 +172,7 @@ export class Trailer {
 
     // Only in active reverse backing up at extreme angle (> 95 deg) does physical apron contact limit folding
     const isReversing = vHitchLong < -1.5;
+    this.isReversing = isReversing;
     if (isReversing) {
       let diff = this.body.angle - parentAngle;
       while (diff > Math.PI) diff -= Math.PI * 2;
@@ -334,6 +337,17 @@ export class Trailer {
       g.fillStyle(0xb91c1c, 0.85);
       g.fillCircle(-hw + 8, hl - 2, 3);
       g.fillCircle(hw - 8, hl - 2, 3);
+    }
+
+    // Reverse lamps (white): same style as the truck's, next to the brake lamps
+    if (this.isReversing) {
+      g.fillStyle(0xffffff, 1);
+      g.fillCircle(-hw + 16, hl - 2, 5);
+      g.fillCircle(hw - 16, hl - 2, 5);
+    } else {
+      g.fillStyle(0x94a3b8, 0.85);
+      g.fillCircle(-hw + 16, hl - 2, 3);
+      g.fillCircle(hw - 16, hl - 2, 3);
     }
   }
 
