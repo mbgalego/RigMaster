@@ -38,7 +38,11 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.6.2** (Versão Atual)
+### **v1.6.3** (Versão Atual)
+- **Luzes de Marcha Atrás Simplificadas (ajuste ao pedido):**
+  - Removidos os cones de luz; as lâmpadas de reversão são agora dois círculos brancos sólidos (raio 5, como os stops acesos) colados aos stops traseiros (±16 px), com estado apagado discreto (cinza) quando a marcha atrás não está engatada.
+
+### **v1.6.2**
 - **Luzes de Marcha Atrás (Brancas) no Trator:**
   - Substituição dos dois pontinhos brancos por lâmpadas de reversão reais: halo branco + núcleo incandescente (estilo das luzes de travão) e dois feixes de flood light brancos projetados para trás da cabeça tratora, ativados por `isReversing` (vLong < -2 px/s).
 - **HUD: Indicador de Semáforo Removido:**
