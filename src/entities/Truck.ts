@@ -110,7 +110,7 @@ export class Truck {
     this.cabGraphics = scene.add.graphics();
     this.lightsGraphics = scene.add.graphics();
 
-    this.container.add([this.wheelGraphics, this.cabGraphics, this.lightsGraphics]);
+    this.container.add([this.cabGraphics, this.wheelGraphics, this.lightsGraphics]);
 
     this.setupInput();
     this.setupCollisions();
@@ -415,15 +415,16 @@ export class Truck {
       g.fillCircle(x, y, Math.min(tw, th) * 0.22);
     };
 
-    // Steered front axle (single tires, salient)
+    // Steered front axle (single tires)
     drawTire(-hw - 2, frontY, this.currentSteerAngle, 9, 22, 0x00f0ff);
     drawTire(hw + 2, frontY, this.currentSteerAngle, 9, 22, 0x00f0ff);
 
-    // Rear drive axle (4x2): dual tires per side, clearly salient beyond the chassis edge
-    drawTire(-hw + 5, rearY, 0, 10, 26, 0x64748b);
-    drawTire(hw - 5, rearY, 0, 10, 26, 0x64748b);
-    drawTire(-hw - 5, rearY, 0, 10, 26, 0x64748b);
-    drawTire(hw + 5, rearY, 0, 10, 26, 0x64748b);
+    // Rear drive axle (4x2): dual tires per side — both visible, drawn over the
+    // chassis edge so the inner tire reads as a real second tire, not a hidden sliver
+    drawTire(-hw - 3, rearY, 0, 8, 24, 0x64748b);
+    drawTire(hw - 3, rearY, 0, 8, 24, 0x64748b);
+    drawTire(-hw + 5, rearY, 0, 8, 24, 0x64748b);
+    drawTire(hw + 5, rearY, 0, 8, 24, 0x64748b);
   }
 
   private drawLights() {

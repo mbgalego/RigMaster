@@ -38,7 +38,11 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.6.7** (Versão Atual)
+### **v1.6.8** (Versão Atual)
+- **Correção: Par Duplo Traseiro Legível:**
+  - Causa: a carroçaria era desenhada por cima das rodas no container, escondendo o pneu interior do par — só o exterior aparecia (uma "roda única" muito saliente). `wheelGraphics` passou a desenhar **sobre** `cabGraphics`; os dois pneus de cada lado são agora visíveis (interior encostado à carroçaria em ±(hw−3), exterior saliente 9px em ±(hw+5)), 8×24 px com separação por contorno.
+
+### **v1.6.7**
 - **Correção: Rodas do Trator Invisíveis (Phaser 4):**
   - `drawWheels` redesenhava as rodas a cada frame com `save()/translateCanvas()/rotateCanvas()/restore()` — sob o renderer do Phaser 4 o estado de transformação não sobrevivia de forma fiável a `clear()` por frame, e as rodas deixavam de aparecer (as luzes, desenhadas no mesmo ciclo sem transforms, apareciam). As rodas são agora desenhadas com cantos rodados manualmente (trig) e um detalhe de cubo; dianteiras 9×22 salientes, duplos traseiros 10×26 salientes.
 
