@@ -25,7 +25,6 @@ export class Kingpin {
   public scene: Phaser.Scene;
   public parentBody: MatterJS.BodyType;
   public trailerBody: MatterJS.BodyType;
-  public constraint: MatterJS.ConstraintType | null = null;
 
   public parentOffset: { x: number; y: number };
   public trailerOffset: { x: number; y: number };
@@ -157,9 +156,6 @@ export class Kingpin {
   }
 
   public destroy() {
-    if (this.constraint && this.scene.matter && this.scene.matter.world) {
-      this.scene.matter.world.remove(this.constraint);
-    }
     if (this.debugGraphics) {
       this.debugGraphics.destroy();
       this.debugGraphics = null;

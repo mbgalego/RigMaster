@@ -6,9 +6,6 @@ export interface TruckConfig {
   angle?: number;
   width?: number;
   length?: number;
-  maxSpeed?: number;
-  acceleration?: number;
-  brakeForce?: number;
   steerSpeed?: number;
   maxSteerAngle?: number;
   surfaceGrip?: number;
