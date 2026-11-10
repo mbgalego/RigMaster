@@ -31,6 +31,8 @@ export class MainScene extends Phaser.Scene {
   private examTargetMarker: Phaser.GameObjects.Graphics | null = null;
   private examTargetLabel: Phaser.GameObjects.Text | null = null;
   private preparedExamId: LicenseId | null = null;
+  // Road-snapped world position of the current exam dock (the real pass target)
+  private examDockWorld: LicenseExam['targetDock'] | null = null;
 
   // Audio Context (Procedural synthesized audio)
   private audioCtx: AudioContext | null = null;
@@ -81,7 +83,7 @@ export class MainScene extends Phaser.Scene {
     this.garageSystem = GarageSystem.getInstance();
 
     // 1. Build World & Tilemap
-    this.tilemapManager = new TilemapManager(this, 24, 18);
+    this.tilemapManager = new TilemapManager(this);
 
     // Set world physics bounds
     const worldW = this.tilemapManager.cols * this.tilemapManager.tileSize;
@@ -318,6 +320,13 @@ export class MainScene extends Phaser.Scene {
     // Keep exam target dock (marker + painted dock tile) in sync with the active exam
     this.syncExamTarget(time);
 
+    // Stream physics around the player: materialize static tile bodies & traffic light
+    // bodies only near the truck — everything else stays as pure grid data.
+    if (this.truck) {
+      this.tilemapManager.updateActiveChunks(this.truck.body.position.x, this.truck.body.position.y);
+      TrafficLightSystem.getInstance(this).updateProximity(this.truck.body.position.x, this.truck.body.position.y);
+    }
+
     // When not in editor mode, update vehicle driving physics
     if (!this.isEditorMode) {
       this.truck.update(delta);
@@ -419,10 +428,12 @@ export class MainScene extends Phaser.Scene {
   private checkDockAlignment(): { inZone: boolean; alignmentDeg: number } {
     const checkBody = this.trailer?.body || this.truck.body;
 
-    // During an exam only the exam's target dock counts for the pass condition
+    // During an exam only the exam's target dock counts for the pass condition.
+    // Uses the road-snapped placement prepared at exam start (authored coordinates may
+    // fall inside buildings/water on big procedural maps).
     const exam = this.licenseSystem.getActiveExam();
     if (exam.active && exam.licenseId) {
-      const td = this.licenseSystem.getLicense(exam.licenseId).exam.targetDock;
+      const td = this.examDockWorld || this.licenseSystem.getLicense(exam.licenseId).exam.targetDock;
       const dist = Phaser.Math.Distance.Between(checkBody.position.x, checkBody.position.y, td.x, td.y);
       const radius = Math.max(td.width, td.height) / 2 + 25;
       if (dist < radius) {
@@ -464,9 +475,12 @@ export class MainScene extends Phaser.Scene {
         this.preparedExamId = exam.licenseId;
         this.prepareExamTargetDock(lic.exam.targetDock);
       }
-      this.renderExamTargetMarker(lic.exam.targetDock, time);
+      if (this.examDockWorld) {
+        this.renderExamTargetMarker(this.examDockWorld, time);
+      }
     } else if (this.preparedExamId) {
       this.preparedExamId = null;
+      this.examDockWorld = null;
       this.examTargetMarker?.destroy();
       this.examTargetMarker = null;
       this.examTargetLabel?.destroy();
@@ -475,13 +489,19 @@ export class MainScene extends Phaser.Scene {
   }
 
   /**
-   * The exam's targetDock coordinates are authored independently of the preset maps, so the
-   * dock tile is painted on exam start and solid neighbours are cleared to guarantee approach.
+   * The exam's targetDock coordinates are authored independently of the preset maps (and on
+   * procedural maps they can fall inside buildings or water), so the dock is snapped to the
+   * nearest drivable road tile before being painted; solid neighbours are cleared to
+   * guarantee approach. The snapped world position becomes the real exam target.
    */
   private prepareExamTargetDock(td: LicenseExam['targetDock']) {
     const tm = this.tilemapManager;
-    const col = Math.floor(td.x / tm.tileSize);
-    const row = Math.floor(td.y / tm.tileSize);
+    const spot = this.findExamDockPlacement(
+      Math.floor(td.x / tm.tileSize),
+      Math.floor(td.y / tm.tileSize)
+    );
+    const col = spot.c;
+    const row = spot.r;
 
     for (let r = row - 1; r <= row + 1; r++) {
       for (let c = col - 1; c <= col + 1; c++) {
@@ -496,6 +516,46 @@ export class MainScene extends Phaser.Scene {
         }
       }
     }
+
+    this.examDockWorld = {
+      x: col * tm.tileSize + tm.tileSize / 2,
+      y: row * tm.tileSize + tm.tileSize / 2,
+      width: tm.tileSize,
+      height: tm.tileSize,
+      requiredAngleDeg: td.requiredAngleDeg,
+      angleToleranceDeg: td.angleToleranceDeg,
+    };
+  }
+
+  /**
+   * Spiral search (Chebyshev rings) from the authored position for the nearest drivable
+   * tile; road-family tiles are preferred so the dock is always reachable via the road grid.
+   */
+  private findExamDockPlacement(col0: number, row0: number): { c: number; r: number } {
+    const tm = this.tilemapManager;
+    const isRoadLike = (t: string) =>
+      t.startsWith('road_') || t === 'asphalt' || t === 'sidewalk' || t === 'pedestrian_crossing' || t === 'cobblestone_narrow';
+
+    let fallback: { c: number; r: number } | null = null;
+    for (let rad = 0; rad <= 16; rad++) {
+      for (let dr = -rad; dr <= rad; dr++) {
+        for (let dc = -rad; dc <= rad; dc++) {
+          if (Math.max(Math.abs(dr), Math.abs(dc)) !== rad) continue; // ring perimeter only
+          const c = col0 + dc;
+          const r = row0 + dr;
+          if (c < 1 || r < 1 || c >= tm.cols - 1 || r >= tm.rows - 1) continue;
+          const tile = tm.getTile(c, r);
+          const def = TILE_DEFINITIONS[tile];
+          if (!def || def.isSolid) continue;
+          if (isRoadLike(tile)) return { c, r };
+          if (!fallback) fallback = { c, r };
+        }
+      }
+    }
+    return fallback || {
+      c: Phaser.Math.Clamp(col0, 1, tm.cols - 2),
+      r: Phaser.Math.Clamp(row0, 1, tm.rows - 2),
+    };
   }
 
   /**

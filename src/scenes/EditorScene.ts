@@ -26,7 +26,7 @@ export class EditorScene extends Phaser.Scene {
   public cursorCol: number = 0;
   public cursorRow: number = 0;
 
-  public static readonly MIN_ZOOM = 0.12; // Allows viewing the entire 3072x2304 map on mobile
+  public static readonly MIN_ZOOM = 0.04; // Allows viewing the entire 13,824x10,240 map on mobile
   public static readonly MAX_ZOOM = 1.8;
 
   constructor() {

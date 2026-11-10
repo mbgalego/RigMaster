@@ -38,7 +38,17 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.5.1** (Versão Atual)
+### **v1.6.0** (Versão Atual)
+- **Mapas 20x Maiores (108×80 tiles = 8.640 tiles, 13.824×10.240 px) com Performance Constante:**
+  - Renderização nativa por Tilemap do Phaser: todas as texturas procedurais são marcadas num único *atlas* (`tile_atlas`) e o terreno usa um `TilemapLayer` com *culling* automático por câmara — o custo de desenho é proporcional aos tiles visíveis, não ao tamanho do mapa.
+  - **Física por chunks (streaming):** corpos Matter estáticos só existem nos chunks (8×8 tiles) num raio de 2 chunks do camião (`updateActiveChunks`); fora do raio, sólidos são apenas dados na grelha. Chunks são reavaliados apenas quando o camião muda de centro de chunk.
+  - **Semáforos com proximidade:** `rebuild` é data-only para o mapa todo; `updateProximity` materializa/desmaterializa corpos (poste + barreira) e desenha apenas sinais a <2560px do camião (reavaliado a cada 256px movidos).
+  - Novo mapa default **procedural determinístico** (seed fixa): grelha de artérias com cruzamentos, passadeiras, passeios, ~30 semáforos alternate, postes/sinais, e 4 biomas de hub (Porto, Estaleiro, Zona Industrial, Centro Histórico). Presets Academia e Porto reescalados para o novo tamanho.
+  - DOCAs de exame passam a ser **snap à estrada mais próxima** (`findExamDockPlacement`, busca em anéis) — coordenadas autorais podem calhar em edifícios/água em mapas grandes; a posição snapada é o alvo real (marcador visível e validação de passagem).
+  - Export/import JSON com **run-length encoding** (`gridRLE`, v2) — ficheiros ~100x menores em mapas grandes; o import continua a aceitar v1 (grelha densa) e valida/repara tiles desconhecidos.
+  - Zoom mínimo do editor reduzido para 0.04 (mapa completo cabe em telemóveis).
+
+### **v1.5.1**
   - `cancelExam()` agora reseta `isPassed`/`isFailed`/`failReason` — o modal de resultado de exame fecha ao clicar "Continuar" (antes ficava aberto para sempre).
 - **Correção do Offset do Editor (Clique ≠ Posição de Pintura):**
   - Causa raiz: `MainScene` e `EditorScene` tinham câmaras independentes (a principal seguia o camião e mantinha os *bounds* do mapa) — a grelha/sede do cursor eram desenhadas com uma câmara e os tiles renderizados com outra, e o Phaser re-centrava a câmara principal sempre que a vista ultrapassava os bounds.
