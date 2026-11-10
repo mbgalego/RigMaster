@@ -38,7 +38,11 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.6.4** (Versão Atual)
+### **v1.6.5** (Versão Atual)
+- **Eixo Trator Traseiro 4x2 com Pneus Duplos:**
+  - `Truck.drawWheels`: o eixo traseiro passa a desenhar **2 pneus de cada lado** (interior encostado à carroçaria + exterior saliente), largura 8px cada, tocando-se em ±hw — visual fiel a um trator 4x2, com as rodas traseiras agora claramente salientes como as dianteiras direcionais.
+
+### **v1.6.4**
 - **Luzes de Reversão em Todos os Atrelados:**
   - `Trailer` agora guarda `isReversing` (espelho do estado do conjunto, calculado em `followHitch` via vHitchLong) e desenha lâmpadas de reversão brancas idênticas às do trator, coladas aos stops traseiros, com lente apagada discreta. Aplica-se a todos os tipos (standard, long_cargo, bitrem dianteiro/traseiro, frágil).
 
