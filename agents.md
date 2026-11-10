@@ -1,6 +1,6 @@
 # RigMaster - Documentação Técnica & Registo de Versões (agents.md)
 
-Este documento centraliza a arquitetura, o estado do sistema, a especificação técnica e o histórico de versões do projeto **RigMaster** (Phaser 3 + Matter.js + TypeScript + Vite + Tailwind CSS), servindo como guia de continuidade para agentes de IA e programadores.
+Este documento centraliza a arquitetura, o estado do sistema, a especificação técnica e o histórico de versões do projeto **RigMaster** (Phaser 4 + Matter.js + TypeScript + Vite + Tailwind CSS), servindo como guia de continuidade para agentes de IA e programadores.
 
 ---
 
@@ -13,7 +13,7 @@ O **RigMaster** é um simulador 2D top-down de manobra e condução de pesados c
 
 ```
 src/
-├── config.ts               # Configuração do Phaser 3 e motor Matter.js
+├── config.ts               # Configuração do Phaser 4 e motor Matter.js
 ├── main.ts                 # Ponto de entrada do Phaser e exportação de instâncias de cenas
 ├── App.tsx                 # Interface React / HUD minimalista, dock do editor e controlos
 ├── components/
@@ -38,7 +38,28 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.5.0** (Versão Atual)
+### **v1.5.1** (Versão Atual)
+  - `cancelExam()` agora reseta `isPassed`/`isFailed`/`failReason` — o modal de resultado de exame fecha ao clicar "Continuar" (antes ficava aberto para sempre).
+- **Correção do Offset do Editor (Clique ≠ Posição de Pintura):**
+  - Causa raiz: `MainScene` e `EditorScene` tinham câmaras independentes (a principal seguia o camião e mantinha os *bounds* do mapa) — a grelha/sede do cursor eram desenhadas com uma câmara e os tiles renderizados com outra, e o Phaser re-centrava a câmara principal sempre que a vista ultrapassava os bounds.
+  - Entrar no editor passa a ser um *handoff* sem salto: a câmara do editor começa exatamente onde a de condução estava (em volta do camião, zoom ~100%), eliminando a vista de "minimapa". Os *bounds* da câmara principal são removidos em modo editor (e repostos ao sair) para o sync por frame ser exato.
+  - Edita-se diretamente o mapa real onde o camião está; **[Ver Tudo]** (`fitEntireMap`) mantém-se para enquadrar o mapa inteiro. `handlePaintPointer` calcula o tile diretamente do pointer (taps em touch deixam de usar posição obsoleta).
+- **Correção do Fluxo de Exames (Auto-bloqueio e Doca-Alvo):**
+  - Iniciar um exame já não é bloqueado pelo próprio gate de licença: `handleSelectVehicle` recebe `force` e o exame atribui o veículo diretamente (C+E, H e X voltam a ser alcançáveis).
+  - A validação de acostagem usa apenas a `targetDock` do exame (raio + tolerância angular próprios), a doca-alvo é pintada fisicamente no arranque do exame (com limpeza de vizinhos sólidos) e assinalada com marcador pulsante "DOCA DO EXAME".
+  - Aprovação exige manter alinhamento **1.5s contínuos** na doca (`dockHoldTimer`), com progresso visível no banner ("A alinhar… X.Xs / 1.5s").
+- **Desempenho e Fugas de Memória:**
+  - `TilemapManager.setTile` atualiza apenas os corpos de colisão do tile pintado (deixa de reconstruir o mapa inteiro por peça); o `TrafficLightSystem` só é reconstruído quando um semáforo é adicionado/removido.
+  - Semáforos re-renderizam apenas em mudança de estado (deixa de haver `renderAll` a 60 fps).
+  - Fuga de listener `collisionstart` do atrelado eliminada (handler removido em `Trailer.destroy()`).
+- **Correções Menores:**
+  - HUD lê `isReversing` da telemetria (elimina janela de crash `getMainScene()?.truck.isReversing`).
+  - Partículas de chuva usam o delta real do frame (deixa de ser fixo `0.016`).
+  - `setPointerCapture` nos pedais (acelerador/travão deixam de encravar se o dedo/rato sair do botão).
+  - Limpeza de código morto (`Kingpin.constraint`, `isPinching`, campos não usados de `TruckConfig`, imports não usados em `App.tsx`, classes Tailwind inexistentes `scrollbar-*`/`animate-in`).
+  - `package.json`: nome corrigido para `rigmaster`.
+
+### **v1.5.0**
 - **Barra Lateral à Esquerda com Menus Deslizantes (Slide-Out):**
   - Substituição da janela flutuante por um dock lateral de 56px (`w-14`) com acesso direto a Pintar, Mover (Pan), Borracha, Spawn, Ver Tudo e Zoom.
   - Catálogo de peças desdobra-se para a direita em gaveta deslizante (`flyout`) com abas de categorias e scroll vertical suave (`overflow-y-auto`), fechável com `[X]`.

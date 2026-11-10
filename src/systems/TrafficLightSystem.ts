@@ -32,6 +32,8 @@ export class TrafficLightSystem {
   public scene: Phaser.Scene;
   public lights: TrafficLightData[] = [];
   private graphics: Phaser.GameObjects.Graphics;
+  // Rendering is driven by state changes only; re-render when true
+  private needsRender: boolean = true;
 
   // European Traffic Light State Durations (ms)
   public static readonly DURATION_GREEN = 7500;
@@ -70,6 +72,7 @@ export class TrafficLightSystem {
       }
     }
 
+    this.needsRender = true;
     this.renderAll();
   }
 
@@ -259,8 +262,14 @@ export class TrafficLightSystem {
       }
     }
 
-    // Always re-render to update dynamic light flares and glowing stop lines
-    this.renderAll();
+    // Only re-render when a light actually changed state (renders are expensive at 60fps)
+    if (hasStateChange) {
+      this.needsRender = true;
+    }
+    if (this.needsRender) {
+      this.renderAll();
+      this.needsRender = false;
+    }
   }
 
   /**

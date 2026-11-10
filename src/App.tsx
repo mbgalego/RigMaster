@@ -3,11 +3,11 @@ import {
   initGame,
   getMainScene,
   getEditorScene,
+  getGame,
   destroyGame,
 } from './main';
 import { MainScene } from './scenes/MainScene';
-import { EditorScene } from './scenes/EditorScene';
-import { LicenseSystem, LicenseInfo, ExamStatus } from './systems/LicenseSystem';
+import { LicenseSystem, LicenseInfo, ExamStatus, LicenseId } from './systems/LicenseSystem';
 import { GarageSystem, HubData, WeatherModifier } from './systems/GarageSystem';
 import { TILE_DEFINITIONS, TILE_THUMBNAILS } from './editor/TilemapManager';
 import { TouchControls } from './components/TouchControls';
@@ -18,10 +18,6 @@ import {
   VolumeX,
   Eye,
   AlertTriangle,
-  CloudRain,
-  CloudFog,
-  Moon,
-  Sun,
   Award,
   MapPin,
   Download,
@@ -32,9 +28,6 @@ import {
   Compass,
   CheckCircle,
   XCircle,
-  ChevronRight,
-  Gauge,
-  Sliders,
   FileCode,
   Smartphone,
   Menu,
@@ -93,6 +86,7 @@ export default function App() {
     jackknifeSeverity: 0,
     tailSwingPx: 0,
     offTrackingPx: 0,
+    isReversing: false,
     collisions: 0,
     fragileHealth: 100,
     weather: 'clear',
@@ -100,6 +94,15 @@ export default function App() {
   });
 
   const [activeExam, setActiveExam] = useState<ExamStatus | null>(null);
+
+  // When any modal/overlay is open, the Phaser canvas must not capture pointer events,
+  // otherwise clicks/taps on HTML buttons (e.g. "Continuar" do exame) are swallowed by the game.
+  const modalOpen = Boolean(
+    showLicenseModal ||
+      showGarageModal ||
+      showJsonModal ||
+      (activeExam && (activeExam.active || activeExam.isPassed || activeExam.isFailed))
+  );
 
   // Initialize Phaser
   useEffect(() => {
@@ -133,6 +136,17 @@ export default function App() {
       }
     }, 60);
 
+    // Keep the Phaser canvas from stealing pointer events while any HTML modal is open,
+    // so buttons like "Continuar" on the exam result popup can actually be clicked.
+    const syncCanvasPointerEvents = () => {
+      const game = getGame();
+      const canvas = game?.canvas as HTMLCanvasElement | undefined;
+      if (canvas) {
+        canvas.style.pointerEvents = modalOpen ? 'none' : 'auto';
+      }
+    };
+    syncCanvasPointerEvents();
+
     return () => {
       clearInterval(interval);
       unsubLic();
@@ -140,6 +154,15 @@ export default function App() {
       destroyGame();
     };
   }, []);
+
+  // Keep the Phaser canvas from stealing pointer events while any HTML modal is open
+  useEffect(() => {
+    const game = getGame();
+    const canvas = game?.canvas as HTMLCanvasElement | undefined;
+    if (canvas) {
+      canvas.style.pointerEvents = modalOpen ? 'none' : 'auto';
+    }
+  }, [modalOpen]);
 
   // Mode Switch
   const handleToggleMode = () => {
@@ -151,21 +174,29 @@ export default function App() {
   };
 
   // Change Vehicle Rig
-  const handleSelectVehicle = (type: 'solo' | 'standard' | 'long_cargo' | 'bitrem' | 'fragile_glass') => {
+  // `force` bypasses license gates — used when an exam assigns its own vehicle.
+  const handleSelectVehicle = (type: 'solo' | 'standard' | 'long_cargo' | 'bitrem' | 'fragile_glass', force: boolean = false) => {
     const licSys = LicenseSystem.getInstance();
 
+    // During an active exam the exam's own vehicle is always allowed
+    const exam = licSys.getActiveExam();
+    const examVehicle = exam.active && exam.licenseId ? licSys.getLicense(exam.licenseId).exam.vehicleType : null;
+    const allowedByExam = exam.active && examVehicle === type;
+
     // Check license requirement
-    if (type === 'long_cargo' && !licSys.isUnlocked('CE')) {
-      setShowLicenseModal(true);
-      return;
-    }
-    if (type === 'bitrem' && !licSys.isUnlocked('H')) {
-      setShowLicenseModal(true);
-      return;
-    }
-    if (type === 'fragile_glass' && !licSys.isUnlocked('X')) {
-      setShowLicenseModal(true);
-      return;
+    if (!force && !allowedByExam) {
+      if (type === 'long_cargo' && !licSys.isUnlocked('CE')) {
+        setShowLicenseModal(true);
+        return;
+      }
+      if (type === 'bitrem' && !licSys.isUnlocked('H')) {
+        setShowLicenseModal(true);
+        return;
+      }
+      if (type === 'fragile_glass' && !licSys.isUnlocked('X')) {
+        setShowLicenseModal(true);
+        return;
+      }
     }
 
     setVehicleConfig(type);
@@ -214,15 +245,15 @@ export default function App() {
   };
 
   // Start Exam
-  const handleStartExam = (licenseId: any) => {
+  const handleStartExam = (licenseId: LicenseId) => {
     const licSys = LicenseSystem.getInstance();
     licSys.startExam(licenseId);
     setShowLicenseModal(false);
 
-    // Switch to corresponding vehicle
+    // Switch to the exam's vehicle directly (bypassing the license gate that the exam itself grants)
     const lic = licSys.getLicense(licenseId);
     if (lic) {
-      handleSelectVehicle(lic.exam.vehicleType as any);
+      handleSelectVehicle(lic.exam.vehicleType, true);
       handleReset();
     }
   };
@@ -306,7 +337,7 @@ export default function App() {
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-[#0c0f17] font-sans text-slate-100 select-none">
       {/* Phaser Canvas Viewport */}
-      <div ref={gameContainerRef} className="w-full h-full cursor-crosshair" />
+      <div ref={gameContainerRef} className={`w-full h-full cursor-crosshair ${modalOpen ? 'pointer-events-none' : ''}`} />
 
       {/* TOP COMPACT INDUSTRIAL APP BAR */}
       <header className="absolute top-0 left-0 right-0 h-12 bg-slate-950/85 backdrop-blur-md border-b border-cyan-500/30 px-2 sm:px-4 flex items-center justify-between z-30 shadow-lg shadow-black/50">
@@ -341,8 +372,8 @@ export default function App() {
               <span className="text-[9px] text-slate-400 font-bold uppercase">km/h</span>
             </div>
             <div className="w-px h-3 bg-white/20" />
-            <span className={`font-mono text-xs font-black ${getMainScene()?.truck.isReversing ? 'text-amber-400' : 'text-cyan-400'}`}>
-              {getMainScene()?.truck.isReversing ? 'R' : 'D'}
+            <span className={`font-mono text-xs font-black ${telemetry.isReversing ? 'text-amber-400' : 'text-cyan-400'}`}>
+              {telemetry.isReversing ? 'R' : 'D'}
             </span>
             {telemetry.isJackknifed && (
               <>
@@ -609,9 +640,15 @@ export default function App() {
             </div>
             <div>
               <span className="text-slate-400">Doca:</span>{' '}
-              <span className={activeExam.inDockZone ? 'text-emerald-400 font-bold' : 'text-slate-400'}>
-                {activeExam.inDockZone ? 'Na Área da Doca' : 'Em aproximação'}
-              </span>
+              {activeExam.inDockZone ? (
+                <span className="text-emerald-400 font-bold">
+                  {activeExam.dockHoldSec > 0
+                    ? `A alinhar… ${activeExam.dockHoldSec.toFixed(1)}s / 1.5s`
+                    : 'Na Área da Doca'}
+                </span>
+              ) : (
+                <span className="text-slate-400">Em aproximação</span>
+              )}
             </div>
           </div>
 
@@ -626,8 +663,8 @@ export default function App() {
 
       {/* EXAM RESULT POPUP */}
       {activeExam && (activeExam.isPassed || activeExam.isFailed) && (
-        <div className="absolute inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 max-w-md w-full p-6 rounded-xl shadow-2xl text-center">
+        <div className="absolute inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 pointer-events-none">
+          <div className="bg-slate-900 border border-slate-700 max-w-md w-full p-6 rounded-xl shadow-2xl text-center pointer-events-auto">
             {activeExam.isPassed ? (
               <>
                 <div className="w-16 h-16 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-500">
@@ -656,7 +693,7 @@ export default function App() {
 
             <button
               onClick={() => LicenseSystem.getInstance().cancelExam()}
-              className="w-full py-2.5 rounded bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-sm transition"
+              className="w-full py-2.5 rounded bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-sm transition pointer-events-auto"
             >
               Continuar
             </button>
@@ -792,7 +829,7 @@ export default function App() {
 
           {/* 2. SLIDING EXPANDABLE RIGHT FLYOUT: TILE CATALOG */}
           {editorTool === 'paint' && !isPaintingSpawn && isPaletteOpen && (
-            <div className="absolute left-13 sm:left-15 top-14 bottom-4 z-20 w-72 sm:w-84 max-w-[calc(100vw-4.5rem)] h-[calc(100vh-4.5rem)] flex flex-col bg-slate-950/95 border border-amber-500/40 rounded-r-xl shadow-2xl p-3 backdrop-blur-xl animate-in fade-in slide-in-from-left-2 transition-all">
+            <div className="absolute left-13 sm:left-15 top-14 bottom-4 z-20 w-72 sm:w-84 max-w-[calc(100vw-4.5rem)] h-[calc(100vh-4.5rem)] flex flex-col bg-slate-950/95 border border-amber-500/40 rounded-r-xl shadow-2xl p-3 backdrop-blur-xl transition-all">
               {/* Flyout Header */}
               <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-2">
                 <div className="flex items-center gap-1.5">
@@ -810,7 +847,7 @@ export default function App() {
               </div>
 
               {/* Horizontally Scrollable Category Tabs */}
-              <div className="flex gap-1 mb-2 text-[10px] overflow-x-auto pb-1 scrollbar-none">
+              <div className="flex gap-1 mb-2 text-[10px] overflow-x-auto pb-1">
                 {(['all', 'road', 'dock', 'obstacle', 'biome'] as const).map((cat) => (
                   <button
                     key={cat}
@@ -827,7 +864,7 @@ export default function App() {
               </div>
 
               {/* Scrollable (Deslizante) Tile Grid with Graphical Previews */}
-              <div className="flex-1 overflow-y-auto pr-1 grid grid-cols-3 sm:grid-cols-4 gap-2 scrollbar-thin scrollbar-thumb-amber-500/40">
+              <div className="flex-1 overflow-y-auto pr-1 grid grid-cols-3 sm:grid-cols-4 gap-2">
                 {Object.entries(TILE_DEFINITIONS)
                   .filter(([_, def]) => brushCategory === 'all' || def.category === brushCategory)
                   .map(([key, def]) => {

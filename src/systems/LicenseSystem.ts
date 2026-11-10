@@ -41,6 +41,8 @@ export interface ExamStatus {
   jackknifeCount: number;
   inDockZone: boolean;
   dockAlignmentDeg: number;
+  // Seconds held aligned inside the target dock (exam passes at 1.5s)
+  dockHoldSec: number;
   isPassed: boolean;
   isFailed: boolean;
   failReason: string | null;
@@ -58,10 +60,17 @@ export class LicenseSystem {
     jackknifeCount: 0,
     inDockZone: false,
     dockAlignmentDeg: 0,
+    dockHoldSec: 0,
     isPassed: false,
     isFailed: false,
     failReason: null,
   };
+
+  // Continuous time (seconds) the rig has stayed aligned inside the exam's target dock
+  private dockHoldTimer: number = 0;
+
+  // Exam pass requirement: stay aligned inside the dock for this long
+  private static readonly DOCK_HOLD_REQUIRED_SEC = 1.5;
 
   private listeners: Array<() => void> = [];
 
@@ -205,16 +214,21 @@ export class LicenseSystem {
       jackknifeCount: 0,
       inDockZone: false,
       dockAlignmentDeg: 999,
+      dockHoldSec: 0,
       isPassed: false,
       isFailed: false,
       failReason: null,
     };
+    this.dockHoldTimer = 0;
 
     this.notify();
   }
 
   public cancelExam() {
     this.activeExamStatus.active = false;
+    this.activeExamStatus.isPassed = false;
+    this.activeExamStatus.isFailed = false;
+    this.activeExamStatus.failReason = null;
     this.notify();
   }
 
@@ -261,9 +275,17 @@ export class LicenseSystem {
       return;
     }
 
-    // Success condition: in dock with acceptable alignment for 1.5 seconds
+    // Success condition: in dock with acceptable alignment held for 1.5 continuous seconds
     if (inDock && Math.abs(alignmentDeg) <= lic.exam.targetDock.angleToleranceDeg) {
-      this.passExam(lic.id);
+      this.dockHoldTimer += deltaSec;
+      this.activeExamStatus.dockHoldSec = this.dockHoldTimer;
+      if (this.dockHoldTimer >= LicenseSystem.DOCK_HOLD_REQUIRED_SEC) {
+        this.passExam(lic.id);
+        return;
+      }
+    } else {
+      this.dockHoldTimer = 0;
+      this.activeExamStatus.dockHoldSec = 0;
     }
 
     this.notify();

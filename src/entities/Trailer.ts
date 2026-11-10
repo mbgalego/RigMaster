@@ -114,28 +114,30 @@ export class Trailer {
     this.drawTrailer();
   }
 
-  private setupCollisionTracking() {
-    this.scene.matter.world.on('collisionstart', (event: any) => {
-      for (const pair of event.pairs) {
-        if (pair.bodyA === this.body || pair.bodyB === this.body) {
-          const other = pair.bodyA === this.body ? pair.bodyB : pair.bodyA;
-          if (other.label && (other.label.startsWith('truck') || other.label.startsWith('trailer'))) continue;
+  private onCollisionStart = (event: any) => {
+    for (const pair of event.pairs) {
+      if (pair.bodyA === this.body || pair.bodyB === this.body) {
+        const other = pair.bodyA === this.body ? pair.bodyB : pair.bodyA;
+        if (other.label && (other.label.startsWith('truck') || other.label.startsWith('trailer'))) continue;
 
-          this.impactCount++;
-          const impact = Math.hypot(this.body.velocity.x, this.body.velocity.y);
-          this.maxGForce = Math.max(this.maxGForce, impact);
-          if (this.isFragile) {
-            const damage = Math.min(Math.max(impact * 8, 10), 30);
-            this.fragileHealth = Math.max(0, this.fragileHealth - damage);
-          }
+        this.impactCount++;
+        const impact = Math.hypot(this.body.velocity.x, this.body.velocity.y);
+        this.maxGForce = Math.max(this.maxGForce, impact);
+        if (this.isFragile) {
+          const damage = Math.min(Math.max(impact * 8, 10), 30);
+          this.fragileHealth = Math.max(0, this.fragileHealth - damage);
+        }
 
-          // If trailer impacts obstacle, stop truck motion
-          if (this.scene && (this.scene as any).truck) {
-            (this.scene as any).truck.currentSpeed = -(this.scene as any).truck.currentSpeed * 0.15;
-          }
+        // If trailer impacts obstacle, stop truck motion
+        if (this.scene && (this.scene as any).truck) {
+          (this.scene as any).truck.currentSpeed = -(this.scene as any).truck.currentSpeed * 0.15;
         }
       }
-    });
+    }
+  };
+
+  private setupCollisionTracking() {
+    this.scene.matter.world.on('collisionstart', this.onCollisionStart);
   }
 
   /**
@@ -348,6 +350,7 @@ export class Trailer {
   public destroy() {
     this.container.destroy();
     if (this.scene.matter && this.scene.matter.world) {
+      this.scene.matter.world.off('collisionstart', this.onCollisionStart);
       this.scene.matter.world.remove(this.body);
     }
   }
