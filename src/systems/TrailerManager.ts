@@ -190,7 +190,7 @@ export class TrailerManager {
   /** Returns a trailer to the loose pool, frozen in place as a static body. */
   public release(trailer: Trailer) {
     trailer.body.collisionFilter.group = 0;
-    trailer.body.collisionFilter.mask = 0x0003;
+    trailer.body.collisionFilter.mask = 0x0007;
     this.scene.matter.body.setStatic(trailer.body, true);
     if (!this.loose.includes(trailer)) this.loose.push(trailer);
   }
@@ -199,12 +199,17 @@ export class TrailerManager {
   public prepareForCoupling(trailer: Trailer) {
     this.scene.matter.body.setStatic(trailer.body, false);
     trailer.body.collisionFilter.group = -1;
-    trailer.body.collisionFilter.mask = 0x0001;
+    // mask 0x0005 = obstacles (0x0001) + other trailers (0x0004): lets a coupled
+    // lead physically touch a parked pup for the contact-gated pup coupling.
+    // The truck (cat 0x0002) still never collides with the coupled trailer.
+    trailer.body.collisionFilter.mask = 0x0005;
   }
 
   private applyParkedFilter(t: Trailer) {
     t.body.collisionFilter.group = 0;
-    t.body.collisionFilter.mask = 0x0003;
+    // mask 0x0007 = obstacles + tractor (0x0002) + other trailers: parked
+    // trailers can be pushed against and physically touched by the rig.
+    t.body.collisionFilter.mask = 0x0007;
     this.scene.matter.body.setStatic(t.body, true);
   }
 

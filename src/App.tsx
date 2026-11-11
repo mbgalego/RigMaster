@@ -91,19 +91,20 @@ export default function App() {
     fragileHealth: 100,
     weather: 'clear',
     activeLicenseExam: null,
-    coupling: { prompt: null, blocked: null, coupledName: null, notice: null, noticeSeq: 0 },
+    coupling: { prompt: null, blocked: null, coupledName: null, notice: null, noticeKind: 'info', noticeSeq: 0 },
   });
 
   // Toast notifications (coupling feedback) — triggered by noticeSeq changes
-  const [toasts, setToasts] = useState<Array<{ id: number; text: string }>>([]);
+  const [toasts, setToasts] = useState<Array<{ id: number; text: string; kind: string }>>([]);
   const toastIdRef = useRef(0);
   const noticeSeq = telemetry.coupling?.noticeSeq ?? 0;
 
   useEffect(() => {
     const n = telemetry.coupling?.notice;
     if (!n) return;
+    const kind = telemetry.coupling?.noticeKind ?? 'info';
     const id = ++toastIdRef.current;
-    setToasts((t) => [...t.slice(-2), { id, text: n }]);
+    setToasts((t) => [...t.slice(-2), { id, text: n, kind }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2800);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [noticeSeq]);
@@ -1245,31 +1246,21 @@ export default function App() {
         </div>
       )}
 
-      {/* TRAILER COUPLING PROMPT (bottom-center, above touch controls) */}
-      {!isEditorMode && !modalOpen && telemetry.coupling && (telemetry.coupling.prompt || telemetry.coupling.blocked) && (
-        <div className="absolute inset-x-0 bottom-32 sm:bottom-36 z-30 flex justify-center pointer-events-none px-4">
-          <div className="flex items-center gap-2 px-4 py-2 rounded-lg border backdrop-blur-md shadow-lg max-w-md">
-            {telemetry.coupling.blocked ? (
-              <span className="text-xs font-bold text-amber-300 border-amber-500/50 bg-amber-950/70 px-3 py-1.5 rounded-md">
-                🔒 {telemetry.coupling.blocked}
-              </span>
-            ) : (
-              <span className="text-xs font-bold text-white bg-slate-900/70 border border-cyan-500/50 px-3 py-1.5 rounded-md">
-                🔗 {telemetry.coupling.prompt}
-              </span>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* TOASTS (coupling feedback notifications) */}
+      {/* TOASTS (coupling feedback notifications — only on coupling attempts) */}
       {!isEditorMode && (
         <div className="absolute top-14 inset-x-0 z-40 flex flex-col items-center gap-2 pointer-events-none px-4">
           {toasts.map((t) => (
             <div
               key={t.id}
-              className="px-4 py-2 rounded-lg bg-slate-900/90 border border-cyan-500/50 shadow-lg shadow-cyan-500/20 text-xs font-bold text-cyan-100"
+              className={`px-4 py-2 rounded-lg border shadow-lg text-xs font-bold ${
+                t.kind === 'blocked'
+                  ? 'bg-amber-950/90 border-amber-500/60 text-amber-200 shadow-amber-500/20'
+                  : t.kind === 'success'
+                    ? 'bg-emerald-950/90 border-emerald-500/60 text-emerald-200 shadow-emerald-500/20'
+                    : 'bg-slate-900/90 border-cyan-500/50 text-cyan-100 shadow-cyan-500/20'
+              }`}
             >
+              {t.kind === 'blocked' ? '🔒 ' : t.kind === 'success' ? '✅ ' : 'ℹ️ '}
               {t.text}
             </div>
           ))}

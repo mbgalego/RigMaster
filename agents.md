@@ -39,7 +39,15 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.7.1** (Versão Atual)
+### **v1.7.2** (Versão Atual)
+- **Nova Mecânica de Engate por Contacto Físico (sem "saltos"):**
+  - O botão 🔗 só fica ativo quando o trator está **fisicamente em contacto** com a placa de engate do atrelado (recuou sobre ele). Novo rastreio de contacto corpo-a-corpo no `MainScene` via `collisionstart/collisionend` (pares com labels `truck*`/`trailer*`).
+  - O engate já **não teleporta** o atrelado: ele fica exatamente onde foi engatado e o ajuste suave do kingpin (correção longitudinal/lateral por frame) assenta-o com um movimento de apenas alguns pixeis — o "clunk" físico do engate. Novo `settleTrailerOntoHitch` garante que o erro fica dentro da banda suave (≤25px) com um único ajuste mínimo, evitando o snap de descontinuidade do `followHitch`.
+  - Máscaras: atrelados estacionados `0x0003→0x0007` (colidem também com outros atrelados) e atrelado acoplado `0x0001→0x0005` — permite contacto físico dianteiro↔pup no bitrem (o pup também exige contacto); o trator continua a nunca colidir com o atrelado acoplado.
+- **Feedback Apenas por Toasts, e Só em Tentativa:**
+  - Removido o banner inferior persistente. Notificações aparecem **apenas no topo** (toasts empilháveis, auto-dismiss 2,8s) quando o jogador **tenta** engatar: sucesso (verde ✅), bloqueado por licença (âmbar 🔒), ou orientação (ciano ℹ️ — "Recue até encostar o pino…", "Pare totalmente…"). Sem tentativa, nenhuma notificação — o estado lê-se só na cor do botão 🔗 (ciano pulsante / vermelho / âmbar).
+
+### **v1.7.1**
 - **Correção: Atrelado Estacionado Desenhado ao Contrário:**
   - Causa: o corpo Matter nascia com ângulo π (nariz a sul) mas o container de desenho ficava com rotação 0 — visualmente o atrelado mostrava o nariz a norte e as rodas para o parque, e o engate parecia acontecer **do lado errado** (na traseira com rodas). `TrailerManager.spawnAt` sincroniza agora o container via `setPosition(x, y, π)` após a criação (lead e pup) — o nariz desenhado coincide com o kingpin físico.
 - **HUD: Toasters + Botão Ícone junto ao (P):**

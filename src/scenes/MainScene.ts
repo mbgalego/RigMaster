@@ -28,6 +28,11 @@ export class MainScene extends Phaser.Scene {
   private couplingNotice: string | null = null;
   private couplingNoticeUntil: number = 0;
   private couplingNoticeSeq: number = 0;
+  private couplingNoticeKind: 'info' | 'blocked' | 'success' = 'info';
+
+  // Physical rig-vs-rig contact pairs (body-id keys) — the tractor must back
+  // INTO the trailer's kingpin plate before the coupling button becomes live.
+  private contactPairs: Set<string> = new Set();
 
   // Environmental layers
   private weatherGraphics!: Phaser.GameObjects.Graphics;
@@ -71,9 +76,10 @@ export class MainScene extends Phaser.Scene {
     activeLicenseExam: any;
     coupling: {
       prompt: string | null;       // contextual action ("Acoplar: X (C)")
-      blocked: string | null;      // candidate nearby but its license is locked
+      blocked: string | null;      // candidate in contact but its license is locked
       coupledName: string | null;  // cargo of the trailer currently coupled
       notice: string | null;       // transient toast from coupling actions
+      noticeKind: 'info' | 'blocked' | 'success'; // toast styling
       noticeSeq: number;           // increments on every notice (toast trigger)
     };
   } = {
@@ -90,7 +96,7 @@ export class MainScene extends Phaser.Scene {
     fragileHealth: 100,
     weather: 'clear',
     activeLicenseExam: null,
-    coupling: { prompt: null, blocked: null, coupledName: null, notice: null, noticeSeq: 0 },
+    coupling: { prompt: null, blocked: null, coupledName: null, notice: null, noticeKind: 'info', noticeSeq: 0 },
   };
 
   constructor() {
@@ -108,6 +114,15 @@ export class MainScene extends Phaser.Scene {
     const worldW = this.tilemapManager.cols * this.tilemapManager.tileSize;
     const worldH = this.tilemapManager.rows * this.tilemapManager.tileSize;
     this.matter.world.setBounds(0, 0, worldW, worldH, 64, true, true, true, true);
+
+    // Track physical contact between rig bodies (truck/trailer labels only) —
+    // used by the coupling mechanic (tractor must back into the kingpin plate)
+    this.matter.world.on('collisionstart', (ev: any) => {
+      for (const pair of ev.pairs) this.trackContactPair(pair, true);
+    });
+    this.matter.world.on('collisionend', (ev: any) => {
+      for (const pair of ev.pairs) this.trackContactPair(pair, false);
+    });
 
     // 2. Spawn Vehicle Rig
     this.spawnVehicleRig(this.currentVehicleConfig);
@@ -323,10 +338,53 @@ export class MainScene extends Phaser.Scene {
     };
   }
 
-  private setCouplingNotice(msg: string) {
+  private setCouplingNotice(msg: string, kind: 'info' | 'blocked' | 'success' = 'info') {
     this.couplingNotice = msg;
+    this.couplingNoticeKind = kind;
     this.couplingNoticeSeq++;
     this.couplingNoticeUntil = this.time.now + 2600;
+  }
+
+  // --- Physical rig contact tracking -------------------------------------
+
+  private static isRigLabel(label?: string): boolean {
+    return !!label && (label.startsWith('truck') || label.startsWith('trailer'));
+  }
+
+  private trackContactPair(pair: any, started: boolean) {
+    const a = pair?.bodyA;
+    const b = pair?.bodyB;
+    if (!MainScene.isRigLabel(a?.label) || !MainScene.isRigLabel(b?.label)) return;
+    const key = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`;
+    if (started) this.contactPairs.add(key);
+    else this.contactPairs.delete(key);
+  }
+
+  private hasContact(a: MatterJS.BodyType, b: MatterJS.BodyType): boolean {
+    const key = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`;
+    return this.contactPairs.has(key);
+  }
+
+  /**
+   * Brings the kingpin error into the gentle-correction band (≤25px) with a one-time
+   * nudge of a few pixels, so followHitch settles the trailer smoothly instead of
+   * triggering its >25px discontinuity snap. The trailer keeps its current position.
+   */
+  private settleTrailerOntoHitch(t: Trailer, hitch: { x: number; y: number }) {
+    const a = t.body.angle;
+    const pinX = t.body.position.x + Math.sin(a) * t.kingpinDist;
+    const pinY = t.body.position.y - Math.cos(a) * t.kingpinDist;
+    const errX = hitch.x - pinX;
+    const errY = hitch.y - pinY;
+    const d = Math.hypot(errX, errY);
+    if (d > 25) {
+      const f = (d - 25) / d;
+      this.matter.body.setPosition(t.body, {
+        x: t.body.position.x + errX * f,
+        y: t.body.position.y + errY * f,
+      });
+      t.container.setPosition(t.body.position.x, t.body.position.y);
+    }
   }
 
   /**
@@ -346,7 +404,7 @@ export class MainScene extends Phaser.Scene {
         return;
       }
       this.decoupleTrailer(true);
-      this.setCouplingNotice('Bitrem traseiro desacoplado');
+      this.setCouplingNotice('Bitrem traseiro desacoplado', 'success');
       return;
     }
 
@@ -356,12 +414,16 @@ export class MainScene extends Phaser.Scene {
       if (this.trailer.type === 'bitrem_lead') {
         const cand = mgr.findCouplablePup(this.trailer);
         if (cand) {
+          if (!this.hasContact(this.trailer.body, cand.trailer.body)) {
+            this.setCouplingNotice('Recue o bitrem dianteiro até tocar o pino do traseiro');
+            return;
+          }
           if (!stopped) {
             this.setCouplingNotice('Pare totalmente para acoplar o bitrem traseiro');
             return;
           }
           if (!this.licenseSystem.isUnlocked(TRAILER_TYPE_TO_LICENSE[cand.trailer.type])) {
-            this.setCouplingNotice(`Requer licença ${TRAILER_TYPE_TO_LICENSE[cand.trailer.type]}`);
+            this.setCouplingNotice(`Requer licença ${TRAILER_TYPE_TO_LICENSE[cand.trailer.type]}`, 'blocked');
             return;
           }
           this.couplePup(cand);
@@ -373,15 +435,20 @@ export class MainScene extends Phaser.Scene {
         return;
       }
       this.decoupleTrailer(false);
-      this.setCouplingNotice('Atrelado desacoplado');
+      this.setCouplingNotice('Atrelado desacoplado', 'success');
       return;
     }
 
-    // 3. Solo tractor -> couple the nearest parked trailer (pups only go behind a lead)
+    // 3. Solo tractor -> couple the nearest parked trailer (pups only go behind a lead).
+    // Physical gate: the tractor must be in contact with the trailer's kingpin plate.
     const hitch = this.getTruckHitch();
     const cand = mgr.findCouplable(hitch.x, hitch.y, this.truck.body.angle, 85, 28, ['bitrem_pup']);
     if (!cand) {
       this.setCouplingNotice('Nenhum atrelado alinhado — recue até à frente dele');
+      return;
+    }
+    if (!this.hasContact(this.truck.body, cand.trailer.body)) {
+      this.setCouplingNotice('Recue até encostar o pino de engate ao atrelado');
       return;
     }
     if (!stopped) {
@@ -390,7 +457,7 @@ export class MainScene extends Phaser.Scene {
     }
     const lic = TRAILER_TYPE_TO_LICENSE[cand.trailer.type];
     if (!this.licenseSystem.isUnlocked(lic)) {
-      this.setCouplingNotice(`${cand.trailer.cargoName} — requer licença ${lic}`);
+      this.setCouplingNotice(`${cand.trailer.cargoName} — requer licença ${lic}`, 'blocked');
       return;
     }
     this.coupleTrailer(cand);
@@ -414,12 +481,10 @@ export class MainScene extends Phaser.Scene {
     mgr.prepareForCoupling(t);
     mgr.adopt(t);
 
-    const angle = this.truck.body.angle;
-    const hitch = this.getTruckHitch();
-    const bx = -Math.sin(angle);
-    const by = Math.cos(angle);
-    // Park the trailer exactly one kingpin distance behind the hitch
-    t.setPosition(hitch.x + bx * t.kingpinDist, hitch.y + by * t.kingpinDist, angle);
+    // No teleport: the trailer stays exactly where the tractor engaged it. The
+    // kingpin's gentle per-frame correction settles it onto the fifth wheel with
+    // only a slight movement — the physical "clunk" of engaging.
+    this.settleTrailerOntoHitch(t, this.getTruckHitch());
 
     let trailerOffY: number;
     let jackknife: number;
@@ -448,7 +513,7 @@ export class MainScene extends Phaser.Scene {
       t.type === 'bitrem_lead' ? 'bitrem' :
       t.type === 'fragile_glass' ? 'fragile_glass' : 'standard';
 
-    this.setCouplingNotice(`Acoplado: ${t.cargoName}`);
+    this.setCouplingNotice(`Acoplado: ${t.cargoName}`, 'success');
   }
 
   /** Attaches a pup to the rear fifth wheel of the coupled bitrem lead. */
@@ -460,11 +525,8 @@ export class MainScene extends Phaser.Scene {
     mgr.prepareForCoupling(t);
     mgr.adopt(t);
 
-    const rear = this.getLeadRearHitch(lead);
-    const a = lead.body.angle;
-    const bx = -Math.sin(a);
-    const by = Math.cos(a);
-    t.setPosition(rear.x + bx * t.kingpinDist, rear.y + by * t.kingpinDist, a);
+    // No teleport: same gentle settle as the main coupling
+    this.settleTrailerOntoHitch(t, this.getLeadRearHitch(lead));
 
     this.pupTrailer = t;
     this.pupKingpin = new Kingpin(this, lead.body, t.body, t.length, {
@@ -474,7 +536,7 @@ export class MainScene extends Phaser.Scene {
       mechanicalLockDeg: 95,
     });
 
-    this.setCouplingNotice(`Acoplado: ${t.cargoName}`);
+    this.setCouplingNotice(`Acoplado: ${t.cargoName}`, 'success');
   }
 
   /**
@@ -517,6 +579,8 @@ export class MainScene extends Phaser.Scene {
     const mgr = TrailerManager.getInstance(this);
     const stopped = Math.abs(this.truck.speedKmh) < 3;
     const notice = time < this.couplingNoticeUntil ? this.couplingNotice : null;
+    const noticeKind = this.couplingNoticeKind;
+    const none = { prompt: null, blocked: null, coupledName: null, notice, noticeKind, noticeSeq: this.couplingNoticeSeq };
 
     if (this.pupTrailer) {
       return {
@@ -524,6 +588,7 @@ export class MainScene extends Phaser.Scene {
         blocked: null,
         coupledName: this.pupTrailer.cargoName,
         notice,
+        noticeKind,
         noticeSeq: this.couplingNoticeSeq,
       };
     }
@@ -531,12 +596,14 @@ export class MainScene extends Phaser.Scene {
     if (this.trailer) {
       if (this.trailer.type === 'bitrem_lead' && !this.pupTrailer) {
         const cand = mgr.findCouplablePup(this.trailer);
-        if (cand) {
+        // Live only on physical contact between the lead and the parked pup
+        if (cand && this.hasContact(this.trailer.body, cand.trailer.body)) {
           return {
             prompt: stopped ? `Acoplar: ${cand.trailer.cargoName} (C)` : `Acoplar: ${cand.trailer.cargoName} — pare primeiro`,
             blocked: null,
             coupledName: this.trailer.cargoName,
             notice,
+            noticeKind,
             noticeSeq: this.couplingNoticeSeq,
           };
         }
@@ -546,14 +613,17 @@ export class MainScene extends Phaser.Scene {
         blocked: null,
         coupledName: this.trailer.cargoName,
         notice,
+        noticeKind,
         noticeSeq: this.couplingNoticeSeq,
       };
     }
 
+    // Solo tractor: the button only goes live when the tractor is physically
+    // touching the trailer's kingpin plate (backed into it, roughly aligned).
     const hitch = this.getTruckHitch();
     const cand = mgr.findCouplable(hitch.x, hitch.y, this.truck.body.angle, 85, 28, ['bitrem_pup']);
-    if (!cand) {
-      return { prompt: null, blocked: null, coupledName: null, notice, noticeSeq: this.couplingNoticeSeq };
+    if (!cand || !this.hasContact(this.truck.body, cand.trailer.body)) {
+      return none;
     }
     const lic = TRAILER_TYPE_TO_LICENSE[cand.trailer.type];
     if (!this.licenseSystem.isUnlocked(lic)) {
@@ -562,6 +632,7 @@ export class MainScene extends Phaser.Scene {
         blocked: `${cand.trailer.cargoName} — requer licença ${lic}`,
         coupledName: null,
         notice,
+        noticeKind,
         noticeSeq: this.couplingNoticeSeq,
       };
     }
@@ -570,6 +641,7 @@ export class MainScene extends Phaser.Scene {
       blocked: null,
       coupledName: null,
       notice,
+      noticeKind,
       noticeSeq: this.couplingNoticeSeq,
     };
   }
