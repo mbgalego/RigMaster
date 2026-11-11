@@ -39,7 +39,14 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.7.7** (Versão Atual)
+### **v1.7.8** (Versão Atual)
+- **"Dominar Todos os Hubs" passou a ter efeito visível:**
+  - Diagnóstico: o botão funcionava (barras a 100%, contratos concluídos, estado gravado) mas **nada mudava no jogo** — os "sinais néon" prometidos no texto do modal nunca tinham sido implementados (`neonColorHex` era dados mortos) e os tiles desbloqueados só aparecem no editor.
+  - Novo **`drawHubSigns`** no MainScene: cada hub dominado a 100% ergue o seu **sinal néon** junto ao bioma no mapa procedural (PORTO/ESTALEIRO/INDUSTRIAL/HISTÓRICO) — poste + painel com barras néon na cor do hub + halo pulsante no solo + rótulo. Hubs não dominados não têm sinal; dominar faz os sinais aparecerem de imediato.
+  - Clicar em "Dominar Todos os Hubs" mostra agora um **toast verde** de confirmação.
+- Nota: os sinais existem no mapa "Região Metropolitana Procedural" (o único com os 4 biomas de hub); noutros mapas ficam sem sinais.
+
+### **v1.7.7**
 - **Auditoria de Desbloqueio (Licenças + Hubs) — correcções:**
   - **Bug crítico (exames a falhar à nascença):** `updateExam` recebia os contadores de colisões **acumulados de vida** (o corpo do trator é reutilizado entre resets e nunca zera `collisionCount`) — bastava uma colisão antes do exame para o C+E/X (limite 0) falharem no primeiro frame com "Limite de colisões ultrapassado". Agora o `syncExamTarget` captura uma **baseline** no arranque do exame e só as colisões **durante** o exame contam.
   - **Ré do exame H passou a ser imposta:** `requireReverse` era configuração morta. `updateExam` recebe `isReversing`, grava `reversedDuringExam` e a doca só conta o tempo de 1.5s se a manobra de ré já tiver ocorrido (o exame H exige entrada em ré).

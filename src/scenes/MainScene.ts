@@ -49,6 +49,19 @@ export class MainScene extends Phaser.Scene {
   // Road-snapped world position of the current exam dock (the real pass target)
   private examDockWorld: LicenseExam['targetDock'] | null = null;
 
+  // Regional hub neon signs: each hub dominated at 100% raises its own glowing
+  // sign on the map (the visible reward promised in the Hubs modal).
+  private hubSignsGraphics: Phaser.GameObjects.Graphics | null = null;
+  private hubSignTexts: Phaser.GameObjects.Text[] = [];
+  // Static sign placements matching initDefaultGrid()'s hub biomes (tile coords)
+  private static readonly HUB_SIGN_TILES: Array<{ id: string; label: string; c: number; r: number }> = [
+    { id: 'harbor', label: 'PORTO', c: 10, r: 4 },
+    { id: 'shipyard', label: 'ESTALEIRO', c: 90, r: 6 },
+    { id: 'industrial', label: 'INDUSTRIAL', c: 94, r: 68 },
+    { id: 'historic', label: 'HISTÓRICO', c: 8, r: 72 },
+  ];
+  private static readonly PROCEDURAL_MAP_NAME = 'Região Metropolitana Procedural';
+
   // Minimap (full-map HUD overview with live camera viewport & truck marker)
   private minimapImage: Phaser.GameObjects.Image | null = null;
   private minimapOverlay: Phaser.GameObjects.Graphics | null = null;
@@ -173,6 +186,66 @@ export class MainScene extends Phaser.Scene {
       const grip = this.garageSystem.getSurfaceGrip();
       this.truck.setSurfaceGrip(grip);
     });
+  }
+
+  /**
+   * Neon hub signs: each regional hub dominated at 100% raises its own glowing
+   * sign near its biome on the procedural map. Drawn every frame (pulsing halo);
+   * non-dominant hubs simply have no sign.
+   */
+  private drawHubSigns(time: number) {
+    if (!this.hubSignsGraphics) {
+      this.hubSignsGraphics = this.add.graphics().setDepth(13);
+      this.hubSignTexts = MainScene.HUB_SIGN_TILES.map((s) =>
+        this.add.text(0, 0, s.label, {
+          fontFamily: 'monospace',
+          fontSize: '13px',
+          color: '#ffffff',
+          stroke: '#000000',
+          strokeThickness: 3,
+        }).setOrigin(0.5).setDepth(13).setVisible(false)
+      );
+    }
+
+    const onProceduralMap = this.tilemapManager.mapName === MainScene.PROCEDURAL_MAP_NAME;
+    const ts = this.tilemapManager.tileSize;
+    const g = this.hubSignsGraphics;
+    g.clear();
+
+    const pulse = 0.5 + 0.5 * Math.sin(time / 320);
+    for (let i = 0; i < MainScene.HUB_SIGN_TILES.length; i++) {
+      const spot = MainScene.HUB_SIGN_TILES[i];
+      const hub = this.garageSystem.getHub(spot.id as any);
+      const dominant = onProceduralMap && !!hub && hub.isDominant;
+      const text = this.hubSignTexts[i];
+      text.setVisible(dominant);
+
+      if (!dominant) continue;
+      const x = spot.c * ts + ts / 2;
+      const y = spot.r * ts + ts / 2;
+      const col = hub!.neonColorHex;
+
+      // Pulsing ground halo
+      g.fillStyle(col, 0.08 + 0.06 * pulse);
+      g.fillCircle(x, y + 18, 46 + 6 * pulse);
+      // Pole
+      g.fillStyle(0x0f172a, 1);
+      g.fillRect(x - 3, y - 12, 6, 52);
+      // Panel
+      g.fillStyle(0x020617, 0.92);
+      g.fillRoundedRect(x - 34, y - 66, 68, 54, 8);
+      g.lineStyle(2, col, 0.85 + 0.15 * pulse);
+      g.strokeRoundedRect(x - 34, y - 66, 68, 54, 8);
+      // Neon glyph bars
+      g.fillStyle(col, 0.7 + 0.3 * pulse);
+      g.fillRect(x - 18, y - 52, 36, 4);
+      g.fillRect(x - 18, y - 42, 24, 4);
+      g.fillRect(x - 18, y - 32, 12, 4);
+
+      text.setPosition(x, y - 94);
+      text.setColor('#' + col.toString(16).padStart(6, '0'));
+      text.setAlpha(0.75 + 0.25 * pulse);
+    }
   }
 
   public spawnVehicleRig(configType: 'solo' | 'standard' | 'long_cargo' | 'bitrem' | 'fragile_glass') {
@@ -642,6 +715,9 @@ export class MainScene extends Phaser.Scene {
 
     // Keep exam target dock (marker + painted dock tile) in sync with the active exam
     this.syncExamTarget(time);
+
+    // Neon hub signs for dominated regional hubs
+    this.drawHubSigns(time);
 
     // Stream physics around the player: materialize static tile bodies & traffic light
     // bodies only near the truck — everything else stays as pure grid data.

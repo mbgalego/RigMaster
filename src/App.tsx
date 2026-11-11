@@ -1185,7 +1185,12 @@ export default function App() {
             <div className="mt-4 pt-3 border-t border-slate-800 flex justify-between items-center text-xs">
               <span className="text-slate-400">Dominar a 100% ativa sinais néon no mapa e liberta peças no Tilemap.</span>
               <button
-                onClick={() => GarageSystem.getInstance().dominateAllHubs()}
+                onClick={() => {
+                  GarageSystem.getInstance().dominateAllHubs();
+                  const id = ++toastIdRef.current;
+                  setToasts((t) => [...t.slice(-2), { id, text: 'Todos os hubs dominados — sinais néon, biomas e meteorologia desbloqueados', kind: 'success' }]);
+                  setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2800);
+                }}
                 className="text-amber-400 hover:underline"
               >
                 Dominar Todos os Hubs (100% Instantâneo)
