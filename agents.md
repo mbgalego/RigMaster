@@ -39,7 +39,12 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.7.3** (Versão Atual)
+### **v1.7.4** (Versão Atual)
+- **Hitbox por Zona: Colisão Restaurada com Corredor de Passagem no Kingpin:**
+  - Atrelados livres voltam a **colidir com o trator** em todo o corpo (`0x0007`): já não é possível passar por baixo do atrelado em qualquer lado. A exceção é apenas a **zona do kingpin**: `updateTrailerPassUnder` deteta a manobra de recua (engate a ≤70px do pino, ângulos ±40°, apenas nos pares válidos — trator→lead em solo; lead→pup no bitrem) e reduz a máscara do atrelado para `0x0001` (só obstáculos) enquanto a traseira desliza por baixo até ao pino.
+  - Estado com **histerese**: o corredor só fecha quando os AABB deixam de se sobrepor — a máscara nunca é reposta a meio de uma penetração (sem empurrões). Obstáculos e outros atrelados continuam a colidir com o atrelado em todas as zonas; `adopt` limpa o estado ao acoplar.
+
+### **v1.7.3**
 - **Acoplamento Automático por Posição (sem botão):**
   - Acoplar deixa de exigir clique: `updateAutoCoupling` corre a cada frame e, quando o engate do trator fica **na zona do kingpin** (≤30px do pino, ângulos alinhados ±28°), faz as validações habituais — se possível, acopla de imediato com toast verde; se não, envia **um único** toast de erro por entrada na zona (âmbar 🔒 licença em falta, ou ciano ℹ️ "Ralentiza para engatar" acima de 6 km/h). O botão 🔗 passa a servir **só para desacoplar** (vermelho quando parado; âmbar passante quando bloqueado) — tecla C idem.
 - **Hitboxes: Traseira Passa por Baixo do Atrelado:**

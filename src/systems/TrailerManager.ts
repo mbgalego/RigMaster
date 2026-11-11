@@ -44,6 +44,11 @@ export class TrailerManager {
   public scene: Phaser.Scene;
   /** All uncoupled trailers on the map (parked or dropped anywhere) */
   public loose: Trailer[] = [];
+  /**
+   * Free trailers currently in "pass-under" state: the tractor is backing into
+   * their kingpin zone, so their hitbox drops the tractor bit (only there).
+   */
+  public passUnder: Set<Trailer> = new Set();
   private tileSize: number = 128;
 
   constructor(scene: Phaser.Scene) {
@@ -185,12 +190,13 @@ export class TrailerManager {
   /** Removes a trailer from the loose pool (it is now coupled to the rig). */
   public adopt(trailer: Trailer) {
     this.loose = this.loose.filter((t) => t !== trailer);
+    this.passUnder.delete(trailer);
   }
 
   /** Returns a trailer to the loose pool, frozen in place as a static body. */
   public release(trailer: Trailer) {
     trailer.body.collisionFilter.group = 0;
-    trailer.body.collisionFilter.mask = 0x0005;
+    trailer.body.collisionFilter.mask = 0x0007;
     this.scene.matter.body.setStatic(trailer.body, true);
     if (!this.loose.includes(trailer)) this.loose.push(trailer);
   }
@@ -206,15 +212,16 @@ export class TrailerManager {
 
   private applyParkedFilter(t: Trailer) {
     t.body.collisionFilter.group = 0;
-    // mask 0x0005 = obstacles + other trailers, WITHOUT the truck bit: the
-    // tractor's rear must be able to slide UNDER the trailer to reach the
-    // kingpin plate (pass-through coupling zone).
-    t.body.collisionFilter.mask = 0x0005;
+    // mask 0x0007 = obstacles + tractor (0x0002) + other trailers. Free trailers
+    // block the tractor normally; updateTrailerPassUnder drops the tractor bit
+    // (0x0001) only while the tractor backs into the kingpin zone.
+    t.body.collisionFilter.mask = 0x0007;
     this.scene.matter.body.setStatic(t.body, true);
   }
 
   public destroyAll() {
     for (const t of this.loose) t.destroy();
     this.loose = [];
+    this.passUnder.clear();
   }
 }
