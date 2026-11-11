@@ -41,6 +41,11 @@ export class MainScene extends Phaser.Scene {
   private examTargetMarker: Phaser.GameObjects.Graphics | null = null;
   private examTargetLabel: Phaser.GameObjects.Text | null = null;
   private preparedExamId: LicenseId | null = null;
+  // Cumulative collision counters (truck + trailer) at exam start: updateExam
+  // must count only collisions that happen DURING the exam, so the counters'
+  // pre-exam lifetime value is subtracted (the truck body is reused across
+  // resets and keeps its history).
+  private examCollisionBaseline: number = 0;
   // Road-snapped world position of the current exam dock (the real pass target)
   private examDockWorld: LicenseExam['targetDock'] | null = null;
 
@@ -703,11 +708,12 @@ export class MainScene extends Phaser.Scene {
       if (activeExam.active) {
         this.licenseSystem.updateExam(
           dt,
-          this.truck.collisionCount + (this.trailer?.impactCount || 0),
+          Math.max(0, this.truck.collisionCount + (this.trailer?.impactCount || 0) - this.examCollisionBaseline),
           artTelemetry.isJackknifed,
           inDock.inZone,
           inDock.alignmentDeg,
-          this.trailer?.fragileHealth || 100
+          this.trailer?.fragileHealth || 100,
+          this.truck.isReversing
         );
       }
 
@@ -791,6 +797,7 @@ export class MainScene extends Phaser.Scene {
 
       if (this.preparedExamId !== exam.licenseId) {
         this.preparedExamId = exam.licenseId;
+        this.examCollisionBaseline = this.truck.collisionCount + (this.trailer?.impactCount || 0);
         this.prepareExamTargetDock(lic.exam.targetDock);
       }
       if (this.examDockWorld) {

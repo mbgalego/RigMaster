@@ -254,9 +254,10 @@ export default function App() {
     }
   };
 
-  // Weather Modifier
+  // Weather Modifier (gated by hub dominance)
   const handleSetWeather = (weather: WeatherModifier) => {
     const garSys = GarageSystem.getInstance();
+    if (!garSys.getUnlockedModifiers().includes(weather)) return;
     garSys.setActiveModifier(weather);
   };
 
@@ -1073,19 +1074,27 @@ export default function App() {
                 <div className="text-[11px] text-slate-400">Ativa condições meteorológicas desbloqueadas pelos hubs dominados.</div>
               </div>
               <div className="flex items-center gap-1.5">
-                {(['clear', 'rain', 'fog', 'night'] as const).map((weather) => (
-                  <button
-                    key={weather}
-                    onClick={() => handleSetWeather(weather)}
-                    className={`px-3 py-1 rounded text-xs font-semibold capitalize transition ${
-                      activeWeather === weather
-                        ? 'bg-cyan-500 text-black font-bold shadow-md shadow-cyan-500/30'
-                        : 'bg-slate-950 text-slate-300 hover:text-white border border-slate-800'
-                    }`}
-                  >
-                    {weather === 'rain' ? 'Chuva / Escorregadio' : weather === 'fog' ? 'Nevoeiro' : weather === 'night' ? 'Noturno' : 'Limpo'}
-                  </button>
-                ))}
+                {(['clear', 'rain', 'fog', 'night'] as const).map((weather) => {
+                  const unlocked = GarageSystem.getInstance().getUnlockedModifiers().includes(weather);
+                  return (
+                    <button
+                      key={weather}
+                      onClick={() => handleSetWeather(weather)}
+                      disabled={!unlocked}
+                      title={unlocked ? undefined : 'Bloqueado: domina o Hub correspondente a 100%'}
+                      className={`px-3 py-1 rounded text-xs font-semibold capitalize transition ${
+                        activeWeather === weather
+                          ? 'bg-cyan-500 text-black font-bold shadow-md shadow-cyan-500/30'
+                          : unlocked
+                            ? 'bg-slate-950 text-slate-300 hover:text-white border border-slate-800'
+                            : 'bg-slate-950 text-slate-600 border border-slate-900 cursor-not-allowed'
+                      }`}
+                    >
+                      {weather === 'rain' ? 'Chuva / Escorregadio' : weather === 'fog' ? 'Nevoeiro' : weather === 'night' ? 'Noturno' : 'Limpo'}
+                      {!unlocked && ' 🔒'}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 

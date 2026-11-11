@@ -43,6 +43,8 @@ export interface ExamStatus {
   dockAlignmentDeg: number;
   // Seconds held aligned inside the target dock (exam passes at 1.5s)
   dockHoldSec: number;
+  // Latched while the rig reverses at least once (H exam: ré obrigatória)
+  reversedDuringExam: boolean;
   isPassed: boolean;
   isFailed: boolean;
   failReason: string | null;
@@ -61,6 +63,7 @@ export class LicenseSystem {
     inDockZone: false,
     dockAlignmentDeg: 0,
     dockHoldSec: 0,
+    reversedDuringExam: false,
     isPassed: false,
     isFailed: false,
     failReason: null,
@@ -215,6 +218,7 @@ export class LicenseSystem {
       inDockZone: false,
       dockAlignmentDeg: 999,
       dockHoldSec: 0,
+      reversedDuringExam: false,
       isPassed: false,
       isFailed: false,
       failReason: null,
@@ -242,7 +246,8 @@ export class LicenseSystem {
     isJackknifed: boolean,
     inDock: boolean,
     alignmentDeg: number,
-    fragileHealth: number = 100
+    fragileHealth: number = 100,
+    isReversing: boolean = false
   ) {
     if (!this.activeExamStatus.active || !this.activeExamStatus.licenseId) return;
 
@@ -251,6 +256,7 @@ export class LicenseSystem {
     this.activeExamStatus.remainingTime = Math.max(0, lic.exam.timeLimitSec - this.activeExamStatus.elapsedTime);
     this.activeExamStatus.collisionCount = collisions;
     if (isJackknifed) this.activeExamStatus.jackknifeCount++;
+    if (isReversing) this.activeExamStatus.reversedDuringExam = true;
     this.activeExamStatus.inDockZone = inDock;
     this.activeExamStatus.dockAlignmentDeg = alignmentDeg;
 
@@ -275,8 +281,10 @@ export class LicenseSystem {
       return;
     }
 
-    // Success condition: in dock with acceptable alignment held for 1.5 continuous seconds
-    if (inDock && Math.abs(alignmentDeg) <= lic.exam.targetDock.angleToleranceDeg) {
+    // Success condition: in dock with acceptable alignment held for 1.5 continuous
+    // seconds. The H exam additionally requires the dock to be taken in reverse.
+    const reverseRequirementMet = !lic.exam.requireReverse || this.activeExamStatus.reversedDuringExam;
+    if (inDock && reverseRequirementMet && Math.abs(alignmentDeg) <= lic.exam.targetDock.angleToleranceDeg) {
       this.dockHoldTimer += deltaSec;
       this.activeExamStatus.dockHoldSec = this.dockHoldTimer;
       if (this.dockHoldTimer >= LicenseSystem.DOCK_HOLD_REQUIRED_SEC) {

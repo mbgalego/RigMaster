@@ -39,7 +39,13 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.7.6** (Versão Atual)
+### **v1.7.7** (Versão Atual)
+- **Auditoria de Desbloqueio (Licenças + Hubs) — correcções:**
+  - **Bug crítico (exames a falhar à nascença):** `updateExam` recebia os contadores de colisões **acumulados de vida** (o corpo do trator é reutilizado entre resets e nunca zera `collisionCount`) — bastava uma colisão antes do exame para o C+E/X (limite 0) falharem no primeiro frame com "Limite de colisões ultrapassado". Agora o `syncExamTarget` captura uma **baseline** no arranque do exame e só as colisões **durante** o exame contam.
+  - **Ré do exame H passou a ser imposta:** `requireReverse` era configuração morta. `updateExam` recebe `isReversing`, grava `reversedDuringExam` e a doca só conta o tempo de 1.5s se a manobra de ré já tiver ocorrido (o exame H exige entrada em ré).
+  - **Meteorologia gated pelos hubs:** a barra rápida dos modificadores mostrava os 4 botões sempre activos — Chuva/Nevoeiro/Noturno ficam agora desativados (🔒) sem o hub correspondente dominado; `handleSetWeather` valida contra `getUnlockedModifiers()`.
+
+### **v1.7.6**
 - **Zona Frontal Sólida do Trator (foto-modelo completo):**
   - Novo `frontBody` no trator: cobre o trator **exceto a faixa traseira de 45px** (quinta roda), categoria `0x0020`, colide **apenas com corpos de atrelado**. A cabine já não consegue atravessar a zona frontal do atrelado — a interseção permitida é exactamente **nariz-do-atrelado × faixa-traseira-do-camião** (rectângulos vermelhos da foto de referência), a qualquer ângulo.
   - O proxy é dinâmico e sincronizado a cada frame (`syncFrontBody`); as correcções de resolução de contacto são **transferidas para o corpo principal** (clamp 8px/frame) — a cabine "encosta" fisicamente ao atrelado em vez de atravessá-lo.
