@@ -27,6 +27,12 @@ export class Trailer {
   public rearAxleY: number;
   public rearOverhang: number;
 
+  // Tractor-corridor blocker: static proxy body covering the box EXCEPT the nose
+  // zone — the surface a free trailer uses to block the tractor everywhere but
+  // the kingpin plate (real 5th-wheel geometry: nose plate sits over the bed).
+  public blockerBody: MatterJS.BodyType;
+  public blockerDepth: number;
+
   public isFragile: boolean = false;
   public fragileHealth: number = 100;
   public maxGForce: number = 0;
@@ -97,12 +103,33 @@ export class Trailer {
       label: `trailer_${this.type}`,
       collisionFilter: {
         category: 0x0004,
-        mask: 0x0001,
+        // Obstacles + other trailers, NOT the tractor (cat 0x0002): the nose
+        // (kingpin) zone stays open for the pass-under coupling corridor.
+        mask: 0x0005,
         group: -1,
       },
       render: {
         visible: false,
       },
+    }) as unknown as MatterJS.BodyType;
+
+    // Tractor-corridor blocker: static proxy body covering the box EXCEPT the
+    // nose zone (depth from the nose edge to just past the kingpin seat). The
+    // trailer body itself never collides with the tractor, so without this
+    // proxy the tractor could drive straight through the middle of a free
+    // trailer. While coupled the blocker is switched off (mask 0).
+    this.blockerDepth = this.length / 2 - this.kingpinDist + 30;
+    const bOffX = -Math.sin(spawnAngle) * (this.blockerDepth / 2);
+    const bOffY = Math.cos(spawnAngle) * (this.blockerDepth / 2);
+    this.blockerBody = matter.add.rectangle(spawnX + bOffX, spawnY + bOffY, this.width, this.length - this.blockerDepth, {
+      isStatic: true,
+      label: `trailer_blocker_${this.type}`,
+      collisionFilter: {
+        category: 0x0008,
+        mask: 0x0002,
+        group: 0,
+      },
+      render: { visible: false },
     }) as unknown as MatterJS.BodyType;
 
     this.container = scene.add.container(spawnX, spawnY);
@@ -232,6 +259,7 @@ export class Trailer {
 
     this.container.setPosition(this.body.position.x, this.body.position.y);
     this.container.setRotation(this.body.angle);
+    this.syncBlocker();
     this.drawTrailerLights(isBraking);
   }
 
@@ -361,6 +389,26 @@ export class Trailer {
     this.scene.matter.body.setAngularVelocity(this.body, 0);
     this.container.setPosition(x, y);
     this.container.setRotation(angle);
+    this.syncBlocker();
+  }
+
+  /** Keeps the tractor-corridor blocker aligned with the trailer body. */
+  public syncBlocker() {
+    if (!this.blockerBody) return;
+    const a = this.body.angle;
+    const ox = -Math.sin(a) * (this.blockerDepth / 2);
+    const oy = Math.cos(a) * (this.blockerDepth / 2);
+    this.scene.matter.body.setPosition(this.blockerBody, {
+      x: this.body.position.x + ox,
+      y: this.body.position.y + oy,
+    });
+    this.scene.matter.body.setAngle(this.blockerBody, a);
+  }
+
+  /** Enables/disables the blocker's collision with the tractor (off while coupled). */
+  public setBlockerActive(active: boolean) {
+    if (!this.blockerBody) return;
+    this.blockerBody.collisionFilter.mask = active ? 0x0002 : 0;
   }
 
   public destroy() {
@@ -368,6 +416,7 @@ export class Trailer {
     if (this.scene.matter && this.scene.matter.world) {
       this.scene.matter.world.off('collisionstart', this.onCollisionStart);
       this.scene.matter.world.remove(this.body);
+      this.scene.matter.world.remove(this.blockerBody);
     }
   }
 }

@@ -39,10 +39,15 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.7.4** (Versão Atual)
-- **Hitbox por Zona: Colisão Restaurada com Corredor de Passagem no Kingpin:**
-  - Atrelados livres voltam a **colidir com o trator** em todo o corpo (`0x0007`): já não é possível passar por baixo do atrelado em qualquer lado. A exceção é apenas a **zona do kingpin**: `updateTrailerPassUnder` deteta a manobra de recua (engate a ≤70px do pino, ângulos ±40°, apenas nos pares válidos — trator→lead em solo; lead→pup no bitrem) e reduz a máscara do atrelado para `0x0001` (só obstáculos) enquanto a traseira desliza por baixo até ao pino.
-  - Estado com **histerese**: o corredor só fecha quando os AABB deixam de se sobrepor — a máscara nunca é reposta a meio de uma penetração (sem empurrões). Obstáculos e outros atrelados continuam a colidir com o atrelado em todas as zonas; `adopt` limpa o estado ao acoplar.
+### **v1.7.5** (Versão Atual)
+- **Corredor de Passagem por Zonas Geométricas (corpo-bloqueador):**
+  - Modelo real da quinta roda (foto de referência): a interseção permitida é o rectângulo **nariz-do-atrelado × traseira-do-camião**. O corpo do atrelado deixa de colidir com o trator (máscara `0x0005`) — o corredor fica **sempre aberto no nariz, a qualquer ângulo**, sem toggles de máscara nem histerese (a abordagem v1.7.4 deixava passar a traseira em ângulos raros).
+  - Novo **corpo-bloqueador** (`blockerBody`) por atrelado: rect estático que cobre a caixa **exceto a zona do nariz** (`blockerDepth = nariz−kingpin+30px`), categoria `0x0008`, máscara `0x0002` (só trator) — é ele que bloqueia o trator no meio/traseira do atrelado. Ao acoplar desliga-se (`setBlockerActive(false)`); ao desacoplar religa-se e ressincroniza. A traseira do camião fica ~10px de folga do bloqueador no assentamento completo do pino.
+  - Trator passa a máscara `0x0009` (obstáculos + bloqueadores). Acoplamento do pup: raio de zona alargado de 30→50px (o contacto lead↔pup dá-se a ~43px, acima do corredor possível entre dois corpos completos — acopla no contacto, antes da colisão).
+  - Removidos `updateTrailerPassUnder`/`passUnder` (v1.7.4). Sem estados, sem pops: o bloqueador é sólido desde o spawn.
+
+### **v1.7.4**
+- **Hitbox por Zona (substituída pela v1.7.5):** toggles dinâmicos de máscara por aproximação ao pino — falhava em ângulos raros, deixando a traseira passar por baixo em qualquer zona.
 
 ### **v1.7.3**
 - **Acoplamento Automático por Posição (sem botão):**

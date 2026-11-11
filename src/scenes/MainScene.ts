@@ -389,63 +389,6 @@ export class MainScene extends Phaser.Scene {
   }
 
   /**
-   * Region-aware pass-under: free trailers keep colliding with the tractor
-   * everywhere, EXCEPT while the tractor is backing into their kingpin zone —
-   * then the trailer's hitbox drops the tractor bit (0x0007 -> 0x0001) so the
-   * rear can slide under to the pin. Obstacles and other trailers still collide
-   * with the trailer in every zone. The state latches while the bodies still
-   * overlap (AABB) so the filter is never popped mid-penetration.
-   */
-  private updateTrailerPassUnder() {
-    const mgr = TrailerManager.getInstance(this);
-    const solo = !this.trailer;
-    const isLeadCoupling = !!(this.trailer && this.trailer.type === 'bitrem_lead' && !this.pupTrailer);
-
-    // No coupling possible in this state: restore solid hitboxes
-    if (!solo && !isLeadCoupling) {
-      for (const t of mgr.loose) {
-        mgr.passUnder.delete(t);
-        if (t.body.collisionFilter.mask !== 0x0007) t.body.collisionFilter.mask = 0x0007;
-      }
-      return;
-    }
-
-    // Hitch context: solo tractor couples leads; a coupled bitrem lead couples its pup
-    const host = solo ? this.truck.body : this.trailer!.body;
-    const hitch = solo ? this.getTruckHitch() : this.getLeadRearHitch(this.trailer!);
-    const hostAngle = host.angle;
-
-    for (const t of mgr.loose) {
-      // Only couplable pairings get the pass-under corridor
-      const allowed = solo ? t.type !== 'bitrem_pup' : t.type === 'bitrem_pup';
-      const a = t.body.angle;
-      const pinX = t.body.position.x + Math.sin(a) * t.kingpinDist;
-      const pinY = t.body.position.y - Math.cos(a) * t.kingpinDist;
-      const d = Phaser.Math.Distance.Between(hitch.x, hitch.y, pinX, pinY);
-
-      let diff = a - hostAngle;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      const aligned = Math.abs(Phaser.Math.RadToDeg(diff)) <= 40;
-
-      const inApproach = allowed && d <= 70 && aligned;
-      const overlapping = MainScene.aabbOverlap(host.bounds, t.body.bounds);
-
-      if (inApproach) mgr.passUnder.add(t);
-      else if (!overlapping) mgr.passUnder.delete(t);
-
-      const want = mgr.passUnder.has(t) ? 0x0001 : 0x0007;
-      if (t.body.collisionFilter.mask !== want) {
-        t.body.collisionFilter.mask = want;
-      }
-    }
-  }
-
-  private static aabbOverlap(a: { min: { x: number; y: number }; max: { x: number; y: number } }, b: { min: { x: number; y: number }; max: { x: number; y: number } }): boolean {
-    return a.min.x < b.max.x && a.max.x > b.min.x && a.min.y < b.max.y && a.max.y > b.min.y;
-  }
-
-  /**
    * Automatic fifth-wheel coupling: whenever the tractor's hitch sits in the
    * kingpin zone (close + aligned), the usual validations run — success couples
    * immediately, failure raises exactly one error toast per zone entry.
@@ -462,10 +405,12 @@ export class MainScene extends Phaser.Scene {
     };
     const reset = () => { this.autoCoupleErrorKey = null; };
 
-    // Bitrem: auto-couple the pup onto the lead's rear fifth wheel
+    // Bitrem: auto-couple the pup onto the lead's rear fifth wheel.
+    // Radius 50 > contact distance (~43): couples right at/before the pup's
+    // nose plate, since two full bodies cannot carve a pass-under corridor.
     if (this.trailer) {
       if (this.trailer.type === 'bitrem_lead' && !this.pupTrailer) {
-        const cand = mgr.findCouplablePup(this.trailer, 30, 28);
+        const cand = mgr.findCouplablePup(this.trailer, 50, 28);
         if (!cand) { reset(); return; }
         const key = `pup_${cand.trailer.body.id}`;
         if (!this.licenseSystem.isUnlocked('H')) { fail(key, 'Requer licença H', 'blocked'); return; }
@@ -747,8 +692,7 @@ export class MainScene extends Phaser.Scene {
         this.pupKingpin.renderDebug(pupTelemetry, this.debugMatter);
       }
 
-      // Region-aware pass-under, then automatic fifth-wheel coupling
-      this.updateTrailerPassUnder();
+      // Automatic fifth-wheel coupling (tractor sits in the kingpin zone)
       this.updateAutoCoupling();
 
       // Check Docking Sensor Proximity
