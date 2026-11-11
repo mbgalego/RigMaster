@@ -32,8 +32,10 @@ export class EditorScene extends Phaser.Scene {
   private roadOverlay!: Phaser.GameObjects.Graphics;
   /** Currently selected road (shows handles, reacts to property buttons) */
   public selectedRoad: RoadData | null = null;
-  /** Active grab: a single handle (index) or the whole road (index null = translate) */
-  private roadDrag: { road: RoadData; index: number | null; grabX: number; grabY: number } | null = null;
+  /** Active control point on the selected road (width buttons act on it) */
+  public selectedPointIndex: number | null = null;
+  /** Active grab: a handle (point/width) or the whole road (kind 'road') */
+  private roadDrag: { road: RoadData; kind: 'point' | 'width' | 'road'; index: number | null; grabX: number; grabY: number } | null = null;
   /** Road currently being drawn (click adds points, Enter/double-click finishes) */
   private pendingRoad: { surface: RoadSurface; points: RoadPoint[] } | null = null;
   private pointerWorld: { x: number; y: number } = { x: 0, y: 0 };
@@ -262,6 +264,7 @@ export class EditorScene extends Phaser.Scene {
         if (this.editorTool === 'road') {
           this.pendingRoad = null; // cancel drawing
           this.selectedRoad = null; // deselect
+          this.selectedPointIndex = null;
         }
       });
       this.input.keyboard.on('keydown-BACKSPACE', () => {
@@ -306,24 +309,47 @@ export class EditorScene extends Phaser.Scene {
       return;
     }
 
-    // 1. Grab a control-point handle (nearest within tolerance)
+    // 1. Width handle of the selected road (edits this section's width exactly)
+    if (this.selectedRoad) {
+      const wi = this.roadNetwork.hitTestWidthHandle(this.selectedRoad, x, y, tol);
+      if (wi !== null) {
+        this.selectedPointIndex = wi;
+        this.roadDrag = { road: this.selectedRoad, kind: 'width', index: wi, grabX: x, grabY: y };
+        return;
+      }
+    }
+
+    // 2. Position handle of any road (nearest within tolerance)
     const handle = this.roadNetwork.hitTestHandle(x, y, tol);
     if (handle) {
       this.selectedRoad = handle.road;
-      this.roadDrag = { road: handle.road, index: handle.index, grabX: x, grabY: y };
+      this.selectedPointIndex = handle.index;
+      this.roadDrag = { road: handle.road, kind: 'point', index: handle.index, grabX: x, grabY: y };
       return;
     }
 
-    // 2. Grab a road body → select + drag the whole road
+    // 3. Road body → select; double-click inserts a control point right here
     const body = this.roadNetwork.hitTestRoad(x, y, tol * 0.5);
     if (body) {
+      if (isDouble) {
+        const inserted = this.roadNetwork.insertPoint(x, y);
+        if (inserted) {
+          this.selectedRoad = inserted.road;
+          this.selectedPointIndex = inserted.index;
+        }
+        this.roadDrag = null;
+        return;
+      }
       this.selectedRoad = body;
-      this.roadDrag = { road: body, index: null, grabX: x, grabY: y };
+      this.selectedPointIndex = null;
+      // Drag the whole road from this grab point
+      this.roadDrag = { road: body, kind: 'road', index: null, grabX: x, grabY: y };
       return;
     }
 
-    // 3. Empty ground → start a new road
+    // 4. Empty ground → start a new road
     this.selectedRoad = null;
+    this.selectedPointIndex = null;
     this.pendingRoad = { surface: this.newRoadSurface, points: [{ x: Math.round(x), y: Math.round(y), w: this.newRoadWidth }] };
   }
 
@@ -332,16 +358,25 @@ export class EditorScene extends Phaser.Scene {
     this.pointerWorld = { x: wp.x, y: wp.y };
 
     if (!this.isPointerDown || !this.roadDrag) return;
+    const d = this.roadDrag;
 
-    if (this.roadDrag.index !== null) {
-      this.roadNetwork.movePoint(this.roadDrag.road.id, this.roadDrag.index, Math.round(wp.x), Math.round(wp.y));
+    if (d.kind === 'width' && d.index !== null) {
+      // Width = 2 × distance from the centre point along the perpendicular
+      const p = d.road.points[d.index];
+      if (p) {
+        const nrm = RoadNetwork.pointNormal(d.road, d.index);
+        const proj = Math.abs((wp.x - p.x) * nrm.nx + (wp.y - p.y) * nrm.ny) * 2;
+        this.roadNetwork.setPointWidth(d.road.id, d.index, proj);
+      }
+    } else if (d.kind === 'point' && d.index !== null) {
+      this.roadNetwork.movePoint(d.road.id, d.index, Math.round(wp.x), Math.round(wp.y));
     } else {
-      const dx = Math.round(wp.x - this.roadDrag.grabX);
-      const dy = Math.round(wp.y - this.roadDrag.grabY);
+      const dx = Math.round(wp.x - d.grabX);
+      const dy = Math.round(wp.y - d.grabY);
       if (dx !== 0 || dy !== 0) {
-        this.roadNetwork.translateRoad(this.roadDrag.road.id, dx, dy);
-        this.roadDrag.grabX += dx;
-        this.roadDrag.grabY += dy;
+        this.roadNetwork.translateRoad(d.road.id, dx, dy);
+        d.grabX += dx;
+        d.grabY += dy;
       }
     }
     this.roadDirtySinceRelease = true;
@@ -354,6 +389,7 @@ export class EditorScene extends Phaser.Scene {
       this.selectedRoad = road;
     }
     this.pendingRoad = null;
+    this.selectedPointIndex = null;
     this.mainScene.tilemapManager.mapVersion++;
   }
 
@@ -368,6 +404,7 @@ export class EditorScene extends Phaser.Scene {
     if (!this.selectedRoad) return;
     this.roadNetwork.removeRoad(this.selectedRoad.id);
     this.selectedRoad = null;
+    this.selectedPointIndex = null;
     this.roadDrag = null;
     this.mainScene.tilemapManager.mapVersion++;
   }
@@ -381,9 +418,15 @@ export class EditorScene extends Phaser.Scene {
     }
   }
 
-  /** App toolbar: width −/+ (selected road, or the default for new roads). */
+  /** App toolbar: width −/+ (selected section/point, whole selected road, or new-road default). */
   public nudgeRoadWidth(delta: number) {
-    if (this.selectedRoad) {
+    if (this.selectedRoad && this.selectedPointIndex !== null) {
+      const p = this.selectedRoad.points[this.selectedPointIndex];
+      if (p) {
+        this.roadNetwork.setPointWidth(this.selectedRoad.id, this.selectedPointIndex, p.w + delta);
+        this.mainScene.tilemapManager.mapVersion++;
+      }
+    } else if (this.selectedRoad) {
       this.roadNetwork.nudgeRoadWidth(this.selectedRoad.id, delta);
       this.mainScene.tilemapManager.mapVersion++;
     } else {
@@ -392,11 +435,13 @@ export class EditorScene extends Phaser.Scene {
   }
 
   /** App toolbar polling: current road-tool state for the UI. */
-  public getRoadUIState(): { hasSelection: boolean; surface: RoadSurface; width: number; drawing: boolean } {
+  public getRoadUIState(): { hasSelection: boolean; hasPoint: boolean; surface: RoadSurface; width: number; drawing: boolean } {
+    const selPoint = this.selectedRoad && this.selectedPointIndex !== null ? this.selectedRoad.points[this.selectedPointIndex] : null;
     return {
       hasSelection: !!this.selectedRoad,
+      hasPoint: !!selPoint,
       surface: this.selectedRoad ? this.selectedRoad.surface : this.newRoadSurface,
-      width: this.selectedRoad ? this.selectedRoad.points[0]?.w ?? this.newRoadWidth : this.newRoadWidth,
+      width: selPoint ? selPoint.w : this.selectedRoad ? this.selectedRoad.points[0]?.w ?? this.newRoadWidth : this.newRoadWidth,
       drawing: !!this.pendingRoad,
     };
   }
@@ -428,11 +473,31 @@ export class EditorScene extends Phaser.Scene {
       // Control-point handles (active grab handle in amber)
       const hs = 8 / z;
       road.points.forEach((p, i) => {
-        const active = !!this.roadDrag && this.roadDrag.road === road && this.roadDrag.index === i;
-        g.fillStyle(active ? 0xfacc15 : 0x00f0ff, 0.95);
-        g.fillRect(p.x - hs / 2, p.y - hs / 2, hs, hs);
+        const active = !!this.roadDrag && this.roadDrag.road === road && this.roadDrag.index === i && this.roadDrag.kind === 'point';
+        const isSelPoint = this.selectedPointIndex === i;
+        const size = active || isSelPoint ? hs * 1.35 : hs;
+        g.fillStyle(active || isSelPoint ? 0xfacc15 : 0x00f0ff, 0.95);
+        g.fillRect(p.x - size / 2, p.y - size / 2, size, size);
         g.lineStyle(1.5 / z, 0x0b1220, 1);
-        g.strokeRect(p.x - hs / 2, p.y - hs / 2, hs, hs);
+        g.strokeRect(p.x - size / 2, p.y - size / 2, size, size);
+
+        // Width handle: circle at half-width, perpendicular (drag to resize the section)
+        const wh = RoadNetwork.widthHandlePos(road, i);
+        const rr = 5.5 / z;
+        const wActive = !!this.roadDrag && this.roadDrag.road === road && this.roadDrag.index === i && this.roadDrag.kind === 'width';
+        g.lineStyle(1.5 / z, 0x94a3b8, 0.5);
+        g.beginPath();
+        g.moveTo(p.x, p.y);
+        g.lineTo(wh.x, wh.y);
+        g.strokePath();
+        g.fillStyle(wActive ? 0xfacc15 : 0xf97316, 0.95);
+        g.beginPath();
+        g.arc(wh.x, wh.y, rr, 0, Math.PI * 2);
+        g.fillPath();
+        g.lineStyle(1.5 / z, 0x0b1220, 1);
+        g.beginPath();
+        g.arc(wh.x, wh.y, rr, 0, Math.PI * 2);
+        g.strokePath();
       });
     };
 

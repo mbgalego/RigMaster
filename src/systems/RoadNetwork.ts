@@ -140,6 +140,48 @@ export class RoadNetwork {
     this.rebuildIndex();
   }
 
+  /** Width of a single control point (one "section" of the road) */
+  public setPointWidth(id: string, index: number, width: number) {
+    const p = this.getRoad(id)?.points[index];
+    if (!p) return;
+    p.w = Phaser.Math.Clamp(Math.round(width), MIN_ROAD_WIDTH, MAX_ROAD_WIDTH);
+    this.rebuildIndex();
+  }
+
+  /**
+   * Inserts a control point on the road segment nearest to (x, y), at the
+   * closest point on that segment (width interpolated). Returns the inserted
+   * location so the editor can select it immediately.
+   */
+  public insertPoint(x: number, y: number): { road: RoadData; index: number } | null {
+    let best: { road: RoadData; segIndex: number; t: number; d: number } | null = null;
+    for (const road of this.roads) {
+      const pts = road.points;
+      const n = pts.length;
+      if (n < 2) continue;
+      const last = road.closed ? n : n - 1;
+      for (let i = 0; i < last; i++) {
+        const a = pts[i], b = pts[(i + 1) % n];
+        const abx = b.x - a.x, aby = b.y - a.y;
+        const len2 = abx * abx + aby * aby;
+        if (len2 < 1) continue;
+        const t = Phaser.Math.Clamp(((x - a.x) * abx + (y - a.y) * aby) / len2, 0, 1);
+        const px = a.x + abx * t, py = a.y + aby * t;
+        const d = Phaser.Math.Distance.Between(x, y, px, py);
+        if (!best || d < best.d) best = { road, segIndex: i, t, d };
+      }
+    }
+    if (!best) return null;
+
+    const a = best.road.points[best.segIndex];
+    const b = best.road.points[(best.segIndex + 1) % best.road.points.length];
+    const w = Math.round(a.w + (b.w - a.w) * best.t);
+    const point: RoadPoint = { x: Math.round(a.x + (b.x - a.x) * best.t), y: Math.round(a.y + (b.y - a.y) * best.t), w };
+    best.road.points.splice(best.segIndex + 1, 0, point);
+    this.rebuildIndex();
+    return { road: best.road, index: best.segIndex + 1 };
+  }
+
   public nudgeRoadWidth(id: string, delta: number) {
     const road = this.getRoad(id);
     if (!road || road.points.length === 0) return;
@@ -319,6 +361,34 @@ export class RoadNetwork {
       }
     }
     return best ? { road: best.road, index: best.index } : null;
+  }
+
+  /** Perpendicular unit vector at a control point (average of neighbours) */
+  public static pointNormal(road: RoadData, i: number): { nx: number; ny: number } {
+    const pts = road.points;
+    const n = pts.length;
+    const a = pts[i > 0 ? i - 1 : road.closed ? n - 1 : 0];
+    const b = pts[i < n - 1 ? i + 1 : road.closed ? 0 : n - 1];
+    let tx = b.x - a.x, ty = b.y - a.y;
+    const len = Math.hypot(tx, ty) || 1;
+    tx /= len; ty /= len;
+    return { nx: -ty, ny: tx };
+  }
+
+  /** Width handle of a control point (sits at half-width, perpendicular) */
+  public static widthHandlePos(road: RoadData, i: number): { x: number; y: number } {
+    const p = road.points[i];
+    const nrm = RoadNetwork.pointNormal(road, i);
+    return { x: p.x + nrm.nx * (p.w / 2), y: p.y + nrm.ny * (p.w / 2) };
+  }
+
+  /** Width handle under the point (only meaningful for the selected road) */
+  public hitTestWidthHandle(road: RoadData, x: number, y: number, slackPx = 14): number | null {
+    for (let i = 0; i < road.points.length; i++) {
+      const h = RoadNetwork.widthHandlePos(road, i);
+      if (Phaser.Math.Distance.Between(x, y, h.x, h.y) <= slackPx) return i;
+    }
+    return null;
   }
 
   // ======================================================================

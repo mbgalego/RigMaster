@@ -79,8 +79,8 @@ export default function App() {
   const [isPaintingSpawn, setIsPaintingSpawn] = useState<boolean>(false);
 
   // Road tool live state (polled from EditorScene in the telemetry loop)
-  const [roadUI, setRoadUI] = useState<{ hasSelection: boolean; surface: RoadSurface; width: number; drawing: boolean }>({
-    hasSelection: false, surface: 'asphalt', width: 128, drawing: false,
+  const [roadUI, setRoadUI] = useState<{ hasSelection: boolean; hasPoint: boolean; surface: RoadSurface; width: number; drawing: boolean }>({
+    hasSelection: false, hasPoint: false, surface: 'asphalt', width: 128, drawing: false,
   });
 
   // Real-time Telemetry
@@ -941,7 +941,7 @@ export default function App() {
               <div className="flex items-center gap-2 flex-wrap justify-center">
                 <Route className="w-4 h-4 text-sky-400 shrink-0" />
                 <span className="text-xs font-bold text-sky-300 whitespace-nowrap">
-                  MODO ESTRADA: {roadUI.drawing ? 'a desenhar — clica para adicionar pontos' : roadUI.hasSelection ? 'estrada selecionada — arrasta os pontos ou a estrada' : 'clica no mapa para começar uma estrada'}
+                  MODO ESTRADA: {roadUI.drawing ? 'a desenhar — clica para adicionar pontos' : roadUI.hasSelection ? (roadUI.hasPoint ? 'ponto selecionado — arrasta ou ajusta a largura da secção' : 'estrada selecionada — duplo clique adiciona um ponto') : 'clica no mapa para começar uma estrada'}
                 </span>
                 {/* Surface picker (acts on selection, or as default for new roads) */}
                 <div className="flex gap-1">
@@ -961,9 +961,9 @@ export default function App() {
                 </div>
                 {/* Width control */}
                 <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5">
-                  <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeRoadWidth(-16); }} className="text-slate-300 hover:text-white px-1 font-black text-xs" title="Reduzir largura">−</button>
-                  <span className="text-[10px] font-bold text-slate-200 w-10 text-center">{Math.round(roadUI.width)}px</span>
-                  <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeRoadWidth(16); }} className="text-slate-300 hover:text-white px-1 font-black text-xs" title="Aumentar largura">+</button>
+                  <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeRoadWidth(-16); }} className="text-slate-300 hover:text-white px-1 font-black text-xs" title="Reduzir largura (secção selecionada ou estrada toda)">−</button>
+                  <span className="text-[10px] font-bold text-slate-200 w-14 text-center">{roadUI.hasPoint ? 'Secção ' : ''}{Math.round(roadUI.width)}px</span>
+                  <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeRoadWidth(16); }} className="text-slate-300 hover:text-white px-1 font-black text-xs" title="Aumentar largura (secção selecionada ou estrada toda)">+</button>
                 </div>
                 {roadUI.drawing && (
                   <>
@@ -976,7 +976,7 @@ export default function App() {
                 )}
               </div>
               <span className="text-[10px] text-slate-400 text-center">
-                Clica: adicionar pontos · Enter ou duplo clique: terminar · Esc: cancelar · Backspace: apagar ponto · Del: apagar estrada selecionada · As estradas são livres (não seguem a grelha)
+                Clica: pontos · Enter/duplo clique: terminar · Duplo clique na estrada: inserir ponto · Círculo laranja: largura da secção · Esc: cancelar · Backspace: apagar ponto · Del: apagar estrada
               </span>
             </div>
           )}
