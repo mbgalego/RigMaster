@@ -9,6 +9,9 @@ export interface TrafficLightData {
   // World position of the pole base on the sidewalk
   postX: number;
   postY: number;
+  // Signal head offset from the pole (toward the road it controls)
+  headOffX: number;
+  headOffY: number;
   // World position and dimensions of the lane stop barrier across the road
   stopBarX: number;
   stopBarY: number;
@@ -85,76 +88,168 @@ export class TrafficLightSystem {
   }
 
   /**
-   * Configures a single traffic light positioned realistically on the sidewalk near the road edge,
-   * with its corresponding lane stop line barrier on the adjacent roadway.
+   * Configures a single traffic light.
+   *
+   * Right-hand-traffic model: the signal stands on the sidewalk a couple of
+   * tiles BEFORE the intersection, on the right-hand side of the lane it
+   * controls, facing the oncoming traffic. The stop line spans only the
+   * controlled lane (the wide road tiles have two 56px lanes with 8px curbs —
+   * lane centres at +36 and +92 from the tile's west/north edge).
    */
   private createTrafficLightAt(col: number, row: number, grid: string[][], tileSize: number) {
     const tileCenterX = col * tileSize + tileSize / 2;
     const tileCenterY = row * tileSize + tileSize / 2;
 
-    // Detect adjacent road direction to place signal near the curb and position lane stop bar
+    // Detect adjacent road direction for the legacy fallback placement
     const isRoad = (r: number, c: number) => {
       if (r < 0 || r >= grid.length || c < 0 || c >= (grid[0]?.length || 0)) return false;
       const t = grid[r][c];
-      return t.startsWith('road_') || t === 'pedestrian_crossing' || t === 'asphalt';
+      return t.startsWith('road_') || t === 'pedestrian_crossing' || t === 'asphalt' || t.startsWith('roundabout_');
     };
 
     let facing: 'north' | 'south' | 'east' | 'west' = 'south';
     let postX = tileCenterX;
     let postY = tileCenterY;
+    let headOffX = 0;
+    let headOffY = -18;
     let stopBarX = tileCenterX;
     let stopBarY = tileCenterY;
     let stopBarWidth = 96;
     let stopBarHeight = 16;
     let phaseGroup: 0 | 1 = 0;
 
-    // European placement: mount post on sidewalk right next to the roadway curb
-    if (isRoad(row + 1, col)) {
-      // Road is to the South: post on southern curb of sidewalk tile, controlling Southbound lane
-      facing = 'south';
-      postX = tileCenterX + 28;
-      postY = tileCenterY + tileSize / 2 - 16;
-      stopBarX = tileCenterX;
-      stopBarY = (row + 1) * tileSize + 20;
-      stopBarWidth = 100;
-      stopBarHeight = 18;
-      phaseGroup = 1; // Vertical avenue phase
-    } else if (isRoad(row - 1, col)) {
-      // Road is to the North: post on northern curb of sidewalk tile, controlling Northbound lane
-      facing = 'north';
-      postX = tileCenterX - 28;
-      postY = tileCenterY - tileSize / 2 + 16;
-      stopBarX = tileCenterX;
-      stopBarY = row * tileSize - 20;
-      stopBarWidth = 100;
-      stopBarHeight = 18;
-      phaseGroup = 1; // Vertical avenue phase
-    } else if (isRoad(row, col + 1)) {
-      // Road is to the East: post on eastern curb of sidewalk tile, controlling Eastbound lane
-      facing = 'east';
-      postX = tileCenterX + tileSize / 2 - 16;
-      postY = tileCenterY - 28;
-      stopBarX = (col + 1) * tileSize + 20;
-      stopBarY = tileCenterY;
-      stopBarWidth = 18;
-      stopBarHeight = 100;
-      phaseGroup = 0; // Horizontal avenue phase
-    } else if (isRoad(row, col - 1)) {
-      // Road is to the West: post on western curb of sidewalk tile, controlling Westbound lane
-      facing = 'west';
-      postX = tileCenterX - tileSize / 2 + 16;
-      postY = tileCenterY + 28;
-      stopBarX = col * tileSize - 20;
-      stopBarY = tileCenterY;
-      stopBarWidth = 18;
-      stopBarHeight = 100;
-      phaseGroup = 0; // Horizontal avenue phase
-    } else {
-      // Default corner placement
-      postX = tileCenterX + 32;
-      postY = tileCenterY + 32;
-      stopBarX = tileCenterX + 64;
-      stopBarY = tileCenterY + 64;
+    const LANE_NEAR = 36;  // west / north lane centre inside a road tile
+    const LANE_FAR = 92;   // east / south lane centre inside a road tile
+
+    // Nearest junction within a small window
+    const win = 8;
+    let junction: { r: number; c: number } | null = null;
+    let bestD = Number.POSITIVE_INFINITY;
+    for (let r = Math.max(0, row - win); r <= Math.min(grid.length - 1, row + win); r++) {
+      const gridRow = grid[r];
+      if (!gridRow) continue;
+      for (let c = Math.max(0, col - win); c <= Math.min(gridRow.length - 1, col + win); c++) {
+        if (gridRow[c] !== 'road_intersection') continue;
+        const d = Math.abs(r - row) + Math.abs(c - col);
+        if (d < bestD) {
+          bestD = d;
+          junction = { r, c };
+        }
+      }
+    }
+
+    let modelled = false;
+    if (junction) {
+      const ix = junction.c * tileSize; // junction tile west edge
+      const iy = junction.r * tileSize; // junction tile north edge
+      const dxC = col - junction.c;
+      const dyR = row - junction.r;
+
+      if (Math.abs(dxC) <= 1 && Math.abs(dyR) >= 1) {
+        // Beside a vertical arterial: controls the vertical-avenue phase.
+        // East sidewalk serves northbound traffic (right-hand side); the
+        // west sidewalk serves southbound traffic.
+        phaseGroup = 1;
+        stopBarWidth = 52;
+        stopBarHeight = 18;
+        if (dxC > 0) {
+          facing = 'south';
+          postX = ix + tileSize + 20;
+          postY = iy + tileSize + 44;
+          headOffX = -12;
+          headOffY = 0;
+          stopBarX = ix + LANE_FAR;         // east lane (northbound)
+          stopBarY = iy + tileSize + 18;    // just before the junction
+        } else {
+          facing = 'north';
+          postX = ix - 20;
+          postY = iy - 44;
+          headOffX = 12;
+          headOffY = 0;
+          stopBarX = ix + LANE_NEAR;        // west lane (southbound)
+          stopBarY = iy - 18;
+        }
+        modelled = true;
+      } else if (Math.abs(dyR) <= 1 && Math.abs(dxC) >= 1) {
+        // Beside a horizontal arterial: controls the horizontal-avenue phase.
+        // South sidewalk serves eastbound traffic; north sidewalk westbound.
+        phaseGroup = 0;
+        stopBarWidth = 18;
+        stopBarHeight = 52;
+        if (dyR > 0) {
+          facing = 'west';
+          postX = ix - 44;
+          postY = iy + tileSize + 20;
+          headOffX = 0;
+          headOffY = -12;
+          stopBarX = ix - 18;
+          stopBarY = iy + LANE_FAR;         // south lane (eastbound)
+        } else {
+          facing = 'east';
+          postX = ix + tileSize + 44;
+          postY = iy - 20;
+          headOffX = 0;
+          headOffY = 12;
+          stopBarX = ix + tileSize + 18;
+          stopBarY = iy + LANE_NEAR;        // north lane (westbound)
+        }
+        modelled = true;
+      }
+    }
+
+    if (!modelled) {
+      // Legacy fallback: mount post on sidewalk right next to the roadway curb
+      if (isRoad(row + 1, col)) {
+        // Road is to the South: post on southern curb of sidewalk tile
+        facing = 'south';
+        postX = tileCenterX + 28;
+        postY = tileCenterY + tileSize / 2 - 16;
+        stopBarX = tileCenterX;
+        stopBarY = (row + 1) * tileSize + 20;
+        stopBarWidth = 100;
+        stopBarHeight = 18;
+        phaseGroup = 1; // Vertical avenue phase
+      } else if (isRoad(row - 1, col)) {
+        // Road is to the North: post on northern curb of sidewalk tile
+        facing = 'north';
+        postX = tileCenterX - 28;
+        postY = tileCenterY - tileSize / 2 + 16;
+        stopBarX = tileCenterX;
+        stopBarY = row * tileSize - 20;
+        stopBarWidth = 100;
+        stopBarHeight = 18;
+        phaseGroup = 1; // Vertical avenue phase
+      } else if (isRoad(row, col + 1)) {
+        // Road is to the East: post on eastern curb of sidewalk tile
+        facing = 'east';
+        postX = tileCenterX + tileSize / 2 - 16;
+        postY = tileCenterY - 28;
+        headOffX = -18;
+        headOffY = 0;
+        stopBarX = (col + 1) * tileSize + 20;
+        stopBarY = tileCenterY;
+        stopBarWidth = 18;
+        stopBarHeight = 100;
+        phaseGroup = 0; // Horizontal avenue phase
+      } else if (isRoad(row, col - 1)) {
+        // Road is to the West: post on western curb of sidewalk tile
+        facing = 'west';
+        postX = tileCenterX - tileSize / 2 + 16;
+        postY = tileCenterY + 28;
+        headOffX = 18;
+        headOffY = 0;
+        stopBarX = col * tileSize - 20;
+        stopBarY = tileCenterY;
+        stopBarWidth = 18;
+        stopBarHeight = 100;
+        phaseGroup = 0; // Horizontal avenue phase
+      } else {
+        // Default corner placement
+        postX = tileCenterX + 32;
+        postY = tileCenterY + 32;
+        stopBarX = tileCenterX + 64;
+        stopBarY = tileCenterY + 64;
+      }
     }
 
     // Phase initial synchronization:
@@ -169,6 +264,8 @@ export class TrafficLightSystem {
       row,
       postX,
       postY,
+      headOffX,
+      headOffY,
       stopBarX,
       stopBarY,
       stopBarWidth,
@@ -406,13 +503,15 @@ export class TrafficLightSystem {
       g.fillCircle(px, py, 5);
 
       // ========================================================
-      // 3. COMPACT EUROPEAN SIGNAL HEAD (16px x 42px)
+      // 3. COMPACT EUROPEAN SIGNAL HEAD
+      //    Vertical head for north/south approaches, horizontal head
+      //    for east/west approaches; offset from the pole toward the road.
       // ========================================================
-      const headW = 16;
-      const headH = 42;
-      // Offset signal head slightly toward road view
-      const hx = px;
-      const hy = py - 18;
+      const horizontal = light.facing === 'east' || light.facing === 'west';
+      const headW = horizontal ? 42 : 16;
+      const headH = horizontal ? 16 : 42;
+      const hx = px + light.headOffX;
+      const hy = py + light.headOffY;
 
       // Ground Light Flare / Pool based on current state
       if (isRedActive) {
@@ -432,69 +531,66 @@ export class TrafficLightSystem {
       g.lineStyle(1.5, 0x475569, 0.9);
       g.strokeRoundedRect(hx - headW / 2, hy - headH / 2, headW, headH, 4);
 
-      // 3 Lenses positions (Red Top, Amber Middle, Green Bottom)
-      const rY = hy - 13;
-      const aY = hy;
-      const gY = hy + 13;
+      // 3 Lens positions (Red first toward the approaching driver)
       const lensR = 4.2;
+      const lensX = horizontal
+        ? [light.facing === 'east' ? hx + 13 : hx - 13, hx, light.facing === 'east' ? hx - 13 : hx + 13]
+        : [hx, hx, hx];
+      const lensY = horizontal ? [hy, hy, hy] : [hy - 13, hy, hy + 13];
 
-      // Visor Hoods (Palas anti-reflexo curvadas sobre cada lente)
-      g.lineStyle(1.5, 0x1e293b, 1);
-      g.beginPath();
-      g.arc(hx, rY - 2, lensR + 1.5, Math.PI * 0.9, Math.PI * 2.1);
-      g.strokePath();
+      // Visor Hoods (vertical heads only — palas anti-reflexo)
+      if (!horizontal) {
+        g.lineStyle(1.5, 0x1e293b, 1);
+        for (const ly of lensY) {
+          g.beginPath();
+          g.arc(hx, ly - 2, lensR + 1.5, Math.PI * 0.9, Math.PI * 2.1);
+          g.strokePath();
+        }
+      } else {
+        // Lens rings for horizontal heads
+        g.lineStyle(1.5, 0x1e293b, 1);
+        for (let i = 0; i < 3; i++) {
+          g.strokeCircle(lensX[i], lensY[i], lensR + 1.5);
+        }
+      }
 
-      g.beginPath();
-      g.arc(hx, aY - 2, lensR + 1.5, Math.PI * 0.9, Math.PI * 2.1);
-      g.strokePath();
-
-      g.beginPath();
-      g.arc(hx, gY - 2, lensR + 1.5, Math.PI * 0.9, Math.PI * 2.1);
-      g.strokePath();
-
-      // --- RED LENS (TOP) ---
+      // --- RED LENS ---
       if (isRedActive) {
-        // Glowing Red Lamp + Halo
         g.fillStyle(0xef4444, 0.4);
-        g.fillCircle(hx, rY, lensR + 3);
+        g.fillCircle(lensX[0], lensY[0], lensR + 3);
         g.fillStyle(0xff2222, 1);
-        g.fillCircle(hx, rY, lensR);
+        g.fillCircle(lensX[0], lensY[0], lensR);
         g.fillStyle(0xffffff, 0.85);
-        g.fillCircle(hx - 1, rY - 1, 1.4);
+        g.fillCircle(lensX[0] - 1, lensY[0] - 1, 1.4);
       } else {
-        // Dark unlit glass
         g.fillStyle(0x450a0a, 0.9);
-        g.fillCircle(hx, rY, lensR);
+        g.fillCircle(lensX[0], lensY[0], lensR);
       }
 
-      // --- AMBER LENS (MIDDLE) ---
+      // --- AMBER LENS ---
       if (isAmberActive) {
-        // Glowing Amber Lamp + Halo
         g.fillStyle(0xf59e0b, 0.4);
-        g.fillCircle(hx, aY, lensR + 3);
+        g.fillCircle(lensX[1], lensY[1], lensR + 3);
         g.fillStyle(0xfbbf24, 1);
-        g.fillCircle(hx, aY, lensR);
+        g.fillCircle(lensX[1], lensY[1], lensR);
         g.fillStyle(0xffffff, 0.85);
-        g.fillCircle(hx - 1, aY - 1, 1.4);
+        g.fillCircle(lensX[1] - 1, lensY[1] - 1, 1.4);
       } else {
-        // Dark unlit glass
         g.fillStyle(0x451a03, 0.9);
-        g.fillCircle(hx, aY, lensR);
+        g.fillCircle(lensX[1], lensY[1], lensR);
       }
 
-      // --- GREEN LENS (BOTTOM) ---
+      // --- GREEN LENS ---
       if (isGreenActive) {
-        // Glowing Green Lamp + Halo
         g.fillStyle(0x10b981, 0.4);
-        g.fillCircle(hx, gY, lensR + 3);
+        g.fillCircle(lensX[2], lensY[2], lensR + 3);
         g.fillStyle(0x34d399, 1);
-        g.fillCircle(hx, gY, lensR);
+        g.fillCircle(lensX[2], lensY[2], lensR);
         g.fillStyle(0xffffff, 0.85);
-        g.fillCircle(hx - 1, gY - 1, 1.4);
+        g.fillCircle(lensX[2] - 1, lensY[2] - 1, 1.4);
       } else {
-        // Dark unlit glass
         g.fillStyle(0x064e3b, 0.9);
-        g.fillCircle(hx, gY, lensR);
+        g.fillCircle(lensX[2], lensY[2], lensR);
       }
     }
   }

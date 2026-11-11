@@ -71,7 +71,7 @@ export default function App() {
   const [hubs, setHubs] = useState<HubData[]>([]);
   const [activeWeather, setActiveWeather] = useState<WeatherModifier>('clear');
   const [selectedBrush, setSelectedBrush] = useState<string>('road_straight_h');
-  const [brushCategory, setBrushCategory] = useState<'all' | 'road' | 'dock' | 'parking' | 'obstacle' | 'biome'>('all');
+  const [brushCategory, setBrushCategory] = useState<'all' | 'road' | 'dock' | 'parking' | 'obstacle' | 'biome' | 'service'>('all');
   const [editorTool, setEditorTool] = useState<'paint' | 'pan' | 'erase'>('paint');
   const [isPaletteOpen, setIsPaletteOpen] = useState<boolean>(true);
   const [isPaintingSpawn, setIsPaintingSpawn] = useState<boolean>(false);
@@ -830,7 +830,7 @@ export default function App() {
 
               {/* Horizontally Scrollable Category Tabs */}
               <div className="flex gap-1 mb-2 text-[10px] overflow-x-auto pb-1">
-                {(['all', 'road', 'dock', 'parking', 'obstacle', 'biome'] as const).map((cat) => (
+                {(['all', 'road', 'dock', 'parking', 'obstacle', 'biome', 'service'] as const).map((cat) => (
                   <button
                     key={cat}
                     onClick={() => setBrushCategory(cat)}
@@ -840,7 +840,7 @@ export default function App() {
                         : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
                     }`}
                   >
-                    {cat === 'all' ? 'Tudo' : cat}
+                    {cat === 'all' ? 'Tudo' : cat === 'service' ? 'serviços' : cat}
                   </button>
                 ))}
               </div>
@@ -848,7 +848,7 @@ export default function App() {
               {/* Scrollable (Deslizante) Tile Grid with Graphical Previews */}
               <div className="flex-1 overflow-y-auto pr-1 grid grid-cols-3 sm:grid-cols-4 gap-2">
                 {Object.entries(TILE_DEFINITIONS)
-                  .filter(([_, def]) => brushCategory === 'all' || def.category === brushCategory)
+                  .filter(([_, def]) => !def.hidden && (brushCategory === 'all' || def.category === brushCategory))
                   .map(([key, def]) => {
                     const isUnlocked = unlockedTileKeys.includes(key);
                     const isSelected = selectedBrush === key;

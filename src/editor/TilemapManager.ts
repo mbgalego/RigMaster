@@ -18,10 +18,12 @@ export interface MapDataJSON {
 export interface TileDefinition {
   id: string;
   name: string;
-  category: 'road' | 'dock' | 'obstacle' | 'biome' | 'parking';
+  category: 'road' | 'dock' | 'obstacle' | 'biome' | 'parking' | 'service';
   isSolid: boolean;
   color: string;
   colliderSize?: { w: number; h: number };
+  // Hidden from the editor palette (internal sub-tiles of composite patterns)
+  hidden?: boolean;
 }
 
 export const TILE_DEFINITIONS: Record<string, TileDefinition> = {
@@ -69,7 +71,61 @@ export const TILE_DEFINITIONS: Record<string, TileDefinition> = {
   cobblestone_narrow: { id: 'cobblestone_narrow', name: 'Calçada Portuguesa Estreita', category: 'biome', isSolid: false, color: '#44403c' },
   granite_bollard: { id: 'granite_bollard', name: 'Pilarete de Granito', category: 'obstacle', isSolid: true, color: '#78716c', colliderSize: { w: 24, h: 24 } },
   ancient_archway: { id: 'ancient_archway', name: 'Arco Histórico', category: 'biome', isSolid: true, color: '#57534e' },
+
+  // === APPENDED (v1.8.0): never reorder the keys above — atlas slot order must stay stable ===
+
+  // Wavy / curvy secondary roads (connect mid-edge to mid-edge like straights)
+  road_wave_h: { id: 'road_wave_h', name: 'Estrada Curva (Onda Horizontal)', category: 'road', isSolid: false, color: '#1a2234' },
+  road_wave_v: { id: 'road_wave_v', name: 'Estrada Curva (Onda Vertical)', category: 'road', isSolid: false, color: '#1a2234' },
+
+  // Roundabouts: composite brushes that stamp a full multi-tile pattern
+  roundabout_s: { id: 'roundabout_s', name: 'Rotunda Pequena (3×3)', category: 'road', isSolid: false, color: '#22d3ee' },
+  roundabout_m: { id: 'roundabout_m', name: 'Rotunda Média (5×5)', category: 'road', isSolid: false, color: '#22d3ee' },
+  roundabout_l: { id: 'roundabout_l', name: 'Rotunda Grande (7×7)', category: 'road', isSolid: false, color: '#22d3ee' },
+  // Roundabout sub-tiles (placed by the pattern; hidden from the palette)
+  roundabout_island_center: { id: 'roundabout_island_center', name: 'Ilha Central', category: 'road', isSolid: true, color: '#166534', hidden: true },
+  roundabout_island_grass: { id: 'roundabout_island_grass', name: 'Ilha Relva', category: 'road', isSolid: true, color: '#166534', hidden: true },
+
+  // Service station
+  gas_canopy: { id: 'gas_canopy', name: 'Cobertura de Bombas', category: 'service', isSolid: false, color: '#f8fafc' },
+  gas_pump: { id: 'gas_pump', name: 'Bomba de Combustível', category: 'service', isSolid: true, color: '#ef4444', colliderSize: { w: 26, h: 100 } },
+  gas_price_sign: { id: 'gas_price_sign', name: 'Totem de Preços', category: 'service', isSolid: true, color: '#fbbf24', colliderSize: { w: 22, h: 22 } },
+
+  // Garages / depots with parked vehicles visible in the bays
+  building_garage_a: { id: 'building_garage_a', name: 'Garagem (Camião Estacionado)', category: 'obstacle', isSolid: true, color: '#475569' },
+  building_garage_b: { id: 'building_garage_b', name: 'Garagem (Atrelado Estacionado)', category: 'obstacle', isSolid: true, color: '#546375' },
+  building_garage_c: { id: 'building_garage_c', name: 'Garagem (Baía Vazia)', category: 'obstacle', isSolid: true, color: '#3f4c5e' },
 };
+
+// Roundabout geometry (px from the pattern centre; tileSize is fixed at 128)
+export const ROUNDABOUT_RADII: Record<number, { ri: number; ro: number }> = {
+  1: { ri: 95, ro: 175 },
+  2: { ri: 205, ro: 314 },
+  3: { ri: 333, ro: 442 },
+};
+
+// Roundabout ring sub-tiles: the annulus crosses a specific set of tiles per
+// size, and every crossed (dx,dy) position gets its own procedural texture
+// (exact arc segment). Registered before TILE_ORDER is computed.
+for (const R of [1, 2, 3] as const) {
+  const { ri, ro } = ROUNDABOUT_RADII[R];
+  for (let dy = -R; dy <= R; dy++) {
+    for (let dx = -R; dx <= R; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      // Mini roundabouts keep the plain road tiles on the approach axes
+      if (R === 1 && (dx === 0 || dy === 0)) continue;
+      const x0 = (dx - 0.5) * 128, x1 = (dx + 0.5) * 128;
+      const y0 = (dy - 0.5) * 128, y1 = (dy + 0.5) * 128;
+      const nx = x0 > 0 ? x0 : x1 < 0 ? x1 : 0;
+      const ny = y0 > 0 ? y0 : y1 < 0 ? y1 : 0;
+      const dmin = Math.sqrt(nx * nx + ny * ny);
+      const dmax = Math.sqrt(Math.max(x0 * x0, x1 * x1) + Math.max(y0 * y0, y1 * y1));
+      if (dmin > ro || dmax < ri) continue; // annulus never reaches this tile
+      const id = `roundabout_r${R}_x${dx}_y${dy}`;
+      TILE_DEFINITIONS[id] = { id, name: `Rotunda R${R} (${dx},${dy})`, category: 'road', isSolid: false, color: '#1a2234', hidden: true };
+    }
+  }
+}
 
 export const TILE_THUMBNAILS: Record<string, string> = {};
 
@@ -149,7 +205,11 @@ export class TilemapManager {
       ctx.fillStyle = '#161d2b';
       ctx.fillRect(1, 1, size - 2, size - 2);
 
-      switch (tileKey) {
+      // Roundabout ring/approach sub-tiles have positional arc geometry — they
+      // are drawn by a dedicated generator instead of the flat switch below.
+      if (this.drawRoundaboutRingTexture(ctx, tileKey, size)) {
+        // handled — fall through to texture registration below
+      } else switch (tileKey) {
         case 'asphalt':
           // Subtle road grid border
           ctx.strokeStyle = '#1e293b';
@@ -657,6 +717,298 @@ export class TilemapManager {
           break;
         }
 
+        case 'road_wave_h':
+        case 'road_wave_v': {
+          // Smooth rolling curve: the centreline is a cosine hump with zero
+          // slope at both tile edges, so it joins straight road pieces with
+          // no kink. Painted as three strokes: curbs, asphalt, dashed line.
+          const vertical = tileKey === 'road_wave_v';
+          const amp = 30;
+          const path = () => {
+            ctx.beginPath();
+            for (let i = 0; i <= 24; i++) {
+              const t = i / 24;
+              const off = -amp * (1 - Math.cos(t * Math.PI * 2)) / 2;
+              const x = vertical ? size / 2 + off : t * size;
+              const y = vertical ? t * size : size / 2 + off;
+              if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            }
+          };
+          ctx.lineCap = 'butt';
+          ctx.lineJoin = 'round';
+          ctx.strokeStyle = '#475569'; // sidewalk curbs
+          ctx.lineWidth = 128;
+          path(); ctx.stroke();
+          ctx.strokeStyle = '#0f172a'; // drivable asphalt
+          ctx.lineWidth = 112;
+          path(); ctx.stroke();
+          ctx.strokeStyle = '#facc15'; // dashed centre line
+          ctx.lineWidth = 4;
+          ctx.setLineDash([16, 16]);
+          path(); ctx.stroke();
+          ctx.setLineDash([]);
+          break;
+        }
+
+        case 'roundabout_s':
+        case 'roundabout_m':
+        case 'roundabout_l': {
+          // Palette preview of the composite pattern
+          ctx.fillStyle = '#0f172a';
+          ctx.fillRect(0, 0, size, size);
+          ctx.strokeStyle = '#3f4a5e';
+          ctx.lineWidth = 20;
+          ctx.beginPath();
+          ctx.arc(size / 2, size / 2, 42, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.strokeStyle = 'rgba(248, 250, 252, 0.6)';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([8, 8]);
+          ctx.beginPath();
+          ctx.arc(size / 2, size / 2, 42, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = '#166534';
+          ctx.beginPath();
+          ctx.arc(size / 2, size / 2, 27, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#151d2c';
+          ctx.fillRect(size / 2 - 7, 0, 14, 24);
+          ctx.fillRect(size / 2 - 7, size - 24, 14, 24);
+          ctx.fillRect(0, size / 2 - 7, 24, 14);
+          ctx.fillRect(size - 24, size / 2 - 7, 24, 14);
+          const rbLabel = tileKey.endsWith('_s') ? 'S' : tileKey.endsWith('_m') ? 'M' : 'L';
+          ctx.fillStyle = '#22d3ee';
+          ctx.font = 'bold 24px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(rbLabel, size / 2, size / 2 + 8);
+          break;
+        }
+
+        case 'roundabout_island_grass': {
+          // Seamless mowed grass (islands of roundabouts)
+          ctx.fillStyle = '#14532d';
+          ctx.fillRect(0, 0, size, size);
+          ctx.fillStyle = '#1d7a43';
+          for (let y = 0; y < size; y += 24) {
+            for (let x = 0; x < size; x += 24) {
+              ctx.fillRect(x, y, 3, 5);
+              ctx.fillRect(x + 9, y + 7, 2, 4);
+            }
+          }
+          break;
+        }
+
+        case 'roundabout_island_center': {
+          // Grass with a stone plaza and a monument at the very centre
+          ctx.fillStyle = '#14532d';
+          ctx.fillRect(0, 0, size, size);
+          ctx.fillStyle = '#1d7a43';
+          for (let y = 0; y < size; y += 24) {
+            for (let x = 0; x < size; x += 24) {
+              ctx.fillRect(x, y, 3, 5);
+              ctx.fillRect(x + 9, y + 7, 2, 4);
+            }
+          }
+          // Circular stone plaza
+          ctx.fillStyle = '#a8a29e';
+          ctx.beginPath();
+          ctx.arc(size / 2, size / 2, 44, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#78716c';
+          ctx.lineWidth = 2;
+          for (let rr = 12; rr <= 44; rr += 10) {
+            ctx.beginPath();
+            ctx.arc(size / 2, size / 2, rr, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+          // Monument pedestal + statue
+          ctx.fillStyle = '#57534e';
+          ctx.fillRect(size / 2 - 16, size / 2 - 16, 32, 32);
+          ctx.strokeStyle = '#292524';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(size / 2 - 16, size / 2 - 16, 32, 32);
+          ctx.fillStyle = '#292524';
+          ctx.beginPath();
+          ctx.arc(size / 2, size / 2 - 4, 9, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillRect(size / 2 - 4, size / 2 + 2, 8, 12);
+          ctx.fillStyle = '#fbbf24';
+          ctx.font = 'bold 12px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('★', size / 2, size / 2 - 1);
+          break;
+        }
+
+        case 'gas_canopy': {
+          // Translucent service-station roof: beams + corner poles, see-through
+          ctx.fillStyle = 'rgba(226, 232, 240, 0.26)';
+          ctx.fillRect(0, 0, size, size);
+          ctx.fillStyle = 'rgba(148, 163, 184, 0.85)';
+          ctx.fillRect(0, 0, size, 7);
+          ctx.fillRect(0, size - 7, size, 7);
+          ctx.fillRect(0, 0, 7, size);
+          ctx.fillRect(size - 7, 0, 7, size);
+          ctx.fillStyle = 'rgba(100, 116, 139, 0.9)';
+          ctx.fillRect(size / 2 - 3, 0, 6, size);
+          // Corner support poles
+          ctx.fillStyle = '#64748b';
+          for (const [px, py] of [[14, 14], [size - 14, 14], [14, size - 14], [size - 14, size - 14]] as const) {
+            ctx.beginPath();
+            ctx.arc(px, py, 6, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          // Brand stripe
+          ctx.fillStyle = 'rgba(220, 38, 38, 0.55)';
+          ctx.fillRect(10, size / 2 - 3, size - 20, 6);
+          break;
+        }
+
+        case 'gas_pump': {
+          // Raised concrete pump island with two fuel pumps back to back
+          ctx.fillStyle = '#94a3b8';
+          ctx.beginPath();
+          ctx.roundRect(size / 2 - 15, 2, 30, size - 4, 10);
+          ctx.fill();
+          ctx.strokeStyle = '#64748b';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          for (const py of [size * 0.28, size * 0.72]) {
+            ctx.fillStyle = '#dc2626';
+            ctx.beginPath();
+            ctx.roundRect(size / 2 - 11, py - 15, 22, 30, 4);
+            ctx.fill();
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(size / 2 - 8, py - 11, 16, 10);
+            ctx.fillStyle = '#fbbf24';
+            ctx.fillRect(size / 2 - 8, py - 11, 16, 3);
+            // hose
+            ctx.strokeStyle = '#1e293b';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(size / 2 + 11, py);
+            ctx.quadraticCurveTo(size / 2 + 22, py + 6, size / 2 + 18, py + 14);
+            ctx.stroke();
+          }
+          break;
+        }
+
+        case 'gas_price_sign': {
+          ctx.fillStyle = '#1e293b';
+          ctx.fillRect(0, 0, size, size);
+          // Pole
+          ctx.fillStyle = '#94a3b8';
+          ctx.fillRect(size / 2 - 4, size / 2, 8, size / 2);
+          // Totem board
+          ctx.fillStyle = '#fbbf24';
+          ctx.beginPath();
+          ctx.roundRect(size / 2 - 26, 8, 52, size / 2 - 14, 6);
+          ctx.fill();
+          ctx.strokeStyle = '#78350f';
+          ctx.lineWidth = 3;
+          ctx.stroke();
+          ctx.fillStyle = '#78350f';
+          ctx.font = 'bold 16px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('GAS', size / 2, 30);
+          ctx.font = 'bold 12px monospace';
+          ctx.fillText('1.85', size / 2, 46);
+          break;
+        }
+
+        case 'building_garage_a':
+        case 'building_garage_b':
+        case 'building_garage_c': {
+          // Garage / depot bay: parapet roof deck with an open bay showing the
+          // parked vehicle inside (truck, trailer or empty with pallets).
+          ctx.fillStyle = '#243247';
+          ctx.fillRect(0, 0, size, size);
+          // Roof deck panel seams
+          ctx.strokeStyle = '#2e3f59';
+          ctx.lineWidth = 2;
+          for (let y = 14; y < size; y += 22) {
+            ctx.beginPath();
+            ctx.moveTo(4, y);
+            ctx.lineTo(size - 4, y);
+            ctx.stroke();
+          }
+          // Parapet border
+          ctx.fillStyle = '#3b4d68';
+          ctx.fillRect(0, 0, size, 8);
+          ctx.fillRect(0, size - 8, size, 8);
+          ctx.fillRect(0, 0, 8, size);
+          ctx.fillRect(size - 8, 0, 8, size);
+
+          // Open bay interior (concrete floor)
+          ctx.fillStyle = '#3f4a56';
+          ctx.fillRect(12, 12, size - 24, size - 24);
+          ctx.strokeStyle = '#546375';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(12, 12, size - 24, size - 24);
+          // Bay floor wear strips
+          ctx.strokeStyle = '#46536180';
+          ctx.lineWidth = 1;
+          for (let x = 24; x < size - 20; x += 18) {
+            ctx.beginPath();
+            ctx.moveTo(x, 16);
+            ctx.lineTo(x, size - 16);
+            ctx.stroke();
+          }
+
+          const veh = '#0b1220';
+          const vehLine = '#8fa3bf';
+          if (tileKey === 'building_garage_a') {
+            // Truck + trailer parked nose-south
+            ctx.fillStyle = veh;
+            ctx.strokeStyle = vehLine;
+            ctx.lineWidth = 2;
+            ctx.fillRect(size / 2 - 19, 18, 38, 52); // trailer box
+            ctx.strokeRect(size / 2 - 19, 18, 38, 52);
+            ctx.fillRect(size / 2 - 17, 74, 34, 26); // cab
+            ctx.strokeRect(size / 2 - 17, 74, 34, 26);
+            ctx.fillStyle = '#93c5fd';
+            ctx.fillRect(size / 2 - 13, 92, 26, 5);   // windshield
+            ctx.fillStyle = '#020617';
+            ctx.fillRect(size / 2 - 22, 62, 7, 12);
+            ctx.fillRect(size / 2 + 15, 62, 7, 12);
+            ctx.fillRect(size / 2 - 22, 88, 7, 12);
+            ctx.fillRect(size / 2 + 15, 88, 7, 12);
+          } else if (tileKey === 'building_garage_b') {
+            // Two trailers (one vertical, one small horizontal)
+            ctx.fillStyle = veh;
+            ctx.strokeStyle = vehLine;
+            ctx.lineWidth = 2;
+            ctx.fillRect(size / 2 - 20, 16, 40, 66);
+            ctx.strokeRect(size / 2 - 20, 16, 40, 66);
+            ctx.fillStyle = '#020617';
+            ctx.fillRect(size / 2 - 24, 24, 7, 13);
+            ctx.fillRect(size / 2 + 17, 24, 7, 13);
+            ctx.fillRect(size / 2 - 24, 66, 7, 13);
+            ctx.fillRect(size / 2 + 17, 66, 7, 13);
+            ctx.fillStyle = veh;
+            ctx.strokeStyle = vehLine;
+            ctx.fillRect(16, size - 34, 30, 20);
+            ctx.strokeRect(16, size - 34, 30, 20);
+          } else {
+            // Empty bay with pallet stacks
+            ctx.fillStyle = '#78350f';
+            for (const [px, py] of [[26, 22], [26, 40], [80, 24]] as const) {
+              ctx.fillRect(px, py, 22, 14);
+              ctx.fillStyle = '#92400e';
+              ctx.fillRect(px + 2, py + 3, 18, 8);
+              ctx.fillStyle = '#78350f';
+            }
+            // Small forklift silhouette
+            ctx.fillStyle = '#f59e0b';
+            ctx.fillRect(size / 2 - 8, 84, 16, 22);
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(size / 2 - 5, 88, 10, 7);
+            ctx.fillRect(size / 2 - 12, 100, 4, 10);
+            ctx.fillRect(size / 2 + 8, 100, 4, 10);
+          }
+          break;
+        }
+
         default:
           ctx.fillStyle = '#1e293b';
           ctx.fillRect(2, 2, size - 4, size - 4);
@@ -670,6 +1022,153 @@ export class TilemapManager {
         // Ignore
       }
     });
+  }
+
+  /**
+   * Stamps every standalone tile texture into one atlas so the TilemapLayer can
+   * reference all tile types from a single tileset image. Slot order is stable
+   * (TILE_ORDER) so saved maps keep valid tile indices.
+   */
+  /**
+   * Draws the positional annulus arc for a roundabout ring/approach sub-tile.
+   * The pattern centre sits at canvas point ((0.5-dx)*ts, (0.5-dy)*ts), where
+   * (dx,dy) is the tile's offset from the pattern centre tile. Tiles partially
+   * covered by the central island get the grass disc drawn first, so the
+   * island reads as a perfect circle across the whole pattern.
+   * Returns true when the tileKey is a roundabout sub-tile (fully drawn).
+   */
+  private drawRoundaboutRingTexture(ctx: CanvasRenderingContext2D, tileKey: string, size: number): boolean {
+    const m = tileKey.match(/^roundabout_r(\d)_x(-?\d+)_y(-?\d+)$/);
+    if (!m) return false;
+    const r = parseInt(m[1], 10) as 1 | 2 | 3;
+    const dx = parseInt(m[2], 10);
+    const dy = parseInt(m[3], 10);
+    const cx = (0.5 - dx) * size;
+    const cy = (0.5 - dy) * size;
+    const { ri, ro } = ROUNDABOUT_RADII[r];
+    const rm = (ri + ro) / 2;
+
+    // 1. Plain asphalt base (everything outside the island is drivable)
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, size, size);
+
+    // 2. Grass disc of the central island (tiles partially inside the island)
+    if (Math.sqrt(cx * cx + cy * cy) - Math.SQRT2 * (size / 2) < ri) {
+      ctx.fillStyle = '#14532d';
+      ctx.beginPath();
+      ctx.arc(cx, cy, ri, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cy, ri, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.fillStyle = '#1d7a43';
+      for (let ty = 0; ty < size; ty += 24) {
+        for (let tx = 0; tx < size; tx += 24) {
+          ctx.fillRect(tx + ((ty / 24) % 2) * 9, ty, 3, 5);
+          ctx.fillRect(tx + 9 + ((ty / 24) % 2) * 9, ty + 7, 2, 4);
+        }
+      }
+      ctx.restore();
+    }
+
+    // 3. Circular carriageway band
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, ro, 0, Math.PI * 2);
+    ctx.arc(cx, cy, ri, 0, Math.PI * 2, true);
+    ctx.fillStyle = '#151d2c';
+    ctx.fill('evenodd');
+    ctx.restore();
+
+    // 4. Kerb edges of the circular carriageway
+    ctx.strokeStyle = '#3f4a5e';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, ro - 2, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, ri + 2, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // 5. Dashed guide line down the middle of the circular lane
+    ctx.strokeStyle = 'rgba(248, 250, 252, 0.55)';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([14, 18]);
+    ctx.beginPath();
+    ctx.arc(cx, cy, rm, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 6. Approach road merging radially into the ring (axis tiles only)
+    if (dx === 0 || dy === 0) {
+      const pos = dx === 0 ? (dy > 0 ? 's' : 'n') : dy === 0 ? (dx > 0 ? 'e' : 'w') : '';
+      const vertical = dx === 0;
+      const laneOff = size / 2 - 8; // lane centre offset (56px)
+
+      // Lane edge lines: from the tile boundary to the outer ring kerb
+      ctx.strokeStyle = 'rgba(248, 250, 252, 0.8)';
+      ctx.lineWidth = 3;
+      for (const t of [-laneOff, laneOff]) {
+        const e = (vertical ? cx : cy) + t;
+        const meet = Math.sqrt(Math.max(0, ro * ro - t * t));
+        ctx.beginPath();
+        if (vertical) {
+          const yStart = pos === 's' ? 0 : size;
+          const yEnd = pos === 's' ? cy + meet : cy - meet;
+          ctx.moveTo(e, yStart);
+          ctx.lineTo(e, yEnd);
+        } else {
+          const xStart = pos === 'e' ? size : 0;
+          const xEnd = pos === 'e' ? cx - meet : cx + meet;
+          ctx.moveTo(xStart, e);
+          ctx.lineTo(xEnd, e);
+        }
+        ctx.stroke();
+      }
+
+      // Dashed centre line from the boundary to the ring lane centre (yield point)
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 4;
+      ctx.setLineDash([16, 16]);
+      ctx.beginPath();
+      if (vertical) {
+        const yEnd = pos === 's' ? cy + rm : cy - rm;
+        ctx.moveTo(cx, pos === 's' ? 0 : size);
+        ctx.lineTo(cx, yEnd);
+      } else {
+        const xEnd = pos === 'e' ? cx - rm : cx + rm;
+        ctx.moveTo(pos === 'e' ? size : 0, cy);
+        ctx.lineTo(xEnd, cy);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Yield triangles on the entry lane (right-hand side of entering traffic)
+      ctx.fillStyle = 'rgba(248, 250, 252, 0.85)';
+      for (const t of [-16, 2]) {
+        ctx.beginPath();
+        if (vertical) {
+          const ex = cx + laneOff / 2 + t;
+          const ey = pos === 's' ? Math.min(size - 18, cy + ro - 26) : Math.max(18, cy - ro + 26);
+          const dir = pos === 's' ? -1 : 1;
+          ctx.moveTo(ex, ey);
+          ctx.lineTo(ex + 10, ey);
+          ctx.lineTo(ex + 5, ey + dir * 12);
+        } else {
+          const ey = cy - laneOff / 2 + t;
+          const ex = pos === 'w' ? Math.min(size - 18, cx + ro - 26) : Math.max(18, cx - ro + 26);
+          const dir = pos === 'w' ? -1 : 1;
+          ctx.moveTo(ex, ey);
+          ctx.lineTo(ex, ey + 10);
+          ctx.lineTo(ex + dir * 12, ey + 5);
+        }
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    return true;
   }
 
   /**
@@ -824,13 +1323,18 @@ export class TilemapManager {
       }
     }
 
-    // Traffic lights at alternating intersections (sidewalk corners)
+    // Traffic lights: one signal per approach, a couple of tiles BEFORE the
+    // intersection, on the right-hand sidewalk, facing the oncoming traffic
+    // (right-hand circulation). Skipped at roundabout junctions. Runs before
+    // the lamp/sign pass so signals claim their sidewalk tile first.
     let idx = 0;
     for (const r of hArterials) {
       for (const c of vArterials) {
-        if (idx % 2 === 0) {
-          this.grid[r - 1][c - 1] = 'traffic_light';
-          this.grid[r + 1][c + 1] = 'traffic_light';
+        if (this.grid[r][c] === 'road_intersection' && idx % 2 === 0) {
+          this.placeApproachLight(r + 2, c + 1, 1, 0);   // northbound: east sidewalk, south of the junction
+          this.placeApproachLight(r - 2, c - 1, -1, 0);  // southbound: west sidewalk, north
+          this.placeApproachLight(r + 1, c - 2, 0, -1);  // eastbound: south sidewalk, west
+          this.placeApproachLight(r - 1, c + 2, 0, 1);   // westbound: north sidewalk, east
         }
         idx++;
       }
@@ -881,16 +1385,22 @@ export class TilemapManager {
     this.fill('dock_standard', 73, 74, 4, 6);
 
     // Jersey barrier maneuvering challenges scattered mid-map (deterministic)
-    this.fill('jersey_barrier', 30, 32, 33, 33);
+    this.fill('jersey_barrier', 26, 28, 33, 33);
     this.fill('jersey_barrier', 44, 46, 55, 55);
     this.fill('jersey_barrier', 16, 18, 70, 70);
     this.fill('jersey_barrier', 58, 60, 20, 20);
 
-    // Decorative building blocks between arterials
+    // Decorative building blocks between arterials (some are garages with
+    // parked trucks / trailers visible inside their bays)
     for (let r = 2; r < this.rows - 2; r += 8) {
       for (let c = 2; c < this.cols - 2; c += 9) {
         if (rand() < 0.35 && this.regionClear(r, c, 2, 2)) {
-          this.fill('building_warehouse', r, r + 1, c, c + 1);
+          const pick2 = rand();
+          const buildingTile =
+            pick2 < 0.15 ? 'building_garage_a' :
+            pick2 < 0.30 ? 'building_garage_b' :
+            pick2 < 0.42 ? 'building_garage_c' : 'building_warehouse';
+          this.fill(buildingTile, r, r + 1, c, c + 1);
         }
       }
     }
@@ -901,6 +1411,37 @@ export class TilemapManager {
     for (const r of hArterials) {
       for (const c of vArterials) this.grid[r][c] = 'road_intersection';
     }
+
+    // --- Roundabouts of different sizes at selected junctions ---
+    // (signal placement below skips any junction no longer an intersection)
+    this.placeRoundabout(63, 40, 1);   // mini roundabout, mid-east
+    this.placeRoundabout(27, 24, 2);   // medium roundabout, north-west quadrant
+    this.placeRoundabout(81, 56, 3);   // large roundabout, south-east quadrant
+
+    // --- Curvy secondary streets (S-wave road pieces) ---
+    // A winding block circuit between the arterials at rows/cols 24..40 / 27..45
+    for (let c = 28; c <= 44; c++) this.grid[32][c] = 'road_wave_h';
+    for (let r = 25; r <= 39; r++) if (r !== 32) this.grid[r][36] = 'road_wave_v';
+    this.grid[32][27] = 'road_intersection';
+    this.grid[32][45] = 'road_intersection';
+    this.grid[24][36] = 'road_intersection';
+    this.grid[40][36] = 'road_intersection';
+
+    // --- Service station A (near the Porto quadrant) ---
+    this.fill('asphalt', 9, 13, 28, 34);
+    this.fill('gas_canopy', 10, 12, 30, 33);
+    this.grid[11][31] = 'gas_pump';
+    this.grid[11][33] = 'gas_pump';
+    this.grid[13][29] = 'gas_price_sign';
+
+    // --- Service station B (south-central, off the row-56 arterial) ---
+    this.fill('asphalt', 57, 60, 64, 70);
+    this.fill('gas_canopy', 58, 59, 65, 69);
+    this.grid[58][67] = 'gas_pump';
+    this.grid[59][67] = 'gas_pump';
+    this.grid[58][69] = 'gas_pump';
+    this.grid[59][69] = 'gas_pump';
+    this.grid[60][65] = 'gas_price_sign';
 
     // Trailer depots (nose faces south; tractor reverses into the nose)
     this.placeTrailerPad(13, 12, 'trailer_parking_c');    // near the spawn
@@ -920,7 +1461,7 @@ export class TilemapManager {
     for (let r = r0; r <= r0 + rh; r++) {
       for (let c = c0; c <= c0 + cw; c++) {
         const t = this.grid[r]?.[c];
-        if (!t || t.startsWith('road_') || t === 'sidewalk' || t === 'pedestrian_crossing' || t === 'traffic_light' || t.startsWith('dock_')) return false;
+        if (!t || t.startsWith('road_') || t.startsWith('roundabout_') || t === 'sidewalk' || t === 'pedestrian_crossing' || t === 'traffic_light' || t === 'gas_pump' || t.startsWith('dock_')) return false;
       }
     }
     return true;
@@ -939,6 +1480,59 @@ export class TilemapManager {
         const t = this.grid[rr][cc];
         if (t.startsWith('road_') || t === 'road_intersection') continue;
         this.grid[rr][cc] = 'asphalt';
+      }
+    }
+  }
+
+  /**
+   * Stamps a full roundabout pattern centred on tile (ci, ri).
+   * size 1 = 3×3 (mini ring, roads pass on the axes), 2 = 5×5, 3 = 7×7.
+   * Tiles fully inside the inner radius become the solid island; tiles crossed
+   * by the annulus get their exact positional ring texture (with approach
+   * markings on the axis tiles); everything beyond the ring is untouched.
+   */
+  public placeRoundabout(ci: number, ri: number, size: 1 | 2 | 3) {
+    const { ri: inner, ro } = ROUNDABOUT_RADII[size];
+    for (let dy = -size; dy <= size; dy++) {
+      for (let dx = -size; dx <= size; dx++) {
+        const r = ri + dy;
+        const c = ci + dx;
+        if (r < 1 || r >= this.rows - 1 || c < 1 || c >= this.cols - 1) continue;
+        if (dx === 0 && dy === 0) {
+          this.grid[r][c] = 'roundabout_island_center';
+          continue;
+        }
+        const x0 = (dx - 0.5) * 128, x1 = (dx + 0.5) * 128;
+        const y0 = (dy - 0.5) * 128, y1 = (dy + 0.5) * 128;
+        const nx = x0 > 0 ? x0 : x1 < 0 ? x1 : 0;
+        const ny = y0 > 0 ? y0 : y1 < 0 ? y1 : 0;
+        const dmin = Math.sqrt(nx * nx + ny * ny);
+        const dmax = Math.sqrt(Math.max(x0 * x0, x1 * x1) + Math.max(y0 * y0, y1 * y1));
+        if (dmax < inner) {
+          this.grid[r][c] = 'roundabout_island_grass';
+        } else if (dmin <= ro && dmax >= inner) {
+          // Mini roundabouts keep the plain road tiles on the approach axes
+          if (size === 1 && (dx === 0 || dy === 0)) continue;
+          this.grid[r][c] = `roundabout_r${size}_x${dx}_y${dy}`;
+        }
+        // Beyond the ring: leave the surrounding tile untouched
+      }
+    }
+    this.mapVersion++;
+  }
+
+  /**
+   * Places a 'traffic_light' on the first free sidewalk tile walking outward
+   * from (r0,c0) in direction (dr,dc) — away from the intersection.
+   */
+  private placeApproachLight(r0: number, c0: number, dr: number, dc: number) {
+    for (let i = 0; i < 4; i++) {
+      const r = r0 + dr * i;
+      const c = c0 + dc * i;
+      if (r <= 0 || r >= this.rows - 1 || c <= 0 || c >= this.cols - 1) return;
+      if (this.grid[r][c] === 'sidewalk') {
+        this.grid[r][c] = 'traffic_light';
+        return;
       }
     }
   }
@@ -1222,6 +1816,14 @@ export class TilemapManager {
   public setTile(col: number, row: number, tileType: string) {
     if (col < 0 || col >= this.cols || row < 0 || row >= this.rows) return;
     if (!TILE_DEFINITIONS[tileType]) return;
+
+    // Composite roundabout brushes stamp a full multi-tile pattern
+    const rbSize = tileType === 'roundabout_s' ? 1 : tileType === 'roundabout_m' ? 2 : tileType === 'roundabout_l' ? 3 : 0;
+    if (rbSize) {
+      this.placeRoundabout(col, row, rbSize as 1 | 2 | 3);
+      this.afterGridReplaced();
+      return;
+    }
 
     const oldTile = this.grid[row][col];
     this.grid[row][col] = tileType;

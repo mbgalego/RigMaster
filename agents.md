@@ -39,7 +39,19 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.7.9** (Versão Atual)
+### **v1.8.0** (Versão Atual — branch `feature/map-graphics`)
+- **Melhorias gráficas do mapa + semáforos realistas (mão direita):**
+  - **Semáforos reescritos** (`TrafficLightSystem`): um sinal por **aproximação** (4 por cruzamento sinalizado), colocado **2 tiles antes do cruzamento**, no passeio do **lado direito da via que controla** (tráfego pela direita), virado para os veículos que se aproximam. Derivação automática a partir do `road_intersection` mais próximo (janela de 8 tiles) — pintar um `traffic_light` no passeio basta; fallback legado mantido para colocações fora de modelo.
+  - **Barra de travagem por faixa** (52px) em vez de barra de via inteira: faixa este/oeste-center 92 vs near 36; cabeço do sinal vertical (N/S) ou horizontal (E/W) com offset em direcção à faixa; corpos (poste + barreira) materializados por proximidade como antes.
+  - Colocação procedural: `placeApproachLight` nos 4 quadrantes (N-bound passeio este a sul, S-bound oeste a norte, E-bound sul a oeste, W-bound norte a este), a correr **antes** dos postes de luz (que só pintam em `sidewalk` livre); cruzamentos com rotunda ficam sem sinais.
+  - **Rotundas de 3 tamanhos** (`roundabout_s/m/l` — pincéis compostos 3×3/5×5/7×7, `setTile` faz *stamp* via `placeRoundabout`): ilha **circular perfeita** (relva sólida + monumento central), anel com arco anular **posicional** (ids `roundabout_r{R}_x{dx}_y{dy}` gerados por loop — cada tile cruza um segmento diferente do anel), marcações de **aproximação radial** nos tiles axiais (linhas de faixa, tracejado até ao ponto de cedência, triângulos de cedência). Sub-tiles `hidden` fora da paleta.
+  - **Estradas curvas**: `road_wave_h/v` — curva suave "cosse hump" com tangente horizontal nos limites do tile ( junção sem kink com rectas), desenhada por 3 strokes (guias, asfalto, tracejado).
+  - **Postos de combustível**: `gas_canopy` (cobertura translúcida com vigas/pilares), `gas_pump` (ilha de betão com 2 bombas, colisor 26×100), `gas_price_sign` (totem de preços). Nova categoria de paleta **`service`**. 2 postes no mapa procedural (quadrante Porto + sul-central).
+  - **Garagens com veículos estacionados**: `building_garage_a/b/c` — baía aberta com silhueta de camião+atrelado / atrelados / baía vazia com paletes e empilhadora; ~40% dos quarteirões decorativos do mapa procedural passaram a ser garagens.
+  - Rua curva secundária no mapa procedural (onda em bloco entre arteriais 24..40/27..45 com junções em T); jersey barrier movido para não colidir.
+  - `regionClear` trata `roundabout_*`/`gas_pump` como bloqueantes; `isRoad` aceita tiles de rotunda; minimapa/herança de atlas estáveis (tiles novos **apensos no fim** do `TILE_DEFINITIONS` — índices de mapas gravados não mudam).
+
+### **v1.7.9**
 - **Editor: lista de desbloqueio completada:**
   - `getUnlockedTiles()` cobria só 23 dos 35 tiles da paleta — ficavam **sempre trancados** (mesmo com todos os hubs a 100%): cruzamento com passadeiras, passeio, passadeira de peões, semáforo, poste de iluminação, os 3 sinais de trânsito e **os 4 parques de atrelados** (adicionados na v1.7.0 e nunca registados na lista).
   - Infra-estrutura padrão (grelha viária, mobiliário urbano, parques) passou a fazer parte da lista base; as peças de bioma (doca/estaleiro/industrial/histórico) continuam gated pelo hub dominado. Dominação total = paleta completa (35/35).

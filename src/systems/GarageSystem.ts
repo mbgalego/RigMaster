@@ -207,6 +207,10 @@ export class GarageSystem {
       'sign_stop', 'sign_yield', 'sign_speed_30',
       'dock_standard', 'building_warehouse', 'jersey_barrier',
       'trailer_parking_c', 'trailer_parking_ce', 'trailer_parking_h', 'trailer_parking_x',
+      'road_wave_h', 'road_wave_v',
+      'roundabout_s', 'roundabout_m', 'roundabout_l',
+      'gas_canopy', 'gas_pump', 'gas_price_sign',
+      'building_garage_a', 'building_garage_b', 'building_garage_c',
     ];
     for (const hub of Object.values(this.hubs)) {
       if (hub.isDominant) {
