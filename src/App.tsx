@@ -91,7 +91,7 @@ export default function App() {
     fragileHealth: 100,
     weather: 'clear',
     activeLicenseExam: null,
-    coupling: { prompt: null, blocked: null, coupledName: null, notice: null, noticeKind: 'info', noticeSeq: 0 },
+    coupling: { decoupleReady: false, coupledName: null, blocked: null, notice: null, noticeKind: 'info', noticeSeq: 0 },
   });
 
   // Toast notifications (coupling feedback) — triggered by noticeSeq changes
@@ -1268,9 +1268,9 @@ export default function App() {
       )}
 
       {/* TOUCH CONTROLS (STEERING WHEEL LEFT, THROTTLE & BRAKE RIGHT) */}
-      <TouchControls visible={!isEditorMode && showTouchControls} coupling={telemetry.coupling} onCouple={() => {
+      <TouchControls visible={!isEditorMode && showTouchControls} coupling={telemetry.coupling} onDecouple={() => {
         const scene = getMainScene();
-        if (scene) scene.tryCoupleOrDecouple();
+        if (scene) scene.decoupleAction();
       }} />
     </div>
   );

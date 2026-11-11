@@ -5,10 +5,10 @@ import type { MainScene } from '../scenes/MainScene';
 interface TouchControlsProps {
   visible: boolean;
   coupling?: MainScene['telemetry']['coupling'];
-  onCouple?: () => void;
+  onDecouple?: () => void;
 }
 
-export const TouchControls: React.FC<TouchControlsProps> = ({ visible, coupling, onCouple }) => {
+export const TouchControls: React.FC<TouchControlsProps> = ({ visible, coupling, onDecouple }) => {
   const wheelRef = useRef<HTMLDivElement>(null);
   const [wheelAngleDeg, setWheelAngleDeg] = useState<number>(0);
   const [isDraggingWheel, setIsDraggingWheel] = useState<boolean>(false);
@@ -253,43 +253,35 @@ export const TouchControls: React.FC<TouchControlsProps> = ({ visible, coupling,
       <div className="flex flex-col items-end gap-2.5 pointer-events-auto">
         {/* Compact Switch de Direção de Marcha (D / R) & Handbrake */}
         <div className="flex items-center gap-2">
-          {/* Coupling Button (C) — icon-only, junto ao travão de mão */}
-          {coupling && (coupling.prompt || coupling.blocked) && (
+          {/* Desacoplar (C) / bloqueado — icon-only, junto ao travão de mão */}
+          {coupling && coupling.decoupleReady && (
             <button
               type="button"
               onPointerDown={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                onCouple?.();
-              }}
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onCouple?.();
+                onDecouple?.();
               }}
               style={{ touchAction: 'none' }}
-              className={`w-8 h-8 rounded-full text-sm border transition flex items-center justify-center shadow-md select-none touch-none ${
-                coupling.blocked
-                  ? 'bg-amber-600/90 text-white border-amber-300 shadow-amber-500/50'
-                  : coupling.prompt?.startsWith('Desacoplar')
-                    ? 'bg-red-600/90 text-white border-red-300 shadow-red-500/50'
-                    : 'bg-cyan-500/90 text-black border-cyan-200 shadow-cyan-500/50 animate-pulse'
-              }`}
-              title="Acoplar / Desacoplar Atrelado (C)"
+              className="w-8 h-8 rounded-full text-sm border bg-red-600/90 text-white border-red-300 shadow-md shadow-red-500/50 transition flex items-center justify-center select-none touch-none"
+              title="Desacoplar Atrelado (C)"
             >
               🔗
             </button>
+          )}
+          {coupling && coupling.blocked && (
+            <div
+              className="w-8 h-8 rounded-full text-sm border bg-amber-600/90 text-white border-amber-300 shadow-md shadow-amber-500/50 flex items-center justify-center select-none pointer-events-none"
+              title="Acoplamento bloqueado por licença"
+            >
+              🔗
+            </div>
           )}
 
           {/* Handbrake Button (P) */}
           <button
             type="button"
             onPointerDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              toggleHandbrake();
-            }}
-            onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
               toggleHandbrake();

@@ -39,7 +39,15 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.7.2** (Versão Atual)
+### **v1.7.3** (Versão Atual)
+- **Acoplamento Automático por Posição (sem botão):**
+  - Acoplar deixa de exigir clique: `updateAutoCoupling` corre a cada frame e, quando o engate do trator fica **na zona do kingpin** (≤30px do pino, ângulos alinhados ±28°), faz as validações habituais — se possível, acopla de imediato com toast verde; se não, envia **um único** toast de erro por entrada na zona (âmbar 🔒 licença em falta, ou ciano ℹ️ "Ralentiza para engatar" acima de 6 km/h). O botão 🔗 passa a servir **só para desacoplar** (vermelho quando parado; âmbar passante quando bloqueado) — tecla C idem.
+- **Hitboxes: Traseira Passa por Baixo do Atrelado:**
+  - Atrelados livres perdem o bit do trator na máscara (`0x0007→0x0005`): a traseira do camião desliza **por baixo** do atrelado até o engate alcançar o pino (o desenho do atrelado fica por cima, como na realidade). Sem colisão física já não há bloqueio na zona de engate; o contacto físico deixou de ser necessário e o rastreio `collisionstart/collisionend` foi removido.
+- **Correção: Duplo Disparo nos Botões Táteis:**
+  - Causa do "acopla e desacopla instantaneamente": os handlers disparavam em `onPointerDown` **e** `onClick` (dois eventos por toque). O botão de acoplamento e o travão de mão (P) ficam apenas com `onPointerDown` — o (P) também era duplo-alternado e nunca pegava.
+
+### **v1.7.2**
 - **Nova Mecânica de Engate por Contacto Físico (sem "saltos"):**
   - O botão 🔗 só fica ativo quando o trator está **fisicamente em contacto** com a placa de engate do atrelado (recuou sobre ele). Novo rastreio de contacto corpo-a-corpo no `MainScene` via `collisionstart/collisionend` (pares com labels `truck*`/`trailer*`).
   - O engate já **não teleporta** o atrelado: ele fica exatamente onde foi engatado e o ajuste suave do kingpin (correção longitudinal/lateral por frame) assenta-o com um movimento de apenas alguns pixeis — o "clunk" físico do engate. Novo `settleTrailerOntoHitch` garante que o erro fica dentro da banda suave (≤25px) com um único ajuste mínimo, evitando o snap de descontinuidade do `followHitch`.
