@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { TrafficLightSystem } from '../systems/TrafficLightSystem';
 import { TrailerManager } from '../systems/TrailerManager';
+import { RoadNetwork, RoadData } from '../systems/RoadNetwork';
 
 export interface MapDataJSON {
   version: number;
@@ -13,6 +14,8 @@ export interface MapDataJSON {
   grid?: string[][];
   gridRLE?: [string, number][];
   docks: Array<{ x: number; y: number; requiredAngle: number; id: string }>;
+  // v3+: vector road network (spline roads over the tile ground)
+  roads?: RoadData[];
 }
 
 export interface TileDefinition {
@@ -173,6 +176,9 @@ export class TilemapManager {
     this.buildAtlasTexture();
     this.buildTilemapLayer();
     this.initDefaultGrid();
+    // Seed the default vector-road layer for this map (demo rural route, etc.)
+    RoadNetwork.getInstance().seedForMap(this.mapName);
+    this.carveRoadCollisions();
   }
 
   // ======================================================================
@@ -1643,6 +1649,9 @@ export class TilemapManager {
     } else {
       this.initDefaultGrid();
     }
+    // Vector roads reset/seed per map (presets don't carry roads)
+    RoadNetwork.getInstance().seedForMap(this.mapName);
+    this.carveRoadCollisions();
   }
 
   // ======================================================================
@@ -1937,6 +1946,7 @@ export class TilemapManager {
       spawn: this.spawnPoint,
       gridRLE: runs,
       docks: this.getAllDocks().map((d) => ({ x: d.x, y: d.y, requiredAngle: d.requiredAngle, id: d.id })),
+      roads: RoadNetwork.getInstance().toJSON(),
     };
     return JSON.stringify(data, null, 2);
   }
@@ -2022,12 +2032,40 @@ export class TilemapManager {
         this.grid[r] = this.grid[r].slice(0, this.cols);
       }
       if (data.spawn) this.spawnPoint = data.spawn;
+      // Vector roads: full map replace (old maps without roads clear the network)
+      RoadNetwork.getInstance().fromJSON(data.roads);
+      this.carveRoadCollisions();
 
       this.afterGridReplaced();
       return true;
     } catch (e) {
       console.error('Failed to parse map JSON:', e);
       return false;
+    }
+  }
+
+  /**
+   * Removes SOLID tiles under the vector-road ribbons (seeded demo roads and
+   * imported maps) so a road never runs through buildings, barriers or posts —
+   * the truck would crash into an obstacle hidden under the drawn asphalt.
+   * Non-solid ground/road tiles are left as-is: the ribbon renders above them.
+   */
+  private carveRoadCollisions() {
+    const network = RoadNetwork.getInstance();
+    if (network.roads.length === 0) return;
+    for (let r = 1; r < this.rows - 1; r++) {
+      for (let c = 1; c < this.cols - 1; c++) {
+        const tileId = this.grid[r][c];
+        const def = TILE_DEFINITIONS[tileId];
+        // Traffic lights own their physics and rebuild themselves — never touch them here
+        if (!def?.isSolid || tileId === 'traffic_light') continue;
+        const x = c * this.tileSize + this.tileSize / 2;
+        const y = r * this.tileSize + this.tileSize / 2;
+        const q = network.query(x, y, 512);
+        if (q && q.dist <= q.width / 2 + 10) {
+          this.setTile(c, r, 'asphalt');
+        }
+      }
     }
   }
 

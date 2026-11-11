@@ -10,6 +10,7 @@ import { MainScene } from './scenes/MainScene';
 import { LicenseSystem, LicenseInfo, ExamStatus, LicenseId } from './systems/LicenseSystem';
 import { GarageSystem, HubData, WeatherModifier } from './systems/GarageSystem';
 import { TILE_DEFINITIONS, TILE_THUMBNAILS } from './editor/TilemapManager';
+import type { RoadSurface } from './systems/RoadNetwork';
 import { TouchControls } from './components/TouchControls';
 import {
   Truck as TruckIcon,
@@ -41,6 +42,7 @@ import {
   ZoomOut,
   Eraser,
   Paintbrush,
+  Route,
 } from 'lucide-react';
 
 export default function App() {
@@ -72,9 +74,14 @@ export default function App() {
   const [activeWeather, setActiveWeather] = useState<WeatherModifier>('clear');
   const [selectedBrush, setSelectedBrush] = useState<string>('road_straight_h');
   const [brushCategory, setBrushCategory] = useState<'all' | 'road' | 'dock' | 'parking' | 'obstacle' | 'biome' | 'service'>('all');
-  const [editorTool, setEditorTool] = useState<'paint' | 'pan' | 'erase'>('paint');
+  const [editorTool, setEditorTool] = useState<'paint' | 'pan' | 'erase' | 'road'>('paint');
   const [isPaletteOpen, setIsPaletteOpen] = useState<boolean>(true);
   const [isPaintingSpawn, setIsPaintingSpawn] = useState<boolean>(false);
+
+  // Road tool live state (polled from EditorScene in the telemetry loop)
+  const [roadUI, setRoadUI] = useState<{ hasSelection: boolean; surface: RoadSurface; width: number; drawing: boolean }>({
+    hasSelection: false, surface: 'asphalt', width: 128, drawing: false,
+  });
 
   // Real-time Telemetry
   const [telemetry, setTelemetry] = useState<MainScene['telemetry']>({
@@ -150,6 +157,8 @@ export default function App() {
         setIsEditorMode(scene.isEditorMode);
         setActiveExam(licSys.getActiveExam());
       }
+      const edScene = getEditorScene();
+      if (edScene) setRoadUI(edScene.getRoadUIState());
     }, 60);
 
     // Keep the Phaser canvas from stealing pointer events while any HTML modal is open,
@@ -286,7 +295,7 @@ export default function App() {
     }
   };
 
-  const handleSetEditorTool = (tool: 'paint' | 'pan' | 'erase') => {
+  const handleSetEditorTool = (tool: 'paint' | 'pan' | 'erase' | 'road') => {
     setEditorTool(tool);
     const edScene = getEditorScene();
     if (edScene) edScene.setTool(tool);
@@ -746,6 +755,23 @@ export default function App() {
               <span className="text-[8px] font-bold mt-0.5">Apagar</span>
             </button>
 
+            {/* Tool: Estrada (vector roads: draw, select, drag handles, delete) */}
+            <button
+              onClick={() => {
+                handleSetEditorTool('road');
+                setIsPaintingSpawn(false);
+              }}
+              className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border ${
+                editorTool === 'road'
+                  ? 'bg-sky-500 text-black border-sky-300 shadow-md shadow-sky-500/40 animate-pulse'
+                  : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+              }`}
+              title="Estradas Livres — Desenha estradas por splines, edita pontos, muda piso/largura"
+            >
+              <Route className="w-4 h-4" />
+              <span className="text-[8px] font-bold mt-0.5">Estrada</span>
+            </button>
+
             {/* Tool: Spawn Point */}
             <button
               onClick={() => {
@@ -910,6 +936,50 @@ export default function App() {
           )}
 
           {/* 3. FLOATING STATUS BANNER FOR ACTIVE MODE */}
+          {editorTool === 'road' && (
+            <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 bg-slate-950/95 border border-sky-400/60 px-4 py-2.5 rounded-xl shadow-2xl backdrop-blur-md flex flex-col items-center gap-2 max-w-[calc(100vw-7rem)]">
+              <div className="flex items-center gap-2 flex-wrap justify-center">
+                <Route className="w-4 h-4 text-sky-400 shrink-0" />
+                <span className="text-xs font-bold text-sky-300 whitespace-nowrap">
+                  MODO ESTRADA: {roadUI.drawing ? 'a desenhar — clica para adicionar pontos' : roadUI.hasSelection ? 'estrada selecionada — arrasta os pontos ou a estrada' : 'clica no mapa para começar uma estrada'}
+                </span>
+                {/* Surface picker (acts on selection, or as default for new roads) */}
+                <div className="flex gap-1">
+                  {([['asphalt', 'Asfalto'], ['dirt', 'Terra'], ['cobble', 'Calçada']] as Array<[RoadSurface, string]>).map(([id, label]) => (
+                    <button
+                      key={id}
+                      onClick={() => { const ed = getEditorScene(); if (ed) ed.setRoadSurface(id); }}
+                      className={`text-[10px] font-bold px-2 py-1 rounded transition border ${
+                        roadUI.surface === id
+                          ? 'bg-sky-500 text-black border-sky-300'
+                          : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {/* Width control */}
+                <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5">
+                  <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeRoadWidth(-16); }} className="text-slate-300 hover:text-white px-1 font-black text-xs" title="Reduzir largura">−</button>
+                  <span className="text-[10px] font-bold text-slate-200 w-10 text-center">{Math.round(roadUI.width)}px</span>
+                  <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeRoadWidth(16); }} className="text-slate-300 hover:text-white px-1 font-black text-xs" title="Aumentar largura">+</button>
+                </div>
+                {roadUI.drawing && (
+                  <>
+                    <button onClick={() => { const ed = getEditorScene(); if (ed) ed.removeLastPendingPoint(); }} className="text-[10px] font-bold bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800 px-2 py-1 rounded">Retroceder Ponto</button>
+                    <button onClick={() => { const ed = getEditorScene(); if (ed) ed.finishPendingRoad(); }} className="text-[10px] font-bold bg-emerald-500 text-black border border-emerald-300 hover:bg-emerald-400 px-2 py-1 rounded">Terminar</button>
+                  </>
+                )}
+                {roadUI.hasSelection && !roadUI.drawing && (
+                  <button onClick={() => { const ed = getEditorScene(); if (ed) ed.deleteSelectedRoad(); }} className="text-[10px] font-bold bg-red-500 text-white border border-red-300 hover:bg-red-400 px-2 py-1 rounded">Apagar Selecionada</button>
+                )}
+              </div>
+              <span className="text-[10px] text-slate-400 text-center">
+                Clica: adicionar pontos · Enter ou duplo clique: terminar · Esc: cancelar · Backspace: apagar ponto · Del: apagar estrada selecionada · As estradas são livres (não seguem a grelha)
+              </span>
+            </div>
+          )}
           {(editorTool === 'pan' || editorTool === 'erase' || isPaintingSpawn) && (
             <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 bg-slate-950/95 border border-cyan-400/60 px-3.5 py-1.5 rounded-full shadow-2xl flex items-center gap-2.5 backdrop-blur-md">
               {editorTool === 'pan' && (

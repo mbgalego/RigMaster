@@ -7,6 +7,7 @@ import { LicenseSystem, LicenseExam, LicenseId } from '../systems/LicenseSystem'
 import { GarageSystem, WeatherModifier } from '../systems/GarageSystem';
 import { TrafficLightSystem } from '../systems/TrafficLightSystem';
 import { TrailerManager, TRAILER_TYPE_TO_LICENSE, CouplingCandidate } from '../systems/TrailerManager';
+import { RoadNetwork, RoadData, RoadSample } from '../systems/RoadNetwork';
 
 export class MainScene extends Phaser.Scene {
   public truck!: Truck;
@@ -18,6 +19,14 @@ export class MainScene extends Phaser.Scene {
   public tilemapManager!: TilemapManager;
   public licenseSystem!: LicenseSystem;
   public garageSystem!: GarageSystem;
+
+  // Vector road network (Phase 1: spline roads over the tile ground)
+  public roadNetwork!: RoadNetwork;
+  private roadGraphics: Phaser.GameObjects.Graphics | null = null;
+  private roadRenderVersion: number = -1;
+  private roadCamX: number = Number.NaN;
+  private roadCamY: number = Number.NaN;
+  private roadCamZoom: number = Number.NaN;
 
   public isEditorMode: boolean = false;
   public debugMatter: boolean = true;
@@ -126,6 +135,10 @@ export class MainScene extends Phaser.Scene {
 
     // 1. Build World & Tilemap
     this.tilemapManager = new TilemapManager(this);
+    this.roadNetwork = RoadNetwork.getInstance();
+
+    // Vector road ribbon renderer (above the tile layer, below vehicles)
+    this.roadGraphics = this.add.graphics().setDepth(2);
 
     // Set world physics bounds
     const worldW = this.tilemapManager.cols * this.tilemapManager.tileSize;
@@ -719,11 +732,16 @@ export class MainScene extends Phaser.Scene {
     // Neon hub signs for dominated regional hubs
     this.drawHubSigns(time);
 
+    // Vector road ribbons (also visible in editor mode)
+    this.renderRoads();
+
     // Stream physics around the player: materialize static tile bodies & traffic light
     // bodies only near the truck — everything else stays as pure grid data.
     if (this.truck) {
       this.tilemapManager.updateActiveChunks(this.truck.body.position.x, this.truck.body.position.y);
       TrafficLightSystem.getInstance(this).updateProximity(this.truck.body.position.x, this.truck.body.position.y);
+      // Surface grip from the road network (asphalt/cobble/dirt vs off-road)
+      this.truck.setRoadGrip(this.roadNetwork.gripAt(this.truck.body.position.x, this.truck.body.position.y));
     }
 
     // When not in editor mode, update vehicle driving physics
@@ -990,6 +1008,131 @@ export class MainScene extends Phaser.Scene {
   }
 
   // ==========================================
+  // VECTOR ROAD RENDERER (Phase 1)
+  // ==========================================
+
+  /** Surface fill / edge / centreline colours per road type */
+  private static readonly ROAD_STYLE: Record<string, { fill: number; fillAlt: number; edge: number; dash: number | null }> = {
+    asphalt: { fill: 0x1e2634, fillAlt: 0x1e2634, edge: 0x3a4457, dash: 0xfacc15 },
+    cobble:  { fill: 0x3d4350, fillAlt: 0x383e4a, edge: 0x262b34, dash: null },
+    dirt:    { fill: 0x6b4f2e, fillAlt: 0x5d4527, edge: 0x4a361e, dash: null },
+  };
+
+  private static readonly ROAD_DASH_LEN = 26;
+  private static readonly ROAD_DASH_GAP = 22;
+
+  /**
+   * Draws the visible road ribbons into a retained Graphics. Redraws only when
+   * the network changed or the camera moved/zoomed enough to matter.
+   */
+  private renderRoads() {
+    if (!this.roadGraphics) return;
+    const cam = this.cameras.main;
+    const moved =
+      Math.abs(cam.scrollX - this.roadCamX) > 4 ||
+      Math.abs(cam.scrollY - this.roadCamY) > 4 ||
+      Math.abs(cam.zoom - this.roadCamZoom) > 0.005;
+    if (!moved && this.roadRenderVersion === this.roadNetwork.version) return;
+    this.roadCamX = cam.scrollX;
+    this.roadCamY = cam.scrollY;
+    this.roadCamZoom = cam.zoom;
+    this.roadRenderVersion = this.roadNetwork.version;
+
+    const g = this.roadGraphics;
+    g.clear();
+
+    const view = cam.worldView;
+    const M = 220; // margin so ribbons don't pop in at the screen edge
+    const vx0 = view.x - M, vy0 = view.y - M, vx1 = view.x + view.width + M, vy1 = view.y + view.height + M;
+
+    for (const road of this.roadNetwork.roads) {
+      // Cheap per-road bounds reject
+      let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+      let maxHalf = 0;
+      for (const p of road.points) {
+        if (p.x < bx0) bx0 = p.x;
+        if (p.y < by0) by0 = p.y;
+        if (p.x > bx1) bx1 = p.x;
+        if (p.y > by1) by1 = p.y;
+        if (p.w > maxHalf) maxHalf = p.w;
+      }
+      maxHalf /= 2;
+      if (bx1 + maxHalf + 80 < vx0 || bx0 - maxHalf - 80 > vx1 || by1 + maxHalf + 80 < vy0 || by0 - maxHalf - 80 > vy1) continue;
+
+      const style = MainScene.ROAD_STYLE[road.surface] || MainScene.ROAD_STYLE.asphalt;
+      const samples = RoadNetwork.sampleRoad(road, 26);
+      if (samples.length === 0) continue;
+
+      // 1. Carriageway ribbon (quads perpendicular to the tangent)
+      const inView = (s: RoadSample) => s.x >= vx0 - 200 && s.x <= vx1 + 200 && s.y >= vy0 - 200 && s.y <= vy1 + 200;
+      let altIdx = 0;
+      for (let i = 0; i < samples.length - 1; i++) {
+        const a = samples[i], b = samples[i + 1];
+        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        if (mx < vx0 || mx > vx1 || my < vy0 || my > vy1) { altIdx++; continue; }
+        const fill = road.surface === 'asphalt' ? style.fill : (altIdx % 6 < 3 ? style.fill : style.fillAlt);
+        this.fillRibbonQuad(g, a, b, fill);
+        altIdx++;
+      }
+
+      // 2. Edge lines (skip on dirt — degraded roads have no markings)
+      if (road.surface !== 'dirt') {
+        for (const side of [-1, 1]) {
+          g.lineStyle(3, style.edge, 0.85);
+          g.beginPath();
+          let started = false;
+          for (let i = 0; i < samples.length; i++) {
+            const s = samples[i];
+            if (!inView(s)) continue;
+            const off = s.w / 2 - 5;
+            const px = s.x - s.ty * off * side;
+            const py = s.y + s.tx * off * side;
+            if (!started) { g.moveTo(px, py); started = true; } else g.lineTo(px, py);
+          }
+          g.strokePath();
+        }
+      }
+
+      // 3. Centre dashed line (asphalt only)
+      if (style.dash !== null) {
+        g.lineStyle(5, style.dash, 0.9);
+        let acc = 0;
+        for (let i = 0; i < samples.length - 1; i++) {
+          const a = samples[i], b = samples[i + 1];
+          const len = Math.hypot(b.x - a.x, b.y - a.y);
+          const period = MainScene.ROAD_DASH_LEN + MainScene.ROAD_DASH_GAP;
+          const phase = acc % period;
+          acc += len;
+          if (phase >= MainScene.ROAD_DASH_LEN) continue;
+          const t0 = 0;
+          const t1 = Math.min(1, (MainScene.ROAD_DASH_LEN - phase) / len);
+          if (t1 <= t0) continue;
+          const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+          if (mx < vx0 || mx > vx1 || my < vy0 || my > vy1) continue;
+          g.beginPath();
+          g.moveTo(Phaser.Math.Linear(a.x, b.x, t0), Phaser.Math.Linear(a.y, b.y, t0));
+          g.lineTo(Phaser.Math.Linear(a.x, b.x, t1), Phaser.Math.Linear(a.y, b.y, t1));
+          g.strokePath();
+        }
+      }
+    }
+  }
+
+  /** Fills one ribbon quad between two samples (perpendicular corners). */
+  private fillRibbonQuad(g: Phaser.GameObjects.Graphics, a: RoadSample, b: RoadSample, color: number) {
+    const anx = -a.ty * (a.w / 2), any = a.tx * (a.w / 2);
+    const bnx = -b.ty * (b.w / 2), bny = b.tx * (b.w / 2);
+    g.fillStyle(color, 1);
+    g.beginPath();
+    g.moveTo(a.x + anx, a.y + any);
+    g.lineTo(b.x + bnx, b.y + bny);
+    g.lineTo(b.x - bnx, b.y - bny);
+    g.lineTo(a.x - anx, a.y - any);
+    g.closePath();
+    g.fillPath();
+  }
+
+  // ==========================================
   // MINIMAP (full-map HUD overview)
   // ==========================================
 
@@ -1105,6 +1248,23 @@ export class MainScene extends Phaser.Scene {
         ctx.fillStyle = color;
         ctx.fillRect(c * px, r * px, px, px);
       }
+    }
+
+    // Vector roads on top (centreline strokes scaled to minimap resolution)
+    const scale = px / this.tilemapManager.tileSize;
+    const roadColors: Record<string, string> = { asphalt: '#5a6478', cobble: '#707788', dirt: '#8a6438' };
+    for (const road of this.roadNetwork.roads) {
+      ctx.strokeStyle = roadColors[road.surface] || roadColors.asphalt;
+      ctx.lineWidth = Math.max(1, road.points.reduce((m, p) => Math.max(m, p.w), 0) * scale);
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      road.points.forEach((p, i) => {
+        const mx = p.x * scale, my = p.y * scale;
+        if (i === 0) ctx.moveTo(mx, my); else ctx.lineTo(mx, my);
+      });
+      if (road.closed) ctx.closePath();
+      ctx.stroke();
     }
     texture.refresh();
   }

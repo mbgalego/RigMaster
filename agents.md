@@ -27,7 +27,8 @@ src/
 │   ├── LicenseSystem.ts    # Gestor de Licenças de Perícia (C, CE, H, X) e temporizadores de exame
 │   ├── TrailerManager.ts   # Atrelados livres/estacionados nos parques, acoplamento e gating por licença
 │   ├── GarageSystem.ts     # Hubs Regionais (Porto, Estaleiro, Industrial, Histórico) e biomas
-│   └── TrafficLightSystem.ts # Semáforos europeus de 4 tempos com barreiras físicas de faixa
+│   ├── TrafficLightSystem.ts # Semáforos europeus de 4 tempos com barreiras físicas de faixa
+│   └── RoadNetwork.ts      # Rede de estradas vetorial (splines Catmull-Rom, grip por piso, editável)
 ├── editor/
 │   └── TilemapManager.ts   # Grelha 128x128, texturas procedurais, miniaturas e exportação JSON
 └── scenes/
@@ -39,7 +40,18 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.8.0** (Versão Atual — branch `feature/map-graphics`)
+### **v1.9.0** (Versão Atual — branch `feature/road-network`)
+- **Fase 1 da nova arquitectura "mundo aberto": rede de estradas vetorial por splines:**
+  - **Novo sistema `src/systems/RoadNetwork.ts`**: estradas são splines **Catmull-Rom** sobre o terreno de tiles — pontos de controlo livres (sem snapping à grelha), **largura por ponto** (a estrada pode afinar de asfalto largo a caminho de terra degradado) e **piso por estrada** (`asphalt` 1.0 / `cobble` 0.88 / `dirt` 0.68 de grip; fora de estrada 0.55). Sem corpos de física — estrada é onde se conduz; só obstáculos colidem.
+  - **Totalmente editável em runtime** (requisito chave: ao contrário do editor de tiles, tudo o que já está no mapa se pode mexer): clicar numa estrada **seleciona-a** (contorno ciano + pegas quadradas), arrasta uma pega para mover o ponto, arrasta o corpo para **mover a estrada inteira**, botões de piso/largura atuam na seleção, Del/botão apaga. Desenhar: clicar adiciona pontos, **Enter ou duplo clique termina**, Esc cancela, Backspace remove o último ponto (com botões touch no painel). Tolerâncias de hit-test em coordenadas de ecrã (independentes do zoom).
+  - **Renderizador de ribbons** (`MainScene.renderRoads`): quads perpendiculares à tangente com largura interpolada, cores por piso (terra com variação de tom para textura "esborracada"), linhas de berma + tracejado central amarelo (asfalto), redraw só quando a rede muda ou a câmara se move >4px, com culling ao viewport. As ribbons ficam **acima** dos tiles e **abaixo** dos veículos (depth 2).
+  - **Grip integrado no camião** (`Truck.roadGrip`, multiplicativo com o grip atmosférico): consulta espacial por hash de segmentos (células 1024px) a cada frame — asfalto adere, terra escorrega, fora de estrada ainda mais; afeta aderência lateral e direção.
+  - **Estrada demo no mapa procedural**: rota rural a sudoeste — sai do cruzamento (45,32) das ruas curvas, 6 curvas amplas com contra-curvas, asfalto 150→96px, a continuar como **terra degradada 92→56px** até ao sudeste. `carveRoadCollisions` limpa tiles sólidos sob as ribbons (demo/importadas nunca atravessam edifícios).
+  - **Persistência**: `MapDataJSON.roads` (v3 implícita); export inclui a rede, import carrega-a (mapas antigos sem estradas → rede limpa); presets (Academia/Porto) fazem reset/seed por mapa; estradas desenhadas nas **estradas de tiles**.
+  - **Minimapa**: centerlines das estradas vetoriais desenhadas por cima dos tiles (escala por largura real).
+  - UI: novo botão **Estrada** na dock do editor (azul), painel flutuante com piso/largura/terminar/retroceder/apagar e estado vivo (polling 60ms via `getRoadUIState`).
+
+### **v1.8.0** (branch `feature/map-graphics`)
 - **Melhorias gráficas do mapa + semáforos realistas (mão direita):**
   - **Semáforos reescritos** (`TrafficLightSystem`): um sinal por **aproximação** (4 por cruzamento sinalizado), colocado **2 tiles antes do cruzamento**, no passeio do **lado direito da via que controla** (tráfego pela direita), virado para os veículos que se aproximam. Derivação automática a partir do `road_intersection` mais próximo (janela de 8 tiles) — pintar um `traffic_light` no passeio basta; fallback legado mantido para colocações fora de modelo.
   - **Barra de travagem por faixa** (52px) em vez de barra de via inteira: faixa este/oeste-center 92 vs near 36; cabeço do sinal vertical (N/S) ou horizontal (E/W) com offset em direcção à faixa; corpos (poste + barreira) materializados por proximidade como antes.

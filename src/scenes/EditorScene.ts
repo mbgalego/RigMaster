@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { MainScene } from './MainScene';
 import { TILE_DEFINITIONS } from '../editor/TilemapManager';
 import { GarageSystem } from '../systems/GarageSystem';
+import { RoadNetwork, RoadData, RoadPoint, RoadSurface } from '../systems/RoadNetwork';
 
 export class EditorScene extends Phaser.Scene {
   public mainScene!: MainScene;
@@ -9,7 +10,7 @@ export class EditorScene extends Phaser.Scene {
 
   public selectedTile: string = 'road_straight_h';
   public isPaintingSpawn: boolean = false;
-  public editorTool: 'paint' | 'pan' | 'erase' = 'paint';
+  public editorTool: 'paint' | 'pan' | 'erase' | 'road' = 'paint';
 
   private gridGraphics!: Phaser.GameObjects.Graphics;
   private cursorGraphics!: Phaser.GameObjects.Graphics;
@@ -25,6 +26,24 @@ export class EditorScene extends Phaser.Scene {
   // Active cursor tile position
   public cursorCol: number = 0;
   public cursorRow: number = 0;
+
+  // ---- Road tool state (Phase 1 vector roads) ----
+  private roadNetwork!: RoadNetwork;
+  private roadOverlay!: Phaser.GameObjects.Graphics;
+  /** Currently selected road (shows handles, reacts to property buttons) */
+  public selectedRoad: RoadData | null = null;
+  /** Active grab: a single handle (index) or the whole road (index null = translate) */
+  private roadDrag: { road: RoadData; index: number | null; grabX: number; grabY: number } | null = null;
+  /** Road currently being drawn (click adds points, Enter/double-click finishes) */
+  private pendingRoad: { surface: RoadSurface; points: RoadPoint[] } | null = null;
+  private pointerWorld: { x: number; y: number } = { x: 0, y: 0 };
+  private lastClickTime: number = 0;
+  private lastClickX: number = 0;
+  private lastClickY: number = 0;
+  /** Defaults for NEW roads (App toolbar syncs these) */
+  public newRoadSurface: RoadSurface = 'asphalt';
+  public newRoadWidth: number = 128;
+  private roadDirtySinceRelease: boolean = false;
 
   public static readonly MIN_ZOOM = 0.04; // Allows viewing the entire 13,824x10,240 map on mobile
   public static readonly MAX_ZOOM = 1.8;
@@ -60,6 +79,11 @@ export class EditorScene extends Phaser.Scene {
 
     this.cursorGraphics = this.add.graphics();
     this.cursorGraphics.setDepth(101);
+
+    // Vector road editing overlay (handles, selection, drawing preview)
+    this.roadNetwork = RoadNetwork.getInstance();
+    this.roadOverlay = this.add.graphics();
+    this.roadOverlay.setDepth(102);
 
     this.drawGridOverlay();
     this.setupPointerInteractions();
@@ -136,6 +160,10 @@ export class EditorScene extends Phaser.Scene {
       }
 
       this.isPointerDown = true;
+      if (this.editorTool === 'road') {
+        this.handleRoadPointerDown(pointer);
+        return;
+      }
       this.handlePaintPointer(pointer);
     });
 
@@ -184,6 +212,11 @@ export class EditorScene extends Phaser.Scene {
 
       this.updateCursorVisual();
 
+      if (this.editorTool === 'road') {
+        this.handleRoadPointerMove(pointer);
+        return;
+      }
+
       // Continuous drag painting
       if (this.isPointerDown && this.editorTool !== 'pan') {
         this.handlePaintPointer(pointer);
@@ -197,6 +230,11 @@ export class EditorScene extends Phaser.Scene {
         this.isPointerDown = false;
         this.isDraggingPan = false;
         this.prevPinchDist = 0;
+        if (this.roadDirtySinceRelease) {
+          this.roadDirtySinceRelease = false;
+          this.mainScene.tilemapManager.mapVersion++; // refresh minimap once per drag
+        }
+        this.roadDrag = null;
       }
     };
 
@@ -214,6 +252,230 @@ export class EditorScene extends Phaser.Scene {
       e.preventDefault();
       this.mainScene.toggleEditorMode();
     });
+
+    // Road tool shortcuts (only active in road mode)
+    if (this.input.keyboard) {
+      this.input.keyboard.on('keydown-ENTER', () => {
+        if (this.editorTool === 'road') this.finishPendingRoad();
+      });
+      this.input.keyboard.on('keydown-ESC', () => {
+        if (this.editorTool === 'road') {
+          this.pendingRoad = null; // cancel drawing
+          this.selectedRoad = null; // deselect
+        }
+      });
+      this.input.keyboard.on('keydown-BACKSPACE', () => {
+        if (this.editorTool === 'road' && this.pendingRoad) {
+          this.pendingRoad.points.pop();
+          if (this.pendingRoad.points.length === 0) this.pendingRoad = null;
+        }
+      });
+      this.input.keyboard.on('keydown-DELETE', () => {
+        if (this.editorTool === 'road') this.deleteSelectedRoad();
+      });
+    }
+  }
+
+  // ======================================================================
+  // ROAD TOOL (Phase 1 vector roads: draw, select, drag, delete)
+  // ======================================================================
+
+  private handleRoadPointerDown(pointer: Phaser.Input.Pointer) {
+    if (this.mainScene.isPointerOverMinimap(pointer)) return;
+
+    const wp = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+    const x = wp.x, y = wp.y;
+    const tol = 16 / this.cameras.main.zoom;
+
+    // Double-click / double-tap while drawing finishes the road
+    const now = this.time.now;
+    const isDouble = now - this.lastClickTime < 350 && Phaser.Math.Distance.Between(x, y, this.lastClickX, this.lastClickY) < tol * 2;
+    this.lastClickTime = now;
+    this.lastClickX = x;
+    this.lastClickY = y;
+
+    if (this.pendingRoad) {
+      if (isDouble) {
+        this.finishPendingRoad();
+        return;
+      }
+      const last = this.pendingRoad.points[this.pendingRoad.points.length - 1];
+      if (!last || Phaser.Math.Distance.Between(x, y, last.x, last.y) > 8) {
+        this.pendingRoad.points.push({ x: Math.round(x), y: Math.round(y), w: this.newRoadWidth });
+      }
+      return;
+    }
+
+    // 1. Grab a control-point handle (nearest within tolerance)
+    const handle = this.roadNetwork.hitTestHandle(x, y, tol);
+    if (handle) {
+      this.selectedRoad = handle.road;
+      this.roadDrag = { road: handle.road, index: handle.index, grabX: x, grabY: y };
+      return;
+    }
+
+    // 2. Grab a road body → select + drag the whole road
+    const body = this.roadNetwork.hitTestRoad(x, y, tol * 0.5);
+    if (body) {
+      this.selectedRoad = body;
+      this.roadDrag = { road: body, index: null, grabX: x, grabY: y };
+      return;
+    }
+
+    // 3. Empty ground → start a new road
+    this.selectedRoad = null;
+    this.pendingRoad = { surface: this.newRoadSurface, points: [{ x: Math.round(x), y: Math.round(y), w: this.newRoadWidth }] };
+  }
+
+  private handleRoadPointerMove(pointer: Phaser.Input.Pointer) {
+    const wp = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+    this.pointerWorld = { x: wp.x, y: wp.y };
+
+    if (!this.isPointerDown || !this.roadDrag) return;
+
+    if (this.roadDrag.index !== null) {
+      this.roadNetwork.movePoint(this.roadDrag.road.id, this.roadDrag.index, Math.round(wp.x), Math.round(wp.y));
+    } else {
+      const dx = Math.round(wp.x - this.roadDrag.grabX);
+      const dy = Math.round(wp.y - this.roadDrag.grabY);
+      if (dx !== 0 || dy !== 0) {
+        this.roadNetwork.translateRoad(this.roadDrag.road.id, dx, dy);
+        this.roadDrag.grabX += dx;
+        this.roadDrag.grabY += dy;
+      }
+    }
+    this.roadDirtySinceRelease = true;
+  }
+
+  public finishPendingRoad() {
+    if (!this.pendingRoad) return;
+    if (this.pendingRoad.points.length >= 2) {
+      const road = this.roadNetwork.addRoad(this.pendingRoad.surface, this.pendingRoad.points);
+      this.selectedRoad = road;
+    }
+    this.pendingRoad = null;
+    this.mainScene.tilemapManager.mapVersion++;
+  }
+
+  /** Removes the last placed point of the in-progress drawing (touch-friendly). */
+  public removeLastPendingPoint() {
+    if (!this.pendingRoad) return;
+    this.pendingRoad.points.pop();
+    if (this.pendingRoad.points.length === 0) this.pendingRoad = null;
+  }
+
+  public deleteSelectedRoad() {
+    if (!this.selectedRoad) return;
+    this.roadNetwork.removeRoad(this.selectedRoad.id);
+    this.selectedRoad = null;
+    this.roadDrag = null;
+    this.mainScene.tilemapManager.mapVersion++;
+  }
+
+  /** App toolbar: sets the surface for new roads AND the selected road. */
+  public setRoadSurface(surface: RoadSurface) {
+    this.newRoadSurface = surface;
+    if (this.selectedRoad) {
+      this.roadNetwork.setRoadSurface(this.selectedRoad.id, surface);
+      this.mainScene.tilemapManager.mapVersion++;
+    }
+  }
+
+  /** App toolbar: width −/+ (selected road, or the default for new roads). */
+  public nudgeRoadWidth(delta: number) {
+    if (this.selectedRoad) {
+      this.roadNetwork.nudgeRoadWidth(this.selectedRoad.id, delta);
+      this.mainScene.tilemapManager.mapVersion++;
+    } else {
+      this.newRoadWidth = Phaser.Math.Clamp(this.newRoadWidth + delta, 48, 320);
+    }
+  }
+
+  /** App toolbar polling: current road-tool state for the UI. */
+  public getRoadUIState(): { hasSelection: boolean; surface: RoadSurface; width: number; drawing: boolean } {
+    return {
+      hasSelection: !!this.selectedRoad,
+      surface: this.selectedRoad ? this.selectedRoad.surface : this.newRoadSurface,
+      width: this.selectedRoad ? this.selectedRoad.points[0]?.w ?? this.newRoadWidth : this.newRoadWidth,
+      drawing: !!this.pendingRoad,
+    };
+  }
+
+  /** Per-frame overlay: selection handles + drawing preview. */
+  private drawRoadOverlay() {
+    const g = this.roadOverlay;
+    g.clear();
+    if (this.editorTool !== 'road') return;
+    const z = this.cameras.main.zoom;
+
+    const drawSelection = (road: RoadData) => {
+      const samples = RoadNetwork.sampleRoad(road, 26);
+      if (samples.length === 0) return;
+
+      // Cyan outline along both ribbon edges
+      g.lineStyle(2 / z, 0x00f0ff, 0.9);
+      for (const side of [-1, 1]) {
+        g.beginPath();
+        samples.forEach((s, i) => {
+          const off = s.w / 2 + 3 / z;
+          const px = s.x - s.ty * off * side;
+          const py = s.y + s.tx * off * side;
+          if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+        });
+        g.strokePath();
+      }
+
+      // Control-point handles (active grab handle in amber)
+      const hs = 8 / z;
+      road.points.forEach((p, i) => {
+        const active = !!this.roadDrag && this.roadDrag.road === road && this.roadDrag.index === i;
+        g.fillStyle(active ? 0xfacc15 : 0x00f0ff, 0.95);
+        g.fillRect(p.x - hs / 2, p.y - hs / 2, hs, hs);
+        g.lineStyle(1.5 / z, 0x0b1220, 1);
+        g.strokeRect(p.x - hs / 2, p.y - hs / 2, hs, hs);
+      });
+    };
+
+    if (this.selectedRoad) drawSelection(this.selectedRoad);
+
+    // Drawing preview: placed points + rubber band to the cursor
+    if (this.pendingRoad) {
+      const preview: RoadData = {
+        id: '_preview',
+        surface: this.pendingRoad.surface,
+        closed: false,
+        points: [...this.pendingRoad.points, { x: this.pointerWorld.x, y: this.pointerWorld.y, w: this.newRoadWidth }],
+      };
+      const samples = RoadNetwork.sampleRoad(preview, 26);
+      const col = this.pendingRoad.surface === 'dirt' ? 0x9a7040 : this.pendingRoad.surface === 'cobble' ? 0x8a93a8 : 0x38bdf8;
+
+      if (samples.length >= 2) {
+        // Translucent carriageway
+        for (let i = 0; i < samples.length - 1; i++) {
+          const a = samples[i], b = samples[i + 1];
+          const anx = -a.ty * (a.w / 2), any = a.tx * (a.w / 2);
+          const bnx = -b.ty * (b.w / 2), bny = b.tx * (b.w / 2);
+          g.fillStyle(col, 0.32);
+          g.beginPath();
+          g.moveTo(a.x + anx, a.y + any);
+          g.lineTo(b.x + bnx, b.y + bny);
+          g.lineTo(b.x - bnx, b.y - bny);
+          g.lineTo(a.x - anx, a.y - any);
+          g.closePath();
+          g.fillPath();
+        }
+        g.lineStyle(2 / z, col, 0.9);
+        g.beginPath();
+        samples.forEach((s, i) => (i === 0 ? g.moveTo(s.x, s.y) : g.lineTo(s.x, s.y)));
+        g.strokePath();
+      }
+
+      const hs = 7 / z;
+      for (const p of this.pendingRoad.points) {
+        g.fillStyle(col, 1);
+        g.fillRect(p.x - hs / 2, p.y - hs / 2, hs, hs);
+      }
+    }
   }
 
   private handlePaintPointer(pointer: Phaser.Input.Pointer) {
@@ -259,6 +521,9 @@ export class EditorScene extends Phaser.Scene {
     const g = this.cursorGraphics;
     g.clear();
 
+    // Road tool: no tile cursor (roads are free-form, not grid-snapped)
+    if (this.editorTool === 'road') return;
+
     const tm = this.mainScene.tilemapManager;
     const size = tm.tileSize;
     const x = this.cursorCol * size;
@@ -299,6 +564,9 @@ export class EditorScene extends Phaser.Scene {
     const mainCam = this.mainScene.cameras.main;
     mainCam.setZoom(this.cameras.main.zoom);
     mainCam.setScroll(this.cameras.main.scrollX, this.cameras.main.scrollY);
+
+    // Road tool overlay (selection handles + drawing preview)
+    this.drawRoadOverlay();
   }
 
   public zoomIn() {
@@ -332,9 +600,15 @@ export class EditorScene extends Phaser.Scene {
     this.fitEntireMap();
   }
 
-  public setTool(tool: 'paint' | 'pan' | 'erase') {
+  public setTool(tool: 'paint' | 'pan' | 'erase' | 'road') {
     this.editorTool = tool;
     this.isPaintingSpawn = false;
+    // Leaving the road tool cancels any in-progress drawing / dragging / selection
+    if (tool !== 'road') {
+      this.pendingRoad = null;
+      this.roadDrag = null;
+      this.selectedRoad = null;
+    }
   }
 
   public setTileBrush(tileId: string) {
