@@ -195,7 +195,19 @@ export class GarageSystem {
   }
 
   public getUnlockedTiles(): string[] {
-    const unlocked: string[] = ['asphalt', 'road_straight_v', 'road_straight_h', 'road_turn_ne', 'road_turn_nw', 'road_turn_se', 'road_turn_sw', 'dock_standard', 'building_warehouse', 'jersey_barrier'];
+    // Standard infrastructure every editor needs from the start: arterial grid,
+    // crossings, street furniture and the trailer depot pads. Biome-themed
+    // pieces (dock, shipyard, industrial, historic) unlock per dominant hub.
+    const unlocked: string[] = [
+      'asphalt',
+      'road_straight_v', 'road_straight_h',
+      'road_turn_ne', 'road_turn_nw', 'road_turn_se', 'road_turn_sw',
+      'road_intersection', 'sidewalk', 'pedestrian_crossing',
+      'traffic_light', 'street_lamp_post',
+      'sign_stop', 'sign_yield', 'sign_speed_30',
+      'dock_standard', 'building_warehouse', 'jersey_barrier',
+      'trailer_parking_c', 'trailer_parking_ce', 'trailer_parking_h', 'trailer_parking_x',
+    ];
     for (const hub of Object.values(this.hubs)) {
       if (hub.isDominant) {
         unlocked.push(...hub.unlockedBiomeTiles);

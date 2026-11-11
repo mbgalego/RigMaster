@@ -39,7 +39,12 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.7.8** (Versão Atual)
+### **v1.7.9** (Versão Atual)
+- **Editor: lista de desbloqueio completada:**
+  - `getUnlockedTiles()` cobria só 23 dos 35 tiles da paleta — ficavam **sempre trancados** (mesmo com todos os hubs a 100%): cruzamento com passadeiras, passeio, passadeira de peões, semáforo, poste de iluminação, os 3 sinais de trânsito e **os 4 parques de atrelados** (adicionados na v1.7.0 e nunca registados na lista).
+  - Infra-estrutura padrão (grelha viária, mobiliário urbano, parques) passou a fazer parte da lista base; as peças de bioma (doca/estaleiro/industrial/histórico) continuam gated pelo hub dominado. Dominação total = paleta completa (35/35).
+
+### **v1.7.8**
 - **"Dominar Todos os Hubs" passou a ter efeito visível:**
   - Diagnóstico: o botão funcionava (barras a 100%, contratos concluídos, estado gravado) mas **nada mudava no jogo** — os "sinais néon" prometidos no texto do modal nunca tinham sido implementados (`neonColorHex` era dados mortos) e os tiles desbloqueados só aparecem no editor.
   - Novo **`drawHubSigns`** no MainScene: cada hub dominado a 100% ergue o seu **sinal néon** junto ao bioma no mapa procedural (PORTO/ESTALEIRO/INDUSTRIAL/HISTÓRICO) — poste + painel com barras néon na cor do hub + halo pulsante no solo + rótulo. Hubs não dominados não têm sinal; dominar faz os sinais aparecerem de imediato.
