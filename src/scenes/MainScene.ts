@@ -405,12 +405,12 @@ export class MainScene extends Phaser.Scene {
     };
     const reset = () => { this.autoCoupleErrorKey = null; };
 
-    // Bitrem: auto-couple the pup onto the lead's rear fifth wheel.
-    // Radius 50 > contact distance (~43): couples right at/before the pup's
-    // nose plate, since two full bodies cannot carve a pass-under corridor.
+    // Bitrem: auto-couple the pup onto the lead's rear fifth wheel. Free
+    // trailer bodies exclude the trailer bit (0x0004), so the lead slides
+    // under the pup's nose plate to the pin — same corridor as the tractor.
     if (this.trailer) {
       if (this.trailer.type === 'bitrem_lead' && !this.pupTrailer) {
-        const cand = mgr.findCouplablePup(this.trailer, 50, 28);
+        const cand = mgr.findCouplablePup(this.trailer, 30, 28);
         if (!cand) { reset(); return; }
         const key = `pup_${cand.trailer.body.id}`;
         if (!this.licenseSystem.isUnlocked('H')) { fail(key, 'Requer licença H', 'blocked'); return; }

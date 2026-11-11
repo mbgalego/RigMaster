@@ -190,9 +190,9 @@ export class TrailerManager {
   /** Returns a trailer to the loose pool, frozen in place as a static body. */
   public release(trailer: Trailer) {
     trailer.body.collisionFilter.group = 0;
-    // Obstacles + other trailers, NOT the tractor: the nose (kingpin) zone is
-    // the pass-under corridor; the blocker proxy keeps the rest solid.
-    trailer.body.collisionFilter.mask = 0x0005;
+    // Obstacles + the tractor's front-solid zone, NOT the tractor's rear strip
+    // (kingpin corridor) and NOT other trailer bodies (lead -> pup corridor).
+    trailer.body.collisionFilter.mask = 0x0021;
     trailer.setBlockerActive(true);
     trailer.syncBlocker();
     this.scene.matter.body.setStatic(trailer.body, true);
@@ -211,9 +211,9 @@ export class TrailerManager {
 
   private applyParkedFilter(t: Trailer) {
     t.body.collisionFilter.group = 0;
-    // Obstacles + other trailers, NOT the tractor: the nose (kingpin) zone is
-    // the pass-under corridor; the blocker proxy keeps the rest solid.
-    t.body.collisionFilter.mask = 0x0005;
+    // Obstacles + the tractor's front-solid zone, NOT the tractor's rear strip
+    // (kingpin corridor) and NOT other trailer bodies (lead -> pup corridor).
+    t.body.collisionFilter.mask = 0x0021;
     this.scene.matter.body.setStatic(t.body, true);
   }
 

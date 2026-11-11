@@ -39,7 +39,17 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.7.5** (Versão Atual)
+### **v1.7.6** (Versão Atual)
+- **Zona Frontal Sólida do Trator (foto-modelo completo):**
+  - Novo `frontBody` no trator: cobre o trator **exceto a faixa traseira de 45px** (quinta roda), categoria `0x0020`, colide **apenas com corpos de atrelado**. A cabine já não consegue atravessar a zona frontal do atrelado — a interseção permitida é exactamente **nariz-do-atrelado × faixa-traseira-do-camião** (rectângulos vermelhos da foto de referência), a qualquer ângulo.
+  - O proxy é dinâmico e sincronizado a cada frame (`syncFrontBody`); as correcções de resolução de contacto são **transferidas para o corpo principal** (clamp 8px/frame) — a cabine "encosta" fisicamente ao atrelado em vez de atravessá-lo.
+- **Acoplamento Pup (lead→pup) restaurado:**
+  - Causa: desde a v1.7.3 o raio de zona era 30px, mas o contacto físico lead↔pup dá-se a ~43px (dois corpos completos) — geometricamente inalcançável; funcionava na v1.7.4 só pelo toggle de máscara.
+  - Correcção pelo modelo de zonas: corpos de atrelado livres deixam de colidir entre si (`mask 0x0021` = obstáculos + zona frontal do trator) — o lead desliza por baixo do nariz do pup até ao pino, como o trator faz com um lead. Raio de volta a 30px, assentamento suave (sem snap).
+  - O **bloqueador** de atrelados livres passa a colidir também com corpos de atrelado (`mask 0x0006`): um atrelado acoplado a varrer o meio/traseira de outro continua bloqueado — só a faixa do nariz é atravessável.
+- Limpo: sem toggles de máscara, sem estados; todas as zonas são geometria fixa desde o spawn.
+
+### **v1.7.5**
 - **Corredor de Passagem por Zonas Geométricas (corpo-bloqueador):**
   - Modelo real da quinta roda (foto de referência): a interseção permitida é o rectângulo **nariz-do-atrelado × traseira-do-camião**. O corpo do atrelado deixa de colidir com o trator (máscara `0x0005`) — o corredor fica **sempre aberto no nariz, a qualquer ângulo**, sem toggles de máscara nem histerese (a abordagem v1.7.4 deixava passar a traseira em ângulos raros).
   - Novo **corpo-bloqueador** (`blockerBody`) por atrelado: rect estático que cobre a caixa **exceto a zona do nariz** (`blockerDepth = nariz−kingpin+30px`), categoria `0x0008`, máscara `0x0002` (só trator) — é ele que bloqueia o trator no meio/traseira do atrelado. Ao acoplar desliga-se (`setBlockerActive(false)`); ao desacoplar religa-se e ressincroniza. A traseira do camião fica ~10px de folga do bloqueador no assentamento completo do pino.

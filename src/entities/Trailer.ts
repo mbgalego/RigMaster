@@ -103,9 +103,11 @@ export class Trailer {
       label: `trailer_${this.type}`,
       collisionFilter: {
         category: 0x0004,
-        // Obstacles + other trailers, NOT the tractor (cat 0x0002): the nose
-        // (kingpin) zone stays open for the pass-under coupling corridor.
-        mask: 0x0005,
+        // Obstacles (0x0001) + the tractor's front-solid zone (0x0020). NOT the
+        // tractor main body: its rear fifth-wheel strip must slide under the
+        // nose plate. NOT other trailer bodies: nose zones stay open for
+        // trailer-to-trailer coupling (bitrem lead -> pup corridor).
+        mask: 0x0021,
         group: -1,
       },
       render: {
@@ -115,9 +117,10 @@ export class Trailer {
 
     // Tractor-corridor blocker: static proxy body covering the box EXCEPT the
     // nose zone (depth from the nose edge to just past the kingpin seat). The
-    // trailer body itself never collides with the tractor, so without this
-    // proxy the tractor could drive straight through the middle of a free
-    // trailer. While coupled the blocker is switched off (mask 0).
+    // trailer body itself never collides with the tractor's rear strip (nor
+    // with other trailer bodies), so without this proxy anything could drive
+    // straight through the middle of a free trailer. While coupled the blocker
+    // is switched off (mask 0).
     this.blockerDepth = this.length / 2 - this.kingpinDist + 30;
     const bOffX = -Math.sin(spawnAngle) * (this.blockerDepth / 2);
     const bOffY = Math.cos(spawnAngle) * (this.blockerDepth / 2);
@@ -126,7 +129,9 @@ export class Trailer {
       label: `trailer_blocker_${this.type}`,
       collisionFilter: {
         category: 0x0008,
-        mask: 0x0002,
+        // Tractor main body (0x0002) + other trailer bodies (0x0004): the
+        // blocker is the solid face of a free trailer everywhere but the nose.
+        mask: 0x0006,
         group: 0,
       },
       render: { visible: false },
@@ -405,10 +410,10 @@ export class Trailer {
     this.scene.matter.body.setAngle(this.blockerBody, a);
   }
 
-  /** Enables/disables the blocker's collision with the tractor (off while coupled). */
+  /** Enables/disables the blocker's collisions (off while coupled). */
   public setBlockerActive(active: boolean) {
     if (!this.blockerBody) return;
-    this.blockerBody.collisionFilter.mask = active ? 0x0002 : 0;
+    this.blockerBody.collisionFilter.mask = active ? 0x0006 : 0;
   }
 
   public destroy() {
