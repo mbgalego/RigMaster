@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { TrafficLightSystem } from '../systems/TrafficLightSystem';
+import { TrailerManager } from '../systems/TrailerManager';
 
 export interface MapDataJSON {
   version: number;
@@ -17,7 +18,7 @@ export interface MapDataJSON {
 export interface TileDefinition {
   id: string;
   name: string;
-  category: 'road' | 'dock' | 'obstacle' | 'biome';
+  category: 'road' | 'dock' | 'obstacle' | 'biome' | 'parking';
   isSolid: boolean;
   color: string;
   colliderSize?: { w: number; h: number };
@@ -46,6 +47,12 @@ export const TILE_DEFINITIONS: Record<string, TileDefinition> = {
   // Docks & Logistics
   dock_standard: { id: 'dock_standard', name: 'Doca de Carga', category: 'dock', isSolid: false, color: '#0f2937' },
   factory_dock: { id: 'factory_dock', name: 'Doca Hidráulica Industrial', category: 'dock', isSolid: false, color: '#1e293b' },
+
+  // Trailer depot pads (spawn a parked, couplable trailer; nose faces south)
+  trailer_parking_c: { id: 'trailer_parking_c', name: 'Parque: Atrelado Standard (C)', category: 'parking', isSolid: false, color: '#ec4899' },
+  trailer_parking_ce: { id: 'trailer_parking_ce', name: 'Parque: Pá Eólica (C+E)', category: 'parking', isSolid: false, color: '#f97316' },
+  trailer_parking_h: { id: 'trailer_parking_h', name: 'Parque: Bitrem (H)', category: 'parking', isSolid: false, color: '#a855f7' },
+  trailer_parking_x: { id: 'trailer_parking_x', name: 'Parque: Vidro Frágil (X)', category: 'parking', isSolid: false, color: '#10b981' },
 
   // Obstacles & Biome Pieces
   building_warehouse: { id: 'building_warehouse', name: 'Armazém / Edifício', category: 'obstacle', isSolid: true, color: '#334155' },
@@ -603,6 +610,53 @@ export class TilemapManager {
           ctx.stroke();
           break;
 
+        case 'trailer_parking_c':
+        case 'trailer_parking_ce':
+        case 'trailer_parking_h':
+        case 'trailer_parking_x': {
+          const accent =
+            tileKey === 'trailer_parking_c' ? '#ec4899' :
+            tileKey === 'trailer_parking_ce' ? '#f97316' :
+            tileKey === 'trailer_parking_h' ? '#a855f7' : '#10b981';
+          const label =
+            tileKey === 'trailer_parking_c' ? 'C' :
+            tileKey === 'trailer_parking_ce' ? 'CE' :
+            tileKey === 'trailer_parking_h' ? 'H' : 'X';
+
+          // Depot pad (asphalt)
+          ctx.fillStyle = '#131a26';
+          ctx.fillRect(0, 0, size, size);
+
+          // Dashed bay outline (nose opens to the south)
+          ctx.strokeStyle = '#cbd5e1';
+          ctx.lineWidth = 3;
+          ctx.setLineDash([12, 9]);
+          ctx.strokeRect(24, 6, size - 48, size - 14);
+          ctx.setLineDash([]);
+
+          // Fifth-wheel nose bar (south edge — the tractor reverses onto it)
+          ctx.fillStyle = accent;
+          ctx.fillRect(32, size - 16, size - 64, 6);
+
+          // Letter badge (license class)
+          ctx.fillStyle = accent;
+          ctx.font = 'bold 20px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(label, size / 2, 26);
+
+          // Trailer silhouette parked nose-south (wheels on the north side)
+          const bw = 36;
+          ctx.fillStyle = '#0b1220';
+          ctx.strokeStyle = accent;
+          ctx.lineWidth = 2;
+          ctx.fillRect(size / 2 - bw / 2, 38, bw, size - 62);
+          ctx.strokeRect(size / 2 - bw / 2, 38, bw, size - 62);
+          ctx.fillStyle = '#020617';
+          ctx.fillRect(size / 2 - bw / 2 - 5, 46, 7, 14);
+          ctx.fillRect(size / 2 + bw / 2 - 2, 46, 7, 14);
+          break;
+        }
+
         default:
           ctx.fillStyle = '#1e293b';
           ctx.fillRect(2, 2, size - 4, size - 4);
@@ -848,6 +902,14 @@ export class TilemapManager {
       for (const c of vArterials) this.grid[r][c] = 'road_intersection';
     }
 
+    // Trailer depots (nose faces south; tractor reverses into the nose)
+    this.placeTrailerPad(13, 12, 'trailer_parking_c');    // near the spawn
+    this.placeTrailerPad(12, 9, 'trailer_parking_ce');    // Porto hub
+    this.placeTrailerPad(84, 12, 'trailer_parking_c');    // Estaleiro hub
+    this.placeTrailerPad(92, 62, 'trailer_parking_x');    // Industrial hub (fragile)
+    this.placeTrailerPad(20, 68, 'trailer_parking_c');    // Centro Histórico
+    this.placeTrailerPad(60, 36, 'trailer_parking_h');    // mid-map bitrem depot
+
     this.spawnPoint = { x: 9 * this.tileSize + 64, y: 8 * this.tileSize + 64, angle: 0 };
 
     this.afterGridReplaced();
@@ -862,6 +924,23 @@ export class TilemapManager {
       }
     }
     return true;
+  }
+
+  /**
+   * Places a trailer depot pad and guarantees a clear approach south of it
+   * (trailers park nose-south; the tractor reverses straight into the nose).
+   * Never wipes road tiles out of the approach.
+   */
+  private placeTrailerPad(c: number, r: number, tileId: string) {
+    this.grid[r][c] = tileId;
+    for (let rr = r + 1; rr <= r + 2; rr++) {
+      for (let cc = c - 1; cc <= c + 1; cc++) {
+        if (cc <= 0 || cc >= this.cols - 1 || rr <= 0 || rr >= this.rows - 1) continue;
+        const t = this.grid[rr][cc];
+        if (t.startsWith('road_') || t === 'road_intersection') continue;
+        this.grid[rr][cc] = 'asphalt';
+      }
+    }
   }
 
   private loadAcademyPreset() {
@@ -904,6 +983,12 @@ export class TilemapManager {
     this.vLine(54, 4, this.rows - 5, 'road_straight_v');
     this.grid[24][54] = 'road_intersection';
 
+    // Trailer depot pads for license-class practice (C / C+E / H / X)
+    this.placeTrailerPad(12, 7, 'trailer_parking_c');
+    this.placeTrailerPad(16, 7, 'trailer_parking_ce');
+    this.placeTrailerPad(12, 12, 'trailer_parking_h');
+    this.placeTrailerPad(16, 12, 'trailer_parking_x');
+
     this.spawnPoint = { x: 6 * this.tileSize + 64, y: 6 * this.tileSize + 64, angle: 90 };
     this.afterGridReplaced();
   }
@@ -945,6 +1030,12 @@ export class TilemapManager {
       this.fill('shipping_container_blue', 46, 46, c, c);
       this.fill('shipping_container_red', 48, 48, c, c);
     }
+
+    // Trailer depot pads between the quay and the first road (all four classes)
+    this.placeTrailerPad(8, 19, 'trailer_parking_c');
+    this.placeTrailerPad(22, 19, 'trailer_parking_ce');
+    this.placeTrailerPad(38, 19, 'trailer_parking_h');
+    this.placeTrailerPad(54, 19, 'trailer_parking_x');
 
     this.spawnPoint = { x: 6 * this.tileSize + 64, y: 24 * this.tileSize + 64, angle: 90 };
     this.afterGridReplaced();
@@ -1124,6 +1215,8 @@ export class TilemapManager {
 
     this.refreshLayer();
     TrafficLightSystem.getInstance(this.scene).rebuild(this.grid, this.tileSize);
+    // Trailer depots own their parked entities; rescan on any full grid replace
+    TrailerManager.getInstance(this.scene).rebuild(this.grid, this.tileSize);
   }
 
   public setTile(col: number, row: number, tileType: string) {
@@ -1192,6 +1285,9 @@ export class TilemapManager {
     if (oldTile === 'traffic_light' || tileType === 'traffic_light') {
       TrafficLightSystem.getInstance(this.scene).rebuild(this.grid, this.tileSize);
     }
+
+    // Trailer depots own their parked entities; spawn/despawn incrementally
+    TrailerManager.getInstance(this.scene).onTileChanged(col, row, tileType, oldTile);
   }
 
   public getTile(col: number, row: number): string {

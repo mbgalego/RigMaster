@@ -23,6 +23,13 @@ export class Truck {
 
   public width: number;
   public length: number;
+  // Front-solid zone proxy: covers the tractor EXCEPT the rear fifth-wheel
+  // strip. Pairs ONLY with trailer bodies so the cab cannot pass through a
+  // trailer's kingpin nose zone, while the rear strip stays open to slide
+  // under the nose plate (allowed intersection: trailer nose x truck rear).
+  public frontBody: MatterJS.BodyType;
+  private frontDepth: number = 45;
+  private frontDesired: { x: number; y: number } | null = null;
   public maxForwardSpeed: number = 160; // in px/s (~36 km/h yard maneuver)
   public maxReverseSpeed: number = 54;  // in px/s (~12 km/h slow maneuvering reverse)
   public engineAccel: number = 48;      // in px/s^2 - realistic heavy diesel torque
@@ -91,9 +98,12 @@ export class Truck {
       restitution: 0.0,
       angle: spawnAngle,
       label: 'truck_cab',
+      // mask 0x0009 = obstacles (0x0001) + trailer blockers (0x0008). Free
+      // trailers' bodies exclude the tractor bit (kingpin corridor), so the
+      // blocker proxy bodies are what physically block the tractor.
       collisionFilter: {
         category: 0x0002,
-        mask: 0x0001,
+        mask: 0x0009,
         group: -1,
       },
       render: {
@@ -103,6 +113,22 @@ export class Truck {
 
     // Enforce infinite inertia on Matter body directly
     this.scene.matter.body.setInertia(this.body, Infinity);
+
+    // Front-solid zone proxy (rear 45px of the tractor stay open for the
+    // pass-under corridor). Dynamic so Matter resolves contacts against it;
+    // syncFrontBody transfers those corrections back onto the main body.
+    const fzOffX = (this.frontDepth / 2) * Math.sin(spawnAngle);
+    const fzOffY = -(this.frontDepth / 2) * Math.cos(spawnAngle);
+    this.frontBody = matter.add.rectangle(spawnX + fzOffX, spawnY + fzOffY, this.width, this.length - this.frontDepth, {
+      mass: 5,
+      frictionAir: 1,
+      friction: 0,
+      restitution: 0,
+      angle: spawnAngle,
+      label: 'truck_front_zone',
+      collisionFilter: { category: 0x0020, mask: 0x0004, group: 0 },
+      render: { visible: false },
+    }) as unknown as MatterJS.BodyType;
 
     // Visual container
     this.container = scene.add.container(spawnX, spawnY);
@@ -325,8 +351,42 @@ export class Truck {
     this.container.setPosition(this.body.position.x, this.body.position.y);
     this.container.setRotation(this.body.angle);
 
+    // 7. Keep the front-solid zone proxy glued to the tractor
+    this.syncFrontBody();
+
     this.drawWheels();
     this.drawLights();
+  }
+
+  /**
+   * Keeps the front-solid proxy glued to the tractor. When Matter resolves a
+   * contact against a trailer's nose zone it displaces the proxy; that
+   * correction is transferred onto the main body so the cab physically rides
+   * against the trailer instead of clipping through it.
+   */
+  public syncFrontBody() {
+    const a = this.body.angle;
+    const ox = (this.frontDepth / 2) * Math.sin(a);
+    const oy = -(this.frontDepth / 2) * Math.cos(a);
+
+    if (this.frontDesired) {
+      const cx = this.frontBody.position.x - this.frontDesired.x;
+      const cy = this.frontBody.position.y - this.frontDesired.y;
+      const mag = Math.hypot(cx, cy);
+      if (mag > 0.05 && mag < 40) {
+        // Clamp the transferred correction for smooth contact response
+        const k = Math.min(1, 8 / mag);
+        this.scene.matter.body.setPosition(this.body, {
+          x: this.body.position.x + cx * k,
+          y: this.body.position.y + cy * k,
+        });
+      }
+    }
+
+    this.frontDesired = { x: this.body.position.x + ox, y: this.body.position.y + oy };
+    this.scene.matter.body.setPosition(this.frontBody, { x: this.frontDesired.x, y: this.frontDesired.y });
+    this.scene.matter.body.setAngle(this.frontBody, a);
+    this.scene.matter.body.setVelocity(this.frontBody, { x: this.body.velocity.x, y: this.body.velocity.y });
   }
 
   private drawTruck() {
@@ -502,12 +562,16 @@ export class Truck {
     this.scene.matter.body.setAngularVelocity(this.body, 0);
     this.container.setPosition(x, y);
     this.container.setRotation(angle);
+    // Teleports must not read as a collision correction
+    this.frontDesired = null;
+    this.syncFrontBody();
   }
 
   public destroy() {
     this.container.destroy();
     if (this.scene.matter && this.scene.matter.world) {
       this.scene.matter.world.remove(this.body);
+      this.scene.matter.world.remove(this.frontBody);
     }
   }
 }

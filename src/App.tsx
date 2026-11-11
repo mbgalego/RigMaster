@@ -71,7 +71,7 @@ export default function App() {
   const [hubs, setHubs] = useState<HubData[]>([]);
   const [activeWeather, setActiveWeather] = useState<WeatherModifier>('clear');
   const [selectedBrush, setSelectedBrush] = useState<string>('road_straight_h');
-  const [brushCategory, setBrushCategory] = useState<'all' | 'road' | 'dock' | 'obstacle' | 'biome'>('all');
+  const [brushCategory, setBrushCategory] = useState<'all' | 'road' | 'dock' | 'parking' | 'obstacle' | 'biome'>('all');
   const [editorTool, setEditorTool] = useState<'paint' | 'pan' | 'erase'>('paint');
   const [isPaletteOpen, setIsPaletteOpen] = useState<boolean>(true);
   const [isPaintingSpawn, setIsPaintingSpawn] = useState<boolean>(false);
@@ -91,7 +91,23 @@ export default function App() {
     fragileHealth: 100,
     weather: 'clear',
     activeLicenseExam: null,
+    coupling: { decoupleReady: false, coupledName: null, blocked: null, notice: null, noticeKind: 'info', noticeSeq: 0 },
   });
+
+  // Toast notifications (coupling feedback) — triggered by noticeSeq changes
+  const [toasts, setToasts] = useState<Array<{ id: number; text: string; kind: string }>>([]);
+  const toastIdRef = useRef(0);
+  const noticeSeq = telemetry.coupling?.noticeSeq ?? 0;
+
+  useEffect(() => {
+    const n = telemetry.coupling?.notice;
+    if (!n) return;
+    const kind = telemetry.coupling?.noticeKind ?? 'info';
+    const id = ++toastIdRef.current;
+    setToasts((t) => [...t.slice(-2), { id, text: n, kind }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2800);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [noticeSeq]);
 
   const [activeExam, setActiveExam] = useState<ExamStatus | null>(null);
 
@@ -813,7 +829,7 @@ export default function App() {
 
               {/* Horizontally Scrollable Category Tabs */}
               <div className="flex gap-1 mb-2 text-[10px] overflow-x-auto pb-1">
-                {(['all', 'road', 'dock', 'obstacle', 'biome'] as const).map((cat) => (
+                {(['all', 'road', 'dock', 'parking', 'obstacle', 'biome'] as const).map((cat) => (
                   <button
                     key={cat}
                     onClick={() => setBrushCategory(cat)}
@@ -1230,8 +1246,32 @@ export default function App() {
         </div>
       )}
 
+      {/* TOASTS (coupling feedback notifications — only on coupling attempts) */}
+      {!isEditorMode && (
+        <div className="absolute top-14 inset-x-0 z-40 flex flex-col items-center gap-2 pointer-events-none px-4">
+          {toasts.map((t) => (
+            <div
+              key={t.id}
+              className={`px-4 py-2 rounded-lg border shadow-lg text-xs font-bold ${
+                t.kind === 'blocked'
+                  ? 'bg-amber-950/90 border-amber-500/60 text-amber-200 shadow-amber-500/20'
+                  : t.kind === 'success'
+                    ? 'bg-emerald-950/90 border-emerald-500/60 text-emerald-200 shadow-emerald-500/20'
+                    : 'bg-slate-900/90 border-cyan-500/50 text-cyan-100 shadow-cyan-500/20'
+              }`}
+            >
+              {t.kind === 'blocked' ? '🔒 ' : t.kind === 'success' ? '✅ ' : 'ℹ️ '}
+              {t.text}
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* TOUCH CONTROLS (STEERING WHEEL LEFT, THROTTLE & BRAKE RIGHT) */}
-      <TouchControls visible={!isEditorMode && showTouchControls} />
+      <TouchControls visible={!isEditorMode && showTouchControls} coupling={telemetry.coupling} onDecouple={() => {
+        const scene = getMainScene();
+        if (scene) scene.decoupleAction();
+      }} />
     </div>
   );
 }

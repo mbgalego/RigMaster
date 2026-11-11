@@ -1,11 +1,14 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { getMainScene } from '../main';
+import type { MainScene } from '../scenes/MainScene';
 
 interface TouchControlsProps {
   visible: boolean;
+  coupling?: MainScene['telemetry']['coupling'];
+  onDecouple?: () => void;
 }
 
-export const TouchControls: React.FC<TouchControlsProps> = ({ visible }) => {
+export const TouchControls: React.FC<TouchControlsProps> = ({ visible, coupling, onDecouple }) => {
   const wheelRef = useRef<HTMLDivElement>(null);
   const [wheelAngleDeg, setWheelAngleDeg] = useState<number>(0);
   const [isDraggingWheel, setIsDraggingWheel] = useState<boolean>(false);
@@ -198,6 +201,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({ visible }) => {
 
   return (
     <div className="absolute inset-x-0 bottom-0 pointer-events-none z-30 select-none pb-4 px-3 sm:px-6 flex justify-between items-end">
+
       {/* ======================================================== */}
       {/* ESQUERDA: VOLANTE INTERATIVO (20% MAIOR, SEMI-TRANSPARENTE) */}
       {/* ======================================================== */}
@@ -249,15 +253,35 @@ export const TouchControls: React.FC<TouchControlsProps> = ({ visible }) => {
       <div className="flex flex-col items-end gap-2.5 pointer-events-auto">
         {/* Compact Switch de Direção de Marcha (D / R) & Handbrake */}
         <div className="flex items-center gap-2">
+          {/* Desacoplar (C) / bloqueado — icon-only, junto ao travão de mão */}
+          {coupling && coupling.decoupleReady && (
+            <button
+              type="button"
+              onPointerDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onDecouple?.();
+              }}
+              style={{ touchAction: 'none' }}
+              className="w-8 h-8 rounded-full text-sm border bg-red-600/90 text-white border-red-300 shadow-md shadow-red-500/50 transition flex items-center justify-center select-none touch-none"
+              title="Desacoplar Atrelado (C)"
+            >
+              🔗
+            </button>
+          )}
+          {coupling && coupling.blocked && (
+            <div
+              className="w-8 h-8 rounded-full text-sm border bg-amber-600/90 text-white border-amber-300 shadow-md shadow-amber-500/50 flex items-center justify-center select-none pointer-events-none"
+              title="Acoplamento bloqueado por licença"
+            >
+              🔗
+            </div>
+          )}
+
           {/* Handbrake Button (P) */}
           <button
             type="button"
             onPointerDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              toggleHandbrake();
-            }}
-            onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
               toggleHandbrake();
