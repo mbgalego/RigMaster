@@ -403,19 +403,19 @@ export class WorldObjects {
       }
     }
 
-    // ---- Street lamps along the arterial grid ----
+    // ---- Street lamps along the arterial grid (well clear of the road edge) ----
     const vCols = [1152, 3456, 5760, 8064, 10368, 12672];
     const hRows = [1024, 3072, 5120, 7168, 9216];
     for (const x of vCols) {
       for (let y = 900; y < 9600; y += 900) {
-        if (terrain.isWater(x - 66, y) || terrain.isBeach(x - 66, y)) continue;
-        this.add('lamp', x - 66, y, 16, 16);
+        if (terrain.isWater(x - 100, y) || terrain.isBeach(x - 100, y)) continue;
+        this.add('lamp', x - 100, y, 12, 12);
       }
     }
     for (const y of hRows) {
       for (let x = 900; x < 13200; x += 900) {
-        if (terrain.isWater(x, y - 66) || terrain.isBeach(x, y - 66)) continue;
-        this.add('lamp', x, y - 66, 16, 16);
+        if (terrain.isWater(x, y - 100) || terrain.isBeach(x, y - 100)) continue;
+        this.add('lamp', x, y - 100, 12, 12);
       }
     }
 
@@ -458,11 +458,36 @@ export class WorldObjects {
         for (const o of list) {
           if (drawn.has(o.id)) continue;
           drawn.add(o.id);
+          if (o.type === 'traffic_light') continue; // animated: rendered every frame by renderLights
           if (o.type === 'gas_canopy' || o.type === 'parking_pad' || o.type === 'exam_dock' || o.type === 'dock') {
             this.drawFlat(flats, o);
           } else {
             this.drawSolid(solids, o);
           }
+        }
+      }
+    }
+  }
+
+  /**
+   * Traffic lights only — animated every frame (cheap: a handful of visible
+   * lights). Kept separate so the heavy static object layers can be redrawn
+   * only when the camera moves or the world is edited.
+   */
+  public renderLights(lights: Phaser.GameObjects.Graphics, view: Phaser.Geom.Rectangle) {
+    lights.clear();
+    const M = 120;
+    const x0 = Math.floor((view.x - M) / OBJ_CELL), x1 = Math.floor((view.x + view.width + M) / OBJ_CELL);
+    const y0 = Math.floor((view.y - M) / OBJ_CELL), y1 = Math.floor((view.y + view.height + M) / OBJ_CELL);
+    const drawn = new Set<string>();
+    for (let cy = y0; cy <= y1; cy++) {
+      for (let cx = x0; cx <= x1; cx++) {
+        const list = this.grid.get(`${cx}_${cy}`);
+        if (!list) continue;
+        for (const o of list) {
+          if (o.type !== 'traffic_light' || drawn.has(o.id)) continue;
+          drawn.add(o.id);
+          this.drawSolid(lights, o);
         }
       }
     }

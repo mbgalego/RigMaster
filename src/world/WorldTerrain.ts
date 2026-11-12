@@ -131,7 +131,9 @@ export class WorldTerrain {
   // CHUNK RENDERING
   // ======================================================================
 
-  /** Makes sure every chunk intersecting the view exists; evicts distant ones. */
+  /** Makes sure every chunk intersecting the view exists; evicts distant ones.
+   *  Chunk *painting* is expensive (~10ms each), so at most ONE chunk is built
+   *  per frame — the rest queue up and materialize over the following frames. */
   public updateView(view: Phaser.Geom.Rectangle) {
     const c0x = Math.floor(view.x / CHUNK), c1x = Math.floor((view.x + view.width) / CHUNK);
     const c0y = Math.floor(view.y / CHUNK), c1y = Math.floor((view.y + view.height) / CHUNK);
@@ -146,8 +148,18 @@ export class WorldTerrain {
 
     for (let cy = c0y; cy <= c1y; cy++) {
       for (let cx = c0x; cx <= c1x; cx++) {
+        const key = `${cx}_${cy}`;
+        if (!this.chunks.has(key)) this.queue.add(key);
+      }
+    }
+    // Build at most one queued chunk per frame
+    for (const key of this.queue) {
+      this.queue.delete(key);
+      if (!this.chunks.has(key)) {
+        const [cx, cy] = key.split('_').map(Number);
         this.ensureChunk(cx, cy);
       }
+      break;
     }
     // Evict chunks far away (keep 2-chunk margin)
     const keep = new Set<string>();
@@ -165,7 +177,10 @@ export class WorldTerrain {
     }
   }
 
+  private queue = new Set<string>();
+
   private evictAll() {
+    this.queue.clear();
     for (const [key, img] of Array.from(this.chunks.entries())) {
       img.destroy();
       this.scene.textures.remove(`terrain_${key}`);
@@ -353,6 +368,7 @@ export class WorldTerrain {
   }
 
   public destroy() {
+    this.queue.clear();
     for (const [key, img] of Array.from(this.chunks.entries())) {
       img.destroy();
       this.scene.textures.remove(`terrain_${key}`);

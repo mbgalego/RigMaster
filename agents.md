@@ -41,7 +41,14 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.0.0** (Versão Atual — branch `feature/road-network`)
+### **v2.0.1** (Versão Atual — branch `feature/road-network`)
+- **Correcções de performance (mundo v2.0 degradava progressivamente):**
+  - **Fuga de memória real (a "piora progressiva")**: o `Truck` registava um listener `collisionstart` no mundo Matter e o `destroy()` **nunca o removia** — cada respawn (tecla R, início de exame, troca de veículo) acrescentava mais um listener que mantinha o camião velho em memória e re-processava **todas** as colisões do mundo (o `Trailer` já fazia `off` correctamente; o `Truck` não). Agora o handler é guardado e removido no destroy.
+  - **Render de prefabs deixou de ser por frame**: todas as frames reconstruíam centenas de comandos Graphics (edifícios, docas, postes…). Agora as camadas estáticas (flats/solids) só são redesenhadas quando a câmara anda >24px, muda de zoom, ou o mundo é editado (`objects.version`); os **semáforos** (animação) vivem numa `Graphics` própria (depth 4) redesenhada por frame — poucos e baratos.
+  - **Terreno: criação de chunks orçamentada**: ao cruzar fronteiras de chunk vários chunks (~10ms cada) eram pintados no mesmo frame (soluços). Agora existe uma **fila** e no máximo **1 chunk é pintado por frame**.
+  - **Postes de luz já não são muros invisíveis**: estavam a 66px do eixo arterial (estrada tem meia-largura 64px) — o colisor de 16px invadia a berma e provocava colisões/rebotes constantes ao conduzir na via. Movidos para 100px do eixo com colisor 12px.
+
+### **v2.0.0** (branch `feature/road-network`)
 - **FIM DAS TILES — Mundo único procedural "Ilha Atlântica" (sem mundos separados):**
   - **Arquitectura nova**: o mundo é **uma ilha gigante delimitada por oceano** (13824×10240 px, cantos arredondados com linha de costa ondulada por ruído — baías e penínsulas na banda costeira). A grelha de tiles 128px, o atlas `TILE_DEFINITIONS`, a paleta, os presets (Academia/Porto) e o `TilemapManager` foram **eliminados por completo**. Novo módulo `src/world/`:
     - **`WorldTerrain.ts`** — terreno procedural por **fbm value-noise com seed determinística**, pintado por **chunks 1024px** (canvas 512² escalado ×2, cache LRU com evicção + guarda: em zoom-out extremo só desenha a imagem **overview** da silhueta da ilha, calculada uma vez). Biomas por região + ruído: oceano profundo/água rasa, praia de areia, relva, floresta (árvores determinísticas, sem colisão), campos agrícolas com sulcos, betão urbano/industrial manchado, calçada histórica. `landPatches` garantem terra nos hubs costeiros (Porto NW, Estaleiro NE, Industrial SE, Histórico SW — todos encostados à costa).

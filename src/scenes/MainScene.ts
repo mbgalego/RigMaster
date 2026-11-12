@@ -23,6 +23,9 @@ export class MainScene extends Phaser.Scene {
   public world!: World;
   private flatsGraphics: Phaser.GameObjects.Graphics | null = null;
   private solidsGraphics: Phaser.GameObjects.Graphics | null = null;
+  private lightsGraphics: Phaser.GameObjects.Graphics | null = null;
+  // Static object layers are redrawn only when the camera or the world changed
+  private lastObjRender = { x: NaN, y: NaN, zoom: NaN, version: -1 };
 
   // Vector road network (Phase 1: spline roads over the tile ground)
   public roadNetwork!: RoadNetwork;
@@ -143,6 +146,7 @@ export class MainScene extends Phaser.Scene {
     // Ground layers: flats (docks/pads) under the roads, solids above them
     this.flatsGraphics = this.add.graphics().setDepth(1);
     this.solidsGraphics = this.add.graphics().setDepth(3);
+    this.lightsGraphics = this.add.graphics().setDepth(4);
 
     // Vector road ribbon renderer (above flats, below solids/vehicles)
     this.roadGraphics = this.add.graphics().setDepth(2);
@@ -749,13 +753,28 @@ export class MainScene extends Phaser.Scene {
     // Vector road ribbons (also visible in editor mode)
     this.renderRoads();
 
-    // Prefab objects (flats under roads, solids above them) — skipped when the
-    // camera is so far out that every object would be sub-pixel anyway
-    if (this.flatsGraphics && this.solidsGraphics && this.cameras.main.zoom >= 0.12) {
-      this.world.objects.render(this.flatsGraphics, this.solidsGraphics, this.cameras.main.worldView);
-    } else if (this.flatsGraphics && this.solidsGraphics) {
+    // Prefab objects: the animated traffic lights redraw every frame (few, cheap);
+    // the heavy static layers only redraw when the camera moved/zoomed or the
+    // world was edited — otherwise the Graphics command buffer is reused as-is.
+    const cam = this.cameras.main;
+    if (this.flatsGraphics && this.solidsGraphics && this.lightsGraphics && cam.zoom >= 0.12) {
+      this.world.objects.renderLights(this.lightsGraphics, cam.worldView);
+      const last = this.lastObjRender;
+      const needsFull =
+        Number.isNaN(last.x) ||
+        Math.hypot(cam.midPoint.x - last.x, cam.midPoint.y - last.y) > 24 ||
+        cam.zoom !== last.zoom ||
+        this.world.objects.version !== last.version;
+      if (needsFull) {
+        this.flatsGraphics.clear();
+        this.solidsGraphics.clear();
+        this.world.objects.render(this.flatsGraphics, this.solidsGraphics, cam.worldView);
+        this.lastObjRender = { x: cam.midPoint.x, y: cam.midPoint.y, zoom: cam.zoom, version: this.world.objects.version };
+      }
+    } else if (this.flatsGraphics && this.solidsGraphics && this.lightsGraphics) {
       this.flatsGraphics.clear();
       this.solidsGraphics.clear();
+      this.lightsGraphics.clear();
     }
 
     // Stream physics + terrain chunks around the player; cycle the traffic lights
