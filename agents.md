@@ -15,7 +15,7 @@ O **RigMaster** é um simulador 2D top-down de manobra e condução de pesados c
 src/
 ├── config.ts               # Configuração do Phaser 4 e motor Matter.js
 ├── main.ts                 # Ponto de entrada do Phaser e exportação de instâncias de cenas
-├── App.tsx                 # Interface React / HUD minimalista, dock do editor e controlos
+├── App.tsx                 # Interface React / HUD minimalista, dock do editor (Mover/Estrada/Objectos/Spawn) e controlos
 ├── components/
 │   └── TouchControls.tsx   # Volante rotativo (+/-270°), switch de marcha D/R, pedais táteis e botão de acoplamento
 ├── entities/
@@ -23,24 +23,38 @@ src/
 │   └── Trailer.ts          # Atrelados (Standard, Pá Eólica, Bitrem Lead/Pup, Vidro Sensível)
 ├── physics/
 │   └── Kingpin.ts          # Conexão de articulação 5th-wheel, cálculo de Tail Swing e Off-tracking
+├── world/
+│   ├── World.ts            # Fachada do mundo único: seed do conteúdo, spawn, export/import JSON
+│   ├── WorldTerrain.ts     # Terreno procedural por fbm-noise com seed, chunks com cache, oceano na borda
+│   └── WorldObjects.ts     # Prefabs vetoriais (docas, edifícios, semáforos…), física streamed, ciclo de luzes
 ├── systems/
 │   ├── LicenseSystem.ts    # Gestor de Licenças de Perícia (C, CE, H, X) e temporizadores de exame
-│   ├── TrailerManager.ts   # Atrelados livres/estacionados nos parques, acoplamento e gating por licença
-│   ├── GarageSystem.ts     # Hubs Regionais (Porto, Estaleiro, Industrial, Histórico) e biomas
-│   ├── TrafficLightSystem.ts # Semáforos europeus de 4 tempos com barreiras físicas de faixa
+│   ├── TrailerManager.ts   # Atrelados livres/estacionados nos pads, acoplamento e gating por licença
+│   ├── GarageSystem.ts     # Hubs Regionais (Porto, Estaleiro, Industrial, Histórico) e meteorologia
 │   └── RoadNetwork.ts      # Rede de estradas vetorial (splines Catmull-Rom, grip por piso, editável)
-├── editor/
-│   └── TilemapManager.ts   # Grelha 128x128, texturas procedurais, miniaturas e exportação JSON
 └── scenes/
     ├── MainScene.ts        # Loop principal de física, áudio sintético Web Audio e câmara de condução
-    └── EditorScene.ts      # Cena do editor, navegação por Pan (arrasto), Zoom global e grelha
+    └── EditorScene.ts      # Editor de objectos: Pan, Estrada (splines), Objectos (mover/rodar/apagar), Spawn
 ```
 
 ---
 
 ## 2. Histórico de Versões & Changelog
 
-### **v1.9.0** (Versão Atual — branch `feature/road-network`)
+### **v2.0.0** (Versão Atual — branch `feature/road-network`)
+- **FIM DAS TILES — Mundo único procedural "Ilha Atlântica" (sem mundos separados):**
+  - **Arquitectura nova**: o mundo é **uma ilha gigante delimitada por oceano** (13824×10240 px, cantos arredondados com linha de costa ondulada por ruído — baías e penínsulas na banda costeira). A grelha de tiles 128px, o atlas `TILE_DEFINITIONS`, a paleta, os presets (Academia/Porto) e o `TilemapManager` foram **eliminados por completo**. Novo módulo `src/world/`:
+    - **`WorldTerrain.ts`** — terreno procedural por **fbm value-noise com seed determinística**, pintado por **chunks 1024px** (canvas 512² escalado ×2, cache LRU com evicção + guarda: em zoom-out extremo só desenha a imagem **overview** da silhueta da ilha, calculada uma vez). Biomas por região + ruído: oceano profundo/água rasa, praia de areia, relva, floresta (árvores determinísticas, sem colisão), campos agrícolas com sulcos, betão urbano/industrial manchado, calçada histórica. `landPatches` garantem terra nos hubs costeiros (Porto NW, Estaleiro NE, Industrial SE, Histórico SW — todos encostados à costa).
+    - **`WorldObjects.ts`** — **camada de prefabs vetoriais** (substitui todos os tiles de conteúdo): `dock`, `parking_pad` (spawn de atrelados), `jersey_barrier`, `building` (warehouse/garage/archway/church), `container_stack`, `crane`, `silo`, `gas_pump`/`gas_canopy`/`price_sign`, `lamp`, `sign`, `traffic_light`, `exam_dock` (temporário). Física **streamed por chunks 2048px** (corpos estáticos Matter materializados só perto do camião, igual ao sistema de tiles antigo); docas registam `dockZones`; pads expõem `parkingPads`. **Semáforos**: ciclo europeu de 4 fases portado para o sistema (verde 7.5s → âmbar 1.5s → vermelho 7.5s → vermelho+âmbar 1.5s; grupos alternados coordenados — sem barreiras de faixa nos cruzamentos abertos da rede vetorial). Render em **Graphics flats (depth 1) + solids (depth 3)** — docas/pads sob as estradas, edifícios/sinais/luzes acima; culling por grelha espacial 1024px.
+    - **`World.ts`** — fachada única: terreno + objectos + rede de estradas + spawn + **seed do conteúdo** (grelha viária vetorial 6×5 arteriais, ruas em S urbanas, rota rural demo asfalto→terra, 4 hubs com docas/gruas/stacks/silos/igreja, 4 parques de atrelados junto aos hubs reais, percursos de exame com jersey, 2 postos de combustível, ~60 edifícios determinísticos com validação de distância à estrada, postes ao longo das arteriais, semáforos em metade dos cruzamentos). **Export/import JSON = seed + estradas + objectos** (poucos KBs, sem grelha RLE).
+  - **Exames nos sítios reais**: os presets de exame deixaram de existir — a doca alvo é **snap à estrada vetorial mais próxima** (`RoadNetwork.query` devolve agora ponto projectado + tangente) e é colocada como **doca temporária** no acostamento (desaparece no fim do exame). Percursos de prática (corredores/slalom/baía estreita com jersey) vivem permanentemente junto aos locais de exame. Lógica de exames (C, C+E, H, X) intacta.
+  - **Editor de objectos**: dock passa a 4 ferramentas — **Mover / Estrada / Objectos / Spawn**. A ferramenta **Objectos** cumpre o requisito de edição total: clicar seleciona (contorno amarelo rotacionado), arrastar **move qualquer prefab**, **R/Shift+R roda ±15°**, Del/botão apaga; painel flutuante mostra tipo+ângulo com botões ⟲/⟳/Apagar. Ferramenta **Spawn** reposiciona o spawn no mapa (marcador ciano sempre visível no editor). Catálogo de peças e borracha **removidos** (nada é pintado; tudo se edita).
+  - **Restaurar Ilha Original** (menu) substitui os presets; `MainScene.reseedWorld()` refaz seed + atrelados.
+  - **Minimapa** redesenhado: silhueta real da ilha (amostragem do terreno) + oceanos, centerlines vetoriais, docas (âmbar), pads (rosa), edifícios/silos (ardósia); refresco por `world.version` (bump em qualquer edição).
+  - `TrailerManager.rebuild(pads)` recebe coordenadas de mundo (fim dos tiles `trailer_parking_*`); `TrafficLightSystem` e `TilemapManager` **apagados**; `GarageSystem.getUnlockedTiles` removido (a paleta já não existe).
+  - Física do camião/atrelados, acoplamento, Kingpin, hubs, meteorologia, áudio e licenças **intactos** — eram sistemas, não tiles.
+
+### **v1.9.0** (branch `feature/road-network`)
 - **Fase 1 da nova arquitectura "mundo aberto": rede de estradas vetorial por splines:**
   - **Novo sistema `src/systems/RoadNetwork.ts`**: estradas são splines **Catmull-Rom** sobre o terreno de tiles — pontos de controlo livres (sem snapping à grelha), **largura por ponto** (a estrada pode afinar de asfalto largo a caminho de terra degradado) e **piso por estrada** (`asphalt` 1.0 / `cobble` 0.88 / `dirt` 0.68 de grip; fora de estrada 0.55). Sem corpos de física — estrada é onde se conduz; só obstáculos colidem.
   - **Totalmente editável em runtime** (requisito chave: ao contrário do editor de tiles, tudo o que já está no mapa se pode mexer): clicar numa estrada **seleciona-a** (contorno ciano + pegas quadradas), arrasta uma pega para mover o ponto, arrasta o corpo para **mover a estrada inteira**, botões de piso/largura atuam na seleção, Del/botão apaga. Desenhar: clicar adiciona pontos, **Enter ou duplo clique termina**, Esc cancela, Backspace remove o último ponto (com botões touch no painel). Tolerâncias de hit-test em coordenadas de ecrã (independentes do zoom).

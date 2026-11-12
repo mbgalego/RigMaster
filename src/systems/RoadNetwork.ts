@@ -247,8 +247,8 @@ export class RoadNetwork {
   }
 
   /** Nearest road info at a world position (null when off-network) */
-  public query(x: number, y: number, maxRadius = 1024): { dist: number; width: number; surface: RoadSurface; road: RoadData } | null {
-    let best: { dist: number; width: number; surface: RoadSurface; road: RoadData } | null = null;
+  public query(x: number, y: number, maxRadius = 1024): { dist: number; width: number; surface: RoadSurface; road: RoadData; px: number; py: number; tx: number; ty: number } | null {
+    let best: { dist: number; width: number; surface: RoadSurface; road: RoadData; px: number; py: number; tx: number; ty: number } | null = null;
     for (const key of this.cellsAround(x, y, maxRadius)) {
       const list = this.grid.get(key);
       if (!list) continue;
@@ -258,7 +258,7 @@ export class RoadNetwork {
         const segLen = Math.max(1, Phaser.Math.Distance.Between(seg.ax, seg.ay, seg.bx, seg.by));
         if (d > segLen + maxRadius && db > segLen + maxRadius) continue;
 
-        // Point-to-segment squared distance
+        // Point-to-segment distance + projected point + tangent
         const abx = seg.bx - seg.ax;
         const aby = seg.by - seg.ay;
         const t = Phaser.Math.Clamp(((x - seg.ax) * abx + (y - seg.ay) * aby) / (segLen * segLen), 0, 1);
@@ -267,8 +267,10 @@ export class RoadNetwork {
         const dist = Phaser.Math.Distance.Between(x, y, px, py);
         if (dist > maxRadius) continue;
         const width = seg.wa + (seg.wb - seg.wa) * t;
+        const tx = abx / segLen;
+        const ty = aby / segLen;
         if (!best || dist < best.dist) {
-          best = { dist, width, surface: seg.road.surface, road: seg.road };
+          best = { dist, width, surface: seg.road.surface, road: seg.road, px, py, tx, ty };
         }
       }
     }
@@ -428,43 +430,5 @@ export class RoadNetwork {
       }
     }
     this.rebuildIndex();
-  }
-
-  // ======================================================================
-  // DEFAULT CONTENT
-  // ======================================================================
-
-  /** Called when a full map is (re)loaded: seeds map-appropriate roads. */
-  public seedForMap(mapName: string) {
-    this.clear();
-    if (mapName === 'Região Metropolitana Procedural') {
-      this.seedProceduralRoads();
-    }
-  }
-
-  /**
-   * Demo rural route for the procedural map: leaves the curvy block junction
-   * at (45,32) heading south-west through open country — sweeping curves with
-   * contra-curves, tapering from wide asphalt to a degraded dirt track.
-   */
-  private seedProceduralRoads() {
-    // Rural asphalt section (wide → narrower)
-    this.addRoad('asphalt', [
-      { x: 45 * 128 + 64, y: 32 * 128 + 64, w: 150 },
-      { x: 5700, y: 4700, w: 140 },
-      { x: 5960, y: 5320, w: 130 },  // sweeps east
-      { x: 5480, y: 5920, w: 120 },  // contra-curve back west
-      { x: 5080, y: 6420, w: 110 },
-      { x: 5340, y: 7010, w: 100 },  // gentle S
-      { x: 4940, y: 7600, w: 96 },
-    ]);
-    // Degraded dirt continuation (narrow, tighter, rougher)
-    this.addRoad('dirt', [
-      { x: 4940, y: 7600, w: 92 },
-      { x: 5420, y: 8120, w: 84 },
-      { x: 5820, y: 8520, w: 72 },   // tight bend
-      { x: 6330, y: 8680, w: 64 },   // contra-curve
-      { x: 6840, y: 9010, w: 56 },
-    ]);
   }
 }

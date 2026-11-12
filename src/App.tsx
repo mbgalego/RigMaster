@@ -9,7 +9,6 @@ import {
 import { MainScene } from './scenes/MainScene';
 import { LicenseSystem, LicenseInfo, ExamStatus, LicenseId } from './systems/LicenseSystem';
 import { GarageSystem, HubData, WeatherModifier } from './systems/GarageSystem';
-import { TILE_DEFINITIONS, TILE_THUMBNAILS } from './editor/TilemapManager';
 import type { RoadSurface } from './systems/RoadNetwork';
 import { TouchControls } from './components/TouchControls';
 import {
@@ -40,9 +39,8 @@ import {
   Hand,
   ZoomIn,
   ZoomOut,
-  Eraser,
-  Paintbrush,
   Route,
+  Box,
 } from 'lucide-react';
 
 export default function App() {
@@ -72,15 +70,15 @@ export default function App() {
   const [licenses, setLicenses] = useState<LicenseInfo[]>([]);
   const [hubs, setHubs] = useState<HubData[]>([]);
   const [activeWeather, setActiveWeather] = useState<WeatherModifier>('clear');
-  const [selectedBrush, setSelectedBrush] = useState<string>('road_straight_h');
-  const [brushCategory, setBrushCategory] = useState<'all' | 'road' | 'dock' | 'parking' | 'obstacle' | 'biome' | 'service'>('all');
-  const [editorTool, setEditorTool] = useState<'paint' | 'pan' | 'erase' | 'road'>('paint');
-  const [isPaletteOpen, setIsPaletteOpen] = useState<boolean>(true);
-  const [isPaintingSpawn, setIsPaintingSpawn] = useState<boolean>(false);
+  const [editorTool, setEditorTool] = useState<'pan' | 'road' | 'object' | 'spawn'>('pan');
 
   // Road tool live state (polled from EditorScene in the telemetry loop)
   const [roadUI, setRoadUI] = useState<{ hasSelection: boolean; hasPoint: boolean; surface: RoadSurface; width: number; drawing: boolean }>({
     hasSelection: false, hasPoint: false, surface: 'asphalt', width: 128, drawing: false,
+  });
+  // Object tool live state (polled from EditorScene in the telemetry loop)
+  const [objectUI, setObjectUI] = useState<{ hasSelection: boolean; type: string; angleDeg: number }>({
+    hasSelection: false, type: '', angleDeg: 0,
   });
 
   // Real-time Telemetry
@@ -158,7 +156,10 @@ export default function App() {
         setActiveExam(licSys.getActiveExam());
       }
       const edScene = getEditorScene();
-      if (edScene) setRoadUI(edScene.getRoadUIState());
+      if (edScene) {
+        setRoadUI(edScene.getRoadUIState());
+        setObjectUI(edScene.getObjectUIState());
+      }
     }, 60);
 
     // Keep the Phaser canvas from stealing pointer events while any HTML modal is open,
@@ -284,18 +285,7 @@ export default function App() {
     }
   };
 
-  // Brush select
-  const handleSelectBrush = (tileId: string) => {
-    setSelectedBrush(tileId);
-    setEditorTool('paint');
-    const edScene = getEditorScene();
-    if (edScene) {
-      edScene.setTileBrush(tileId);
-      edScene.setTool('paint');
-    }
-  };
-
-  const handleSetEditorTool = (tool: 'paint' | 'pan' | 'erase' | 'road') => {
+  const handleSetEditorTool = (tool: 'pan' | 'road' | 'object' | 'spawn') => {
     setEditorTool(tool);
     const edScene = getEditorScene();
     if (edScene) edScene.setTool(tool);
@@ -316,11 +306,11 @@ export default function App() {
     if (edScene) edScene.resetView();
   };
 
-  // JSON Export / Import
+  // JSON Export / Import (world: seed + roads + objects)
   const handleOpenExport = () => {
     const scene = getMainScene();
     if (scene) {
-      setJsonContent(scene.tilemapManager.exportJSON());
+      setJsonContent(scene.world.exportJSON());
       setJsonError(null);
       setShowJsonModal(true);
     }
@@ -329,7 +319,7 @@ export default function App() {
   const handleApplyImport = () => {
     const scene = getMainScene();
     if (scene) {
-      const ok = scene.tilemapManager.importJSON(jsonContent);
+      const ok = scene.world.importJSON(jsonContent);
       if (ok) {
         setShowJsonModal(false);
         setJsonError(null);
@@ -344,21 +334,19 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `rigmaster_map_${Date.now()}.json`;
+    a.download = `rigmaster_world_${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  // Presets
-  const handleLoadPreset = (key: string) => {
+  // Reseed the island back to its default content
+  const handleReseedWorld = () => {
     const scene = getMainScene();
     if (scene) {
-      scene.tilemapManager.loadPreset(key);
+      scene.reseedWorld();
       handleReset();
     }
   };
-
-  const unlockedTileKeys = GarageSystem.getInstance().getUnlockedTiles();
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-[#0c0f17] font-sans text-slate-100 select-none">
@@ -543,38 +531,20 @@ export default function App() {
 
                 <div className="h-px bg-slate-800" />
 
-                {/* 3. Preset Circuits */}
+                {/* 3. World */}
                 <div>
                   <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 px-2 py-0.5 font-bold">
-                    Circuitos / Pistas
+                    Mundo
                   </div>
                   <div className="flex flex-col gap-0.5 mt-1">
                     <button
                       onClick={() => {
-                        handleLoadPreset('default');
+                        handleReseedWorld();
                         setIsMenuOpen(false);
                       }}
                       className="text-left px-2 py-1.5 rounded text-slate-300 hover:bg-slate-900"
                     >
-                      Circuito Regional (4 Hubs)
-                    </button>
-                    <button
-                      onClick={() => {
-                        handleLoadPreset('license_academy');
-                        setIsMenuOpen(false);
-                      }}
-                      className="text-left px-2 py-1.5 rounded text-slate-300 hover:bg-slate-900"
-                    >
-                      Academia de Licenças
-                    </button>
-                    <button
-                      onClick={() => {
-                        handleLoadPreset('harbor_challenge');
-                        setIsMenuOpen(false);
-                      }}
-                      className="text-left px-2 py-1.5 rounded text-slate-300 hover:bg-slate-900"
-                    >
-                      Terminal Portuário Oceânico
+                      Restaurar Ilha Original
                     </button>
                   </div>
                 </div>
@@ -699,34 +669,9 @@ export default function App() {
         <>
           {/* 1. SLIM LEFT VERTICAL DOCK / SIDEBAR */}
           <aside className="absolute left-0 top-12 bottom-0 w-13 sm:w-15 z-30 bg-slate-950/95 backdrop-blur-md border-r border-amber-500/40 flex flex-col items-center py-2.5 px-1 gap-2 shadow-2xl select-none">
-            {/* Tool: Paint / Peças (Toggles the slide-out catalog to the right) */}
+            {/* Tool: Mover (Pan / travel the map) */}
             <button
-              onClick={() => {
-                if (editorTool === 'paint') {
-                  setIsPaletteOpen(!isPaletteOpen);
-                } else {
-                  handleSetEditorTool('paint');
-                  setIsPaletteOpen(true);
-                }
-                setIsPaintingSpawn(false);
-              }}
-              className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border ${
-                editorTool === 'paint' && !isPaintingSpawn
-                  ? 'bg-amber-500 text-black border-amber-300 shadow-md shadow-amber-500/40'
-                  : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
-              }`}
-              title="Pintar / Abrir Catálogo de Peças"
-            >
-              <Paintbrush className="w-4 h-4" />
-              <span className="text-[8px] font-bold mt-0.5">Pintar</span>
-            </button>
-
-            {/* Tool: Pan / Mover (Travel the map with touch or mouse) */}
-            <button
-              onClick={() => {
-                handleSetEditorTool('pan');
-                setIsPaintingSpawn(false);
-              }}
+              onClick={() => handleSetEditorTool('pan')}
               className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border ${
                 editorTool === 'pan'
                   ? 'bg-cyan-500 text-black border-cyan-300 shadow-md shadow-cyan-500/40 animate-pulse'
@@ -738,29 +683,9 @@ export default function App() {
               <span className="text-[8px] font-bold mt-0.5">Mover</span>
             </button>
 
-            {/* Tool: Erase / Borracha */}
-            <button
-              onClick={() => {
-                handleSetEditorTool('erase');
-                setIsPaintingSpawn(false);
-              }}
-              className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border ${
-                editorTool === 'erase'
-                  ? 'bg-red-500 text-white border-red-300 shadow-md shadow-red-500/40'
-                  : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
-              }`}
-              title="Borracha — Limpa blocos de volta para asfalto"
-            >
-              <Eraser className="w-4 h-4" />
-              <span className="text-[8px] font-bold mt-0.5">Apagar</span>
-            </button>
-
             {/* Tool: Estrada (vector roads: draw, select, drag handles, delete) */}
             <button
-              onClick={() => {
-                handleSetEditorTool('road');
-                setIsPaintingSpawn(false);
-              }}
+              onClick={() => handleSetEditorTool('road')}
               className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border ${
                 editorTool === 'road'
                   ? 'bg-sky-500 text-black border-sky-300 shadow-md shadow-sky-500/40 animate-pulse'
@@ -772,19 +697,29 @@ export default function App() {
               <span className="text-[8px] font-bold mt-0.5">Estrada</span>
             </button>
 
+            {/* Tool: Objectos (select / move / rotate / delete any prefab) */}
+            <button
+              onClick={() => handleSetEditorTool('object')}
+              className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border ${
+                editorTool === 'object'
+                  ? 'bg-amber-500 text-black border-amber-300 shadow-md shadow-amber-500/40 animate-pulse'
+                  : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+              }`}
+              title="Objectos — Seleciona, move, roda (R) e apaga (Del) edifícios, docas, barreiras, semáforos…"
+            >
+              <Box className="w-4 h-4" />
+              <span className="text-[8px] font-bold mt-0.5">Objectos</span>
+            </button>
+
             {/* Tool: Spawn Point */}
             <button
-              onClick={() => {
-                setIsPaintingSpawn(true);
-                const edScene = getEditorScene();
-                if (edScene) edScene.setSpawnBrush();
-              }}
+              onClick={() => handleSetEditorTool('spawn')}
               className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border ${
-                isPaintingSpawn
+                editorTool === 'spawn'
                   ? 'bg-emerald-500 text-black border-emerald-300 shadow-md shadow-emerald-500/40 animate-pulse'
                   : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
               }`}
-              title="Definir Ponto de Spawn do Camião"
+              title="Definir Ponto de Spawn do Camião (clica no mapa)"
             >
               <Compass className="w-4 h-4" />
               <span className="text-[8px] font-bold mt-0.5">Spawn</span>
@@ -835,107 +770,7 @@ export default function App() {
             </button>
           </aside>
 
-          {/* 2. SLIDING EXPANDABLE RIGHT FLYOUT: TILE CATALOG */}
-          {editorTool === 'paint' && !isPaintingSpawn && isPaletteOpen && (
-            <div className="absolute left-13 sm:left-15 top-14 bottom-4 z-20 w-72 sm:w-84 max-w-[calc(100vw-4.5rem)] h-[calc(100vh-4.5rem)] flex flex-col bg-slate-950/95 border border-amber-500/40 rounded-r-xl shadow-2xl p-3 backdrop-blur-xl transition-all">
-              {/* Flyout Header */}
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-2">
-                <div className="flex items-center gap-1.5">
-                  <Layers className="w-4 h-4 text-amber-400" />
-                  <span className="text-xs font-bold text-amber-400 tracking-wider uppercase">Catálogo de Peças</span>
-                </div>
-                {/* Close Button to Tuck Away for 100% Unobstructed Map Editing */}
-                <button
-                  onClick={() => setIsPaletteOpen(false)}
-                  className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition"
-                  title="Fechar Menu (Podes reabrir clicando no botão Pintar à esquerda)"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Horizontally Scrollable Category Tabs */}
-              <div className="flex gap-1 mb-2 text-[10px] overflow-x-auto pb-1">
-                {(['all', 'road', 'dock', 'parking', 'obstacle', 'biome', 'service'] as const).map((cat) => (
-                  <button
-                    key={cat}
-                    onClick={() => setBrushCategory(cat)}
-                    className={`px-2.5 py-1 rounded capitalize font-bold transition whitespace-nowrap ${
-                      brushCategory === cat
-                        ? 'bg-amber-500 text-black shadow-sm shadow-amber-500/40'
-                        : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
-                    }`}
-                  >
-                    {cat === 'all' ? 'Tudo' : cat === 'service' ? 'serviços' : cat}
-                  </button>
-                ))}
-              </div>
-
-              {/* Scrollable (Deslizante) Tile Grid with Graphical Previews */}
-              <div className="flex-1 overflow-y-auto pr-1 grid grid-cols-3 sm:grid-cols-4 gap-2">
-                {Object.entries(TILE_DEFINITIONS)
-                  .filter(([_, def]) => !def.hidden && (brushCategory === 'all' || def.category === brushCategory))
-                  .map(([key, def]) => {
-                    const isUnlocked = unlockedTileKeys.includes(key);
-                    const isSelected = selectedBrush === key;
-                    const thumbUrl = TILE_THUMBNAILS[key];
-
-                    return (
-                      <button
-                        key={key}
-                        disabled={!isUnlocked}
-                        onClick={() => handleSelectBrush(key)}
-                        title={isUnlocked ? `${def.name} (${def.isSolid ? 'Obstáculo sólido' : 'Passagem livre'})` : 'Bloqueado: Domina o Hub correspondente a 100%!'}
-                        className={`group relative p-1.5 rounded flex flex-col items-center justify-between text-center transition border ${
-                          isSelected
-                            ? 'border-amber-400 bg-amber-500/20 shadow-md shadow-amber-500/30 scale-95'
-                            : isUnlocked
-                            ? 'border-slate-800 bg-slate-900/70 hover:border-amber-400/60 hover:bg-slate-900'
-                            : 'border-slate-900 bg-slate-950/30 opacity-40 cursor-not-allowed'
-                        }`}
-                      >
-                        {/* Crisp Graphical Texture Preview */}
-                        <div className="relative w-12 h-12 rounded bg-slate-950 border border-white/15 overflow-hidden flex items-center justify-center shadow-inner group-hover:border-amber-400/80 mb-1">
-                          {thumbUrl ? (
-                            <img
-                              src={thumbUrl}
-                              alt={def.name}
-                              className="w-full h-full object-cover"
-                              loading="lazy"
-                            />
-                          ) : (
-                            <div
-                              className="w-full h-full flex items-center justify-center text-[10px] font-mono text-white/70"
-                              style={{ backgroundColor: def.color }}
-                            >
-                              {def.isSolid ? '■' : '☵'}
-                            </div>
-                          )}
-
-                          {def.isSolid && (
-                            <span
-                              className="absolute bottom-0.5 right-0.5 w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_4px_#f59e0b]"
-                              title="Com colisão sólida"
-                            />
-                          )}
-                        </div>
-
-                        <span className="text-[9px] text-slate-300 group-hover:text-white truncate w-full leading-tight font-medium">
-                          {def.name}
-                        </span>
-                      </button>
-                    );
-                  })}
-              </div>
-
-              {/* Footer hint */}
-              <div className="mt-2 pt-2 border-t border-slate-800/80 text-[10px] text-slate-400 font-mono text-center">
-                Clica numa peça e clica/arrasta na grelha para pintar
-              </div>
-            </div>
-          )}
-
-          {/* 3. FLOATING STATUS BANNER FOR ACTIVE MODE */}
+          {/* 2. FLOATING STATUS BANNER FOR ACTIVE MODE */}
           {editorTool === 'road' && (
             <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 bg-slate-950/95 border border-sky-400/60 px-4 py-2.5 rounded-xl shadow-2xl backdrop-blur-md flex flex-col items-center gap-2 max-w-[calc(100vw-7rem)]">
               <div className="flex items-center gap-2 flex-wrap justify-center">
@@ -980,36 +815,52 @@ export default function App() {
               </span>
             </div>
           )}
-          {(editorTool === 'pan' || editorTool === 'erase' || isPaintingSpawn) && (
-            <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 bg-slate-950/95 border border-cyan-400/60 px-3.5 py-1.5 rounded-full shadow-2xl flex items-center gap-2.5 backdrop-blur-md">
+          {editorTool !== 'road' && (
+            <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 bg-slate-950/95 border border-cyan-400/60 px-3.5 py-1.5 rounded-full shadow-2xl flex items-center gap-2.5 backdrop-blur-md max-w-[calc(100vw-7rem)]">
               {editorTool === 'pan' && (
                 <>
                   <Hand className="w-4 h-4 text-cyan-400 animate-bounce" />
                   <span className="text-xs font-bold text-cyan-300">MODO MOVER (PAN): Arrasta no ecrã com rato ou toque para viajar pelo mapa</span>
                 </>
               )}
-              {editorTool === 'erase' && (
+              {editorTool === 'object' && (
                 <>
-                  <Eraser className="w-4 h-4 text-red-400" />
-                  <span className="text-xs font-bold text-red-300">MODO APAGAR: Clica ou arrasta sobre os blocos para limpar para asfalto</span>
+                  <Box className="w-4 h-4 text-amber-400" />
+                  {objectUI.hasSelection ? (
+                    <>
+                      <span className="text-xs font-bold text-amber-300">
+                        OBJECTO: {objectUI.type} · {objectUI.angleDeg}°
+                      </span>
+                      <button
+                        onClick={() => { const ed = getEditorScene(); if (ed) ed.rotateSelectedObject(-15); }}
+                        className="text-[10px] font-bold bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800 px-2 py-1 rounded"
+                      >
+                        ⟲ −15°
+                      </button>
+                      <button
+                        onClick={() => { const ed = getEditorScene(); if (ed) ed.rotateSelectedObject(15); }}
+                        className="text-[10px] font-bold bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800 px-2 py-1 rounded"
+                      >
+                        ⟳ +15°
+                      </button>
+                      <button
+                        onClick={() => { const ed = getEditorScene(); if (ed) ed.deleteSelectedObject(); }}
+                        className="text-[10px] font-bold bg-red-500 text-white border border-red-300 hover:bg-red-400 px-2 py-1 rounded"
+                      >
+                        Apagar
+                      </button>
+                    </>
+                  ) : (
+                    <span className="text-xs font-bold text-amber-300">MODO OBJECTOS: Clica num objecto para o selecionar — arrasta para mover, R roda 15°, Del apaga</span>
+                  )}
                 </>
               )}
-              {isPaintingSpawn && (
+              {editorTool === 'spawn' && (
                 <>
                   <Compass className="w-4 h-4 text-emerald-400 animate-spin" />
                   <span className="text-xs font-bold text-emerald-300">MODO SPAWN: Clica no mapa para definir o ponto de partida do camião</span>
                 </>
               )}
-              <button
-                onClick={() => {
-                  handleSetEditorTool('paint');
-                  setIsPaintingSpawn(false);
-                  setIsPaletteOpen(true);
-                }}
-                className="ml-1 text-[10px] font-bold bg-white/10 hover:bg-white/20 px-2 py-0.5 rounded text-white transition"
-              >
-                Voltar a Pintar
-              </button>
             </div>
           )}
         </>
