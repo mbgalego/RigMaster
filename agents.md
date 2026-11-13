@@ -41,7 +41,13 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.2.0** (Versão Atual — branch `feature/road-network`)
+### **v2.2.1** (Versão Atual — branch `feature/road-network`)
+- **Fim dos spikes/dobras nas estradas (foto do utilizador)**: o sampler passou de Catmull-Rom **uniforme** (que ultrapassa e dobra a faixa quando os pontos têm espaçamento irregular ou ângulos fechados) para **Hermite cúbica com tangentes de diferença finita e parametrização por comprimento de corda** (comportamento chordal) — a curva nunca ultrapassa o traçado; em reversões quase exactas desacelera até zero (cúspide limpa). Tangentes por ponto rodadas pelo twist individual (não interpolado ao longo do span).
+- **Guarda de cúspides no renderizador**: quads de faixa e traços de linha central com tangentes quase opostas (dot < 0.2) são saltados — não há mais "bowties"/setas a apontar para fora da estrada.
+- **Consistência total entre pegas e curva**: `pointNormal`/`pointTangent`/`baseTangentAngle`/`extendHandlePos` usam agora exactamente a mesma direcção que os samples da curva (a pega de largura, o knob de twist e a pega de extensão assentam na tangente real).
+- **Pega de rotação dos objectos corrigida**: tinha o sinal do X invertido (girava em espelho relativamente ao objecto); agora gira solidária com o objecto e foi **muito reduzida** (ponto rosa de 3.5px, a 20px da borda).
+
+### **v2.2.0** (branch `feature/road-network`)
 - **Estradas — adições curtas e marcação:**
   - **Espaçamento mínimo entre pontos de controlo (56px)**: ao mover/estender, o ponto é repelido dos vizinhos até à distância mínima — fim dos loops/folds do Catmull-Rom em segmentos curtos (o comportamento estranho das pequenas extensões). Toques para desenhar também exigem ≥24px do ponto anterior.
   - **Tracejado central consistente**: as linhas centrais são desenhadas por **comprimento de arco exacto** (traço 26px / espaço 22px interpolados dentro de cada amostra, independentemente do espaçamento irregular dos samples) — tracejado uniforme em curvas e nas transições entre spans.

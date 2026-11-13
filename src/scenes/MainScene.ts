@@ -1067,6 +1067,9 @@ export class MainScene extends Phaser.Scene {
       let altIdx = 0;
       for (let i = 0; i < samples.length - 1; i++) {
         const a = samples[i], b = samples[i + 1];
+        // Cusp guard: at near-reversals the perpendicular quad folds into a
+        // bowtie spike — skip it (the Hermite curve itself never overshoots).
+        if (a.tx * b.tx + a.ty * b.ty < 0.2) { altIdx++; continue; }
         const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
         if (mx < vx0 || mx > vx1 || my < vy0 || my > vy1) { altIdx++; continue; }
         const fill = road.surface === 'asphalt' ? style.fill : (altIdx % 6 < 3 ? style.fill : style.fillAlt);
@@ -1104,6 +1107,7 @@ export class MainScene extends Phaser.Scene {
           const a = samples[i], b = samples[i + 1];
           const len = Math.hypot(b.x - a.x, b.y - a.y);
           if (len < 0.001) continue;
+          if (a.tx * b.tx + a.ty * b.ty < 0.2) { s += len; continue; } // cusp guard
           let t = 0;
           while (t < len) {
             const phase = s % PERIOD;

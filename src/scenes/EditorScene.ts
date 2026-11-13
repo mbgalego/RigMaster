@@ -588,11 +588,12 @@ export class EditorScene extends Phaser.Scene {
     return EditorScene.RESIZABLE_TYPES.has(o.type);
   }
 
-  /** Position of the free-rotation knob (above the object, in its local frame) */
+  /** Position of the free-rotation knob (above the object, rotating with it) */
   private rotationHandlePos(o: WorldObject): { x: number; y: number } {
     const c = Math.cos(o.angle), s = Math.sin(o.angle);
-    const d = Math.max(o.w, o.h) / 2 + 36;
-    return { x: o.x - s * d, y: o.y - c * d };
+    const d = Math.max(o.w, o.h) / 2 + 20;
+    // Local (0, −d) rotated by the object's angle → (s·d, −c·d)
+    return { x: o.x + s * d, y: o.y - c * d };
   }
 
   /** Position of a resize corner handle (corner: 0..3, in the object's local frame) */
@@ -619,7 +620,7 @@ export class EditorScene extends Phaser.Scene {
     // 1. Free-rotation knob of the current selection
     if (sel) {
       const rp = this.rotationHandlePos(sel);
-      if (Phaser.Math.Distance.Between(x, y, rp.x, rp.y) <= tol + 2) {
+      if (Phaser.Math.Distance.Between(x, y, rp.x, rp.y) <= tol) {
         this.objectDrag = {
           obj: sel, grabX: x, grabY: y, mode: 'rotate',
           startAngle: sel.angle,
@@ -779,25 +780,20 @@ export class EditorScene extends Phaser.Scene {
         }
       }
 
-      // Free-rotation knob (pink circle above the object, in its local frame)
+      // Free-rotation knob (small pink dot above the object, rotates with it)
       const rp = this.rotationHandlePos(o);
-      g.lineStyle(1.5 / z, 0xe879f9, 0.6);
+      g.lineStyle(1.2 / z, 0xe879f9, 0.55);
       g.beginPath();
       g.moveTo(o.x, o.y);
       g.lineTo(rp.x, rp.y);
       g.strokePath();
       g.fillStyle(0xe879f9, 0.95);
       g.beginPath();
-      g.arc(rp.x, rp.y, 6 / z, 0, Math.PI * 2);
+      g.arc(rp.x, rp.y, 3.5 / z, 0, Math.PI * 2);
       g.fillPath();
-      g.lineStyle(1.5 / z, 0x0b1220, 1);
+      g.lineStyle(1.2 / z, 0x0b1220, 1);
       g.beginPath();
-      g.arc(rp.x, rp.y, 6 / z, 0, Math.PI * 2);
-      g.strokePath();
-      // Little rotation arrow on the knob
-      g.lineStyle(2 / z, 0x0b1220, 0.9);
-      g.beginPath();
-      g.arc(rp.x, rp.y, 3 / z, Math.PI * 0.15, Math.PI * 1.05);
+      g.arc(rp.x, rp.y, 3.5 / z, 0, Math.PI * 2);
       g.strokePath();
     }
 

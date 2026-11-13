@@ -354,9 +354,11 @@ export class RoadNetwork {
   // ======================================================================
 
   /**
-   * Dense samples along the smoothed centreline (Catmull-Rom through the
-   * control points, ~24px spacing) with linearly interpolated widths.
-   * Tangents come from the analytic Catmull-Rom derivative.
+   * Dense samples along the smoothed centreline (~24px spacing) with linearly
+   * interpolated widths. Uses cubic Hermite with **finite-difference tangents
+   * and chord-length parameterisation** (chordal Catmull-Rom behaviour):
+   * unlike uniform Catmull-Rom this does not overshoot on uneven point
+   * spacing or sharp turns — which used to fold the ribbon into spikes.
    */
   public static sampleRoad(road: RoadData, stepPx = 24): RoadSample[] {
     const pts = road.points;
@@ -365,66 +367,70 @@ export class RoadNetwork {
     if (n === 1) return [{ x: pts[0].x, y: pts[0].y, w: pts[0].w, tx: 1, ty: 0 }];
 
     const wrap = (i: number) => (road.closed ? (i + n) % n : Phaser.Math.Clamp(i, 0, n - 1));
-    const out: RoadSample[] = [];
+    const P = (k: number) => pts[wrap(k)];
+
+    // Finite-difference unit tangents at each control point, rotated by its twist
+    const m: Array<{ x: number; y: number }> = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const a = P(i - 1), b = pts[i], c = P(i + 1);
+      let mx = c.x - a.x;
+      let my = c.y - a.y;
+      // Degenerate on near-reversals → zero tangent (smooth cusp, no overshoot)
+      const len = Math.hypot(mx, my);
+      if (len > 0.001) {
+        mx /= len; my /= len;
+      } else {
+        mx = 0; my = 0;
+      }
+      const tw = pts[i].twist ?? 0;
+      if (tw !== 0) {
+        const cs = Math.cos(tw), sn = Math.sin(tw);
+        const rx = mx * cs - my * sn;
+        const ry = mx * sn + my * cs;
+        mx = rx; my = ry;
+      }
+      m[i] = { x: mx, y: my };
+    }
+
     const spanCount = road.closed ? n : n - 1;
+    const out: RoadSample[] = [];
 
     for (let i = 0; i < spanCount; i++) {
-      const p0 = pts[wrap(i - 1)];
-      const p1 = pts[wrap(i)];
-      const p2 = pts[wrap(i + 1)];
-      const p3 = pts[wrap(i + 2)];
-
-      const spanLen = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
-      const steps = Math.max(1, Math.ceil(spanLen / stepPx));
+      const j = wrap(i + 1);
+      const p1 = pts[i], p2 = pts[j];
+      const D = Math.hypot(p2.x - p1.x, p2.y - p1.y) || 0.001; // chord length
+      const steps = Math.max(1, Math.ceil(D / stepPx));
+      const m1 = m[i], m2 = m[j];
 
       for (let s = 0; s < steps; s++) {
         const t = s / steps;
-        const t2 = t * t;
-        const t3 = t2 * t;
-
-        // Centripetal-ish uniform Catmull-Rom (tension 0.5)
-        const x = 0.5 * ((2 * p1.x) + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3);
-        const y = 0.5 * ((2 * p1.y) + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3);
+        const t2 = t * t, t3 = t2 * t;
+        const h00 = 2 * t3 - 3 * t2 + 1;
+        const h10 = t3 - 2 * t2 + t;
+        const h01 = -2 * t3 + 3 * t2;
+        const h11 = t3 - t2;
+        const x = h00 * p1.x + h10 * D * m1.x + h01 * p2.x + h11 * D * m2.x;
+        const y = h00 * p1.y + h10 * D * m1.y + h01 * p2.y + h11 * D * m2.y;
         const w = p1.w + (p2.w - p1.w) * t;
 
-        // Analytic derivative for the tangent
-        let dx = 0.5 * ((-p0.x + p2.x) + 2 * (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t + 3 * (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t2);
-        let dy = 0.5 * ((-p0.y + p2.y) + 2 * (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t + 3 * (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t2);
+        const d00 = 6 * t2 - 6 * t;
+        const d10 = 3 * t2 - 4 * t + 1;
+        const d01 = -6 * t2 + 6 * t;
+        const d11 = 3 * t2 - 2 * t;
+        let dx = d00 * p1.x + d10 * D * m1.x + d01 * p2.x + d11 * D * m2.x;
+        let dy = d00 * p1.y + d10 * D * m1.y + d01 * p2.y + d11 * D * m2.y;
         const len = Math.hypot(dx, dy) || 1;
         dx /= len;
         dy /= len;
-
-        // Per-point twist (asymmetric curves): blend the rotation offset
-        // between the span's endpoints and rotate the analytic tangent
-        const tw = (p1.twist ?? 0) + ((p2.twist ?? 0) - (p1.twist ?? 0)) * t;
-        if (tw !== 0) {
-          const c = Math.cos(tw), s = Math.sin(tw);
-          const rx = dx * c - dy * s;
-          const ry = dx * s + dy * c;
-          dx = rx;
-          dy = ry;
-        }
 
         out.push({ x, y, w, tx: dx, ty: dy });
       }
     }
 
-    // Final endpoint for open roads
+    // Final endpoint for open roads (tangent already includes its twist)
     if (!road.closed) {
-      const a = pts[n - 2];
       const b = pts[n - 1];
-      const len = Phaser.Math.Distance.Between(a.x, a.y, b.x, b.y) || 1;
-      let tx = (b.x - a.x) / len;
-      let ty = (b.y - a.y) / len;
-      const tw = b.twist ?? 0;
-      if (tw !== 0) {
-        const c = Math.cos(tw), s = Math.sin(tw);
-        const rx = tx * c - ty * s;
-        const ry = tx * s + ty * c;
-        tx = rx;
-        ty = ry;
-      }
-      out.push({ x: b.x, y: b.y, w: b.w, tx, ty });
+      out.push({ x: b.x, y: b.y, w: b.w, tx: m[n - 1].x, ty: m[n - 1].y });
     }
     return out;
   }
