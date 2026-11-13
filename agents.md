@@ -41,7 +41,12 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.5.1** (Versão Atual — branch `feature/road-network`)
+### **v2.5.2** (Versão Atual — branch `feature/road-network`)
+- **Redimensionamento ancorado — refactor do mecanismo**: a v2.5.1 congelava após o 1.º evento (o canto fixo era recalculado com o tamanho inicial no frame local, cuja origem se desloca a cada frame). Agora o canto oposto é **capturado em coordenadas do mundo** no início do drag (`pinX/pinY`) e todas as medidas correm a partir dele: largura/altura = distância ponteiro↔pino no frame local, centro = ponto médio entre pino e canto extremo. Estável frame a frame, inclusive quando o ponteiro cruza o pino (a caixa vira de lado mantendo o pino fixo). `resizeCornerPos` ganhou o parâmetro `opposite`.
+- **Re-acoplamento — distância reduzida 90→45px**: o raio de acoplamento automático é 30px; agora basta o trator sair ligeiramente da zona do pino (45px) após os 1.2s de arrefecimento para o atrelado desbloquear.
+- **Passadeiras acima das estradas**: o crosswalk passou da camada flats (depth 1) para a camada solids (depth 3) — acima dos ribbons de estrada (depth 2). Colocar uma passadeira sobre uma estrada deixou de a esconder (era pintada por baixo do asfalto).
+
+### **v2.5.1** (branch `feature/road-network`)
 - **Redimensionamento ancorado ao canto oposto**: arrastar um canto já não cresce simetricamente a partir do centro — o canto oposto fica fixo e o objecto cresce só na direcção arrastada (o centro desloca-se metade do delta, rotacionado de volta para o mundo; overshoot além do mínimo de 20px tratado graciosamente).
 - **Re-acoplamento pós-desengate fixado a sério**: o armar do lockout (`decoupleLockout`) era avaliado apenas quando já existia candidato no raio de 30px — ou seja, nunca armava (ao voltar perto, a distância era sempre < 90px). Agora `updateDecoupleLockoutArming()` corre **a cada frame** do update: após os 1.2s de arrefecimento, o atrelado desbloqueia assim que o trator passa a >90px do pino. O guard por-candidato (`decoupleLockoutArmed(t)`) ficou como verificação passiva.
 - **Atrelados editáveis no editor**: novo tipo de objecto `trailer` (só dados, sem corpo estático) no catálogo, em categoria própria **"Atrelados"** (Atrelado, Vidro, Pá Eólica, Bitrem Frente, Bitrem Trás — separado dos Pads). `addTap` cria o objecto + a entidade viva (`TrailerManager.spawnObjectTrailer`, sem pup automático); Objectos permite mover/rodar/apagar (sem redimensionar) com sync vivo (`syncForObject`); os botões C/CE/H/**P**/X trocam o tipo de um atrelado colocado (respawn). Ao acoplar, o objecto de origem é removido (evita duplicados no rebuild); `rebuild()` responde também os objectos `trailer` após import JSON (`rebuildTrailers()` chamado no import).

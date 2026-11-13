@@ -810,7 +810,8 @@ export class MainScene extends Phaser.Scene {
    * the auto-coupler would instantly grab the same trailer back. Arming is
    * evaluated EVERY frame (not just when a candidate is in the zone — it could
    * otherwise never arm): after the cooldown, the lockout releases once the
-   * tractor has genuinely moved away (pin > 90px from the relevant hitch).
+   * tractor has pulled just clear of the coupling zone (pin > 45px — the
+   * auto-couple radius itself is 30px).
    */
   private updateDecoupleLockoutArming() {
     const lock = this.decoupleLockout;
@@ -834,7 +835,7 @@ export class MainScene extends Phaser.Scene {
     const a = t.body.angle;
     const kx = t.body.position.x + Math.sin(a) * t.kingpinDist;
     const ky = t.body.position.y - Math.cos(a) * t.kingpinDist;
-    if (Phaser.Math.Distance.Between(hx, hy, kx, ky) > 90) {
+    if (Phaser.Math.Distance.Between(hx, hy, kx, ky) > 45) {
       lock.armed = true;
     }
   }

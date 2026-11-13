@@ -619,7 +619,8 @@ export class WorldObjects {
           if (o.type === 'traffic_light') continue; // animated: rendered every frame by renderLights
           // NOTE: roundabout renders in the SOLIDS layer (depth 3) so the
           // island sits above the road ribbons at a junction.
-          if (o.type === 'gas_canopy' || o.type === 'parking_pad' || o.type === 'parking_lot' || o.type === 'entrance' || o.type === 'crosswalk' || o.type === 'exam_dock' || o.type === 'dock' || o.type === 'pad_asphalt' || o.type === 'pad_dirt') {
+          // Crosswalks too — road paint belongs above the asphalt (see drawSolid).
+          if (o.type === 'gas_canopy' || o.type === 'parking_pad' || o.type === 'parking_lot' || o.type === 'entrance' || o.type === 'exam_dock' || o.type === 'dock' || o.type === 'pad_asphalt' || o.type === 'pad_dirt') {
             this.drawFlat(flats, o);
           } else {
             this.drawSolid(solids, o);
@@ -868,17 +869,6 @@ export class WorldObjects {
           }
           break;
         }
-        case 'crosswalk': {
-          g.fillStyle(0x1c2027, 1);
-          g.fillRect(x0, y0, o.w, o.h);
-          // Zebra stripes: each stripe spans o.w (along the road), repeating across o.h
-          g.fillStyle(0xe2e8f0, 0.7);
-          const stripe = 10, gap = 8;
-          for (let sy = y0 + 4; sy + stripe <= y0 + o.h - 4; sy += stripe + gap) {
-            g.fillRect(x0 + 2, sy, o.w - 4, stripe);
-          }
-          break;
-        }
         case 'entrance': {
           g.fillStyle(0x2e333d, 1);
           g.fillRect(x0, y0, o.w, o.h);
@@ -913,6 +903,20 @@ export class WorldObjects {
     this.rotated(g, o, () => {
       const x0 = o.x - o.w / 2, y0 = o.y - o.h / 2;
       switch (o.type) {
+        case 'crosswalk': {
+          // NOTE: crosswalks render in the SOLIDS layer (depth 3) so the paint
+          // sits ABOVE the road ribbons (depth 2) — placing one over a road
+          // used to hide it completely.
+          g.fillStyle(0x1c2027, 1);
+          g.fillRect(x0, y0, o.w, o.h);
+          // Zebra stripes: each stripe spans o.w (along the road), repeating across o.h
+          g.fillStyle(0xe2e8f0, 0.7);
+          const stripe = 10, gap = 8;
+          for (let sy = y0 + 4; sy + stripe <= y0 + o.h - 4; sy += stripe + gap) {
+            g.fillRect(x0 + 2, sy, o.w - 4, stripe);
+          }
+          break;
+        }
         case 'roundabout': {
           const R = Math.min(o.w, o.h) / 2;
           g.fillStyle(0x000000, 0.22);

@@ -73,6 +73,8 @@ export class EditorScene extends Phaser.Scene {
     mode: 'move' | 'rotate' | 'resize';
     corner?: number; startAngle?: number; startPointerAngle?: number;
     startW?: number; startH?: number;
+    /** Resize anchor: the OPPOSITE corner's world position at drag start (stays pinned). */
+    pinX?: number; pinY?: number;
   } | null = null;
 
   // ---- Add tool (place new objects from the catalog) ----
@@ -598,11 +600,13 @@ export class EditorScene extends Phaser.Scene {
     return { x: o.x + s * d, y: o.y - c * d };
   }
 
-  /** Position of a resize corner handle (corner: 0..3, in the object's local frame) */
-  private resizeCornerPos(o: WorldObject, corner: number): { x: number; y: number } {
+  /** Position of a resize corner handle (corner: 0..3, in the object's local frame).
+   *  `opposite` returns the diagonally opposite corner instead (the resize anchor). */
+  private resizeCornerPos(o: WorldObject, corner: number, opposite: boolean = false): { x: number; y: number } {
     const c = Math.cos(o.angle), s = Math.sin(o.angle);
-    const sx = corner % 2 === 0 ? -1 : 1;
-    const sy = corner < 2 ? -1 : 1;
+    const flip = opposite ? -1 : 1;
+    const sx = (corner % 2 === 0 ? -1 : 1) * flip;
+    const sy = (corner < 2 ? -1 : 1) * flip;
     const lx = (o.w / 2) * sx, ly = (o.h / 2) * sy;
     return { x: o.x + c * lx - s * ly, y: o.y + s * lx + c * ly };
   }
@@ -636,7 +640,8 @@ export class EditorScene extends Phaser.Scene {
         for (let corner = 0; corner < 4; corner++) {
           const cp = this.resizeCornerPos(sel, corner);
           if (Phaser.Math.Distance.Between(x, y, cp.x, cp.y) <= tol) {
-            this.objectDrag = { obj: sel, grabX: x, grabY: y, mode: 'resize', corner, startW: sel.w, startH: sel.h };
+            const pin = this.resizeCornerPos(sel, corner, true); // opposite corner stays put
+            this.objectDrag = { obj: sel, grabX: x, grabY: y, mode: 'resize', corner, startW: sel.w, startH: sel.h, pinX: pin.x, pinY: pin.y };
             return true;
           }
         }
@@ -666,29 +671,23 @@ export class EditorScene extends Phaser.Scene {
     }
 
     if (d.mode === 'resize' && this.isResizable(o)) {
-      // Pointer position in the object's local frame
-      const dx = wp.x - o.x, dy = wp.y - o.y;
+      // Anchored resize: the OPPOSITE corner (captured in world space at drag
+      // start) stays pinned; the box grows only toward the dragged direction.
+      // All measurements run from the PIN (a fixed world point), so the moving
+      // centre never perturbs the anchor frame-to-frame.
       const c = Math.cos(o.angle), s = Math.sin(o.angle);
-      const lx = c * dx + s * dy;
-      const ly = -s * dx + c * dy;
-      // Anchored resize: the OPPOSITE corner stays pinned and the box grows
-      // only in the direction being dragged (centre shifts, not both edges).
-      const sx = (d.corner ?? 0) % 2 === 0 ? -1 : 1;
-      const sy = (d.corner ?? 0) < 2 ? -1 : 1;
-      const fx = -(sx * (d.startW ?? o.w)) / 2; // fixed corner (local frame)
-      const fy = -(sy * (d.startH ?? o.h)) / 2;
-      const w = Math.max(20, Math.abs(lx - fx));
-      const h = Math.max(20, Math.abs(ly - fy));
+      const plx = c * (wp.x - (d.pinX ?? o.x)) + s * (wp.y - (d.pinY ?? o.y)); // pointer, pin-relative local
+      const ply = -s * (wp.x - (d.pinX ?? o.x)) + c * (wp.y - (d.pinY ?? o.y));
+      const w = Math.max(20, Math.abs(plx));
+      const h = Math.max(20, Math.abs(ply));
       this.mainScene.world.objects.resizeObject(o.id, w, h);
       const cur = this.mainScene.world.objects.get(o.id)!;
       o.w = cur.w; o.h = cur.h;
-      // Keep the fixed corner put: shift the centre by half the size delta
-      // (direction the pointer is on), rotated back into world space.
-      const dirX = lx >= fx ? 1 : -1;
-      const dirY = ly >= fy ? 1 : -1;
-      const ncx = fx + dirX * (cur.w / 2);
-      const ncy = fy + dirY * (cur.h / 2);
-      this.mainScene.world.objects.moveObject(o.id, o.x + ncx * c - ncy * s, o.y + ncx * s + ncy * c);
+      // New centre = midpoint between the pinned corner and the box's far
+      // corner (sign follows which side of the pin the pointer is on)
+      const ncx = (plx >= 0 ? 1 : -1) * (cur.w / 2);
+      const ncy = (ply >= 0 ? 1 : -1) * (cur.h / 2);
+      this.mainScene.world.objects.moveObject(o.id, (d.pinX ?? o.x) + ncx * c - ncy * s, (d.pinY ?? o.y) + ncx * s + ncy * c);
       const moved = this.mainScene.world.objects.get(o.id)!;
       o.x = moved.x; o.y = moved.y;
       this.roadDirtySinceRelease = true;
