@@ -549,6 +549,67 @@ export class MainScene extends Phaser.Scene {
     };
   }
 
+  /**
+   * Dock capture assist: when the coupled trailer's tail sits inside a dock
+   * bay at creep speed, the rear tyres "grip" — yaw and lateral drift are
+   * damped, the trailer is softly squared to the wall and settles against the
+   * stop bumpers. Without this the kinematic hitch follower overpowers the
+   * contact solver and the tail slides sideways along the pier faces.
+   */
+  private updateDockCapture() {
+    if (!this.trailer || !this.kingpin) return;
+    const t = this.trailer;
+    const bw = t.body;
+    // Only at creep speed (~<20 km/h) — never fight a moving driver
+    if (Math.hypot(bw.velocity.x, bw.velocity.y) > 3 || Math.abs(this.truck.currentSpeed) > 90) return;
+
+    const angle = bw.angle;
+    const tailX = bw.position.x - Math.sin(angle) * (t.length / 2);
+    const tailY = bw.position.y + Math.cos(angle) * (t.length / 2);
+
+    for (const o of this.world.objects.objects) {
+      if (o.type !== 'dock_wall') continue;
+      const c = Math.cos(o.angle), s = Math.sin(o.angle);
+      const dx = tailX - o.x, dy = tailY - o.y;
+      const lx = dx * c + dy * s;
+      const ly = -dx * s + dy * c;
+      // Bays open toward local +y (apron side); stop bumpers sit at local -y
+      if (ly > o.h / 2 + 30 || ly < -o.h / 2 - 12) continue;
+      const { centres, gap } = this.world.objects.dockWallBays(o);
+      let bayCx: number | null = null;
+      for (const cx of centres) {
+        if (Math.abs(lx - cx) <= gap / 2 - 4) { bayCx = cx; break; }
+      }
+      if (bayCx === null) continue;
+      // Alignment: trailer axis must be near-perpendicular to the wall (mod π)
+      let d = angle - (o.angle + Math.PI / 2);
+      while (d > Math.PI / 2) d -= Math.PI;
+      while (d < -Math.PI / 2) d += Math.PI;
+      if (Math.abs(Phaser.Math.RadToDeg(d)) > 25) continue;
+
+      // --- engage ---
+      const nx = -s, ny = c; // wall local +y (bay mouth side)
+      const tx = c, ty = s;  // along the wall
+      let vx = bw.velocity.x, vy = bw.velocity.y;
+      // Absorb into the rubber stop: kill approach once the tail is on the bumper
+      if (ly < -o.h / 2 + 26) {
+        const vn = vx * nx + vy * ny;
+        if (vn < 0) { vx -= vn * nx; vy -= vn * ny; }
+      }
+      // Rear tyres grip: damp drift along the wall
+      const vt = vx * tx + vy * ty;
+      vx -= vt * 0.22; vy -= vt * 0.22;
+      // Gentle pull toward the bay axis
+      const pull = Phaser.Math.Clamp(-(lx - bayCx) * 0.015, -0.4, 0.4);
+      vx += pull * tx; vy += pull * ty;
+      this.matter.body.setVelocity(bw, { x: vx, y: vy });
+      // Damp yaw + softly square the trailer to the wall
+      this.matter.body.setAngularVelocity(bw, bw.angularVelocity * 0.75);
+      this.matter.body.setAngle(bw, angle + Phaser.Math.Clamp(d, -1, 1) * 0.012);
+      break;
+    }
+  }
+
   /** Attaches a parked trailer to the tractor's fifth wheel (mirrors spawnVehicleRig params). */
   private coupleTrailer(cand: CouplingCandidate) {
     const t = cand.trailer;
@@ -813,6 +874,7 @@ export class MainScene extends Phaser.Scene {
         this.trailer.followHitch(truckHitchX, truckHitchY, hitchVx, hitchVy, truckAngle, delta, this.truck.isBraking);
         artTelemetry = this.kingpin.update(this.truck.isReversing, this.truck.speedKmh);
         this.kingpin.renderDebug(artTelemetry, this.debugMatter);
+        this.updateDockCapture();
       }
 
       if (this.pupTrailer && this.pupKingpin && this.trailer) {

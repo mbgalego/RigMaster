@@ -247,6 +247,21 @@ export class WorldObjects {
     }
   }
 
+  /**
+   * Dock bay geometry shared by the chunk physics and the dock-capture assist:
+   * local-x centres of the bays + bay width. Empty list = solid wall fallback.
+   */
+  public dockWallBays(o: WorldObject): { centres: number[]; gap: number } {
+    const gap = 76;
+    const maxN = Math.floor((o.w - 14) / (gap + 14));
+    const n = maxN < 1 ? 0 : Math.min(Math.max(1, Math.floor(Number(o.params?.docks) || 3)), maxN);
+    if (n < 1) return { centres: [], gap };
+    const pier = (o.w - n * gap) / (n + 1);
+    const centres: number[] = [];
+    for (let i = 0; i < n; i++) centres.push(-o.w / 2 + pier + gap / 2 + i * (pier + gap));
+    return { centres, gap };
+  }
+
   /** Builds (or rebuilds) the static colliders of one active chunk from the object data */
   private buildChunkBodies(key: string) {
     const bodies: MatterJS.BodyType[] = [];
@@ -270,16 +285,14 @@ export class WorldObjects {
       } else if (o.type === 'dock_wall') {
         // Multi-body: solid piers between the dock bays + a stop bumper inside
         // each bay (the bay mouth stays open so trucks can reverse into it).
-        const gap = 76;
-        const maxN = Math.floor((o.w - 14) / (gap + 14));
-        if (maxN < 1) {
+        const { centres, gap } = this.dockWallBays(o);
+        if (centres.length === 0) {
           body = this.scene.matter.add.rectangle(o.x, o.y, o.w, o.h, {
             angle: o.angle, isStatic: true, friction: 0.8, restitution: 0.1,
             label: `obstacle_${o.type}`, collisionFilter: { category: 0x0001, mask: 0xffff },
           }) as unknown as MatterJS.BodyType;
-          bodies.push(body);
         } else {
-          const n = Math.max(1, Math.min(Math.floor(Number(o.params?.docks) || 3), maxN));
+          const n = centres.length;
           const pier = (o.w - n * gap) / (n + 1);
           const c = Math.cos(o.angle), s = Math.sin(o.angle);
           const staticOpts = {
@@ -292,10 +305,9 @@ export class WorldObjects {
               angle: o.angle, ...staticOpts,
             }) as unknown as MatterJS.BodyType);
           }
-          for (let i = 0; i < n; i++) {
-            const lx = -o.w / 2 + pier + gap / 2 + i * (pier + gap);
+          for (const cx of centres) {
             const ly = -o.h / 2 + 10;
-            bodies.push(this.scene.matter.add.rectangle(o.x + c * lx - s * ly, o.y + s * lx + c * ly, gap - 14, 8, {
+            bodies.push(this.scene.matter.add.rectangle(o.x + c * cx - s * ly, o.y + s * cx + c * ly, gap - 14, 8, {
               angle: o.angle, ...staticOpts,
             }) as unknown as MatterJS.BodyType);
           }

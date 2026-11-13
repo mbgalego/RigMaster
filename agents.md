@@ -41,7 +41,11 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.4.0** (Versão Atual — branch `feature/road-network`)
+### **v2.4.1** (Versão Atual — branch `feature/road-network`)
+- **Assistente de captura de doca**: com o atrelado engatado e a traseira dentro da boca de uma baia do `dock_wall`, a velocidade de rastejo activa o "agarre dos pneus traseiros" — amortece o bamboleio lateral/yaw, puxa suavemente para o eixo da baia (±15° de tolerância) e absorve o impacto nos topes de borracha. Causa: o seguidor cinemático do pino (`followHitch`) sobrepõe-se ao solver de contactos e a traseira deslizava de lado nas faces dos brutaços.
+- Geometria das baias partilhada (`WorldObjects.dockWallBays`) entre a física (corpos dos brutaços/topes) e o assistente — um só ponto de verdade para boca/pier.
+
+### **v2.4.0** (branch `feature/road-network`)
 - **Elementos de construção no editor (catálogo Criar)**:
   - **Base Alcatrão** e **Base Terra** (`pad_asphalt`/`pad_dirt`): bases planas de pátio redimensionáveis, sem colisão (alcatrão com juntas de dilatação e granulado; terra com sulcos de pneus e gravilha).
   - **Muro Docas** (`dock_wall`): parede sólida com N baias de descarga (`params.docks`, default 3, boca de 76px) — brutaços de alvenaria + tope de estiva dentro de cada baia + faixa de serviço com borda amarela e pilaretes. Física multi-corpo (os brutaços são corpos individuais; a boca das baias fica aberta para o camião entrar às-costas).
