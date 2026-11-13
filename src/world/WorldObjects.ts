@@ -131,6 +131,29 @@ export class WorldObjects {
     this.refreshSolidBodiesAround(o.x, o.y, o);
   }
 
+  /** Absolute rotation (free rotate handle) */
+  public setObjectAngle(id: string, angleRad: number) {
+    const o = this.get(id);
+    if (!o) return;
+    o.angle = Phaser.Math.Wrap(angleRad, -Math.PI, Math.PI);
+    this.rebuildIndex();
+    this.refreshSolidBodiesAround(o.x, o.y, o);
+  }
+
+  /** Free resizing from the corner handles (min 20px, keeps position/angle) */
+  public resizeObject(id: string, w: number, h: number) {
+    const o = this.get(id);
+    if (!o) return;
+    const oldW = o.w, oldH = o.h;
+    o.w = Phaser.Math.Clamp(Math.round(w), 20, 2400);
+    o.h = Phaser.Math.Clamp(Math.round(h), 20, 2400);
+    if (o.w === oldW && o.h === oldH) return;
+    this.rebuildIndex();
+    // Refresh both the old (smaller/larger) and new footprints
+    this.refreshSolidBodiesAround(o.x, o.y, { ...o, w: oldW, h: oldH });
+    this.refreshSolidBodiesAround(o.x, o.y, o);
+  }
+
   public clear() {
     this.objects = [];
     this.nextId = 1;

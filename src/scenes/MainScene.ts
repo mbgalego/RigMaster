@@ -1092,34 +1092,80 @@ export class MainScene extends Phaser.Scene {
         }
       }
 
-      // 3. Centre dashed line (asphalt only)
-      if (style.dash !== null) {
+      // 3. Centreline: consistent dashes by exact arc length, or direction
+      // chevrons on one-way sections (no carriageway split)
+      if (road.oneWay) {
+        this.drawDirectionChevrons(g, samples, vx0, vy0, vx1, vy1);
+      } else if (style.dash !== null) {
+        const ON = MainScene.ROAD_DASH_LEN, OFF = MainScene.ROAD_DASH_GAP, PERIOD = ON + OFF;
         g.lineStyle(5, style.dash, 0.9);
-        let acc = 0;
+        let s = 0; // arc-length position along the whole centreline
         for (let i = 0; i < samples.length - 1; i++) {
           const a = samples[i], b = samples[i + 1];
           const len = Math.hypot(b.x - a.x, b.y - a.y);
-          const period = MainScene.ROAD_DASH_LEN + MainScene.ROAD_DASH_GAP;
-          const phase = acc % period;
-          acc += len;
-          if (phase >= MainScene.ROAD_DASH_LEN) continue;
-          const t0 = 0;
-          const t1 = Math.min(1, (MainScene.ROAD_DASH_LEN - phase) / len);
-          if (t1 <= t0) continue;
-          const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-          if (mx < vx0 || mx > vx1 || my < vy0 || my > vy1) continue;
-          g.beginPath();
-          g.moveTo(Phaser.Math.Linear(a.x, b.x, t0), Phaser.Math.Linear(a.y, b.y, t0));
-          g.lineTo(Phaser.Math.Linear(a.x, b.x, t1), Phaser.Math.Linear(a.y, b.y, t1));
-          g.strokePath();
+          if (len < 0.001) continue;
+          let t = 0;
+          while (t < len) {
+            const phase = s % PERIOD;
+            if (phase < ON) {
+              const run = Math.min(len - t, ON - phase); // exact dash length
+              const t1 = t + run;
+              const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+              if (mx >= vx0 && mx <= vx1 && my >= vy0 && my <= vy1) {
+                g.beginPath();
+                g.moveTo(Phaser.Math.Linear(a.x, b.x, t / len), Phaser.Math.Linear(a.y, b.y, t / len));
+                g.lineTo(Phaser.Math.Linear(a.x, b.x, t1 / len), Phaser.Math.Linear(a.y, b.y, t1 / len));
+                g.strokePath();
+              }
+              s += run; t = t1;
+            } else {
+              const run = Math.min(len - t, PERIOD - phase); // exact gap length
+              s += run; t += run;
+            }
+          }
         }
       }
     }
   }
 
+  /** Direction chevrons for one-way roads (every ~420px along the centreline) */
+  private drawDirectionChevrons(
+    g: Phaser.GameObjects.Graphics,
+    samples: RoadSample[],
+    vx0: number, vy0: number, vx1: number, vy1: number,
+  ) {
+    const STEP = 420;
+    let s = 0;
+    let next = STEP / 2;
+    g.lineStyle(4, 0xfacc15, 0.45);
+    for (let i = 0; i < samples.length - 1; i++) {
+      const a = samples[i], b = samples[i + 1];
+      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      if (len < 0.001) continue;
+      while (next <= s + len) {
+        const t = (next - s) / len;
+        const px = Phaser.Math.Linear(a.x, b.x, t);
+        const py = Phaser.Math.Linear(a.y, b.y, t);
+        if (px >= vx0 && px <= vx1 && py >= vy0 && py <= vy1) {
+          // Tangent at that position (lerped), chevron pointing along travel
+          const tx = Phaser.Math.Linear(a.tx, b.tx, t);
+          const ty = Phaser.Math.Linear(a.ty, b.ty, t);
+          const bx = -ty, by = tx; // normal
+          const r = 14;
+          g.beginPath();
+          g.moveTo(px - tx * r + bx * r * 0.8, py - ty * r + by * r * 0.8);
+          g.lineTo(px + tx * r * 0.6, py + ty * r * 0.6);
+          g.lineTo(px - tx * r - bx * r * 0.8, py - ty * r - by * r * 0.8);
+          g.strokePath();
+        }
+        next += STEP;
+      }
+      s += len;
+    }
+  }
+
   /** Fills one ribbon quad between two samples (perpendicular corners). */
-  private fillRibbonQuad(g: Phaser.GameObjects.Graphics, a: RoadSample, b: RoadSample, color: number) {
-    const anx = -a.ty * (a.w / 2), any = a.tx * (a.w / 2);
+  private fillRibbonQuad(g: Phaser.GameObjects.Graphics, a: RoadSample, b: RoadSample, color: number) {    const anx = -a.ty * (a.w / 2), any = a.tx * (a.w / 2);
     const bnx = -b.ty * (b.w / 2), bny = b.tx * (b.w / 2);
     g.fillStyle(color, 1);
     g.beginPath();

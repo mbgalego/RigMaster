@@ -41,7 +41,18 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.1.0** (Versão Atual — branch `feature/road-network`)
+### **v2.2.0** (Versão Atual — branch `feature/road-network`)
+- **Estradas — adições curtas e marcação:**
+  - **Espaçamento mínimo entre pontos de controlo (56px)**: ao mover/estender, o ponto é repelido dos vizinhos até à distância mínima — fim dos loops/folds do Catmull-Rom em segmentos curtos (o comportamento estranho das pequenas extensões). Toques para desenhar também exigem ≥24px do ponto anterior.
+  - **Tracejado central consistente**: as linhas centrais são desenhadas por **comprimento de arco exacto** (traço 26px / espaço 22px interpolados dentro de cada amostra, independentemente do espaçamento irregular dos samples) — tracejado uniforme em curvas e nas transições entre spans.
+  - **Estradas de sentido único**: flag `oneWay` por estrada (botão **⇄ 2 Sentidos / → 1 Sentido** no painel; default aplicável a estradas novas) — **sem tracejado central**, com **chevrons amarelos** de direcção a cada ~420px. Serializada no JSON.
+- **Objectos — edição imediata e pegas directas:**
+  - **Criar → Objectos automático**: colocar um objecto com a ferramenta Criar muda logo para a ferramenta Objectos (dock do App sincroniza por polling) — mover/rodar/redimensionar de imediato.
+  - **Rotação livre**: pega **rosa** acima do objecto (no referencial local) — arrastar roda à vontade (fim dos passos fixos de 15°; a tecla R mantém-se como atalho para ±15°).
+  - **Redimensionamento**: 4 **pegas quadradas brancas** nos cantos (tipos redimensionáveis: muro, entrada, parque, edifício, barreira, contentores, doca, cobertura de posto, silo, grua) — arrastar escala a partir do centro (mín. 20px). `WorldObjects.resizeObject` refresca os colisores das pegadas antiga e nova.
+  - Colisores continuam a acompanhar rotação/redimensionamento (reconstrução de chunks nas mutações).
+
+### **v2.1.0** (branch `feature/road-network`)
 - **Editor de gestos (touch + rato unificados):**
   - **2 dedos = sempre pan/zoom**, em qualquer ferramenta: um gesto de dois dedos **cancela** qualquer acção de ferramenta pendente ou drag em curso (os dados editados mantêm-se). Pinos fazem zoom, arrasto faz pan.
   - **Modelo de gestos geral**: o "toque" não executa nada imediatamente — no primeiro movimento significativo (>12px de ecrã) o gesto classifica-se: se começou sobre algo editável (pega da estrada, pega de largura, knob de tangente, objecto) vira **drag da ferramenta**; caso contrário vira **pan** (arrastar no vazio = viajar). Soltar sem mover = **toque** (executa a acção de clique da ferramenta: colocar ponto, selecionar, spawn, criar objecto).

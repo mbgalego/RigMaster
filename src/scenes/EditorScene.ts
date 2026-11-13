@@ -55,18 +55,24 @@ export class EditorScene extends Phaser.Scene {
   public selectedRoad: RoadData | null = null;
   public selectedPointIndex: number | null = null;
   private roadDrag: { road: RoadData; kind: 'point' | 'width' | 'twist' | 'road'; index: number | null; grabX: number; grabY: number } | null = null;
-  private pendingRoad: { surface: RoadSurface; points: RoadPoint[] } | null = null;
+  private pendingRoad: { surface: RoadSurface; points: RoadPoint[]; oneWay: boolean } | null = null;
   private pointerWorld: { x: number; y: number } = { x: 0, y: 0 };
   private lastClickTime: number = 0;
   private lastClickX: number = 0;
   private lastClickY: number = 0;
   public newRoadSurface: RoadSurface = 'asphalt';
   public newRoadWidth: number = 128;
+  public newRoadOneWay: boolean = false;
   private roadDirtySinceRelease: boolean = false;
 
   // ---- Object tool state ----
   public selectedObject: WorldObject | null = null;
-  private objectDrag: { obj: WorldObject; grabX: number; grabY: number } | null = null;
+  private objectDrag: {
+    obj: WorldObject; grabX: number; grabY: number;
+    mode: 'move' | 'rotate' | 'resize';
+    corner?: number; startAngle?: number; startPointerAngle?: number;
+    startW?: number; startH?: number;
+  } | null = null;
 
   // ---- Add tool (place new objects from the catalog) ----
   public addType: AddObjectSpec = { type: 'wall', w: 220, h: 26, label: 'Muro' };
@@ -346,7 +352,7 @@ export class EditorScene extends Phaser.Scene {
         return;
       }
       const last = this.pendingRoad.points[this.pendingRoad.points.length - 1];
-      if (!last || Phaser.Math.Distance.Between(x, y, last.x, last.y) > 8) {
+      if (!last || Phaser.Math.Distance.Between(x, y, last.x, last.y) > 24) {
         this.pendingRoad.points.push({ x: Math.round(x), y: Math.round(y), w: this.newRoadWidth });
       }
       return;
@@ -372,7 +378,7 @@ export class EditorScene extends Phaser.Scene {
     // Empty ground → start a new road (first point)
     this.selectedRoad = null;
     this.selectedPointIndex = null;
-    this.pendingRoad = { surface: this.newRoadSurface, points: [{ x: Math.round(x), y: Math.round(y), w: this.newRoadWidth }] };
+    this.pendingRoad = { surface: this.newRoadSurface, points: [{ x: Math.round(x), y: Math.round(y), w: this.newRoadWidth }], oneWay: this.newRoadOneWay };
   }
 
   /** Begins a road drag when the press started on a handle or a road body. */
@@ -477,7 +483,7 @@ export class EditorScene extends Phaser.Scene {
   public finishPendingRoad() {
     if (!this.pendingRoad) return;
     if (this.pendingRoad.points.length >= 2) {
-      const road = this.roadNetwork.addRoad(this.pendingRoad.surface, this.pendingRoad.points);
+      const road = this.roadNetwork.addRoad(this.pendingRoad.surface, this.pendingRoad.points, false, this.pendingRoad.oneWay);
       this.selectedRoad = road;
     }
     this.pendingRoad = null;
@@ -532,6 +538,15 @@ export class EditorScene extends Phaser.Scene {
     return { x: p.x + t.tx * dist, y: p.y + t.ty * dist };
   }
 
+  /** Toggle single/double direction — acts on the selection or as default for new roads */
+  public setRoadOneWay(oneWay: boolean) {
+    this.newRoadOneWay = oneWay;
+    if (this.selectedRoad) {
+      this.roadNetwork.setRoadOneWay(this.selectedRoad.id, oneWay);
+      this.mainScene.world.version++;
+    }
+  }
+
   public nudgeTwist(deltaDeg: number) {
     if (!this.selectedRoad || this.selectedPointIndex === null) return;
     const p = this.selectedRoad.points[this.selectedPointIndex];
@@ -546,7 +561,7 @@ export class EditorScene extends Phaser.Scene {
     this.mainScene.world.version++;
   }
 
-  public getRoadUIState(): { hasSelection: boolean; hasPoint: boolean; surface: RoadSurface; width: number; drawing: boolean; twistDeg: number } {
+  public getRoadUIState(): { hasSelection: boolean; hasPoint: boolean; surface: RoadSurface; width: number; drawing: boolean; twistDeg: number; oneWay: boolean } {
     const selPoint = this.selectedRoad && this.selectedPointIndex !== null ? this.selectedRoad.points[this.selectedPointIndex] : null;
     return {
       hasSelection: !!this.selectedRoad,
@@ -555,12 +570,39 @@ export class EditorScene extends Phaser.Scene {
       width: selPoint ? selPoint.w : this.selectedRoad ? this.selectedRoad.points[0]?.w ?? this.newRoadWidth : this.newRoadWidth,
       drawing: !!this.pendingRoad,
       twistDeg: selPoint ? Math.round(Phaser.Math.RadToDeg(selPoint.twist ?? 0)) : 0,
+      oneWay: this.selectedRoad ? !!this.selectedRoad.oneWay : this.newRoadOneWay,
     };
   }
 
   // ======================================================================
-  // OBJECT TOOL (select / move / rotate / delete prefabs)
+  // OBJECT TOOL (select / move / free-rotate / resize / delete prefabs)
   // ======================================================================
+
+  /** Types whose width/height can be dragged from the corner handles */
+  private static readonly RESIZABLE_TYPES = new Set<string>([
+    'wall', 'entrance', 'parking_lot', 'building', 'jersey_barrier',
+    'container_stack', 'dock', 'gas_canopy', 'silo', 'crane',
+  ]);
+
+  private isResizable(o: WorldObject): boolean {
+    return EditorScene.RESIZABLE_TYPES.has(o.type);
+  }
+
+  /** Position of the free-rotation knob (above the object, in its local frame) */
+  private rotationHandlePos(o: WorldObject): { x: number; y: number } {
+    const c = Math.cos(o.angle), s = Math.sin(o.angle);
+    const d = Math.max(o.w, o.h) / 2 + 36;
+    return { x: o.x - s * d, y: o.y - c * d };
+  }
+
+  /** Position of a resize corner handle (corner: 0..3, in the object's local frame) */
+  private resizeCornerPos(o: WorldObject, corner: number): { x: number; y: number } {
+    const c = Math.cos(o.angle), s = Math.sin(o.angle);
+    const sx = corner % 2 === 0 ? -1 : 1;
+    const sy = corner < 2 ? -1 : 1;
+    const lx = (o.w / 2) * sx, ly = (o.h / 2) * sy;
+    return { x: o.x + c * lx - s * ly, y: o.y + s * lx + c * ly };
+  }
 
   /** Tap action: select the object under the pointer, or deselect. */
   private objectTap(x: number, y: number) {
@@ -569,24 +611,77 @@ export class EditorScene extends Phaser.Scene {
     this.objectDrag = null;
   }
 
-  /** Begins an object drag when the press started on an object. */
+  /** Begins an object drag: rotation knob → resize corners → move the body. */
   private tryStartObjectDrag(x: number, y: number): boolean {
-    const tol = 10 / this.cameras.main.zoom;
-    const hit = this.mainScene.world.objects.hitTest(x, y, tol);
+    const tol = 12 / this.cameras.main.zoom;
+    const sel = this.selectedObject;
+
+    // 1. Free-rotation knob of the current selection
+    if (sel) {
+      const rp = this.rotationHandlePos(sel);
+      if (Phaser.Math.Distance.Between(x, y, rp.x, rp.y) <= tol + 2) {
+        this.objectDrag = {
+          obj: sel, grabX: x, grabY: y, mode: 'rotate',
+          startAngle: sel.angle,
+          startPointerAngle: Math.atan2(y - sel.y, x - sel.x),
+        };
+        return true;
+      }
+
+      // 2. Resize corner handles (resizable types only)
+      if (this.isResizable(sel)) {
+        for (let corner = 0; corner < 4; corner++) {
+          const cp = this.resizeCornerPos(sel, corner);
+          if (Phaser.Math.Distance.Between(x, y, cp.x, cp.y) <= tol) {
+            this.objectDrag = { obj: sel, grabX: x, grabY: y, mode: 'resize', corner, startW: sel.w, startH: sel.h };
+            return true;
+          }
+        }
+      }
+    }
+
+    // 3. Body hit → select + move
+    const hit = this.mainScene.world.objects.hitTest(x, y, 10 / this.cameras.main.zoom);
     if (!hit) return false;
     this.selectedObject = hit;
-    this.objectDrag = { obj: hit, grabX: x, grabY: y };
+    this.objectDrag = { obj: hit, grabX: x, grabY: y, mode: 'move' };
     return true;
   }
 
   private applyObjectDrag(wp: { x: number; y: number }) {
     if (!this.objectDrag) return;
-    const dx = Math.round(wp.x - this.objectDrag.grabX);
-    const dy = Math.round(wp.y - this.objectDrag.grabY);
-    if (dx !== 0 || dy !== 0) {
-      this.mainScene.world.objects.moveObject(this.objectDrag.obj.id, this.objectDrag.obj.x + dx, this.objectDrag.obj.y + dy);
-      this.objectDrag.grabX += dx;
-      this.objectDrag.grabY += dy;
+    const d = this.objectDrag;
+    const o = d.obj;
+
+    if (d.mode === 'rotate') {
+      const delta = Math.atan2(wp.y - o.y, wp.x - o.x) - (d.startPointerAngle ?? 0);
+      this.mainScene.world.objects.setObjectAngle(o.id, (d.startAngle ?? o.angle) + delta);
+      o.angle = this.mainScene.world.objects.get(o.id)!.angle; // follow the knob visually
+      this.roadDirtySinceRelease = true;
+      return;
+    }
+
+    if (d.mode === 'resize' && this.isResizable(o)) {
+      // Pointer position in the object's local frame (resize from the centre)
+      const dx = wp.x - o.x, dy = wp.y - o.y;
+      const c = Math.cos(o.angle), s = Math.sin(o.angle);
+      const lx = c * dx + s * dy;
+      const ly = -s * dx + c * dy;
+      const w = Math.max(20, Math.abs(2 * lx));
+      const h = Math.max(20, Math.abs(2 * ly));
+      this.mainScene.world.objects.resizeObject(o.id, w, h);
+      o.w = this.mainScene.world.objects.get(o.id)!.w;
+      o.h = this.mainScene.world.objects.get(o.id)!.h;
+      this.roadDirtySinceRelease = true;
+      return;
+    }
+
+    const ddx = Math.round(wp.x - d.grabX);
+    const ddy = Math.round(wp.y - d.grabY);
+    if (ddx !== 0 || ddy !== 0) {
+      this.mainScene.world.objects.moveObject(o.id, o.x + ddx, o.y + ddy);
+      d.grabX += ddx;
+      d.grabY += ddy;
       this.roadDirtySinceRelease = true; // minimap refresh on release
     }
   }
@@ -605,11 +700,13 @@ export class EditorScene extends Phaser.Scene {
     this.mainScene.world.version++;
   }
 
-  public getObjectUIState(): { hasSelection: boolean; type: string; angleDeg: number } {
+  public getObjectUIState(): { hasSelection: boolean; type: string; angleDeg: number; resizable: boolean } {
+    const o = this.selectedObject;
     return {
-      hasSelection: !!this.selectedObject,
-      type: this.selectedObject ? this.selectedObject.type : '',
-      angleDeg: this.selectedObject ? Math.round(Phaser.Math.RadToDeg(this.selectedObject.angle)) : 0,
+      hasSelection: !!o,
+      type: o ? o.type : '',
+      angleDeg: o ? Math.round(Phaser.Math.RadToDeg(o.angle)) : 0,
+      resizable: o ? this.isResizable(o) : false,
     };
   }
 
@@ -627,15 +724,17 @@ export class EditorScene extends Phaser.Scene {
     this.addType = spec;
   }
 
-  /** Tap action of the 'add' tool: place a new object of the selected type. */
+  /** Tap action of the 'add' tool: place a new object and jump straight into
+   *  the Objectos tool so it can be moved/rotated/resized immediately. */
   private addTap(x: number, y: number) {
     const spec = this.addType;
     const o = this.mainScene.world.objects.add(spec.type, Math.round(x), Math.round(y), spec.w, spec.h, {
       variant: spec.variant,
       params: spec.params,
     });
-    this.selectedObject = o; // handy: switch to Objectos and it's already selected
     this.mainScene.world.version++;
+    this.selectedObject = o;
+    this.setTool('object'); // immediate editing — App polls editorTool to sync the dock
   }
 
   // ======================================================================
@@ -657,7 +756,7 @@ export class EditorScene extends Phaser.Scene {
     g.lineBetween(sp.x, sp.y - 40, sp.x, sp.y + 40);
     g.lineBetween(sp.x - 40, sp.y, sp.x + 40, sp.y);
 
-    // Selected object outline
+    // Selected object outline + editing handles
     if (this.selectedObject && this.editorTool === 'object') {
       const o = this.selectedObject;
       this.rotatedRectPath(g, o, 3 / z);
@@ -667,6 +766,39 @@ export class EditorScene extends Phaser.Scene {
       g.beginPath();
       g.arc(o.x, o.y, 5 / z, 0, Math.PI * 2);
       g.fillPath();
+
+      // Resize corner handles (resizable types only)
+      if (this.isResizable(o)) {
+        for (let corner = 0; corner < 4; corner++) {
+          const cp = this.resizeCornerPos(o, corner);
+          const hs = 6 / z;
+          g.fillStyle(0xffffff, 0.95);
+          g.fillRect(cp.x - hs / 2, cp.y - hs / 2, hs, hs);
+          g.lineStyle(1.5 / z, 0x0b1220, 1);
+          g.strokeRect(cp.x - hs / 2, cp.y - hs / 2, hs, hs);
+        }
+      }
+
+      // Free-rotation knob (pink circle above the object, in its local frame)
+      const rp = this.rotationHandlePos(o);
+      g.lineStyle(1.5 / z, 0xe879f9, 0.6);
+      g.beginPath();
+      g.moveTo(o.x, o.y);
+      g.lineTo(rp.x, rp.y);
+      g.strokePath();
+      g.fillStyle(0xe879f9, 0.95);
+      g.beginPath();
+      g.arc(rp.x, rp.y, 6 / z, 0, Math.PI * 2);
+      g.fillPath();
+      g.lineStyle(1.5 / z, 0x0b1220, 1);
+      g.beginPath();
+      g.arc(rp.x, rp.y, 6 / z, 0, Math.PI * 2);
+      g.strokePath();
+      // Little rotation arrow on the knob
+      g.lineStyle(2 / z, 0x0b1220, 0.9);
+      g.beginPath();
+      g.arc(rp.x, rp.y, 3 / z, Math.PI * 0.15, Math.PI * 1.05);
+      g.strokePath();
     }
 
     // Road tool: selected road + pending drawing

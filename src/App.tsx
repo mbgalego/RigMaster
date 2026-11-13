@@ -77,16 +77,17 @@ export default function App() {
   const [hubs, setHubs] = useState<HubData[]>([]);
   const [activeWeather, setActiveWeather] = useState<WeatherModifier>('clear');
   const [editorTool, setEditorTool] = useState<'pan' | 'road' | 'object' | 'spawn' | 'add'>('pan');
+  const editorToolRef = useRef<'pan' | 'road' | 'object' | 'spawn' | 'add'>('pan');
   // Catalog selection for the 'add' (Criar) tool
   const [addType, setAddType] = useState<AddObjectSpec>({ type: 'wall', w: 220, h: 26, label: 'Muro' });
 
   // Road tool live state (polled from EditorScene in the telemetry loop)
-  const [roadUI, setRoadUI] = useState<{ hasSelection: boolean; hasPoint: boolean; surface: RoadSurface; width: number; drawing: boolean; twistDeg: number }>({
-    hasSelection: false, hasPoint: false, surface: 'asphalt', width: 128, drawing: false, twistDeg: 0,
+  const [roadUI, setRoadUI] = useState<{ hasSelection: boolean; hasPoint: boolean; surface: RoadSurface; width: number; drawing: boolean; twistDeg: number; oneWay: boolean }>({
+    hasSelection: false, hasPoint: false, surface: 'asphalt', width: 128, drawing: false, twistDeg: 0, oneWay: false,
   });
   // Object tool live state (polled from EditorScene in the telemetry loop)
-  const [objectUI, setObjectUI] = useState<{ hasSelection: boolean; type: string; angleDeg: number }>({
-    hasSelection: false, type: '', angleDeg: 0,
+  const [objectUI, setObjectUI] = useState<{ hasSelection: boolean; type: string; angleDeg: number; resizable: boolean }>({
+    hasSelection: false, type: '', angleDeg: 0, resizable: false,
   });
 
   // Real-time Telemetry
@@ -167,6 +168,11 @@ export default function App() {
       if (edScene) {
         setRoadUI(edScene.getRoadUIState());
         setObjectUI(edScene.getObjectUIState());
+        // The scene can switch tools by itself (e.g. Criar → Objectos after placing)
+        if (edScene.editorTool !== editorToolRef.current) {
+          editorToolRef.current = edScene.editorTool;
+          setEditorTool(edScene.editorTool);
+        }
       }
     }, 60);
 
@@ -295,6 +301,7 @@ export default function App() {
 
   const handleSetEditorTool = (tool: 'pan' | 'road' | 'object' | 'spawn' | 'add') => {
     setEditorTool(tool);
+    editorToolRef.current = tool;
     const edScene = getEditorScene();
     if (edScene) {
       if (tool === 'add') edScene.setAddObjectType(addType);
@@ -825,6 +832,18 @@ export default function App() {
                     </button>
                   ))}
                 </div>
+                {/* One-way / two-way toggle */}
+                <button
+                  onClick={() => { const ed = getEditorScene(); if (ed) ed.setRoadOneWay(!roadUI.oneWay); }}
+                  className={`text-[10px] font-bold px-2 py-1 rounded transition border ${
+                    roadUI.oneWay
+                      ? 'bg-amber-400 text-black border-amber-200'
+                      : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
+                  }`}
+                  title="Sem tracejado central — um só sentido (setas amarelas)"
+                >
+                  {roadUI.oneWay ? '→ 1 Sentido' : '⇄ 2 Sentidos'}
+                </button>
                 {/* Width control */}
                 <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5">
                   <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeRoadWidth(-16); }} className="text-slate-300 hover:text-white px-1 font-black text-xs" title="Reduzir largura (secção selecionada ou estrada toda)">−</button>
@@ -852,7 +871,7 @@ export default function App() {
                 )}
               </div>
               <span className="text-[10px] text-slate-400 text-center">
-                Clica: pontos · Enter/duplo clique: terminar · Duplo clique na estrada: inserir ponto · Círculo laranja: largura · Botão verde +: estender a estrada na ponta · Knob violeta: roda a direcção da faixa · Esc: cancelar · Del: apagar estrada
+                Clica: pontos · Enter/duplo clique: terminar · Duplo clique na estrada: inserir ponto · Círculo laranja: largura · Verde +: estender · Knob violeta: rodar a faixa · Esc: cancelar · Del: apagar estrada
               </span>
             </div>
           )}
@@ -873,26 +892,17 @@ export default function App() {
                         OBJECTO: {objectUI.type} · {objectUI.angleDeg}°
                       </span>
                       <button
-                        onClick={() => { const ed = getEditorScene(); if (ed) ed.rotateSelectedObject(-15); }}
-                        className="text-[10px] font-bold bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800 px-2 py-1 rounded"
-                      >
-                        ⟲ −15°
-                      </button>
-                      <button
-                        onClick={() => { const ed = getEditorScene(); if (ed) ed.rotateSelectedObject(15); }}
-                        className="text-[10px] font-bold bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800 px-2 py-1 rounded"
-                      >
-                        ⟳ +15°
-                      </button>
-                      <button
                         onClick={() => { const ed = getEditorScene(); if (ed) ed.deleteSelectedObject(); }}
                         className="text-[10px] font-bold bg-red-500 text-white border border-red-300 hover:bg-red-400 px-2 py-1 rounded"
                       >
                         Apagar
                       </button>
+                      <span className="text-[10px] text-slate-400 hidden lg:inline whitespace-nowrap">
+                        arrasta = mover · pega rosa = rodar livre{objectUI.resizable ? ' · quadrados brancos = redimensionar' : ''}
+                      </span>
                     </>
                   ) : (
-                    <span className="text-xs font-bold text-amber-300">MODO OBJECTOS: Clica num objecto para o selecionar — arrasta para mover, R roda 15°, Del apaga</span>
+                    <span className="text-xs font-bold text-amber-300">MODO OBJECTOS: Clica num objecto para o selecionar — arrasta para mover, Del apaga</span>
                   )}
                 </>
               )}

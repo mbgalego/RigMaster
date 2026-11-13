@@ -28,6 +28,8 @@ export interface RoadData {
   id: string;
   surface: RoadSurface;
   closed: boolean;
+  /** No carriageway split — single direction, no centre dashes */
+  oneWay?: boolean;
   points: RoadPoint[];
 }
 
@@ -61,6 +63,9 @@ export const OFFROAD_GRIP = 0.55;
 /** Extra slack beyond half-width that still counts as "on the road" (shoulder) */
 const SHOULDER_PX = 14;
 
+/** Minimum spacing between adjacent control points (prevents spline fold-over) */
+const MIN_POINT_DIST = 56;
+
 /** Spatial hash cell size (segments are short; 3×3 cell lookups suffice) */
 const CELL = 1024;
 
@@ -89,8 +94,8 @@ export class RoadNetwork {
   // DATA EDITING
   // ======================================================================
 
-  public addRoad(surface: RoadSurface, points: RoadPoint[], closed = false): RoadData {
-    const road: RoadData = { id: `rd_${this.nextId++}`, surface, closed, points };
+  public addRoad(surface: RoadSurface, points: RoadPoint[], closed = false, oneWay = false): RoadData {
+    const road: RoadData = { id: `rd_${this.nextId++}`, surface, closed, ...(oneWay ? { oneWay: true } : {}), points };
     this.roads.push(road);
     this.rebuildIndex();
     return road;
@@ -123,9 +128,37 @@ export class RoadNetwork {
   public movePoint(id: string, index: number, x: number, y: number) {
     const road = this.getRoad(id);
     const p = road?.points[index];
-    if (!p) return;
+    if (!road || !p) return;
     p.x = x;
     p.y = y;
+    // Keep a minimum span between control points: very short Catmull-Rom
+    // segments overshoot and fold the ribbon into loops.
+    const n = road.points.length;
+    const MIN = MIN_POINT_DIST;
+    const keepAway = (q: RoadPoint | undefined) => {
+      if (!q) return;
+      const dx = p.x - q.x, dy = p.y - q.y;
+      const d = Math.hypot(dx, dy) || 0.001;
+      if (d < MIN) {
+        p.x = Math.round(q.x + (dx / d) * MIN);
+        p.y = Math.round(q.y + (dy / d) * MIN);
+      }
+    };
+    if (road.closed) {
+      keepAway(road.points[(index - 1 + n) % n]);
+      keepAway(road.points[(index + 1) % n]);
+    } else {
+      keepAway(road.points[index - 1]);
+      keepAway(road.points[index + 1]);
+    }
+    this.rebuildIndex();
+  }
+
+  public setRoadOneWay(id: string, oneWay: boolean) {
+    const road = this.getRoad(id);
+    if (!road) return;
+    if (oneWay) road.oneWay = true;
+    else delete road.oneWay;
     this.rebuildIndex();
   }
 
@@ -503,6 +536,7 @@ export class RoadNetwork {
       id: r.id,
       surface: r.surface,
       closed: r.closed,
+      ...(r.oneWay ? { oneWay: true } : {}),
       points: r.points.map((p) => ({
         x: Math.round(p.x), y: Math.round(p.y), w: Math.round(p.w),
         ...(p.twist ? { twist: Math.round(Phaser.Math.RadToDeg(p.twist) * 10) / 10 } : {}),
@@ -530,6 +564,7 @@ export class RoadNetwork {
           id: typeof raw.id === 'string' ? raw.id : `rd_${this.nextId++}`,
           surface,
           closed: !!raw.closed,
+          ...(raw.oneWay ? { oneWay: true } : {}),
           points,
         };
         // Keep nextId ahead of imported ids
