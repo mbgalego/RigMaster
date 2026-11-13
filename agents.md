@@ -41,7 +41,15 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.2.1** (Versão Atual — branch `feature/road-network`)
+### **v2.3.0** (Versão Atual — branch `feature/road-network`)
+- **Parques industriais ao estilo da foto de referência:**
+  - **Novas variantes de edifício**: `warehouse_big` (armazém logístico — tecto plano cinzento-claro com juntas de painel, faixa de clarabóia e unidades HVAC) e `shed` (nave industrial — tecto branco com linhas de crista paralelas).
+  - **Carros estacionados nos parques**: `parking_lot` desenha viaturas determinísticas (por objecto + lugar, ~75% de ocupação, paleta variada, em duas filas ao longo do corredor central; `params.cars: false` desactiva).
+  - **Rotunda**: prefab circular com faixa de circulação (chevrons anti-horário, trânsito à direita), cordão e ilha ajardinada. Só a **ilha central é sólida** (corpo circular Matter) — a faixa de circulação é transitável. Renderiza na camada **solids (depth 3)** para ficar acima das ribbons no cruzamento.
+  - **Passadeira**: prefab plano de zebras (listras ao longo da estrada, repetidas atravessando a faixa), redimensionável/rotável.
+  - **Parque industrial de demonstração no seed** (SE, junto à Zona Industrial, sul da arterial y=9216): dois conectores de acesso com passadeiras, rua interior, rotunda no cruzamento, armazém logístico 700×280 + nave 380×280 viradas à rua, e dois parques de funcionários com carros. Editável como tudo o resto (apagar/estender/mexer).
+
+### **v2.2.1** (branch `feature/road-network`)
 - **Fim dos spikes/dobras nas estradas (foto do utilizador)**: o sampler passou de Catmull-Rom **uniforme** (que ultrapassa e dobra a faixa quando os pontos têm espaçamento irregular ou ângulos fechados) para **Hermite cúbica com tangentes de diferença finita e parametrização por comprimento de corda** (comportamento chordal) — a curva nunca ultrapassa o traçado; em reversões quase exactas desacelera até zero (cúspide limpa). Tangentes por ponto rodadas pelo twist individual (não interpolado ao longo do span).
 - **Guarda de cúspides no renderizador**: quads de faixa e traços de linha central com tangentes quase opostas (dot < 0.2) são saltados — não há mais "bowties"/setas a apontar para fora da estrada.
 - **Consistência total entre pegas e curva**: `pointNormal`/`pointTangent`/`baseTangentAngle`/`extendHandlePos` usam agora exactamente a mesma direcção que os samples da curva (a pega de largura, o knob de twist e a pega de extensão assentam na tangente real).

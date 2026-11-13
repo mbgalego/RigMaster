@@ -582,6 +582,7 @@ export class EditorScene extends Phaser.Scene {
   private static readonly RESIZABLE_TYPES = new Set<string>([
     'wall', 'entrance', 'parking_lot', 'building', 'jersey_barrier',
     'container_stack', 'dock', 'gas_canopy', 'silo', 'crane',
+    'roundabout', 'crosswalk',
   ]);
 
   private isResizable(o: WorldObject): boolean {
