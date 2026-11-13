@@ -2,11 +2,11 @@ import Phaser from 'phaser';
 import { Truck } from '../entities/Truck';
 import { Trailer, TrailerType } from '../entities/Trailer';
 import { Kingpin, ArticulationTelemetry } from '../physics/Kingpin';
-import { TilemapManager, TILE_DEFINITIONS } from '../editor/TilemapManager';
+import { World } from '../world/World';
 import { LicenseSystem, LicenseExam, LicenseId } from '../systems/LicenseSystem';
 import { GarageSystem, WeatherModifier } from '../systems/GarageSystem';
-import { TrafficLightSystem } from '../systems/TrafficLightSystem';
 import { TrailerManager, TRAILER_TYPE_TO_LICENSE, CouplingCandidate } from '../systems/TrailerManager';
+import { RoadNetwork, RoadData, RoadSample } from '../systems/RoadNetwork';
 
 export class MainScene extends Phaser.Scene {
   public truck!: Truck;
@@ -15,9 +15,25 @@ export class MainScene extends Phaser.Scene {
   public kingpin: Kingpin | null = null;
   public pupKingpin: Kingpin | null = null;
 
-  public tilemapManager!: TilemapManager;
+  
   public licenseSystem!: LicenseSystem;
   public garageSystem!: GarageSystem;
+
+  // The single procedural island world (no tiles)
+  public world!: World;
+  private flatsGraphics: Phaser.GameObjects.Graphics | null = null;
+  private solidsGraphics: Phaser.GameObjects.Graphics | null = null;
+  private lightsGraphics: Phaser.GameObjects.Graphics | null = null;
+  // Static object layers are redrawn only when the camera or the world changed
+  private lastObjRender = { x: NaN, y: NaN, zoom: NaN, version: -1 };
+
+  // Vector road network (Phase 1: spline roads over the tile ground)
+  public roadNetwork!: RoadNetwork;
+  private roadGraphics: Phaser.GameObjects.Graphics | null = null;
+  private roadRenderVersion: number = -1;
+  private roadCamX: number = Number.NaN;
+  private roadCamY: number = Number.NaN;
+  private roadCamZoom: number = Number.NaN;
 
   public isEditorMode: boolean = false;
   public debugMatter: boolean = true;
@@ -32,6 +48,10 @@ export class MainScene extends Phaser.Scene {
 
   // Auto-coupling: debounces the "failed attempt" toast to one per zone entry
   private autoCoupleErrorKey: string | null = null;
+  /** Re-lock guard after decouple: trailer body id + armed flag (see decoupleLockoutArmed). */
+  private decoupleLockout: { id: number; armed: boolean } | null = null;
+  private decoupleLockoutUntil: number = 0;
+  private pinchStartDist: number = 0;
 
   // Environmental layers
   private weatherGraphics!: Phaser.GameObjects.Graphics;
@@ -60,7 +80,6 @@ export class MainScene extends Phaser.Scene {
     { id: 'industrial', label: 'INDUSTRIAL', c: 94, r: 68 },
     { id: 'historic', label: 'HISTÓRICO', c: 8, r: 72 },
   ];
-  private static readonly PROCEDURAL_MAP_NAME = 'Região Metropolitana Procedural';
 
   // Minimap (full-map HUD overview with live camera viewport & truck marker)
   private minimapImage: Phaser.GameObjects.Image | null = null;
@@ -124,21 +143,35 @@ export class MainScene extends Phaser.Scene {
     this.licenseSystem = LicenseSystem.getInstance();
     this.garageSystem = GarageSystem.getInstance();
 
-    // 1. Build World & Tilemap
-    this.tilemapManager = new TilemapManager(this);
+    // 1. Build the single procedural island world (terrain + vector roads + prefabs)
+    this.world = new World(this);
+    this.roadNetwork = RoadNetwork.getInstance();
 
-    // Set world physics bounds
-    const worldW = this.tilemapManager.cols * this.tilemapManager.tileSize;
-    const worldH = this.tilemapManager.rows * this.tilemapManager.tileSize;
+    // Ground layers: flats (docks/pads) under the roads, solids above them
+    this.flatsGraphics = this.add.graphics().setDepth(1);
+    this.solidsGraphics = this.add.graphics().setDepth(3);
+    this.lightsGraphics = this.add.graphics().setDepth(4);
+
+    // Vector road ribbon renderer (above flats, below solids/vehicles)
+    this.roadGraphics = this.add.graphics().setDepth(2);
+
+    // Set world physics bounds (island edge)
+    const worldW = World.WORLD_W;
+    const worldH = World.WORLD_H;
     this.matter.world.setBounds(0, 0, worldW, worldH, 64, true, true, true, true);
 
-    // 2. Spawn Vehicle Rig
+    // 2. Spawn parked trailers on the world's parking pads, then the rig
+    TrailerManager.getInstance(this).rebuild(this.world.parkingPads);
     this.spawnVehicleRig(this.currentVehicleConfig);
 
     // 3. Camera Setup
     this.cameras.main.setBounds(0, 0, worldW, worldH);
+    this.cameras.main.setBackgroundColor(0x0a2338); // ocean blue behind the island
     this.cameras.main.startFollow(this.truck.container, true, 0.1, 0.1);
-    this.cameras.main.setZoom(1.0);
+    // Responsive default zoom: small screens (phones) start more zoomed out
+    this.cameras.main.setZoom(Phaser.Math.Clamp(
+      Math.min(this.scale.width / 900, this.scale.height / 620), 0.5, 1.0,
+    ));
 
     // Mouse wheel camera zoom (drive mode only; the editor has its own zoom handler)
     this.input.on('wheel', (pointer: any, gameObjects: any, deltaX: number, deltaY: number) => {
@@ -146,6 +179,31 @@ export class MainScene extends Phaser.Scene {
       const newZoom = Phaser.Math.Clamp(this.cameras.main.zoom - deltaY * 0.001, 0.45, 1.8);
       this.cameras.main.setZoom(newZoom);
     });
+
+    // Pinch-to-zoom (touch devices, drive mode): two fingers control the zoom
+    this.pinchStartDist = 0;
+    const activePointers = () => ((this.input as any).activePointers as any[]).filter((pt) => pt.isDown);
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      if (this.isEditorMode) return;
+      const active = activePointers();
+      if (active.length === 2) {
+        this.pinchStartDist = Phaser.Math.Distance.Between(active[0].x, active[0].y, active[1].x, active[1].y);
+      }
+    });
+    this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
+      if (this.isEditorMode || this.pinchStartDist <= 0) return;
+      const active = activePointers();
+      if (active.length < 2) return;
+      const d = Phaser.Math.Distance.Between(active[0].x, active[0].y, active[1].x, active[1].y);
+      const factor = Phaser.Math.Clamp(d / this.pinchStartDist, 0.85, 1.18);
+      this.pinchStartDist = d;
+      this.adjustZoom(factor);
+    });
+    const endPinch = () => {
+      if (activePointers().length < 2) this.pinchStartDist = 0;
+    };
+    this.input.on('pointerup', endPinch);
+    this.input.on('pointerupoutside', endPinch);
 
     // 4. Weather Overlay
     this.weatherGraphics = this.add.graphics();
@@ -207,8 +265,7 @@ export class MainScene extends Phaser.Scene {
       );
     }
 
-    const onProceduralMap = this.tilemapManager.mapName === MainScene.PROCEDURAL_MAP_NAME;
-    const ts = this.tilemapManager.tileSize;
+    const ts = 128; // world-tile legacy scale for the authored sign spots
     const g = this.hubSignsGraphics;
     g.clear();
 
@@ -216,7 +273,7 @@ export class MainScene extends Phaser.Scene {
     for (let i = 0; i < MainScene.HUB_SIGN_TILES.length; i++) {
       const spot = MainScene.HUB_SIGN_TILES[i];
       const hub = this.garageSystem.getHub(spot.id as any);
-      const dominant = onProceduralMap && !!hub && hub.isDominant;
+      const dominant = !!hub && hub.isDominant;
       const text = this.hubSignTexts[i];
       text.setVisible(dominant);
 
@@ -269,7 +326,7 @@ export class MainScene extends Phaser.Scene {
       this.trailer = null;
     }
 
-    const spawn = this.tilemapManager.spawnPoint;
+    const spawn = this.world.spawnPoint;
     const spawnAngleRad = Phaser.Math.DegToRad(spawn.angle || 0);
 
     if (!this.truck) {
@@ -305,7 +362,7 @@ export class MainScene extends Phaser.Scene {
 
       this.kingpin = new Kingpin(this, this.truck.body, this.trailer.body, this.trailer.length, {
         parentOffset: { x: 0, y: 35 },
-        trailerOffset: { x: 0, y: -this.trailer.length / 2 + 30 },
+        trailerOffset: { x: 0, y: -this.trailer.length / 2 + 14 },
         jackknifeLimitDeg: 75,
         mechanicalLockDeg: 95,
       });
@@ -323,7 +380,7 @@ export class MainScene extends Phaser.Scene {
 
       this.kingpin = new Kingpin(this, this.truck.body, this.trailer.body, this.trailer.length, {
         parentOffset: { x: 0, y: 35 },
-        trailerOffset: { x: 0, y: -this.trailer.length / 2 + 35 },
+        trailerOffset: { x: 0, y: -this.trailer.length / 2 + 18 },
         jackknifeLimitDeg: 72,
         mechanicalLockDeg: 95,
       });
@@ -341,7 +398,7 @@ export class MainScene extends Phaser.Scene {
 
       this.kingpin = new Kingpin(this, this.truck.body, this.trailer.body, this.trailer.length, {
         parentOffset: { x: 0, y: 35 },
-        trailerOffset: { x: 0, y: -this.trailer.length / 2 + 25 },
+        trailerOffset: { x: 0, y: -this.trailer.length / 2 + 14 },
         jackknifeLimitDeg: 75,
         mechanicalLockDeg: 95,
       });
@@ -359,7 +416,7 @@ export class MainScene extends Phaser.Scene {
 
       this.pupKingpin = new Kingpin(this, this.trailer.body, this.pupTrailer.body, this.pupTrailer.length, {
         parentOffset: { x: 0, y: this.trailer.length / 2 - 18 },
-        trailerOffset: { x: 0, y: -this.pupTrailer.length / 2 + 25 },
+        trailerOffset: { x: 0, y: -this.pupTrailer.length / 2 + 14 },
         jackknifeLimitDeg: 75,
         mechanicalLockDeg: 95,
       });
@@ -367,7 +424,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   public resetVehicleToSpawn() {
-    const spawn = this.tilemapManager.spawnPoint;
+    const spawn = this.world.spawnPoint;
     const spawnAngleRad = Phaser.Math.DegToRad(spawn.angle || 0);
     const backwardX = -Math.sin(spawnAngleRad);
     const backwardY = Math.cos(spawnAngleRad);
@@ -440,6 +497,12 @@ export class MainScene extends Phaser.Scene {
    * tractor sits in the correct kingpin position (updateAutoCoupling). The
    * bitrem pup comes off first.
    */
+  /** Camera zoom step for the HUD buttons (drive mode only). */
+  public adjustZoom(factor: number) {
+    if (this.isEditorMode) return;
+    this.cameras.main.setZoom(Phaser.Math.Clamp(this.cameras.main.zoom * factor, 0.45, 1.8));
+  }
+
   public decoupleAction() {
     if (!this.truck || this.isEditorMode) return;
     const stopped = Math.abs(this.truck.speedKmh) < 3;
@@ -460,7 +523,7 @@ export class MainScene extends Phaser.Scene {
         return;
       }
       this.decoupleTrailer(false);
-      this.setCouplingNotice('Atrelado desacoplado', 'success');
+      this.setCouplingNotice('Atrelado desacoplado — avança com o trator', 'success');
       return;
     }
     // Nothing coupled — coupling is automatic; nothing to do here
@@ -490,6 +553,7 @@ export class MainScene extends Phaser.Scene {
       if (this.trailer.type === 'bitrem_lead' && !this.pupTrailer) {
         const cand = mgr.findCouplablePup(this.trailer, 30, 28);
         if (!cand) { reset(); return; }
+        if (!this.decoupleLockoutArmed(cand.trailer)) { reset(); return; }
         const key = `pup_${cand.trailer.body.id}`;
         if (!this.licenseSystem.isUnlocked('H')) { fail(key, 'Requer licença H', 'blocked'); return; }
         if (!creepSpeed) { fail(key, 'Ralentiza para engatar o bitrem traseiro', 'info'); return; }
@@ -505,6 +569,7 @@ export class MainScene extends Phaser.Scene {
     const hitch = this.getTruckHitch();
     const cand = mgr.findCouplable(hitch.x, hitch.y, this.truck.body.angle, 30, 28, ['bitrem_pup']);
     if (!cand) { reset(); return; }
+    if (!this.decoupleLockoutArmed(cand.trailer)) { reset(); return; }
 
     const key = `lead_${cand.trailer.body.id}`;
     const lic = TRAILER_TYPE_TO_LICENSE[cand.trailer.type];
@@ -524,6 +589,104 @@ export class MainScene extends Phaser.Scene {
     };
   }
 
+  /**
+   * Dock capture assist: when the coupled trailer's tail sits inside a dock
+   * bay at creep speed, the rear tyres "grip" — yaw and lateral drift are
+   * damped, the trailer is softly squared to the wall and settles against the
+   * stop bumpers. Without this the kinematic hitch follower overpowers the
+   * contact solver and the tail slides sideways along the pier faces.
+   * Covers both dock kinds: `dock_wall` bays and `warehouse_docks` doors.
+   */
+  private updateDockCapture() {
+    if (!this.trailer || !this.kingpin) return;
+    const t = this.trailer;
+    const bw = t.body;
+    // Only at creep speed (~<20 km/h) — never fight a moving driver
+    if (Math.hypot(bw.velocity.x, bw.velocity.y) > 3 || Math.abs(this.truck.currentSpeed) > 90) return;
+
+    const angle = bw.angle;
+    const tailX = bw.position.x - Math.sin(angle) * (t.length / 2);
+    const tailY = bw.position.y + Math.cos(angle) * (t.length / 2);
+
+    for (const o of this.world.objects.objects) {
+      if (o.type !== 'dock_wall' && !(o.type === 'building' && o.variant === 'warehouse_docks')) continue;
+      const c = Math.cos(o.angle), s = Math.sin(o.angle);
+      const dx = tailX - o.x, dy = tailY - o.y;
+      const lx = dx * c + dy * s;
+      const ly = -dx * s + dy * c;
+
+      // Per-kind bay geometry: door centres, mouth half-width, settle face
+      let centres: number[] = [];
+      let halfMouth: number;
+      let stopLy: number;
+      if (o.type === 'dock_wall') {
+        const bays = this.world.objects.dockWallBays(o);
+        centres = bays.centres;
+        halfMouth = bays.gap / 2 - 4;
+        stopLy = -o.h / 2 + 10; // stop bumpers inside the bay (local -y end)
+        // Tail must be inside the bay mouth (approaching from the +y side)
+        if (ly > o.h / 2 + 30 || ly < -o.h / 2 - 12) continue;
+      } else {
+        // warehouse_docks: doors evenly spaced along the SOUTH wall (local +y)
+        const nd = Math.max(1, Math.floor(Number(o.params?.docks) || 5));
+        const spacing = o.w / nd;
+        for (let i = 0; i < nd; i++) centres.push(-o.w / 2 + (i + 0.5) * spacing);
+        halfMouth = 30;
+        stopLy = o.h / 2; // the wall face itself is the stop
+        if (ly > o.h / 2 + 46 || ly < -o.h / 2) continue;
+      }
+
+      let bayCx: number | null = null;
+      for (const cx of centres) {
+        if (Math.abs(lx - cx) <= halfMouth) { bayCx = cx; break; }
+      }
+      if (bayCx === null) continue;
+      // Alignment: trailer axis must be near-perpendicular to the wall (mod π)
+      let d = angle - (o.angle + Math.PI / 2);
+      while (d > Math.PI / 2) d -= Math.PI;
+      while (d < -Math.PI / 2) d += Math.PI;
+      if (Math.abs(Phaser.Math.RadToDeg(d)) > 25) continue;
+
+      // --- engage ---
+      const nx = -s, ny = c; // wall local +y (bay mouth side)
+      const tx = c, ty = s;  // along the wall
+      let vx = bw.velocity.x, vy = bw.velocity.y;
+      // Absorb into the rubber stop: kill approach once the tail is ~26px
+      // from the settle face
+      if (ly - stopLy < 26) {
+        const vn = vx * nx + vy * ny;
+        if (vn < 0) { vx -= vn * nx; vy -= vn * ny; }
+      }
+      // Rear tyres grip: damp drift along the wall
+      const vt = vx * tx + vy * ty;
+      vx -= vt * 0.25; vy -= vt * 0.25;
+      // Gentle pull toward the bay axis
+      const pull = Phaser.Math.Clamp(-(lx - bayCx) * 0.015, -0.4, 0.4);
+      vx += pull * tx; vy += pull * ty;
+      this.matter.body.setVelocity(bw, { x: vx, y: vy });
+      // Walk the tail back onto the bay axis (soft lateral clamp, capped step)
+      const latErr = bayCx - lx;
+      if (Math.abs(latErr) > 1) {
+        const step = Phaser.Math.Clamp(latErr * 0.15, -1.5, 1.5);
+        this.matter.body.setPosition(bw, {
+          x: bw.position.x + step * tx,
+          y: bw.position.y + step * ty,
+        });
+      }
+      // Damp yaw + square the trailer to the wall (firm while captured)
+      this.matter.body.setAngularVelocity(bw, bw.angularVelocity * 0.75);
+      this.matter.body.setAngle(bw, angle + Phaser.Math.Clamp(d * 0.1, -0.01, 0.01));
+      // The tractor is kinematic — clamp its push into the dock too, or the
+      // hitch follower keeps pressing and re-generates the sideways slide.
+      const tb = this.truck.body;
+      const tvn = tb.velocity.x * nx + tb.velocity.y * ny;
+      if (tvn < 0) {
+        this.matter.body.setVelocity(tb, { x: tb.velocity.x - tvn * nx, y: tb.velocity.y - tvn * ny });
+      }
+      break;
+    }
+  }
+
   /** Attaches a parked trailer to the tractor's fifth wheel (mirrors spawnVehicleRig params). */
   private coupleTrailer(cand: CouplingCandidate) {
     const t = cand.trailer;
@@ -531,6 +694,13 @@ export class MainScene extends Phaser.Scene {
 
     mgr.prepareForCoupling(t);
     mgr.adopt(t);
+    // If this trailer was editor-placed, its data-only world object must go —
+    // otherwise a later rebuild would respawn a duplicate at the old position.
+    if (t.wobjId) {
+      this.world.objects.remove(t.wobjId);
+      this.world.version++;
+      t.wobjId = undefined;
+    }
 
     // No teleport: the trailer stays exactly where the tractor engaged it. The
     // kingpin's gentle per-frame correction settles it onto the fifth wheel with
@@ -540,17 +710,18 @@ export class MainScene extends Phaser.Scene {
     let trailerOffY: number;
     let jackknife: number;
     if (t.type === 'long_cargo') {
-      trailerOffY = -t.length / 2 + 35;
+      trailerOffY = -t.length / 2 + 18;
       jackknife = 72;
     } else if (t.type === 'bitrem_lead') {
-      trailerOffY = -t.length / 2 + 25;
+      trailerOffY = -t.length / 2 + 14;
       jackknife = 75;
     } else {
-      trailerOffY = -t.length / 2 + 30;
+      trailerOffY = -t.length / 2 + 14;
       jackknife = 75;
     }
 
     this.trailer = t;
+    this.decoupleLockout = null;
     this.kingpin = new Kingpin(this, this.truck.body, t.body, t.length, {
       parentOffset: { x: 0, y: 35 },
       trailerOffset: { x: 0, y: trailerOffY },
@@ -578,11 +749,18 @@ export class MainScene extends Phaser.Scene {
 
     // No teleport: same gentle settle as the main coupling
     this.settleTrailerOntoHitch(t, this.getLeadRearHitch(lead));
+    // Editor-placed pup: drop the backing world object (no respawn duplicates)
+    if (t.wobjId) {
+      this.world.objects.remove(t.wobjId);
+      this.world.version++;
+      t.wobjId = undefined;
+    }
 
     this.pupTrailer = t;
+    this.decoupleLockout = null;
     this.pupKingpin = new Kingpin(this, lead.body, t.body, t.length, {
       parentOffset: { x: 0, y: lead.length / 2 - 18 },
-      trailerOffset: { x: 0, y: -t.length / 2 + 25 },
+      trailerOffset: { x: 0, y: -t.length / 2 + 14 },
       jackknifeLimitDeg: 75,
       mechanicalLockDeg: 95,
     });
@@ -597,18 +775,16 @@ export class MainScene extends Phaser.Scene {
   private decoupleTrailer(isPup: boolean) {
     const t = isPup ? this.pupTrailer : this.trailer;
     if (!t) return;
-    const parentBody = isPup ? this.trailer!.body : this.truck.body;
-    const offY = isPup ? (this.trailer!.length / 2 - 18) : 35;
-    const a = parentBody.angle;
-    const hx = parentBody.position.x - Math.sin(a) * offY;
-    const hy = parentBody.position.y + Math.cos(a) * offY;
-    const bx = -Math.sin(a);
-    const by = Math.cos(a);
 
-    // They overlap at the fifth wheel while coupled: park the trailer clear
-    // of the parent BEFORE restoring its truck-facing collision mask.
-    const parkDist = t.kingpinDist + 45;
-    t.setPosition(hx + bx * parkDist, hy + by * parkDist, t.body.angle);
+    // NO repositioning — the trailer stays exactly where it is (like real
+    // life: the tractor is the one that pulls away). The nose plate sits over
+    // the tractor's open rear fifth-wheel strip, so restoring the collision
+    // mask creates no overlap. The old "park clear" teleport was jumping the
+    // box backward through walls.
+    // Re-lock guard: block immediate auto-recoupling of this trailer until
+    // the tractor pulls away (pin > 90px from the hitch) + 1.2s cooldown.
+    this.decoupleLockout = { id: t.body.id, armed: false };
+    this.decoupleLockoutUntil = this.time.now + 1200;
 
     if (isPup) {
       this.pupKingpin?.destroy();
@@ -620,9 +796,54 @@ export class MainScene extends Phaser.Scene {
       this.trailer = null;
     }
 
+    // Kill residual kinematic velocity so the box doesn't creep when frozen
+    this.matter.body.setVelocity(t.body, { x: 0, y: 0 });
+    this.matter.body.setAngularVelocity(t.body, 0);
+
     t.isReversing = false;
     t.update(16, false); // reset lamps to idle
     TrailerManager.getInstance(this).release(t);
+  }
+
+  /**
+   * Re-lock guard after a decouple: the hitch often still sits at the pin, so
+   * the auto-coupler would instantly grab the same trailer back. Arming is
+   * evaluated EVERY frame (not just when a candidate is in the zone — it could
+   * otherwise never arm): after the cooldown, the lockout releases once the
+   * tractor has pulled just clear of the coupling zone (pin > 45px — the
+   * auto-couple radius itself is 30px).
+   */
+  private updateDecoupleLockoutArming() {
+    const lock = this.decoupleLockout;
+    if (!lock || lock.armed) return;
+    if (this.time.now < this.decoupleLockoutUntil) return;
+    const t = TrailerManager.getInstance(this).loose.find((tr) => tr.body.id === lock.id);
+    if (!t) { this.decoupleLockout = null; return; }
+
+    // Hitch point that would re-couple it: the truck's fifth wheel for a lead
+    // trailer, the lead's rear fifth wheel for a pup.
+    let hx: number, hy: number;
+    if (this.trailer && this.trailer.type === 'bitrem_lead') {
+      const h = this.getLeadRearHitch(this.trailer);
+      hx = h.x; hy = h.y;
+    } else if (!this.trailer) {
+      const h = this.getTruckHitch();
+      hx = h.x; hy = h.y;
+    } else {
+      return; // a standard trailer is coupled — nothing can couple anyway
+    }
+    const a = t.body.angle;
+    const kx = t.body.position.x + Math.sin(a) * t.kingpinDist;
+    const ky = t.body.position.y - Math.cos(a) * t.kingpinDist;
+    if (Phaser.Math.Distance.Between(hx, hy, kx, ky) > 45) {
+      lock.armed = true;
+    }
+  }
+
+  /** Candidate-level check: is this trailer past its post-decouple lockout? */
+  private decoupleLockoutArmed(t: Trailer): boolean {
+    const lock = this.decoupleLockout;
+    return !lock || lock.id !== t.body.id || lock.armed;
   }
 
   /** Builds the coupling HUD state (decouple button live / blocked indicator / notice). */
@@ -695,12 +916,20 @@ export class MainScene extends Phaser.Scene {
       this.scene.bringToTop('EditorScene');
     } else {
       this.scene.stop('EditorScene');
-      const worldW = this.tilemapManager.cols * this.tilemapManager.tileSize;
-      const worldH = this.tilemapManager.rows * this.tilemapManager.tileSize;
-      this.cameras.main.setBounds(0, 0, worldW, worldH);
+      this.cameras.main.setBounds(0, 0, World.WORLD_W, World.WORLD_H);
       this.cameras.main.setZoom(this.preEditorZoom);
       this.cameras.main.startFollow(this.truck.container, true, 0.1, 0.1);
     }
+  }
+
+  public reseedWorld() {
+    this.world.reseed();
+    TrailerManager.getInstance(this).rebuild(this.world.parkingPads);
+  }
+
+  /** Respawns every loose trailer from pads + editor 'trailer' objects (after JSON import). */
+  public rebuildTrailers() {
+    TrailerManager.getInstance(this).rebuild(this.world.parkingPads);
   }
 
   public togglePhysicsDebug() {
@@ -713,22 +942,64 @@ export class MainScene extends Phaser.Scene {
   public update(time: number, delta: number) {
     const dt = delta / 1000;
 
+    // Coordinated traffic light cycle (prefab layer)
+    this.world.update(delta);
+
     // Keep exam target dock (marker + painted dock tile) in sync with the active exam
     this.syncExamTarget(time);
 
     // Neon hub signs for dominated regional hubs
     this.drawHubSigns(time);
 
-    // Stream physics around the player: materialize static tile bodies & traffic light
-    // bodies only near the truck — everything else stays as pure grid data.
+    // Vector road ribbons (also visible in editor mode)
+    this.renderRoads();
+
+    // Prefab objects: the animated traffic lights redraw every frame (few, cheap);
+    // the heavy static layers only redraw when the camera moved/zoomed or the
+    // world was edited — otherwise the Graphics command buffer is reused as-is.
+    const cam = this.cameras.main;
+    if (this.flatsGraphics && this.solidsGraphics && this.lightsGraphics && cam.zoom >= 0.12) {
+      this.world.objects.renderLights(this.lightsGraphics, cam.worldView);
+      const last = this.lastObjRender;
+      const needsFull =
+        Number.isNaN(last.x) ||
+        Math.hypot(cam.midPoint.x - last.x, cam.midPoint.y - last.y) > 24 ||
+        cam.zoom !== last.zoom ||
+        this.world.objects.version !== last.version;
+      if (needsFull) {
+        this.flatsGraphics.clear();
+        this.solidsGraphics.clear();
+        this.world.objects.render(this.flatsGraphics, this.solidsGraphics, cam.worldView);
+        this.lastObjRender = { x: cam.midPoint.x, y: cam.midPoint.y, zoom: cam.zoom, version: this.world.objects.version };
+      }
+    } else if (this.flatsGraphics && this.solidsGraphics && this.lightsGraphics) {
+      this.flatsGraphics.clear();
+      this.solidsGraphics.clear();
+      this.lightsGraphics.clear();
+    }
+
+    // Stream physics + terrain chunks around the player; cycle the traffic lights
     if (this.truck) {
-      this.tilemapManager.updateActiveChunks(this.truck.body.position.x, this.truck.body.position.y);
-      TrafficLightSystem.getInstance(this).updateProximity(this.truck.body.position.x, this.truck.body.position.y);
+      this.world.updateActiveChunks(this.truck.body.position.x, this.truck.body.position.y, this.cameras.main.worldView);
+      // Surface grip from the road network (asphalt/cobble/dirt vs off-road)
+      this.truck.setRoadGrip(this.roadNetwork.gripAt(this.truck.body.position.x, this.truck.body.position.y));
     }
 
     // When not in editor mode, update vehicle driving physics
     if (!this.isEditorMode) {
       this.truck.update(delta);
+
+      // If the coupled trailer's tail is blocked by an obstacle, the tractor
+      // cannot keep backing into it — clamp its push so the rig stops like a
+      // real one (the follower's imposed velocity would otherwise keep
+      // compacting the rig against the wall).
+      if (this.trailer && this.trailer.tailBlocked) {
+        const ta = this.trailer.body.angle;
+        const fx = Math.sin(ta), fy = -Math.cos(ta);
+        const v = this.truck.body.velocity;
+        const vl = v.x * fx + v.y * fy;
+        if (vl < 0) this.matter.body.setVelocity(this.truck.body, { x: v.x - vl * fx, y: v.y - vl * fy });
+      }
 
       let artTelemetry: ArticulationTelemetry = {
         angleDeg: 0,
@@ -755,6 +1026,7 @@ export class MainScene extends Phaser.Scene {
         this.trailer.followHitch(truckHitchX, truckHitchY, hitchVx, hitchVy, truckAngle, delta, this.truck.isBraking);
         artTelemetry = this.kingpin.update(this.truck.isReversing, this.truck.speedKmh);
         this.kingpin.renderDebug(artTelemetry, this.debugMatter);
+        this.updateDockCapture();
       }
 
       if (this.pupTrailer && this.pupKingpin && this.trailer) {
@@ -774,6 +1046,7 @@ export class MainScene extends Phaser.Scene {
       }
 
       // Automatic fifth-wheel coupling (tractor sits in the kingpin zone)
+      this.updateDecoupleLockoutArming();
       this.updateAutoCoupling();
 
       // Check Docking Sensor Proximity
@@ -815,9 +1088,6 @@ export class MainScene extends Phaser.Scene {
       this.updateSyntheticAudio(time);
     }
 
-    // Always update European Traffic Light state machine cycle
-    TrafficLightSystem.getInstance(this).update(delta);
-
     // Minimap HUD (base texture redraws only when the map changed; overlay is cheap)
     this.updateMinimap(time);
 
@@ -845,7 +1115,7 @@ export class MainScene extends Phaser.Scene {
       return { inZone: false, alignmentDeg: 999 };
     }
 
-    for (const dock of this.tilemapManager.dockZones) {
+    for (const dock of this.world.dockZones) {
       const dist = Phaser.Math.Distance.Between(checkBody.position.x, checkBody.position.y, dock.x, dock.y);
       if (dist < 70) {
         let diffDeg = Phaser.Math.RadToDeg(checkBody.angle) - dock.requiredAngle;
@@ -882,6 +1152,7 @@ export class MainScene extends Phaser.Scene {
     } else if (this.preparedExamId) {
       this.preparedExamId = null;
       this.examDockWorld = null;
+      this.world.objects.removeExamDock();
       this.examTargetMarker?.destroy();
       this.examTargetMarker = null;
       this.examTargetLabel?.destroy();
@@ -890,72 +1161,33 @@ export class MainScene extends Phaser.Scene {
   }
 
   /**
-   * The exam's targetDock coordinates are authored independently of the preset maps (and on
-   * procedural maps they can fall inside buildings or water), so the dock is snapped to the
-   * nearest drivable road tile before being painted; solid neighbours are cleared to
-   * guarantee approach. The snapped world position becomes the real exam target.
+   * The exam's targetDock coordinates are authored independently of the world,
+   * so the exam dock is snapped to the nearest vector-road point and placed on
+   * its shoulder (long side parallel to the road). The snapped world position
+   * becomes the real exam target; the dock itself is a temporary prefab that
+   * disappears when the exam ends.
    */
   private prepareExamTargetDock(td: LicenseExam['targetDock']) {
-    const tm = this.tilemapManager;
-    const spot = this.findExamDockPlacement(
-      Math.floor(td.x / tm.tileSize),
-      Math.floor(td.y / tm.tileSize)
-    );
-    const col = spot.c;
-    const row = spot.r;
-
-    for (let r = row - 1; r <= row + 1; r++) {
-      for (let c = col - 1; c <= col + 1; c++) {
-        if (c <= 0 || r <= 0 || c >= tm.cols - 1 || r >= tm.rows - 1) continue;
-        const tile = tm.getTile(c, r);
-        if (c === col && r === row) {
-          if (tile !== 'dock_standard' && tile !== 'factory_dock') {
-            tm.setTile(c, r, 'dock_standard');
-          }
-        } else if (TILE_DEFINITIONS[tile]?.isSolid) {
-          tm.setTile(c, r, 'asphalt');
-        }
-      }
+    const np = this.roadNetwork.query(td.x, td.y, 4096);
+    let cx = td.x;
+    let cy = td.y;
+    let angle = Phaser.Math.DegToRad(td.requiredAngleDeg);
+    if (np) {
+      // Long axis of the dock parallels the road; sit on the right shoulder
+      const off = np.width / 2 + Math.min(td.width, td.height) / 2 + 24;
+      cx = np.px + -np.ty * off;
+      cy = np.py + np.tx * off;
+      angle = Math.atan2(np.ty, np.tx) + Math.PI / 2;
     }
+    this.world.objects.addExamDock(cx, cy, td.width, td.height, angle);
 
     this.examDockWorld = {
-      x: col * tm.tileSize + tm.tileSize / 2,
-      y: row * tm.tileSize + tm.tileSize / 2,
-      width: tm.tileSize,
-      height: tm.tileSize,
+      x: cx,
+      y: cy,
+      width: td.width,
+      height: td.height,
       requiredAngleDeg: td.requiredAngleDeg,
       angleToleranceDeg: td.angleToleranceDeg,
-    };
-  }
-
-  /**
-   * Spiral search (Chebyshev rings) from the authored position for the nearest drivable
-   * tile; road-family tiles are preferred so the dock is always reachable via the road grid.
-   */
-  private findExamDockPlacement(col0: number, row0: number): { c: number; r: number } {
-    const tm = this.tilemapManager;
-    const isRoadLike = (t: string) =>
-      t.startsWith('road_') || t === 'asphalt' || t === 'sidewalk' || t === 'pedestrian_crossing' || t === 'cobblestone_narrow';
-
-    let fallback: { c: number; r: number } | null = null;
-    for (let rad = 0; rad <= 16; rad++) {
-      for (let dr = -rad; dr <= rad; dr++) {
-        for (let dc = -rad; dc <= rad; dc++) {
-          if (Math.max(Math.abs(dr), Math.abs(dc)) !== rad) continue; // ring perimeter only
-          const c = col0 + dc;
-          const r = row0 + dr;
-          if (c < 1 || r < 1 || c >= tm.cols - 1 || r >= tm.rows - 1) continue;
-          const tile = tm.getTile(c, r);
-          const def = TILE_DEFINITIONS[tile];
-          if (!def || def.isSolid) continue;
-          if (isRoadLike(tile)) return { c, r };
-          if (!fallback) fallback = { c, r };
-        }
-      }
-    }
-    return fallback || {
-      c: Phaser.Math.Clamp(col0, 1, tm.cols - 2),
-      r: Phaser.Math.Clamp(row0, 1, tm.rows - 2),
     };
   }
 
@@ -990,15 +1222,189 @@ export class MainScene extends Phaser.Scene {
   }
 
   // ==========================================
+  // VECTOR ROAD RENDERER (Phase 1)
+  // ==========================================
+
+  /** Surface fill / edge / centreline colours per road type */
+  private static readonly ROAD_STYLE: Record<string, { fill: number; fillAlt: number; edge: number; dash: number | null }> = {
+    asphalt: { fill: 0x1e2634, fillAlt: 0x1e2634, edge: 0x3a4457, dash: 0xfacc15 },
+    cobble:  { fill: 0x3d4350, fillAlt: 0x383e4a, edge: 0x262b34, dash: null },
+    dirt:    { fill: 0x6b4f2e, fillAlt: 0x5d4527, edge: 0x4a361e, dash: null },
+  };
+
+  private static readonly ROAD_DASH_LEN = 26;
+  private static readonly ROAD_DASH_GAP = 22;
+
+  /**
+   * Draws the visible road ribbons into a retained Graphics. Redraws only when
+   * the network changed or the camera moved/zoomed enough to matter.
+   */
+  private renderRoads() {
+    if (!this.roadGraphics) return;
+    const cam = this.cameras.main;
+    const moved =
+      Math.abs(cam.scrollX - this.roadCamX) > 4 ||
+      Math.abs(cam.scrollY - this.roadCamY) > 4 ||
+      Math.abs(cam.zoom - this.roadCamZoom) > 0.005;
+    if (!moved && this.roadRenderVersion === this.roadNetwork.version) return;
+    this.roadCamX = cam.scrollX;
+    this.roadCamY = cam.scrollY;
+    this.roadCamZoom = cam.zoom;
+    this.roadRenderVersion = this.roadNetwork.version;
+
+    const g = this.roadGraphics;
+    g.clear();
+
+    const view = cam.worldView;
+    const M = 220; // margin so ribbons don't pop in at the screen edge
+    const vx0 = view.x - M, vy0 = view.y - M, vx1 = view.x + view.width + M, vy1 = view.y + view.height + M;
+
+    for (const road of this.roadNetwork.roads) {
+      // Cheap per-road bounds reject
+      let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+      let maxHalf = 0;
+      for (const p of road.points) {
+        if (p.x < bx0) bx0 = p.x;
+        if (p.y < by0) by0 = p.y;
+        if (p.x > bx1) bx1 = p.x;
+        if (p.y > by1) by1 = p.y;
+        if (p.w > maxHalf) maxHalf = p.w;
+      }
+      maxHalf /= 2;
+      if (bx1 + maxHalf + 80 < vx0 || bx0 - maxHalf - 80 > vx1 || by1 + maxHalf + 80 < vy0 || by0 - maxHalf - 80 > vy1) continue;
+
+      const style = MainScene.ROAD_STYLE[road.surface] || MainScene.ROAD_STYLE.asphalt;
+      const samples = RoadNetwork.sampleRoad(road, 26);
+      if (samples.length === 0) continue;
+
+      // 1. Carriageway ribbon (quads perpendicular to the tangent)
+      const inView = (s: RoadSample) => s.x >= vx0 - 200 && s.x <= vx1 + 200 && s.y >= vy0 - 200 && s.y <= vy1 + 200;
+      let altIdx = 0;
+      for (let i = 0; i < samples.length - 1; i++) {
+        const a = samples[i], b = samples[i + 1];
+        // Cusp guard: at near-reversals the perpendicular quad folds into a
+        // bowtie spike — skip it (the Hermite curve itself never overshoots).
+        if (a.tx * b.tx + a.ty * b.ty < 0.2) { altIdx++; continue; }
+        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        if (mx < vx0 || mx > vx1 || my < vy0 || my > vy1) { altIdx++; continue; }
+        const fill = road.surface === 'asphalt' ? style.fill : (altIdx % 6 < 3 ? style.fill : style.fillAlt);
+        this.fillRibbonQuad(g, a, b, fill);
+        altIdx++;
+      }
+
+      // 2. Edge lines (skip on dirt — degraded roads have no markings)
+      if (road.surface !== 'dirt') {
+        for (const side of [-1, 1]) {
+          g.lineStyle(3, style.edge, 0.85);
+          g.beginPath();
+          let started = false;
+          for (let i = 0; i < samples.length; i++) {
+            const s = samples[i];
+            if (!inView(s)) continue;
+            const off = s.w / 2 - 5;
+            const px = s.x - s.ty * off * side;
+            const py = s.y + s.tx * off * side;
+            if (!started) { g.moveTo(px, py); started = true; } else g.lineTo(px, py);
+          }
+          g.strokePath();
+        }
+      }
+
+      // 3. Centreline: consistent dashes by exact arc length, or direction
+      // chevrons on one-way sections (no carriageway split)
+      if (road.oneWay) {
+        this.drawDirectionChevrons(g, samples, vx0, vy0, vx1, vy1);
+      } else if (style.dash !== null) {
+        const ON = MainScene.ROAD_DASH_LEN, OFF = MainScene.ROAD_DASH_GAP, PERIOD = ON + OFF;
+        g.lineStyle(5, style.dash, 0.9);
+        let s = 0; // arc-length position along the whole centreline
+        for (let i = 0; i < samples.length - 1; i++) {
+          const a = samples[i], b = samples[i + 1];
+          const len = Math.hypot(b.x - a.x, b.y - a.y);
+          if (len < 0.001) continue;
+          if (a.tx * b.tx + a.ty * b.ty < 0.2) { s += len; continue; } // cusp guard
+          let t = 0;
+          while (t < len) {
+            const phase = s % PERIOD;
+            if (phase < ON) {
+              const run = Math.min(len - t, ON - phase); // exact dash length
+              const t1 = t + run;
+              const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+              if (mx >= vx0 && mx <= vx1 && my >= vy0 && my <= vy1) {
+                g.beginPath();
+                g.moveTo(Phaser.Math.Linear(a.x, b.x, t / len), Phaser.Math.Linear(a.y, b.y, t / len));
+                g.lineTo(Phaser.Math.Linear(a.x, b.x, t1 / len), Phaser.Math.Linear(a.y, b.y, t1 / len));
+                g.strokePath();
+              }
+              s += run; t = t1;
+            } else {
+              const run = Math.min(len - t, PERIOD - phase); // exact gap length
+              s += run; t += run;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /** Direction chevrons for one-way roads (every ~420px along the centreline) */
+  private drawDirectionChevrons(
+    g: Phaser.GameObjects.Graphics,
+    samples: RoadSample[],
+    vx0: number, vy0: number, vx1: number, vy1: number,
+  ) {
+    const STEP = 420;
+    let s = 0;
+    let next = STEP / 2;
+    g.lineStyle(4, 0xfacc15, 0.45);
+    for (let i = 0; i < samples.length - 1; i++) {
+      const a = samples[i], b = samples[i + 1];
+      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      if (len < 0.001) continue;
+      while (next <= s + len) {
+        const t = (next - s) / len;
+        const px = Phaser.Math.Linear(a.x, b.x, t);
+        const py = Phaser.Math.Linear(a.y, b.y, t);
+        if (px >= vx0 && px <= vx1 && py >= vy0 && py <= vy1) {
+          // Tangent at that position (lerped), chevron pointing along travel
+          const tx = Phaser.Math.Linear(a.tx, b.tx, t);
+          const ty = Phaser.Math.Linear(a.ty, b.ty, t);
+          const bx = -ty, by = tx; // normal
+          const r = 14;
+          g.beginPath();
+          g.moveTo(px - tx * r + bx * r * 0.8, py - ty * r + by * r * 0.8);
+          g.lineTo(px + tx * r * 0.6, py + ty * r * 0.6);
+          g.lineTo(px - tx * r - bx * r * 0.8, py - ty * r - by * r * 0.8);
+          g.strokePath();
+        }
+        next += STEP;
+      }
+      s += len;
+    }
+  }
+
+  /** Fills one ribbon quad between two samples (perpendicular corners). */
+  private fillRibbonQuad(g: Phaser.GameObjects.Graphics, a: RoadSample, b: RoadSample, color: number) {    const anx = -a.ty * (a.w / 2), any = a.tx * (a.w / 2);
+    const bnx = -b.ty * (b.w / 2), bny = b.tx * (b.w / 2);
+    g.fillStyle(color, 1);
+    g.beginPath();
+    g.moveTo(a.x + anx, a.y + any);
+    g.lineTo(b.x + bnx, b.y + bny);
+    g.lineTo(b.x - bnx, b.y - bny);
+    g.lineTo(a.x - anx, a.y - any);
+    g.closePath();
+    g.fillPath();
+  }
+
+  // ==========================================
   // MINIMAP (full-map HUD overview)
   // ==========================================
 
   private static readonly MINIMAP_PX_PER_TILE = 2;
 
   private createMinimap() {
-    const tm = this.tilemapManager;
-    const mmW = tm.cols * MainScene.MINIMAP_PX_PER_TILE;
-    const mmH = tm.rows * MainScene.MINIMAP_PX_PER_TILE;
+    const mmW = Math.round((World.WORLD_W / 128) * MainScene.MINIMAP_PX_PER_TILE);
+    const mmH = Math.round((World.WORLD_H / 128) * MainScene.MINIMAP_PX_PER_TILE);
 
     // Adaptive display scale: ~26% of the smaller viewport dimension, clamped
     this.minimapScale = Phaser.Math.Clamp(
@@ -1033,7 +1439,7 @@ export class MainScene extends Phaser.Scene {
 
   private repositionMinimap() {
     if (!this.minimapImage) return;
-    const mmW = this.tilemapManager.cols * MainScene.MINIMAP_PX_PER_TILE;
+    const mmW = Math.round((World.WORLD_W / 128) * MainScene.MINIMAP_PX_PER_TILE);
     this.minimapScale = Phaser.Math.Clamp(
       (Math.min(this.scale.width, this.scale.height) * 0.26) / mmW,
       0.5, 1.6
@@ -1070,41 +1476,66 @@ export class MainScene extends Phaser.Scene {
       this.minimapOverlay.clear();
       return;
     }
-    if (this.lastMinimapVersion !== this.tilemapManager.mapVersion) {
-      this.lastMinimapVersion = this.tilemapManager.mapVersion;
+    if (this.lastMinimapVersion !== this.world.version) {
+      this.lastMinimapVersion = this.world.version;
       this.redrawMinimapBase();
     }
     this.drawMinimapOverlay(time);
   }
 
   /**
-   * Rasterizes the whole grid into a small canvas texture (2px per tile). Only runs
-   * when the map version changed — painting/import/preset trigger exactly one redraw.
+   * Rasterizes the island into a small canvas: ocean, land silhouette,
+   * vector roads and prefab highlights. Only runs when the world version
+   * changed — edits/import/reseed trigger exactly one redraw.
    */
   private redrawMinimapBase() {
     const texture = this.textures.get('minimap_base') as Phaser.Textures.CanvasTexture | null;
     if (!texture) return;
     const ctx = texture.getContext();
     const px = MainScene.MINIMAP_PX_PER_TILE;
-    const cols = this.tilemapManager.cols;
-    const rows = this.tilemapManager.rows;
+    const mmW = texture.width;
+    const mmH = texture.height;
+    const scale = mmW / World.WORLD_W;
 
-    ctx.fillStyle = '#131822'; // asphalt base
-    ctx.fillRect(0, 0, cols * px, rows * px);
-
-    for (let r = 0; r < rows; r++) {
-      const row = this.tilemapManager.grid[r];
-      for (let c = 0; c < cols; c++) {
-        const tileId = row[c];
-        if (!tileId || tileId === 'asphalt') continue;
-        const def = TILE_DEFINITIONS[tileId];
-        if (!def) continue;
-        let color = def.color;
-        if (def.category === 'dock') color = '#eab308';
-        else if (tileId === 'traffic_light') color = '#16a34a';
-        ctx.fillStyle = color;
-        ctx.fillRect(c * px, r * px, px, px);
+    // Ocean + land silhouette (coarse terrain sampling)
+    ctx.fillStyle = '#0a2338';
+    ctx.fillRect(0, 0, mmW, mmH);
+    const terrain = this.world.terrain;
+    for (let my = 0; my < mmH; my++) {
+      for (let mx = 0; mx < mmW; mx++) {
+        const wx = mx / scale, wy = my / scale;
+        if (terrain.isWater(wx, wy)) continue;
+        ctx.fillStyle = terrain.isBeach(wx, wy) ? '#8a744d' : '#22381f';
+        ctx.fillRect(mx, my, px, px);
       }
+    }
+
+    // Vector roads (centreline strokes scaled to minimap resolution)
+    const roadColors: Record<string, string> = { asphalt: '#5a6478', cobble: '#707788', dirt: '#8a6438' };
+    for (const road of this.roadNetwork.roads) {
+      ctx.strokeStyle = roadColors[road.surface] || roadColors.asphalt;
+      ctx.lineWidth = Math.max(1, road.points.reduce((m, p) => Math.max(m, p.w), 0) * scale);
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      road.points.forEach((p, i) => {
+        const mx = p.x * scale, my = p.y * scale;
+        if (i === 0) ctx.moveTo(mx, my); else ctx.lineTo(mx, my);
+      });
+      if (road.closed) ctx.closePath();
+      ctx.stroke();
+    }
+
+    // Prefab highlights: docks (amber), parking pads (pink), buildings (slate)
+    for (const o of this.world.objects.objects) {
+      let color: string | null = null;
+      if (o.type === 'dock' || o.type === 'exam_dock') color = '#eab308';
+      else if (o.type === 'parking_pad') color = '#ec4899';
+      else if (o.type === 'building' || o.type === 'silo') color = '#475569';
+      else if (o.type === 'gas_pump') color = '#34d058';
+      if (!color) continue;
+      ctx.fillStyle = color;
+      ctx.fillRect(o.x * scale - px / 2, o.y * scale - px / 2, px, px);
     }
     texture.refresh();
   }
@@ -1112,12 +1543,11 @@ export class MainScene extends Phaser.Scene {
   private drawMinimapOverlay(time: number) {
     const g = this.minimapOverlay;
     const img = this.minimapImage;
-    const tm = this.tilemapManager;
     if (!g || !img) return;
     g.clear();
 
-    const worldW = tm.cols * tm.tileSize;
-    const worldH = tm.rows * tm.tileSize;
+    const worldW = World.WORLD_W;
+    const worldH = World.WORLD_H;
     const toMapX = (wx: number) => img.x + (wx / worldW) * img.displayWidth;
     const toMapY = (wy: number) => img.y + (wy / worldH) * img.displayHeight;
 

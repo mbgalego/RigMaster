@@ -157,8 +157,10 @@ export class Truck {
     }
   }
 
+  private collisionHandler: ((event: any) => void) | null = null;
+
   private setupCollisions() {
-    this.scene.matter.world.on('collisionstart', (event: any) => {
+    this.collisionHandler = (event: any) => {
       for (const pair of event.pairs) {
         if (pair.bodyA === this.body || pair.bodyB === this.body) {
           const other = pair.bodyA === this.body ? pair.bodyB : pair.bodyA;
@@ -173,11 +175,22 @@ export class Truck {
           this.currentSpeed = this.vLong;
         }
       }
-    });
+    };
+    this.scene.matter.world.on('collisionstart', this.collisionHandler);
   }
 
   public setSurfaceGrip(grip: number) {
     this.surfaceGrip = Phaser.Math.Clamp(grip, 0.25, 1.0);
+  }
+
+  /**
+   * Vector-road layer factor (asphalt 1.0 → dirt 0.68 → off-road 0.5).
+   * Multiplied with the weather-driven surfaceGrip in the physics model.
+   */
+  public roadGrip: number = 1.0;
+
+  public setRoadGrip(grip: number) {
+    this.roadGrip = Phaser.Math.Clamp(grip, 0.25, 1.0);
   }
 
   public setTouchSteer(steer: number) {
@@ -315,13 +328,14 @@ export class Truck {
     this.currentSpeed = this.vLong;
 
     // 3. Realistic Lateral Tire Grip (Eliminating 97% of sideways slip)
-    const lateralGripFactor = 0.97 * this.surfaceGrip;
+    const totalGrip = this.surfaceGrip * this.roadGrip;
+    const lateralGripFactor = 0.97 * totalGrip;
     this.vLat *= (1.0 - lateralGripFactor);
     if (Math.abs(this.vLat) < 0.1) this.vLat = 0;
 
     // 4. Ackermann Steering & Angular Velocity (rad/s)
     const wheelbase = 56;
-    const effectiveSteer = this.currentSteerAngle * this.surfaceGrip;
+    const effectiveSteer = this.currentSteerAngle * totalGrip;
     const omega = (this.vLong / wheelbase) * Math.tan(effectiveSteer);
 
     // 5. Apply Natural Velocity to Matter.js Body
@@ -568,6 +582,10 @@ export class Truck {
   }
 
   public destroy() {
+    if (this.collisionHandler && this.scene.matter && this.scene.matter.world) {
+      this.scene.matter.world.off('collisionstart', this.collisionHandler);
+      this.collisionHandler = null;
+    }
     this.container.destroy();
     if (this.scene.matter && this.scene.matter.world) {
       this.scene.matter.world.remove(this.body);

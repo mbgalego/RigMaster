@@ -45,9 +45,13 @@ export class Trailer {
   public omega: number = 0;
   // Mirror of the rig's reversing state (drives the white reverse lamps)
   public isReversing: boolean = false;
+  /** True while the tail region is inside a static obstacle (updated in followHitch). */
+  public tailBlocked: boolean = false;
   public prevHitchX: number = 0;
   public prevHitchY: number = 0;
   public hasPrevHitch: boolean = false;
+  /** WorldObject id when this loose trailer was placed by the editor (data-only 'trailer' object). */
+  public wobjId?: string;
 
   constructor(scene: Phaser.Scene, config: TrailerConfig) {
     this.scene = scene;
@@ -79,12 +83,16 @@ export class Trailer {
     this.rearAxleY = this.length * 0.28;
     this.rearOverhang = (this.length / 2) - this.rearAxleY;
 
+    // Nose overhang past the kingpin pin: ~14px (18 for the long-cargo pole
+    // trailer). Keeps the nose plate over the fifth-wheel seat only — a bigger
+    // overhang visually covers the tractor cab and lets the nose corners hit
+    // the tractor's front-solid zone during articulation.
     if (this.type === 'long_cargo') {
-      this.kingpinDist = (this.length / 2) - 35;
+      this.kingpinDist = (this.length / 2) - 18;
     } else if (this.type === 'bitrem_lead' || this.type === 'bitrem_pup') {
-      this.kingpinDist = (this.length / 2) - 25;
+      this.kingpinDist = (this.length / 2) - 14;
     } else {
-      this.kingpinDist = (this.length / 2) - 30;
+      this.kingpinDist = (this.length / 2) - 14;
     }
     this.wheelbase = this.kingpinDist + this.rearAxleY;
 
@@ -180,6 +188,33 @@ export class Trailer {
    * Kinematic articulated tracking around fifth wheel hitch point.
    * Models authentic off-tracking, tail-swing, and reversing kinematics with 100% tire grip.
    */
+  /**
+   * True when the tail region (centre + corners) is inside a static obstacle
+   * body. The kinematic hitch follower must respect walls: its position
+   * corrections and imposed velocity would otherwise push the box straight
+   * through them.
+   */
+  private computeTailBlocked(): boolean {
+    const ML = (Phaser as unknown as { Physics?: { Matter?: { Matter?: any } } }).Physics?.Matter?.Matter;
+    const world = this.scene.matter?.world;
+    if (!ML || !world) return false;
+    const bodies = ML.Composite.allBodies(world.localWorld);
+    if (!bodies.length) return false;
+    const a = this.body.angle;
+    const fx = Math.sin(a), fy = -Math.cos(a);  // forward (nose)
+    const rx = Math.cos(a), ry = Math.sin(a);   // lateral
+    const halfL = this.length / 2, halfW = this.width / 2;
+    const cx = this.body.position.x - fx * (halfL - 6);
+    const cy = this.body.position.y - fy * (halfL - 6);
+    const hits: any[] = ML.Query.point(bodies, [
+      { x: cx, y: cy },
+      { x: cx + rx * (halfW - 3), y: cy + ry * (halfW - 3) },
+      { x: cx - rx * (halfW - 3), y: cy - ry * (halfW - 3) },
+    ]);
+    // Obstacles are static category 0x0001 — ignore our own proxy bodies
+    return hits.some((b) => b.isStatic && b.collisionFilter?.category === 0x0001);
+  }
+
   public followHitch(
     hitchX: number,
     hitchY: number,
@@ -229,8 +264,20 @@ export class Trailer {
     this.vy = trailerVy;
     this.omega = omegaT;
 
+    // Obstruction awareness: never drive the kinematic follower through a wall
+    this.tailBlocked = this.computeTailBlocked();
+    let applyVx = trailerVx, applyVy = trailerVy;
+    if (this.tailBlocked) {
+      const vLongImp = trailerVx * fwdX + trailerVy * fwdY;
+      if (vLongImp < 0) {
+        // Moving tail-first into an obstacle: kill that component only
+        applyVx -= vLongImp * fwdX;
+        applyVy -= vLongImp * fwdY;
+      }
+    }
+
     // Apply displacement per frame to Matter.js body
-    this.scene.matter.body.setVelocity(this.body, { x: trailerVx * dt, y: trailerVy * dt });
+    this.scene.matter.body.setVelocity(this.body, { x: applyVx * dt, y: applyVy * dt });
     this.scene.matter.body.setAngularVelocity(this.body, omegaT * dt);
 
     // Micro-stabilize kingpin position onto fifth-wheel pin without lateral tire sliding
@@ -240,22 +287,29 @@ export class Trailer {
     const errY = hitchY - curPinY;
     const errDist = Math.hypot(errX, errY);
 
-    if (errDist > 25) {
-      // Discontinuity (reset/spawn): snap directly
-      this.scene.matter.body.setPosition(this.body, {
-        x: this.body.position.x + errX,
-        y: this.body.position.y + errY,
-      });
+    if (errDist > 60) {
+      // True discontinuity (reset/spawn): snap directly — but never through
+      // an obstacle the tail is inside of
+      if (!this.tailBlocked) {
+        this.scene.matter.body.setPosition(this.body, {
+          x: this.body.position.x + errX,
+          y: this.body.position.y + errY,
+        });
+      }
     } else if (errDist > 0.1) {
       // Decompose error: longitudinal along rolling direction, lateral by subtle axle rotation
       const errLong = errX * fwdX + errY * fwdY;
       const errLat = errX * latX + errY * latY;
 
-      // Longitudinal pull along tires
-      this.scene.matter.body.setPosition(this.body, {
-        x: this.body.position.x + fwdX * errLong * 0.5,
-        y: this.body.position.y + fwdY * errLong * 0.5,
-      });
+      // Longitudinal pull along tires — capped per frame, and never into a
+      // blocked tail (that was the wall-penetration bug)
+      if (!(this.tailBlocked && errLong < 0)) {
+        const pullStep = Phaser.Math.Clamp(errLong * 0.5, -2, 2);
+        this.scene.matter.body.setPosition(this.body, {
+          x: this.body.position.x + fwdX * pullStep,
+          y: this.body.position.y + fwdY * pullStep,
+        });
+      }
 
       // Lateral alignment by rotating kingpin towards fifth wheel, avoiding tire slide
       const rotAdj = (errLat / this.wheelbase) * 0.4;
