@@ -41,7 +41,13 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.4.2** (Versão Atual — branch `feature/road-network`)
+### **v2.4.3** (Versão Atual — branch `feature/road-network`)
+- **Fim da penetração de paredes em marcha-atrás**: o seguidor cinemático do atrelado (`followHitch`) passou a ser consciente de obstáculos — detecta a traseira dentro de um corpo estático (`computeTailBlocked`, pontos de teste no centro+quinas da traseira) e nesse caso: mata a velocidade imposta no sentido bloqueado, salta o puxão longitudinal (que era o `setPosition` que atravessava a parede) e o snap de emergência (agora só >60px de erro real = reset).
+- **Puxão longitudinal limitado** a ±2px/frame (antes era proporcional sem teto — outro vector de penetração).
+- **O trator pára quando o atrelado está bloqueado**: clamp da velocidade do trator no sentido de empurrão enquanto `trailer.tailBlocked` — o conjunto trava como um real em vez de continuar a compactar.
+- **Desengate no sítio**: removido o teleporte de estacionamento (`kingpinDist + 45` px) da `decoupleTrailer` — era o "salto para trás através de obstáculos". O atrelado fica exactamente onde está; é o trator que avança (a chapa do nariz assenta na faixa aberta da roda quinta, sem sobreposição de colisores). Velocidade residual zerada antes de congelar em estático.
+
+### **v2.4.2** (branch `feature/road-network`)
 - **Captura de doca cobre os dois tipos de doca**: o assistente agora também cobre as portas do **Armazém Docas** (`warehouse_docks`) — antes só funcionava no Muro Docas, e o deslize continuava na fachada lisa do edifício. Geometria: portões uniformemente espaçados, meia-boca 30px, face da parede como topo.
 - **Engage mais firme**: kill da componente de aproximação 26px antes do topo (toque suave, sem penetração), travagem lateral do trator enquanto capturado (a máquina cinemática deixava de empurrar), caminhar da traseira de volta ao eixo da baia (passo limitado 1.5px/frame) e esquadrejamento mais firme (±0.57°/frame).
 

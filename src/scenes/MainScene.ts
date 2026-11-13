@@ -720,19 +720,12 @@ export class MainScene extends Phaser.Scene {
   private decoupleTrailer(isPup: boolean) {
     const t = isPup ? this.pupTrailer : this.trailer;
     if (!t) return;
-    const parentBody = isPup ? this.trailer!.body : this.truck.body;
-    const offY = isPup ? (this.trailer!.length / 2 - 18) : 35;
-    const a = parentBody.angle;
-    const hx = parentBody.position.x - Math.sin(a) * offY;
-    const hy = parentBody.position.y + Math.cos(a) * offY;
-    const bx = -Math.sin(a);
-    const by = Math.cos(a);
 
-    // They overlap at the fifth wheel while coupled: park the trailer clear
-    // of the parent BEFORE restoring its truck-facing collision mask.
-    const parkDist = t.kingpinDist + 45;
-    t.setPosition(hx + bx * parkDist, hy + by * parkDist, t.body.angle);
-
+    // NO repositioning — the trailer stays exactly where it is (like real
+    // life: the tractor is the one that pulls away). The nose plate sits over
+    // the tractor's open rear fifth-wheel strip, so restoring the collision
+    // mask creates no overlap. The old "park clear" teleport was jumping the
+    // box backward through walls.
     if (isPup) {
       this.pupKingpin?.destroy();
       this.pupKingpin = null;
@@ -742,6 +735,10 @@ export class MainScene extends Phaser.Scene {
       this.kingpin = null;
       this.trailer = null;
     }
+
+    // Kill residual kinematic velocity so the box doesn't creep when frozen
+    this.matter.body.setVelocity(t.body, { x: 0, y: 0 });
+    this.matter.body.setAngularVelocity(t.body, 0);
 
     t.isReversing = false;
     t.update(16, false); // reset lamps to idle
@@ -885,6 +882,18 @@ export class MainScene extends Phaser.Scene {
     // When not in editor mode, update vehicle driving physics
     if (!this.isEditorMode) {
       this.truck.update(delta);
+
+      // If the coupled trailer's tail is blocked by an obstacle, the tractor
+      // cannot keep backing into it — clamp its push so the rig stops like a
+      // real one (the follower's imposed velocity would otherwise keep
+      // compacting the rig against the wall).
+      if (this.trailer && this.trailer.tailBlocked) {
+        const ta = this.trailer.body.angle;
+        const fx = Math.sin(ta), fy = -Math.cos(ta);
+        const v = this.truck.body.velocity;
+        const vl = v.x * fx + v.y * fy;
+        if (vl < 0) this.matter.body.setVelocity(this.truck.body, { x: v.x - vl * fx, y: v.y - vl * fy });
+      }
 
       let artTelemetry: ArticulationTelemetry = {
         angleDeg: 0,
