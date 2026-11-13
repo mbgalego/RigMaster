@@ -41,7 +41,16 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.3.0** (Versão Atual — branch `feature/road-network`)
+### **v2.3.1** (Versão Atual — branch `feature/road-network`)
+- **Rotunda agora aparece (bug de render)**: o caso de desenho tinha ficado no layer *flats* (depth 1) enquanto o routing a mandava para *solids* (depth 3) — resultado: invisível sob as ribbons das estradas, **com colisor circular invisível**. O desenho foi movido para `drawSolid`.
+- **Escala adaptada ao camião** (trator 96×48, atrelados até 310px):
+  - Lugares de estacionamento: 64px → **100px**; carros 44×20 → **64×28** (com parasóis/pára-vidas).
+  - Rotunda default 260 → **420** (ilha ≈94px de raio — manobrável mas visível).
+  - Ruas do parque: 110 → **140px**; passadeiras 36×170.
+  - Armazém logístico default 700×280 → **900×420**; nave 380×280 → **420×360**; catálogo actualizado.
+  - Parque de demonstração re-plantado (oeste do hub Industrial): conectores 140px, rotunda 420 no cruzamento W, armazém 900×420 + nave 400×360, três parques com carros (2 a norte da rua, 1 a sudoeste), passadeiras na arterial. Todos os afastamentos verificados contra arteriais/bermas.
+
+### **v2.3.0** (branch `feature/road-network`)
 - **Parques industriais ao estilo da foto de referência:**
   - **Novas variantes de edifício**: `warehouse_big` (armazém logístico — tecto plano cinzento-claro com juntas de painel, faixa de clarabóia e unidades HVAC) e `shed` (nave industrial — tecto branco com linhas de crista paralelas).
   - **Carros estacionados nos parques**: `parking_lot` desenha viaturas determinísticas (por objecto + lugar, ~75% de ocupação, paleta variada, em duas filas ao longo do corredor central; `params.cars: false` desactiva).

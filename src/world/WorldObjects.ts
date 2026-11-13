@@ -463,22 +463,23 @@ export class WorldObjects {
     // ---- Demo industrial business park (SE, south of the arterial y=9216) ----
     {
       const rnp = RoadNetwork.getInstance();
-      // Access connectors from the arterial + interior street + service stub
-      rnp.addRoad('asphalt', [{ x: 11150, y: 9216, w: 110 }, { x: 11150, y: 9550, w: 110 }]);
-      rnp.addRoad('asphalt', [{ x: 12100, y: 9216, w: 110 }, { x: 12100, y: 9550, w: 110 }]);
-      rnp.addRoad('asphalt', [{ x: 11150, y: 9550, w: 110 }, { x: 12100, y: 9550, w: 110 }]);
-      rnp.addRoad('asphalt', [{ x: 12100, y: 9550, w: 96 }, { x: 12100, y: 9840, w: 96 }]);
-      // Roundabout at the interior junction
-      this.add('roundabout', 12100, 9550, 260, 260);
+      // Access connectors from the arterial + interior street + west arm (all 140px)
+      rnp.addRoad('asphalt', [{ x: 10900, y: 9216, w: 140 }, { x: 10900, y: 9600, w: 140 }]);
+      rnp.addRoad('asphalt', [{ x: 12300, y: 9216, w: 140 }, { x: 12300, y: 9600, w: 140 }]);
+      rnp.addRoad('asphalt', [{ x: 10900, y: 9600, w: 140 }, { x: 12300, y: 9600, w: 140 }]);
+      rnp.addRoad('asphalt', [{ x: 10900, y: 9600, w: 120 }, { x: 10520, y: 9600, w: 120 }]);
+      // Roundabout at the west junction (420 — islands sized for articulated trucks)
+      this.add('roundabout', 10900, 9600, 420, 420);
       // Big logistics warehouse + ribbed industrial shed (south of the street)
-      this.add('building', 11400, 9880, 700, 280, { variant: 'warehouse_big' });
-      this.add('building', 12380, 9880, 380, 280, { variant: 'shed' });
-      // Staff/customer car parks
-      this.add('parking_lot', 10700, 9750, 440, 280);
-      this.add('parking_lot', 11890, 9720, 280, 200);
+      this.add('building', 11650, 9950, 900, 420, { variant: 'warehouse_big' });
+      this.add('building', 12360, 9950, 400, 360, { variant: 'shed' });
+      // Staff/customer car parks (100px slots)
+      this.add('parking_lot', 11370, 9400, 460, 240);
+      this.add('parking_lot', 12060, 9400, 300, 240);
+      this.add('parking_lot', 10600, 9960, 300, 240);
       // Zebra crossings on the arterial, at the junctions
-      this.add('crosswalk', 11150, 9310, 26, 150);
-      this.add('crosswalk', 12100, 9310, 26, 150);
+      this.add('crosswalk', 10900, 9280, 36, 170);
+      this.add('crosswalk', 12300, 9280, 36, 170);
     }
 
     // ---- Urban buildings (deterministic scatter, road-aware) ----
@@ -649,7 +650,7 @@ export class WorldObjects {
           const along = Math.max(o.w, o.h);
           const depth = Math.min(o.w, o.h);
           const horizontal = o.w >= o.h;
-          const slot = 64;
+          const slot = 100;
           const slots = Math.floor(along / slot);
           const start = -along / 2 + (along - slots * slot) / 2 + slot;
           for (let i = 0; i < slots - 1; i++) {
@@ -667,12 +668,12 @@ export class WorldObjects {
           else g.lineBetween(o.x, y0 + 6, o.x, y0 + o.h - 6);
 
           // Parked cars (deterministic per object + slot, ~75% occupancy)
-          if (o.params?.cars !== false && depth / 2 - 14 >= 50) {
+          if (o.params?.cars !== false && depth / 2 - 14 >= 72) {
             const num = parseInt(o.id.replace(/\D/g, ''), 10) || 0;
             const palette = [0xd8dde3, 0x9aa2ac, 0x2b3440, 0x3a5a8c, 0x8c3a3a, 0x3a6b4f, 0xc9a227];
             const drawCar = (cx: number, cy: number, vert: boolean, r: number) => {
               const col = palette[Math.floor(r * palette.length) % palette.length];
-              const L = 44, W = 20;
+              const L = 64, W = 28;
               g.fillStyle(0x000000, 0.3);
               if (vert) g.fillRect(cx - W / 2 + 2, cy - L / 2 + 3, W, L);
               else g.fillRect(cx - L / 2 + 2, cy - W / 2 + 3, L, W);
@@ -680,13 +681,13 @@ export class WorldObjects {
               if (vert) {
                 g.fillRect(cx - W / 2, cy - L / 2, W, L);
                 g.fillStyle(0x1e242e, 1);
-                g.fillRect(cx - W / 2 + 2, cy - L / 2 + 12, W - 4, 7);
-                g.fillRect(cx - W / 2 + 2, cy + L / 2 - 12, W - 4, 7);
+                g.fillRect(cx - W / 2 + 3, cy - L / 2 + 16, W - 6, 9);
+                g.fillRect(cx - W / 2 + 3, cy + L / 2 - 16, W - 6, 9);
               } else {
                 g.fillRect(cx - L / 2, cy - W / 2, L, W);
                 g.fillStyle(0x1e242e, 1);
-                g.fillRect(cx - L / 2 + 12, cy - W / 2 + 2, 7, W - 4);
-                g.fillRect(cx + L / 2 - 12, cy - W / 2 + 2, 7, W - 4);
+                g.fillRect(cx - L / 2 + 16, cy - W / 2 + 3, 9, W - 6);
+                g.fillRect(cx + L / 2 - 16, cy - W / 2 + 3, 9, W - 6);
               }
             };
             const rnd = (k: number) => {
@@ -707,41 +708,6 @@ export class WorldObjects {
                 if (rnd(k * 3 + 5) > 0.3) drawCar(x0 + depth * 0.73, o.y + centre + jit, true, rnd(k * 3 + 6));
               }
             }
-          }
-          break;
-        }
-        case 'roundabout': {
-          const R = Math.min(o.w, o.h) / 2;
-          g.fillStyle(0x000000, 0.22);
-          g.fillCircle(o.x + 4, o.y + 5, R);
-          g.fillStyle(0x39404d, 1); // circulating carriageway
-          g.fillCircle(o.x, o.y, R);
-          // Chevron marks on the circulating lane (counter-clockwise, right-hand traffic)
-          g.lineStyle(3, 0xe2e8f0, 0.4);
-          const chevR = R * 0.68;
-          const nChev = 10;
-          for (let i = 0; i < nChev; i++) {
-            const a = (i / nChev) * Math.PI * 2;
-            const ax = o.x + Math.cos(a) * chevR;
-            const ay = o.y + Math.sin(a) * chevR;
-            const ta = a + Math.PI / 2; // tangent, counter-clockwise
-            const sz = Math.max(7, R * 0.09);
-            g.beginPath();
-            g.moveTo(ax - Math.cos(ta) * sz + Math.cos(a) * sz * 0.7, ay - Math.sin(ta) * sz + Math.sin(a) * sz * 0.7);
-            g.lineTo(ax + Math.cos(ta) * sz * 0.6, ay + Math.sin(ta) * sz * 0.6);
-            g.lineTo(ax - Math.cos(ta) * sz - Math.cos(a) * sz * 0.7, ay - Math.sin(ta) * sz - Math.sin(a) * sz * 0.7);
-            g.strokePath();
-          }
-          // Kerb ring + landscaped island
-          g.fillStyle(0x8a93a8, 1);
-          g.fillCircle(o.x, o.y, R * 0.5);
-          g.fillStyle(0x3e5a38, 1);
-          g.fillCircle(o.x, o.y, R * 0.44);
-          g.fillStyle(0x2f4a2c, 1);
-          for (let i = 0; i < 5; i++) {
-            const a = i * 2.399;
-            const rr = (R * 0.22 * ((i % 3) + 1)) / 3;
-            g.fillCircle(o.x + Math.cos(a) * rr, o.y + Math.sin(a) * rr, Math.max(5, R * 0.06));
           }
           break;
         }
@@ -790,6 +756,41 @@ export class WorldObjects {
     this.rotated(g, o, () => {
       const x0 = o.x - o.w / 2, y0 = o.y - o.h / 2;
       switch (o.type) {
+        case 'roundabout': {
+          const R = Math.min(o.w, o.h) / 2;
+          g.fillStyle(0x000000, 0.22);
+          g.fillCircle(o.x + 4, o.y + 5, R);
+          g.fillStyle(0x39404d, 1); // circulating carriageway
+          g.fillCircle(o.x, o.y, R);
+          // Chevron marks on the circulating lane (counter-clockwise, right-hand traffic)
+          g.lineStyle(3, 0xe2e8f0, 0.4);
+          const chevR = R * 0.68;
+          const nChev = 10;
+          for (let i = 0; i < nChev; i++) {
+            const a = (i / nChev) * Math.PI * 2;
+            const ax = o.x + Math.cos(a) * chevR;
+            const ay = o.y + Math.sin(a) * chevR;
+            const ta = a + Math.PI / 2; // tangent, counter-clockwise
+            const sz = Math.max(7, R * 0.09);
+            g.beginPath();
+            g.moveTo(ax - Math.cos(ta) * sz + Math.cos(a) * sz * 0.7, ay - Math.sin(ta) * sz + Math.sin(a) * sz * 0.7);
+            g.lineTo(ax + Math.cos(ta) * sz * 0.6, ay + Math.sin(ta) * sz * 0.6);
+            g.lineTo(ax - Math.cos(ta) * sz - Math.cos(a) * sz * 0.7, ay - Math.sin(ta) * sz - Math.sin(a) * sz * 0.7);
+            g.strokePath();
+          }
+          // Kerb ring + landscaped island
+          g.fillStyle(0x8a93a8, 1);
+          g.fillCircle(o.x, o.y, R * 0.5);
+          g.fillStyle(0x3e5a38, 1);
+          g.fillCircle(o.x, o.y, R * 0.44);
+          g.fillStyle(0x2f4a2c, 1);
+          for (let i = 0; i < 5; i++) {
+            const a = i * 2.399;
+            const rr = (R * 0.22 * ((i % 3) + 1)) / 3;
+            g.fillCircle(o.x + Math.cos(a) * rr, o.y + Math.sin(a) * rr, Math.max(5, R * 0.06));
+          }
+          break;
+        }
         case 'wall': {
           g.fillStyle(0x000000, 0.25);
           g.fillRect(x0 + 4, y0 + 5, o.w, o.h);
