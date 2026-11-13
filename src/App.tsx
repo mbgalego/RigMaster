@@ -51,6 +51,8 @@ import {
   Factory,
   Circle,
   Equal,
+  Mountain,
+  Truck,
 } from 'lucide-react';
 
 export default function App() {
@@ -90,8 +92,8 @@ export default function App() {
     hasSelection: false, hasPoint: false, surface: 'asphalt', width: 128, drawing: false, twistDeg: 0, oneWay: false,
   });
   // Object tool live state (polled from EditorScene in the telemetry loop)
-  const [objectUI, setObjectUI] = useState<{ hasSelection: boolean; type: string; angleDeg: number; resizable: boolean }>({
-    hasSelection: false, type: '', angleDeg: 0, resizable: false,
+  const [objectUI, setObjectUI] = useState<{ hasSelection: boolean; id: string; type: string; angleDeg: number; resizable: boolean; trailer: string }>({
+    hasSelection: false, id: '', type: '', angleDeg: 0, resizable: false, trailer: '',
   });
 
   // Real-time Telemetry
@@ -901,6 +903,23 @@ export default function App() {
                       >
                         Apagar
                       </button>
+                      {objectUI.type === 'parking_pad' && (
+                        <div className="flex gap-1">
+                          {([['C', 'standard'], ['CE', 'long_cargo'], ['H', 'bitrem_lead'], ['X', 'fragile_glass']] as Array<[string, string]>).map(([lbl, val]) => (
+                            <button
+                              key={val}
+                              onClick={() => { const ed = getEditorScene(); if (ed) ed.setTrailerPadType(objectUI.id, val); }}
+                              className={`text-[10px] font-bold px-2 py-1 rounded border ${
+                                objectUI.trailer === val
+                                  ? 'bg-amber-400 text-slate-900 border-amber-200'
+                                  : 'bg-slate-800 text-amber-300 border-slate-600 hover:bg-slate-700'
+                              }`}
+                            >
+                              {lbl}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       <span className="text-[10px] text-slate-400 hidden lg:inline whitespace-nowrap">
                         arrasta = mover · pega rosa = rodar livre{objectUI.resizable ? ' · quadrados brancos = redimensionar' : ''}
                       </span>
@@ -935,6 +954,14 @@ export default function App() {
                         { spec: { type: 'jersey_barrier', w: 140, h: 26, label: 'Barreira' }, icon: BrickWall, tint: 'violet' },
                         { spec: { type: 'container_stack', w: 180, h: 140, label: 'Contentores' }, icon: Box, tint: 'violet' },
                         { spec: { type: 'dock', w: 128, h: 128, label: 'Doca' }, icon: Warehouse, tint: 'violet' },
+                        { spec: { type: 'pad_asphalt', w: 700, h: 420, label: 'Alcatrão' }, icon: Layers, tint: 'violet' },
+                        { spec: { type: 'pad_dirt', w: 700, h: 420, label: 'Terra' }, icon: Mountain, tint: 'violet' },
+                        { spec: { type: 'dock_wall', w: 420, h: 56, params: { docks: 3 }, label: 'Muro Docas' }, icon: BrickWall, tint: 'violet' },
+                        { spec: { type: 'building', w: 900, h: 420, variant: 'warehouse_docks', params: { docks: 5 }, label: 'Armazém Docas' }, icon: Building2, tint: 'violet' },
+                        { spec: { type: 'parking_pad', w: 130, h: 420, params: { trailer: 'standard' }, label: 'Pad C' }, icon: Truck, tint: 'violet' },
+                        { spec: { type: 'parking_pad', w: 170, h: 640, params: { trailer: 'long_cargo' }, label: 'Pad CE' }, icon: Truck, tint: 'violet' },
+                        { spec: { type: 'parking_pad', w: 140, h: 560, params: { trailer: 'bitrem_lead' }, label: 'Pad H' }, icon: Truck, tint: 'violet' },
+                        { spec: { type: 'parking_pad', w: 140, h: 420, params: { trailer: 'fragile_glass' }, label: 'Pad X' }, icon: Truck, tint: 'violet' },
                       ] as Array<{ spec: AddObjectSpec; icon: React.ComponentType<{ className?: string }>; tint: string }>
                     ).map(({ spec, icon: Icon }) => (
                       <button

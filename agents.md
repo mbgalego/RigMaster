@@ -41,7 +41,20 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.3.2** (Versão Atual — branch `feature/road-network`)
+### **v2.4.0** (Versão Atual — branch `feature/road-network`)
+- **Elementos de construção no editor (catálogo Criar)**:
+  - **Base Alcatrão** e **Base Terra** (`pad_asphalt`/`pad_dirt`): bases planas de pátio redimensionáveis, sem colisão (alcatrão com juntas de dilatação e granulado; terra com sulcos de pneus e gravilha).
+  - **Muro Docas** (`dock_wall`): parede sólida com N baias de descarga (`params.docks`, default 3, boca de 76px) — brutaços de alvenaria + tope de estiva dentro de cada baia + faixa de serviço com borda amarela e pilaretes. Física multi-corpo (os brutaços são corpos individuais; a boca das baias fica aberta para o camião entrar às-costas).
+  - **Armazém Docas** (variante `warehouse_docks`): armazém logístico com portões de descarga na fachada sul (`params.docks`, default 5), montantes listrados e plataformas de cais.
+  - **Teto de duas águas** (variante `gabled` do edifício).
+- **Pads de atrelado completos**: a marcação do `parking_pad` passou a ser amarela (tipo-codificada: C=amarelo, CE=verde, H=azul, X=vermelho) com silhueta do atrelado (bitrem = 2 caixas), linha de paragem no nariz, entrada hachurada e chevrons — desenhada para servir de futuro ponto de captura/chegada.
+- **Catálogo Criar com os 4 atrelados**: Pad C / Pad CE / Pad H / Pad X (tamanhos calibrados por tipo; o atrelado nasce estacionado no pad ao entrar em jogo via `TrailerManager`).
+- **Ângulo do pad respeitado**: `TrailerManager.spawnAt(x, y, tipo, ângulo)` usa o ângulo do pad (nose = −y local); o pup do bitrem nasce atrás da traseira na direcção certa. Pads seeded mantêm nose-sul.
+- **Editar tipo de atrelado**: painel OBJECTO mostra botões C/CE/H/X quando o objecto selecionado é um pad (troca o tipo sem apagar).
+- **Pátio de docas no seed**: base de alcatrão + muro de docas (3 baias) + 3 pads C no parque industrial de demonstração; base de terra no estaleiro (NE).
+- Redimensionáveis: + `pad_asphalt`, `pad_dirt`, `dock_wall` (pads de atrelado mantêm tamanho fixo por tipo).
+
+### **v2.3.2** (branch `feature/road-network`)
 - **Nariz do atrelado já não invade a cabine**: a saliência do nariz além do pino (kingpin) foi reduzida de 30px para **14px** (18 no porta-pá eolico, 14 no bitrem) — a chapa do nariz cobre apenas a zona da roda quinta, como num semi real. Antes o nariz cobria metade do trator e as quinas do nariz chegavam a colidir com a *zona sólida frontal* do trator durante a articulação (empurrões visíveis).
 - Valores sincronizados em todos os acoplamentos (spawn, acoplamento manual, pup do bitrem), no `Trailer.kingpinDist` (detoção de acoplamento/blocker) e no debug do `Kingpin` (pin agora derivado do `trailerOffset` real, não hardcoded).
 

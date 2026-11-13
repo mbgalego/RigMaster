@@ -582,7 +582,7 @@ export class EditorScene extends Phaser.Scene {
   private static readonly RESIZABLE_TYPES = new Set<string>([
     'wall', 'entrance', 'parking_lot', 'building', 'jersey_barrier',
     'container_stack', 'dock', 'gas_canopy', 'silo', 'crane',
-    'roundabout', 'crosswalk',
+    'roundabout', 'crosswalk', 'pad_asphalt', 'pad_dirt', 'dock_wall',
   ]);
 
   private isResizable(o: WorldObject): boolean {
@@ -702,14 +702,24 @@ export class EditorScene extends Phaser.Scene {
     this.mainScene.world.version++;
   }
 
-  public getObjectUIState(): { hasSelection: boolean; type: string; angleDeg: number; resizable: boolean } {
+  public getObjectUIState(): { hasSelection: boolean; id: string; type: string; angleDeg: number; resizable: boolean; trailer: string } {
     const o = this.selectedObject;
     return {
       hasSelection: !!o,
+      id: o ? o.id : '',
       type: o ? o.type : '',
       angleDeg: o ? Math.round(Phaser.Math.RadToDeg(o.angle)) : 0,
       resizable: o ? this.isResizable(o) : false,
+      trailer: o && o.type === 'parking_pad' ? String(o.params?.trailer || 'standard') : '',
     };
+  }
+
+  /** Switches the trailer type of a parking pad (re-renders via version bump). */
+  public setTrailerPadType(id: string, trailer: string) {
+    const o = this.mainScene.world.objects.get(id);
+    if (!o || o.type !== 'parking_pad') return;
+    o.params = { ...(o.params || {}), trailer };
+    this.mainScene.world.version++;
   }
 
   // ======================================================================

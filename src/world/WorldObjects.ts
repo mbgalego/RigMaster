@@ -12,7 +12,10 @@ import { WorldTerrain } from './WorldTerrain';
 
 export type WObjType =
   | 'dock'            // flat loading platform (hub docks, factory docks)
-  | 'parking_pad'     // flat trailer parking slot (params.trailer → spawns one)
+  | 'parking_pad'     // flat trailer parking slot (params.trailer → spawns one; future capture point)
+  | 'pad_asphalt'     // flat asphalt base pad (yard ground, no collision)
+  | 'pad_dirt'        // flat dirt/gravel base pad (yard ground, no collision)
+  | 'dock_wall'       // solid wall with loading-dock bays (params.docks)
   | 'parking_lot'     // flat car/truck parking area with painted slots + parked cars
   | 'entrance'        // flat concrete apron in front of a building/garage
   | 'roundabout'      // circular island with circulating lane (solid centre island)
@@ -52,6 +55,7 @@ const CHUNK_PX = 2048;
 const SOLID_TYPES = new Set<WObjType>([
   'wall', 'jersey_barrier', 'building', 'container_stack', 'silo',
   'gas_pump', 'price_sign', 'lamp', 'sign', 'traffic_light', 'roundabout',
+  'dock_wall',
 ]);
 
 // Traffic light cycle (ms) — coordinated European 4-phase junction
@@ -184,10 +188,10 @@ export class WorldObjects {
       .map((o) => ({ x: o.x, y: o.y, width: o.w, height: o.h, requiredAngle: 0, id: o.id }));
   }
 
-  public get parkingPads(): Array<{ x: number; y: number; type: TrailerType }> {
+  public get parkingPads(): Array<{ x: number; y: number; angle: number; type: TrailerType }> {
     return this.objects
       .filter((o) => o.type === 'parking_pad' && o.params?.trailer)
-      .map((o) => ({ x: o.x, y: o.y, type: o.params!.trailer as TrailerType }));
+      .map((o) => ({ x: o.x, y: o.y, angle: o.angle, type: o.params!.trailer as TrailerType }));
   }
 
   /** Rotated-rect hit test for the object editor (padded for easy grabbing) */
@@ -253,7 +257,7 @@ export class WorldObjects {
       if (!SOLID_TYPES.has(o.type)) continue;
       const r = Math.max(o.w, o.h) / 2 + 8;
       if (o.x + r < x0 || o.x - r > x1 || o.y + r < y0 || o.y - r > y1) continue;
-      let body: MatterJS.BodyType;
+      let body: MatterJS.BodyType | undefined;
       if (o.type === 'roundabout') {
         // Only the central island is solid — the circulating lane stays drivable
         body = this.scene.matter.add.circle(o.x, o.y, Math.min(o.w, o.h) * 0.225, {
@@ -263,6 +267,39 @@ export class WorldObjects {
           label: `obstacle_${o.type}`,
           collisionFilter: { category: 0x0001, mask: 0xffff },
         }) as unknown as MatterJS.BodyType;
+      } else if (o.type === 'dock_wall') {
+        // Multi-body: solid piers between the dock bays + a stop bumper inside
+        // each bay (the bay mouth stays open so trucks can reverse into it).
+        const gap = 76;
+        const maxN = Math.floor((o.w - 14) / (gap + 14));
+        if (maxN < 1) {
+          body = this.scene.matter.add.rectangle(o.x, o.y, o.w, o.h, {
+            angle: o.angle, isStatic: true, friction: 0.8, restitution: 0.1,
+            label: `obstacle_${o.type}`, collisionFilter: { category: 0x0001, mask: 0xffff },
+          }) as unknown as MatterJS.BodyType;
+          bodies.push(body);
+        } else {
+          const n = Math.max(1, Math.min(Math.floor(Number(o.params?.docks) || 3), maxN));
+          const pier = (o.w - n * gap) / (n + 1);
+          const c = Math.cos(o.angle), s = Math.sin(o.angle);
+          const staticOpts = {
+            isStatic: true, friction: 0.8, restitution: 0.1,
+            label: `obstacle_${o.type}`, collisionFilter: { category: 0x0001, mask: 0xffff },
+          };
+          for (let i = 0; i <= n; i++) {
+            const lx = -o.w / 2 + pier / 2 + i * (pier + gap);
+            bodies.push(this.scene.matter.add.rectangle(o.x + c * lx, o.y + s * lx, pier, o.h, {
+              angle: o.angle, ...staticOpts,
+            }) as unknown as MatterJS.BodyType);
+          }
+          for (let i = 0; i < n; i++) {
+            const lx = -o.w / 2 + pier + gap / 2 + i * (pier + gap);
+            const ly = -o.h / 2 + 10;
+            bodies.push(this.scene.matter.add.rectangle(o.x + c * lx - s * ly, o.y + s * lx + c * ly, gap - 14, 8, {
+              angle: o.angle, ...staticOpts,
+            }) as unknown as MatterJS.BodyType);
+          }
+        }
       } else {
         body = this.scene.matter.add.rectangle(o.x, o.y, o.w, o.h, {
           angle: o.angle,
@@ -273,7 +310,7 @@ export class WorldObjects {
           collisionFilter: { category: 0x0001, mask: 0xffff },
         }) as unknown as MatterJS.BodyType;
       }
-      bodies.push(body);
+      if (body) bodies.push(body);
     }
     // Replace any previous body set for this chunk
     const old = this.bodiesByChunk.get(key);
@@ -410,6 +447,8 @@ export class WorldObjects {
     this.add('container_stack', 11330, 340, 200, 150, { variant: 'rust' });
     for (let i = 0; i < 3; i++) this.add('dock', 10752 + i * 128, 620, 118, 118, { variant: 'port' });
     this.add('building', 11400, 850, 320, 200, { variant: 'garage' });
+    // Dirt staging yard for the construction site
+    this.add('pad_dirt', 10900, 1250, 420, 300);
 
     // ---- Hub 3: Zona Industrial (SE) ----
     this.add('silo', 11840, 8512, 128, 128);
@@ -424,8 +463,9 @@ export class WorldObjects {
     for (let i = 0; i < 3; i++) this.add('dock', 576 + i * 128, 9450, 118, 118, { variant: 'port' });
 
     // ---- Trailer parks (real sites: park, couple, go) ----
+    // Nose faces SOUTH (angle PI) — the classic depot posture.
     const pad = (x: number, y: number, w: number, h: number, trailer: string) =>
-      this.add('parking_pad', x, y, w, h, { params: { trailer } });
+      this.add('parking_pad', x, y, w, h, { params: { trailer }, angle: Math.PI });
     // Standard (C) — east of Porto
     for (let i = 0; i < 4; i++) pad(1950 + i * 150, 1560, 130, 300, 'standard');
     // Long cargo (C+E) — south of Estaleiro
@@ -480,6 +520,13 @@ export class WorldObjects {
       // Zebra crossings on the arterial, at the junctions
       this.add('crosswalk', 10900, 9280, 36, 170);
       this.add('crosswalk', 12300, 9280, 36, 170);
+      // ---- Dock yard on the asphalt base: dock wall with 3 bays + trailer
+      //      pads (nose north, toward the docks) — future capture points ----
+      this.add('pad_asphalt', 10840, 10050, 460, 360);
+      this.add('dock_wall', 10840, 9898, 420, 56, { params: { docks: 3 } });
+      for (let i = 0; i < 3; i++) {
+        this.add('parking_pad', 10720 + i * 120, 10080, 110, 300, { params: { trailer: 'standard' } });
+      }
     }
 
     // ---- Urban buildings (deterministic scatter, road-aware) ----
@@ -559,7 +606,7 @@ export class WorldObjects {
           if (o.type === 'traffic_light') continue; // animated: rendered every frame by renderLights
           // NOTE: roundabout renders in the SOLIDS layer (depth 3) so the
           // island sits above the road ribbons at a junction.
-          if (o.type === 'gas_canopy' || o.type === 'parking_pad' || o.type === 'parking_lot' || o.type === 'entrance' || o.type === 'crosswalk' || o.type === 'exam_dock' || o.type === 'dock') {
+          if (o.type === 'gas_canopy' || o.type === 'parking_pad' || o.type === 'parking_lot' || o.type === 'entrance' || o.type === 'crosswalk' || o.type === 'exam_dock' || o.type === 'dock' || o.type === 'pad_asphalt' || o.type === 'pad_dirt') {
             this.drawFlat(flats, o);
           } else {
             this.drawSolid(solids, o);
@@ -630,14 +677,111 @@ export class WorldObjects {
           break;
         }
         case 'parking_pad': {
+          // Trailer bay marking — yellow bay lines, hatched entry, faint
+          // silhouette of the trailer it spawns. Doubles as a future
+          // arrival/capture trigger point.
+          const tr = String(o.params?.trailer || 'standard');
+          const mark = tr === 'long_cargo' ? 0x4ade80 : tr.startsWith('bitrem') ? 0x60a5fa : tr === 'fragile_glass' ? 0xf87171 : 0xfacc15;
           g.fillStyle(0x1c2027, 1);
           g.fillRect(x0, y0, o.w, o.h);
-          g.lineStyle(2, 0xe2e8f0, 0.55);
+          // Bay boundary (solid yellow, dim) + bright corner brackets
+          g.lineStyle(2, mark, 0.45);
           g.strokeRect(x0 + 4, y0 + 4, o.w - 8, o.h - 8);
-          g.lineStyle(2, 0xe2e8f0, 0.35);
-          for (let yy = y0 + 18; yy < y0 + o.h - 10; yy += 26) {
-            g.lineBetween(x0 + 10, yy, x0 + o.w - 10, yy);
+          g.lineStyle(3, mark, 0.85);
+          const b = 22;
+          for (const [cx, cy, dx, dy] of [
+            [x0 + 4, y0 + 4, 1, 1], [x0 + o.w - 4, y0 + 4, -1, 1],
+            [x0 + 4, y0 + o.h - 4, 1, -1], [x0 + o.w - 4, y0 + o.h - 4, -1, -1],
+          ]) {
+            g.lineBetween(cx, cy, cx + dx * b, cy);
+            g.lineBetween(cx, cy, cx, cy + dy * b);
           }
+          // Stop bar at the nose end (local -y)
+          g.fillStyle(0xe2e8f0, 0.65);
+          g.fillRect(x0 + 14, y0 + 10, o.w - 28, 6);
+          // Hatched entry strip + chevrons pointing to the nose (local +y end)
+          g.lineStyle(2, mark, 0.4);
+          for (let hx = x0 + 6; hx < x0 + o.w + 20; hx += 26) {
+            g.lineBetween(hx, y0 + o.h - 4, Math.min(hx + 22, x0 + o.w - 6), y0 + o.h - 30);
+          }
+          const chevY = y0 + o.h - 46;
+          for (let k = 0; k < 3; k++) {
+            const cy = chevY - k * 18;
+            const s = 10;
+            g.beginPath();
+            g.moveTo(o.x - s, cy + s);
+            g.lineTo(o.x, cy);
+            g.lineTo(o.x + s, cy + s);
+            g.strokePath();
+          }
+          // Faint silhouettes of the parked trailer(s) near the nose end
+          const box = (cy: number, L: number, W: number) => {
+            g.fillStyle(0x11151b, 0.9);
+            g.fillRect(o.x - W / 2, cy - L / 2, W, L);
+            g.lineStyle(1.5, 0x3c4550, 1);
+            g.strokeRect(o.x - W / 2, cy - L / 2, W, L);
+            g.lineStyle(2, 0x232b35, 1);
+            g.lineBetween(o.x - W / 2 + 6, cy, o.x + W / 2 - 6, cy);
+          };
+          if (tr === 'bitrem_lead' || tr === 'bitrem_pup') {
+            const pupCy = y0 + 16 + 77.5;
+            box(pupCy, 155, 46);
+            box(pupCy + 167, 155, 46);
+          } else {
+            const L = tr === 'long_cargo' ? 310 : 220;
+            box(y0 + 16 + L / 2, L, 46);
+          }
+          break;
+        }
+        case 'pad_asphalt': {
+          // Asphalt yard base — dark surface, aggregate noise, expansion seams
+          g.fillStyle(0x262b33, 1);
+          g.fillRect(x0, y0, o.w, o.h);
+          const num = parseInt(o.id.replace(/\D/g, ''), 10) || 0;
+          for (let i = 0; i < 26; i++) {
+            const r = Math.sin(num * 13.7 + i * 91.7) * 43758.5453;
+            const f = r - Math.floor(r);
+            const r2 = Math.sin(num * 7.3 + i * 57.1) * 24634.63;
+            const f2 = r2 - Math.floor(r2);
+            g.fillStyle(0x2e343d, 0.5);
+            g.fillRect(x0 + 4 + f * (o.w - 14), y0 + 4 + f2 * (o.h - 14), 6, 6);
+          }
+          g.lineStyle(1.5, 0x1e232a, 0.9);
+          if (o.w >= o.h) {
+            for (let sx = x0 + 110; sx < x0 + o.w - 40; sx += 220) g.lineBetween(sx, y0 + 3, sx, y0 + o.h - 3);
+          } else {
+            for (let sy = y0 + 110; sy < y0 + o.h - 40; sy += 220) g.lineBetween(x0 + 3, sy, x0 + o.w - 3, sy);
+          }
+          g.lineStyle(2, 0x14181e, 0.8);
+          g.strokeRect(x0, y0, o.w, o.h);
+          break;
+        }
+        case 'pad_dirt': {
+          // Dirt/gravel yard base — earth tone, tyre ruts, gravel specks
+          g.fillStyle(0x54452e, 1);
+          g.fillRect(x0, y0, o.w, o.h);
+          const num = parseInt(o.id.replace(/\D/g, ''), 10) || 0;
+          const horiz = o.w >= o.h;
+          g.lineStyle(3, 0x483b27, 0.55);
+          for (const frac of [0.22, 0.5, 0.78]) {
+            const off = (horiz ? o.h : o.w) * frac;
+            if (horiz) g.lineBetween(x0 + 10, y0 + off - 5, x0 + o.w - 10, y0 + off - 5);
+            else g.lineBetween(x0 + off - 5, y0 + 10, x0 + off - 5, y0 + o.h - 10);
+            g.lineBetween(
+              horiz ? x0 + 10 : x0 + off + 5, horiz ? y0 + off + 5 : y0 + 10,
+              horiz ? x0 + o.w - 10 : x0 + off + 5, horiz ? y0 + off + 5 : y0 + o.h - 10,
+            );
+          }
+          for (let i = 0; i < 20; i++) {
+            const r = Math.sin(num * 17.3 + i * 71.3) * 43758.5453;
+            const f = r - Math.floor(r);
+            const r2 = Math.sin(num * 5.9 + i * 33.7) * 15463.25;
+            const f2 = r2 - Math.floor(r2);
+            g.fillStyle(0x63523a, 0.7);
+            g.fillRect(x0 + 4 + f * (o.w - 12), y0 + 4 + f2 * (o.h - 12), 4, 4);
+          }
+          g.lineStyle(2, 0x3e321f, 0.9);
+          g.strokeRect(x0, y0, o.w, o.h);
           break;
         }
         case 'parking_lot': {
@@ -791,6 +935,57 @@ export class WorldObjects {
           }
           break;
         }
+        case 'dock_wall': {
+          // Wall band with dock bays (openings) + service apron strip in front
+          const docks = Math.max(1, Math.floor(Number(o.params?.docks) || 3));
+          const gap = 76;
+          const maxN = Math.floor((o.w - 14) / (gap + 14));
+          const n = maxN < 1 ? 0 : Math.min(docks, maxN);
+          const wallH = Math.min(34, o.h);
+          if (n < 1) {
+            g.fillStyle(0x3a3d44, 1);
+            g.fillRect(x0, y0, o.w, wallH);
+          } else {
+            const pier = (o.w - n * gap) / (n + 1);
+            // Apron (behind the piers, z-under): concrete strip with yellow edge
+            g.fillStyle(0x2e333b, 1);
+            g.fillRect(x0, y0 + wallH, o.w, o.h - wallH);
+            g.lineStyle(2, 0xfacc15, 0.75);
+            g.lineBetween(x0 + 2, y0 + wallH, x0 + o.w - 2, y0 + wallH);
+            // Piers (masonry, like the wall prefab)
+            g.fillStyle(0x3a3d44, 1);
+            for (let i = 0; i <= n; i++) {
+              g.fillRect(x0 + i * (pier + gap), y0, pier, wallH);
+            }
+            g.fillStyle(0x565b66, 1);
+            for (let i = 0; i <= n; i++) {
+              g.fillRect(x0 + i * (pier + gap), y0, pier, Math.min(5, wallH / 3));
+            }
+            // Bays: dark opening + hazard-striped lintel + bay number badge
+            for (let i = 0; i < n; i++) {
+              const bx = x0 + pier + i * (pier + gap);
+              g.fillStyle(0x0d1015, 1);
+              g.fillRect(bx, y0, gap, wallH - 4);
+              g.fillStyle(0xfacc15, 0.9);
+              g.fillRect(bx, y0 + wallH - 8, gap, 4);
+              g.fillStyle(0x1c202a, 1);
+              for (let hx = 0; hx < gap; hx += 12) g.fillRect(bx + hx, y0 + wallH - 8, 6, 4);
+              // Stop bumper inside the bay (matches the physics bumper)
+              g.fillStyle(0x22262e, 1);
+              g.fillRect(bx + 7, y0 + 6, gap - 14, 8);
+              // Number badge
+              g.fillStyle(0xe2e8f0, 0.9);
+              g.fillRect(bx + gap / 2 - 6, y0 + 18, 12, 9);
+              // Bollards on the apron, flanking each bay
+              g.fillStyle(0xfacc15, 0.85);
+              g.fillRect(bx - 5, y0 + wallH + 2, 5, 9);
+              g.fillRect(bx + gap, y0 + wallH + 2, 5, 9);
+            }
+          }
+          g.lineStyle(2, 0x1c202a, 1);
+          g.strokeRect(x0, y0, o.w, o.h);
+          break;
+        }
         case 'wall': {
           g.fillStyle(0x000000, 0.25);
           g.fillRect(x0 + 4, y0 + 5, o.w, o.h);
@@ -823,7 +1018,7 @@ export class WorldObjects {
         }
         case 'building': {
           // Light industrial variants: flat light-grey roof / ribbed white roof
-          if (o.variant === 'warehouse_big' || o.variant === 'shed') {
+          if (o.variant === 'warehouse_big' || o.variant === 'shed' || o.variant === 'warehouse_docks') {
             g.fillStyle(0x000000, 0.28);
             g.fillRect(x0 + 6, y0 + 8, o.w, o.h);
             // Wall band
@@ -858,6 +1053,26 @@ export class WorldObjects {
             }
             g.lineStyle(2, 0x1c202a, 1);
             g.strokeRect(x0, y0, o.w, o.h);
+            if (o.variant === 'warehouse_docks') {
+              // Dock doors along the SOUTH wall (local +y): dark openings,
+              // hazard-striped lintels, dock plates + bumpers outside
+              const nd = Math.max(1, Math.floor(Number(o.params?.docks) || 5));
+              const spacing = o.w / nd;
+              for (let i = 0; i < nd; i++) {
+                const cx = x0 + (i + 0.5) * spacing;
+                g.fillStyle(0x0d1015, 1);
+                g.fillRect(cx - 28, y0 + o.h - 12, 56, 12);
+                g.fillStyle(0xfacc15, 0.9);
+                g.fillRect(cx - 30, y0 + o.h - 16, 60, 4);
+                g.fillStyle(0x1c202a, 1);
+                for (let dx = 0; dx < 60; dx += 12) g.fillRect(cx - 30 + dx, y0 + o.h - 16, 6, 4);
+                g.fillStyle(0x5a616c, 1);
+                g.fillRect(cx - 22, y0 + o.h, 44, 7);
+                g.fillStyle(0x22262e, 1);
+                g.fillRect(cx - 28, y0 + o.h + 7, 8, 6);
+                g.fillRect(cx + 20, y0 + o.h + 7, 8, 6);
+              }
+            }
             break;
           }
           // shadow
@@ -868,6 +1083,16 @@ export class WorldObjects {
           g.fillRect(x0, y0, o.w, o.h);
           g.fillStyle(o.variant === 'church' ? 0x4a4550 : 0x3f4756, 1);
           g.fillRect(x0 + 4, y0 + 4, o.w - 8, o.h - 8);
+          if (o.variant === 'gabled') {
+            // Two-slope roof: lighter half + ridge line along the long axis
+            const horiz = o.w >= o.h;
+            g.fillStyle(0x4d5666, 1);
+            if (horiz) g.fillRect(x0 + 4, y0 + 4, o.w - 8, (o.h - 8) / 2);
+            else g.fillRect(x0 + 4, y0 + 4, (o.w - 8) / 2, o.h - 8);
+            g.lineStyle(2, 0x6a7484, 1);
+            if (horiz) g.lineBetween(x0 + 4, o.y, x0 + o.w - 4, o.y);
+            else g.lineBetween(o.x, y0 + 4, o.x, y0 + o.h - 4);
+          }
           g.fillStyle(0x565f6e, 1);
           // skylights
           for (let sy = y0 + 14; sy < y0 + o.h - 20; sy += 34) {

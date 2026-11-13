@@ -46,18 +46,19 @@ export class TrailerManager {
    * and spawns new ones on every pad. Called by MainScene when the world is
    * (re)seeded or a world JSON is imported.
    */
-  public rebuild(pads: Array<{ x: number; y: number; type: TrailerType }>) {
+  public rebuild(pads: Array<{ x: number; y: number; angle: number; type: TrailerType }>) {
     this.destroyAll();
-    for (const pad of pads) this.spawnAt(pad.x, pad.y, pad.type);
+    for (const pad of pads) this.spawnAt(pad.x, pad.y, pad.type, pad.angle);
   }
 
   /**
-   * Spawns a parked trailer centered on the pad, nose facing SOUTH (angle PI) —
-   * the classic depot posture: the tractor reverses straight into the nose.
-   * bitrem spots also park a pup behind the lead (north side).
+   * Spawns a parked trailer centered on the pad with the pad's facing (nose =
+   * trailer forward = local -y). Default nose SOUTH (angle PI) — the classic
+   * depot posture: the tractor reverses straight into the nose.
+   * Bitrem spots also park a pup behind the lead's rear.
    */
-  public spawnAt(x: number, y: number, type: TrailerType) {
-    const noseAngle = Math.PI; // nose (kingpin) faces south
+  public spawnAt(x: number, y: number, type: TrailerType, angle: number = Math.PI) {
+    const noseAngle = angle;
 
     const lead = new Trailer(this.scene, { x, y, angle: noseAngle, type });
     // Sync the drawn container with the body angle (constructor only sets the body)
@@ -66,14 +67,12 @@ export class TrailerManager {
     this.loose.push(lead);
 
     if (type === 'bitrem_lead') {
-      // Pup parked north of the lead (behind its rear bumper when the nose faces south)
-      const pup = new Trailer(this.scene, {
-        x,
-        y: y - (lead.length / 2 + 155 / 2 + 12),
-        angle: noseAngle,
-        type: 'bitrem_pup',
-      });
-      pup.setPosition(x, y - (lead.length / 2 + 155 / 2 + 12), noseAngle);
+      // Pup behind the lead's rear bumper (opposite the nose direction)
+      const D = lead.length / 2 + 155 / 2 + 12;
+      const px = x - Math.sin(noseAngle) * D;
+      const py = y + Math.cos(noseAngle) * D;
+      const pup = new Trailer(this.scene, { x: px, y: py, angle: noseAngle, type: 'bitrem_pup' });
+      pup.setPosition(px, py, noseAngle);
       this.applyParkedFilter(pup);
       this.loose.push(pup);
     }
