@@ -48,6 +48,10 @@ export class MainScene extends Phaser.Scene {
 
   // Auto-coupling: debounces the "failed attempt" toast to one per zone entry
   private autoCoupleErrorKey: string | null = null;
+  /** Re-lock guard after decouple: trailer body id + armed flag (see decoupleLockoutArmed). */
+  private decoupleLockout: { id: number; armed: boolean } | null = null;
+  private decoupleLockoutUntil: number = 0;
+  private pinchStartDist: number = 0;
 
   // Environmental layers
   private weatherGraphics!: Phaser.GameObjects.Graphics;
@@ -164,7 +168,10 @@ export class MainScene extends Phaser.Scene {
     this.cameras.main.setBounds(0, 0, worldW, worldH);
     this.cameras.main.setBackgroundColor(0x0a2338); // ocean blue behind the island
     this.cameras.main.startFollow(this.truck.container, true, 0.1, 0.1);
-    this.cameras.main.setZoom(1.0);
+    // Responsive default zoom: small screens (phones) start more zoomed out
+    this.cameras.main.setZoom(Phaser.Math.Clamp(
+      Math.min(this.scale.width / 900, this.scale.height / 620), 0.5, 1.0,
+    ));
 
     // Mouse wheel camera zoom (drive mode only; the editor has its own zoom handler)
     this.input.on('wheel', (pointer: any, gameObjects: any, deltaX: number, deltaY: number) => {
@@ -172,6 +179,31 @@ export class MainScene extends Phaser.Scene {
       const newZoom = Phaser.Math.Clamp(this.cameras.main.zoom - deltaY * 0.001, 0.45, 1.8);
       this.cameras.main.setZoom(newZoom);
     });
+
+    // Pinch-to-zoom (touch devices, drive mode): two fingers control the zoom
+    this.pinchStartDist = 0;
+    const activePointers = () => ((this.input as any).activePointers as any[]).filter((pt) => pt.isDown);
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      if (this.isEditorMode) return;
+      const active = activePointers();
+      if (active.length === 2) {
+        this.pinchStartDist = Phaser.Math.Distance.Between(active[0].x, active[0].y, active[1].x, active[1].y);
+      }
+    });
+    this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
+      if (this.isEditorMode || this.pinchStartDist <= 0) return;
+      const active = activePointers();
+      if (active.length < 2) return;
+      const d = Phaser.Math.Distance.Between(active[0].x, active[0].y, active[1].x, active[1].y);
+      const factor = Phaser.Math.Clamp(d / this.pinchStartDist, 0.85, 1.18);
+      this.pinchStartDist = d;
+      this.adjustZoom(factor);
+    });
+    const endPinch = () => {
+      if (activePointers().length < 2) this.pinchStartDist = 0;
+    };
+    this.input.on('pointerup', endPinch);
+    this.input.on('pointerupoutside', endPinch);
 
     // 4. Weather Overlay
     this.weatherGraphics = this.add.graphics();
@@ -465,6 +497,12 @@ export class MainScene extends Phaser.Scene {
    * tractor sits in the correct kingpin position (updateAutoCoupling). The
    * bitrem pup comes off first.
    */
+  /** Camera zoom step for the HUD buttons (drive mode only). */
+  public adjustZoom(factor: number) {
+    if (this.isEditorMode) return;
+    this.cameras.main.setZoom(Phaser.Math.Clamp(this.cameras.main.zoom * factor, 0.45, 1.8));
+  }
+
   public decoupleAction() {
     if (!this.truck || this.isEditorMode) return;
     const stopped = Math.abs(this.truck.speedKmh) < 3;
@@ -485,7 +523,7 @@ export class MainScene extends Phaser.Scene {
         return;
       }
       this.decoupleTrailer(false);
-      this.setCouplingNotice('Atrelado desacoplado', 'success');
+      this.setCouplingNotice('Atrelado desacoplado — avança com o trator', 'success');
       return;
     }
     // Nothing coupled — coupling is automatic; nothing to do here
@@ -513,8 +551,10 @@ export class MainScene extends Phaser.Scene {
     // under the pup's nose plate to the pin — same corridor as the tractor.
     if (this.trailer) {
       if (this.trailer.type === 'bitrem_lead' && !this.pupTrailer) {
+        const leadHitch = this.getLeadRearHitch(this.trailer);
         const cand = mgr.findCouplablePup(this.trailer, 30, 28);
         if (!cand) { reset(); return; }
+        if (!this.decoupleLockoutArmed(cand.trailer, leadHitch.x, leadHitch.y)) { reset(); return; }
         const key = `pup_${cand.trailer.body.id}`;
         if (!this.licenseSystem.isUnlocked('H')) { fail(key, 'Requer licença H', 'blocked'); return; }
         if (!creepSpeed) { fail(key, 'Ralentiza para engatar o bitrem traseiro', 'info'); return; }
@@ -530,6 +570,7 @@ export class MainScene extends Phaser.Scene {
     const hitch = this.getTruckHitch();
     const cand = mgr.findCouplable(hitch.x, hitch.y, this.truck.body.angle, 30, 28, ['bitrem_pup']);
     if (!cand) { reset(); return; }
+    if (!this.decoupleLockoutArmed(cand.trailer, hitch.x, hitch.y)) { reset(); return; }
 
     const key = `lead_${cand.trailer.body.id}`;
     const lic = TRAILER_TYPE_TO_LICENSE[cand.trailer.type];
@@ -674,6 +715,7 @@ export class MainScene extends Phaser.Scene {
     }
 
     this.trailer = t;
+    this.decoupleLockout = null;
     this.kingpin = new Kingpin(this, this.truck.body, t.body, t.length, {
       parentOffset: { x: 0, y: 35 },
       trailerOffset: { x: 0, y: trailerOffY },
@@ -703,6 +745,7 @@ export class MainScene extends Phaser.Scene {
     this.settleTrailerOntoHitch(t, this.getLeadRearHitch(lead));
 
     this.pupTrailer = t;
+    this.decoupleLockout = null;
     this.pupKingpin = new Kingpin(this, lead.body, t.body, t.length, {
       parentOffset: { x: 0, y: lead.length / 2 - 18 },
       trailerOffset: { x: 0, y: -t.length / 2 + 14 },
@@ -726,6 +769,11 @@ export class MainScene extends Phaser.Scene {
     // the tractor's open rear fifth-wheel strip, so restoring the collision
     // mask creates no overlap. The old "park clear" teleport was jumping the
     // box backward through walls.
+    // Re-lock guard: block immediate auto-recoupling of this trailer until
+    // the tractor pulls away (pin > 90px from the hitch) + 1.2s cooldown.
+    this.decoupleLockout = { id: t.body.id, armed: false };
+    this.decoupleLockoutUntil = this.time.now + 1200;
+
     if (isPup) {
       this.pupKingpin?.destroy();
       this.pupKingpin = null;
@@ -743,6 +791,26 @@ export class MainScene extends Phaser.Scene {
     t.isReversing = false;
     t.update(16, false); // reset lamps to idle
     TrailerManager.getInstance(this).release(t);
+  }
+
+  /**
+   * Re-lock guard after a decouple: the hitch often still sits at the pin, so
+   * the auto-coupler would instantly grab the same trailer back. The trailer
+   * stays locked out until the tractor moves away (pin > 90px from the hitch)
+   * after the cooldown window.
+   */
+  private decoupleLockoutArmed(t: Trailer, hx: number, hy: number): boolean {
+    if (!this.decoupleLockout || this.decoupleLockout.id !== t.body.id) return true;
+    if (this.decoupleLockout.armed) return true;
+    if (this.time.now < this.decoupleLockoutUntil) return false;
+    const a = t.body.angle;
+    const kx = t.body.position.x + Math.sin(a) * t.kingpinDist;
+    const ky = t.body.position.y - Math.cos(a) * t.kingpinDist;
+    if (Phaser.Math.Distance.Between(hx, hy, kx, ky) > 90) {
+      this.decoupleLockout.armed = true;
+      return true;
+    }
+    return false;
   }
 
   /** Builds the coupling HUD state (decouple button live / blocked indicator / notice). */

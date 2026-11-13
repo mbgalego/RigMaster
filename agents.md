@@ -41,7 +41,12 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.4.3** (Versão Atual — branch `feature/road-network`)
+### **v2.5.0** (Versão Atual — branch `feature/road-network`)
+- **Re-acoplamento pós-desengate corrigido**: após desengatar, o atrelado ficava bloqueado no pino e o acoplamento automático agarrava-o de volta no mesmo frame. Novo guard `decoupleLockout` — o atrelado desengatado só volta a ser acoplável depois de 1.2s de arrefecimento **e** do trator se afastar (pino > 90px do engate, re-armado uma única vez). Aplica-se ao atrelado principal e ao pup do bitrem (guard no ramo pup usando `getLeadRearHitch`); `coupleTrailer`/`couplePup` limpam o lockout.
+- **Zoom no telemóvel (modo condução)**: pinch-to-zoom com 2 dedos no canvas (factor por evento clampado 0.85–1.18), botões +/− de zoom no HUD (`adjustZoom(factor)`, limites 0.45–1.8, ignorados no modo editor) e **zoom default responsivo** — ecrãs pequenos começam mais afastados (`clamp(min(w/900, h/620), 0.5, 1.0)`), acabando o "zoom demasiado elevado" de origem no telemóvel.
+- **Menu do editor em réguas**: os banners flutuantes ao centro foram substituídos por uma **régua horizontal scrollable** que sai da barra esquerda para a direita (`top-14 left-[60px]`, borda colorida por ferramenta). Ferramentas simples = 1 linha (estado + opções como chips `shrink-0`); o **Criar tem 2 linhas** — 1.ª linha com categorias (Edifícios, Docas, Atrelados, Bases, Piso, Barreiras) e 2.ª linha com os objectos da categoria activa; mudar de categoria auto-selecciona o 1.º objecto. Catálogo reorganizado em `CREATE_CATALOG`.
+
+### **v2.4.3** (branch `feature/road-network`)
 - **Fim da penetração de paredes em marcha-atrás**: o seguidor cinemático do atrelado (`followHitch`) passou a ser consciente de obstáculos — detecta a traseira dentro de um corpo estático (`computeTailBlocked`, pontos de teste no centro+quinas da traseira) e nesse caso: mata a velocidade imposta no sentido bloqueado, salta o puxão longitudinal (que era o `setPosition` que atravessava a parede) e o snap de emergência (agora só >60px de erro real = reset).
 - **Puxão longitudinal limitado** a ±2px/frame (antes era proporcional sem teto — outro vector de penetração).
 - **O trator pára quando o atrelado está bloqueado**: clamp da velocidade do trator no sentido de empurrão enquanto `trailer.tailBlocked` — o conjunto trava como um real em vez de continuar a compactar.

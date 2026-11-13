@@ -55,6 +55,70 @@ import {
   Truck,
 } from 'lucide-react';
 
+/** Catálogo do Criar organizado por categorias (régua de 2 linhas do editor). */
+const CREATE_CATALOG: Array<{
+  id: string;
+  label: string;
+  items: Array<{ spec: AddObjectSpec; icon: React.ComponentType<{ className?: string }> }>;
+}> = [
+  {
+    id: 'edif',
+    label: 'Edifícios',
+    items: [
+      { spec: { type: 'building', w: 900, h: 420, variant: 'warehouse_big', label: 'Armazém' }, icon: Building2 },
+      { spec: { type: 'building', w: 420, h: 360, variant: 'shed', label: 'Nave' }, icon: Factory },
+      { spec: { type: 'building', w: 320, h: 220, variant: 'garage', label: 'Garagem' }, icon: Warehouse },
+      { spec: { type: 'building', w: 300, h: 200, variant: 'warehouse', label: 'Edifício' }, icon: Warehouse },
+      { spec: { type: 'building', w: 900, h: 420, variant: 'warehouse_docks', params: { docks: 5 }, label: 'Armazém Docas' }, icon: Building2 },
+    ],
+  },
+  {
+    id: 'docas',
+    label: 'Docas',
+    items: [
+      { spec: { type: 'dock', w: 128, h: 128, label: 'Doca' }, icon: Warehouse },
+      { spec: { type: 'dock_wall', w: 420, h: 56, params: { docks: 3 }, label: 'Muro Docas' }, icon: BrickWall },
+    ],
+  },
+  {
+    id: 'pads',
+    label: 'Atrelados',
+    items: [
+      { spec: { type: 'parking_pad', w: 130, h: 420, params: { trailer: 'standard' }, label: 'Pad C' }, icon: Truck },
+      { spec: { type: 'parking_pad', w: 170, h: 640, params: { trailer: 'long_cargo' }, label: 'Pad CE' }, icon: Truck },
+      { spec: { type: 'parking_pad', w: 140, h: 560, params: { trailer: 'bitrem_lead' }, label: 'Pad H' }, icon: Truck },
+      { spec: { type: 'parking_pad', w: 140, h: 420, params: { trailer: 'fragile_glass' }, label: 'Pad X' }, icon: Truck },
+    ],
+  },
+  {
+    id: 'bases',
+    label: 'Bases',
+    items: [
+      { spec: { type: 'pad_asphalt', w: 700, h: 420, label: 'Alcatrão' }, icon: Layers },
+      { spec: { type: 'pad_dirt', w: 700, h: 420, label: 'Terra' }, icon: Mountain },
+      { spec: { type: 'parking_lot', w: 520, h: 340, label: 'Parque' }, icon: CarFront },
+    ],
+  },
+  {
+    id: 'piso',
+    label: 'Piso',
+    items: [
+      { spec: { type: 'entrance', w: 140, h: 220, label: 'Entrada' }, icon: DoorOpen },
+      { spec: { type: 'crosswalk', w: 36, h: 170, label: 'Passadeira' }, icon: Equal },
+    ],
+  },
+  {
+    id: 'barreiras',
+    label: 'Barreiras',
+    items: [
+      { spec: { type: 'wall', w: 220, h: 26, label: 'Muro' }, icon: BrickWall },
+      { spec: { type: 'jersey_barrier', w: 140, h: 26, label: 'Barreira' }, icon: BrickWall },
+      { spec: { type: 'container_stack', w: 180, h: 140, label: 'Contentores' }, icon: Box },
+      { spec: { type: 'roundabout', w: 420, h: 420, label: 'Rotunda' }, icon: Circle },
+    ],
+  },
+];
+
 export default function App() {
   const gameContainerRef = useRef<HTMLDivElement>(null);
   const [isEditorMode, setIsEditorMode] = useState<boolean>(false);
@@ -86,6 +150,7 @@ export default function App() {
   const editorToolRef = useRef<'pan' | 'road' | 'object' | 'spawn' | 'add'>('pan');
   // Catalog selection for the 'add' (Criar) tool
   const [addType, setAddType] = useState<AddObjectSpec>({ type: 'wall', w: 220, h: 26, label: 'Muro' });
+  const [addCat, setAddCat] = useState<string>('barreiras');
 
   // Road tool live state (polled from EditorScene in the telemetry loop)
   const [roadUI, setRoadUI] = useState<{ hasSelection: boolean; hasPoint: boolean; surface: RoadSurface; width: number; drawing: boolean; twistDeg: number; oneWay: boolean }>({
@@ -319,6 +384,13 @@ export default function App() {
     setAddType(spec);
     const edScene = getEditorScene();
     if (edScene) edScene.setAddObjectType(spec);
+  };
+
+  /** Régua do Criar: muda de categoria e auto-selecciona o 1.º objecto dela. */
+  const handleSetAddCategory = (catId: string) => {
+    setAddCat(catId);
+    const cat = CREATE_CATALOG.find((c) => c.id === catId) ?? CREATE_CATALOG[0];
+    if (cat.items.length > 0) handleSetAddType(cat.items[0].spec);
   };
 
   const handleZoomIn = () => {
@@ -814,102 +886,101 @@ export default function App() {
             </button>
           </aside>
 
-          {/* 2. FLOATING STATUS BANNER FOR ACTIVE MODE */}
-          {editorTool === 'road' && (
-            <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 bg-slate-950/95 border border-sky-400/60 px-4 py-2.5 rounded-xl shadow-2xl backdrop-blur-md flex flex-col items-center gap-2 max-w-[calc(100vw-7rem)]">
-              <div className="flex items-center gap-2 flex-wrap justify-center">
-                <Route className="w-4 h-4 text-sky-400 shrink-0" />
-                <span className="text-xs font-bold text-sky-300 whitespace-nowrap">
-                  MODO ESTRADA: {roadUI.drawing ? 'a desenhar — clica para adicionar pontos' : roadUI.hasSelection ? (roadUI.hasPoint ? 'ponto selecionado — arrasta ou ajusta a largura da secção' : 'estrada selecionada — duplo clique adiciona um ponto') : 'clica no mapa para começar uma estrada'}
-                </span>
-                {/* Surface picker (acts on selection, or as default for new roads) */}
-                <div className="flex gap-1">
-                  {([['asphalt', 'Asfalto'], ['dirt', 'Terra'], ['cobble', 'Calçada']] as Array<[RoadSurface, string]>).map(([id, label]) => (
-                    <button
-                      key={id}
-                      onClick={() => { const ed = getEditorScene(); if (ed) ed.setRoadSurface(id); }}
-                      className={`text-[10px] font-bold px-2 py-1 rounded transition border ${
-                        roadUI.surface === id
-                          ? 'bg-sky-500 text-black border-sky-300'
-                          : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                {/* One-way / two-way toggle */}
-                <button
-                  onClick={() => { const ed = getEditorScene(); if (ed) ed.setRoadOneWay(!roadUI.oneWay); }}
-                  className={`text-[10px] font-bold px-2 py-1 rounded transition border ${
-                    roadUI.oneWay
-                      ? 'bg-amber-400 text-black border-amber-200'
-                      : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
-                  }`}
-                  title="Sem tracejado central — um só sentido (setas amarelas)"
-                >
-                  {roadUI.oneWay ? '→ 1 Sentido' : '⇄ 2 Sentidos'}
-                </button>
-                {/* Width control */}
-                <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5">
-                  <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeRoadWidth(-16); }} className="text-slate-300 hover:text-white px-1 font-black text-xs" title="Reduzir largura (secção selecionada ou estrada toda)">−</button>
-                  <span className="text-[10px] font-bold text-slate-200 w-14 text-center">{roadUI.hasPoint ? 'Secção ' : ''}{Math.round(roadUI.width)}px</span>
-                  <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeRoadWidth(16); }} className="text-slate-300 hover:text-white px-1 font-black text-xs" title="Aumentar largura (secção selecionada ou estrada toda)">+</button>
-                </div>
-                {/* Tangent rotation at the selected point (edge direction) */}
-                {roadUI.hasPoint && (
-                  <div className="flex items-center gap-1 bg-slate-900 border border-violet-500/60 rounded px-1.5 py-0.5">
-                    <span className="text-[9px] font-bold text-violet-300 px-0.5">Tangente</span>
-                    <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeTwist(-5); }} className="text-slate-300 hover:text-white px-1 font-black text-xs">−</button>
-                    <span className="text-[10px] font-bold text-slate-200 w-10 text-center">{roadUI.twistDeg}°</span>
-                    <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeTwist(5); }} className="text-slate-300 hover:text-white px-1 font-black text-xs">+</button>
-                    <button onClick={() => { const ed = getEditorScene(); if (ed) ed.resetTwist(); }} className="text-[9px] font-bold text-violet-300 hover:text-white px-1">Reta</button>
-                  </div>
-                )}
-                {roadUI.drawing && (
+          {/* 2. RÉGUA — subopções da ferramenta, a sair da barra esquerda.
+              Uma linha scrollable; o Criar tem 2 linhas (categorias + objectos). */}
+          <div className="absolute top-14 left-[60px] sm:left-[68px] right-2 z-20">
+            <div
+              className={`bg-slate-950/95 border rounded-xl shadow-2xl backdrop-blur-md px-2 py-2 flex flex-col gap-1.5 max-w-full ${
+                editorTool === 'pan' ? 'border-cyan-400/60' :
+                editorTool === 'road' ? 'border-sky-400/60' :
+                editorTool === 'object' ? 'border-amber-400/60' :
+                editorTool === 'add' ? 'border-violet-400/60' : 'border-emerald-400/60'
+              }`}
+            >
+              {/* ROW 1 — estado + opções rápidas (scrollable) */}
+              <div className="flex items-center gap-1.5 overflow-x-auto" style={{ scrollbarWidth: 'thin' }}>
+                {editorTool === 'pan' && (
                   <>
-                    <button onClick={() => { const ed = getEditorScene(); if (ed) ed.removeLastPendingPoint(); }} className="text-[10px] font-bold bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800 px-2 py-1 rounded">Retroceder Ponto</button>
-                    <button onClick={() => { const ed = getEditorScene(); if (ed) ed.finishPendingRoad(); }} className="text-[10px] font-bold bg-emerald-500 text-black border border-emerald-300 hover:bg-emerald-400 px-2 py-1 rounded">Terminar</button>
+                    <Hand className="w-4 h-4 text-cyan-400 shrink-0 animate-bounce" />
+                    <span className="text-xs font-bold text-cyan-300 whitespace-nowrap shrink-0">MOVER: Arrasta (rato/botão do meio/2 dedos) — funciona sempre, em qualquer ferramenta</span>
                   </>
                 )}
-                {roadUI.hasSelection && !roadUI.drawing && (
-                  <button onClick={() => { const ed = getEditorScene(); if (ed) ed.deleteSelectedRoad(); }} className="text-[10px] font-bold bg-red-500 text-white border border-red-300 hover:bg-red-400 px-2 py-1 rounded">Apagar Selecionada</button>
-                )}
-              </div>
-              <span className="text-[10px] text-slate-400 text-center">
-                Clica: pontos · Enter/duplo clique: terminar · Duplo clique na estrada: inserir ponto · Círculo laranja: largura · Verde +: estender · Knob violeta: rodar a faixa · Esc: cancelar · Del: apagar estrada
-              </span>
-            </div>
-          )}
-          {editorTool !== 'road' && (
-            <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 bg-slate-950/95 border border-cyan-400/60 px-3.5 py-1.5 rounded-full shadow-2xl flex items-center gap-2.5 backdrop-blur-md max-w-[calc(100vw-7rem)]">
-              {editorTool === 'pan' && (
-                <>
-                  <Hand className="w-4 h-4 text-cyan-400 animate-bounce" />
-                  <span className="text-xs font-bold text-cyan-300">MODO MOVER (PAN): Arrasta com o rato (botão do meio também) ou 2 dedos — funciona sempre, em qualquer ferramenta</span>
-                </>
-              )}
-              {editorTool === 'object' && (
-                <>
-                  <Box className="w-4 h-4 text-amber-400" />
-                  {objectUI.hasSelection ? (
-                    <>
-                      <span className="text-xs font-bold text-amber-300">
-                        OBJECTO: {objectUI.type} · {objectUI.angleDeg}°
-                      </span>
+                {editorTool === 'road' && (
+                  <>
+                    <Route className="w-4 h-4 text-sky-400 shrink-0" />
+                    <span className="text-xs font-bold text-sky-300 whitespace-nowrap shrink-0">
+                      ESTRADA: {roadUI.drawing ? 'a desenhar — clica para adicionar pontos' : roadUI.hasSelection ? (roadUI.hasPoint ? 'ponto selecionado' : 'estrada selecionada — duplo clique adiciona ponto') : 'clica para começar'}
+                    </span>
+                    {([['asphalt', 'Asfalto'], ['dirt', 'Terra'], ['cobble', 'Calçada']] as Array<[RoadSurface, string]>).map(([id, label]) => (
                       <button
-                        onClick={() => { const ed = getEditorScene(); if (ed) ed.deleteSelectedObject(); }}
-                        className="text-[10px] font-bold bg-red-500 text-white border border-red-300 hover:bg-red-400 px-2 py-1 rounded"
+                        key={id}
+                        onClick={() => { const ed = getEditorScene(); if (ed) ed.setRoadSurface(id); }}
+                        className={`shrink-0 text-[10px] font-bold px-2 py-1 rounded transition border ${
+                          roadUI.surface === id
+                            ? 'bg-sky-500 text-black border-sky-300'
+                            : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
+                        }`}
                       >
-                        Apagar
+                        {label}
                       </button>
-                      {objectUI.type === 'parking_pad' && (
-                        <div className="flex gap-1">
-                          {([['C', 'standard'], ['CE', 'long_cargo'], ['H', 'bitrem_lead'], ['X', 'fragile_glass']] as Array<[string, string]>).map(([lbl, val]) => (
+                    ))}
+                    <button
+                      onClick={() => { const ed = getEditorScene(); if (ed) ed.setRoadOneWay(!roadUI.oneWay); }}
+                      className={`shrink-0 text-[10px] font-bold px-2 py-1 rounded transition border ${
+                        roadUI.oneWay
+                          ? 'bg-amber-400 text-black border-amber-200'
+                          : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
+                      }`}
+                      title="Sem tracejado central — um só sentido (setas amarelas)"
+                    >
+                      {roadUI.oneWay ? '→ 1 Sentido' : '⇄ 2 Sentidos'}
+                    </button>
+                    <div className="shrink-0 flex items-center gap-1 bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5">
+                      <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeRoadWidth(-16); }} className="text-slate-300 hover:text-white px-1 font-black text-xs" title="Reduzir largura">−</button>
+                      <span className="text-[10px] font-bold text-slate-200 w-14 text-center">{roadUI.hasPoint ? 'Secção ' : ''}{Math.round(roadUI.width)}px</span>
+                      <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeRoadWidth(16); }} className="text-slate-300 hover:text-white px-1 font-black text-xs" title="Aumentar largura">+</button>
+                    </div>
+                    {roadUI.hasPoint && (
+                      <div className="shrink-0 flex items-center gap-1 bg-slate-900 border border-violet-500/60 rounded px-1.5 py-0.5">
+                        <span className="text-[9px] font-bold text-violet-300 px-0.5">Tangente</span>
+                        <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeTwist(-5); }} className="text-slate-300 hover:text-white px-1 font-black text-xs">−</button>
+                        <span className="text-[10px] font-bold text-slate-200 w-10 text-center">{roadUI.twistDeg}°</span>
+                        <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeTwist(5); }} className="text-slate-300 hover:text-white px-1 font-black text-xs">+</button>
+                        <button onClick={() => { const ed = getEditorScene(); if (ed) ed.resetTwist(); }} className="text-[9px] font-bold text-violet-300 hover:text-white px-1">Reta</button>
+                      </div>
+                    )}
+                    {roadUI.drawing && (
+                      <>
+                        <button onClick={() => { const ed = getEditorScene(); if (ed) ed.removeLastPendingPoint(); }} className="shrink-0 text-[10px] font-bold bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800 px-2 py-1 rounded">Retroceder Ponto</button>
+                        <button onClick={() => { const ed = getEditorScene(); if (ed) ed.finishPendingRoad(); }} className="shrink-0 text-[10px] font-bold bg-emerald-500 text-black border border-emerald-300 hover:bg-emerald-400 px-2 py-1 rounded">Terminar</button>
+                      </>
+                    )}
+                    {roadUI.hasSelection && !roadUI.drawing && (
+                      <button onClick={() => { const ed = getEditorScene(); if (ed) ed.deleteSelectedRoad(); }} className="shrink-0 text-[10px] font-bold bg-red-500 text-white border border-red-300 hover:bg-red-400 px-2 py-1 rounded">Apagar Selecionada</button>
+                    )}
+                    <span className="text-[10px] text-slate-400 whitespace-nowrap shrink-0 hidden lg:inline">Enter/duplo clique: terminar · Del: apagar · Esc: cancelar</span>
+                  </>
+                )}
+                {editorTool === 'object' && (
+                  <>
+                    <Box className="w-4 h-4 text-amber-400 shrink-0" />
+                    {objectUI.hasSelection ? (
+                      <>
+                        <span className="text-xs font-bold text-amber-300 whitespace-nowrap shrink-0">
+                          OBJECTO: {objectUI.type} · {objectUI.angleDeg}°
+                        </span>
+                        <button
+                          onClick={() => { const ed = getEditorScene(); if (ed) ed.deleteSelectedObject(); }}
+                          className="shrink-0 text-[10px] font-bold bg-red-500 text-white border border-red-300 hover:bg-red-400 px-2 py-1 rounded"
+                        >
+                          Apagar
+                        </button>
+                        {objectUI.type === 'parking_pad' && (
+                          ([['C', 'standard'], ['CE', 'long_cargo'], ['H', 'bitrem_lead'], ['X', 'fragile_glass']] as Array<[string, string]>).map(([lbl, val]) => (
                             <button
                               key={val}
                               onClick={() => { const ed = getEditorScene(); if (ed) ed.setTrailerPadType(objectUI.id, val); }}
-                              className={`text-[10px] font-bold px-2 py-1 rounded border ${
+                              className={`shrink-0 text-[10px] font-bold px-2 py-1 rounded border ${
                                 objectUI.trailer === val
                                   ? 'bg-amber-400 text-slate-900 border-amber-200'
                                   : 'bg-slate-800 text-amber-300 border-slate-600 hover:bg-slate-700'
@@ -917,72 +988,66 @@ export default function App() {
                             >
                               {lbl}
                             </button>
-                          ))}
-                        </div>
-                      )}
-                      <span className="text-[10px] text-slate-400 hidden lg:inline whitespace-nowrap">
-                        arrasta = mover · pega rosa = rodar livre{objectUI.resizable ? ' · quadrados brancos = redimensionar' : ''}
-                      </span>
-                    </>
-                  ) : (
-                    <span className="text-xs font-bold text-amber-300">MODO OBJECTOS: Clica num objecto para o selecionar — arrasta para mover, Del apaga</span>
-                  )}
-                </>
-              )}
-              {editorTool === 'spawn' && (
-                <>
-                  <Compass className="w-4 h-4 text-emerald-400 animate-spin" />
-                  <span className="text-xs font-bold text-emerald-300">MODO SPAWN: Clica no mapa para definir o ponto de partida do camião</span>
-                </>
-              )}
-              {editorTool === 'add' && (
-                <>
-                  <Plus className="w-4 h-4 text-violet-400" />
-                  <span className="text-xs font-bold text-violet-300 whitespace-nowrap">CRIAR:</span>
-                  <div className="flex gap-1 flex-wrap justify-center">
-                    {(
-                      [
-                        { spec: { type: 'wall', w: 220, h: 26, label: 'Muro' }, icon: BrickWall, tint: 'violet' },
-                        { spec: { type: 'entrance', w: 140, h: 220, label: 'Entrada' }, icon: DoorOpen, tint: 'violet' },
-                        { spec: { type: 'parking_lot', w: 520, h: 340, label: 'Parque' }, icon: CarFront, tint: 'violet' },
-                        { spec: { type: 'building', w: 900, h: 420, variant: 'warehouse_big', label: 'Armazém' }, icon: Building2, tint: 'violet' },
-                        { spec: { type: 'building', w: 420, h: 360, variant: 'shed', label: 'Nave' }, icon: Factory, tint: 'violet' },
-                        { spec: { type: 'building', w: 320, h: 220, variant: 'garage', label: 'Garagem' }, icon: Warehouse, tint: 'violet' },
-                        { spec: { type: 'building', w: 300, h: 200, variant: 'warehouse', label: 'Edifício' }, icon: Warehouse, tint: 'violet' },
-                        { spec: { type: 'roundabout', w: 420, h: 420, label: 'Rotunda' }, icon: Circle, tint: 'violet' },
-                        { spec: { type: 'crosswalk', w: 36, h: 170, label: 'Passadeira' }, icon: Equal, tint: 'violet' },
-                        { spec: { type: 'jersey_barrier', w: 140, h: 26, label: 'Barreira' }, icon: BrickWall, tint: 'violet' },
-                        { spec: { type: 'container_stack', w: 180, h: 140, label: 'Contentores' }, icon: Box, tint: 'violet' },
-                        { spec: { type: 'dock', w: 128, h: 128, label: 'Doca' }, icon: Warehouse, tint: 'violet' },
-                        { spec: { type: 'pad_asphalt', w: 700, h: 420, label: 'Alcatrão' }, icon: Layers, tint: 'violet' },
-                        { spec: { type: 'pad_dirt', w: 700, h: 420, label: 'Terra' }, icon: Mountain, tint: 'violet' },
-                        { spec: { type: 'dock_wall', w: 420, h: 56, params: { docks: 3 }, label: 'Muro Docas' }, icon: BrickWall, tint: 'violet' },
-                        { spec: { type: 'building', w: 900, h: 420, variant: 'warehouse_docks', params: { docks: 5 }, label: 'Armazém Docas' }, icon: Building2, tint: 'violet' },
-                        { spec: { type: 'parking_pad', w: 130, h: 420, params: { trailer: 'standard' }, label: 'Pad C' }, icon: Truck, tint: 'violet' },
-                        { spec: { type: 'parking_pad', w: 170, h: 640, params: { trailer: 'long_cargo' }, label: 'Pad CE' }, icon: Truck, tint: 'violet' },
-                        { spec: { type: 'parking_pad', w: 140, h: 560, params: { trailer: 'bitrem_lead' }, label: 'Pad H' }, icon: Truck, tint: 'violet' },
-                        { spec: { type: 'parking_pad', w: 140, h: 420, params: { trailer: 'fragile_glass' }, label: 'Pad X' }, icon: Truck, tint: 'violet' },
-                      ] as Array<{ spec: AddObjectSpec; icon: React.ComponentType<{ className?: string }>; tint: string }>
-                    ).map(({ spec, icon: Icon }) => (
+                          ))
+                        )}
+                        <span className="text-[10px] text-slate-400 whitespace-nowrap shrink-0 hidden lg:inline">
+                          arrasta = mover · pega rosa = rodar livre{objectUI.resizable ? ' · quadrados brancos = redimensionar' : ''}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-xs font-bold text-amber-300 whitespace-nowrap shrink-0">OBJECTOS: Clica num objecto — arrasta para mover, Del apaga</span>
+                    )}
+                  </>
+                )}
+                {editorTool === 'spawn' && (
+                  <>
+                    <Compass className="w-4 h-4 text-emerald-400 shrink-0 animate-spin" />
+                    <span className="text-xs font-bold text-emerald-300 whitespace-nowrap shrink-0">SPAWN: Clica no mapa para definir o ponto de partida do camião</span>
+                  </>
+                )}
+                {editorTool === 'add' && (
+                  <>
+                    <Plus className="w-4 h-4 text-violet-400 shrink-0" />
+                    <span className="text-xs font-bold text-violet-300 whitespace-nowrap shrink-0">CRIAR:</span>
+                    {CREATE_CATALOG.map((cat) => (
                       <button
-                        key={spec.label}
-                        onClick={() => handleSetAddType(spec)}
-                        className={`flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded border transition ${
-                          addType.label === spec.label
+                        key={cat.id}
+                        onClick={() => handleSetAddCategory(cat.id)}
+                        className={`shrink-0 text-[10px] font-black px-2.5 py-1 rounded border transition ${
+                          addCat === cat.id
                             ? 'bg-violet-500 text-black border-violet-300'
-                            : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
+                            : 'bg-slate-900 text-violet-300 border-slate-800 hover:bg-slate-800'
                         }`}
                       >
-                        <Icon className="w-3 h-3" />
-                        {spec.label}
+                        {cat.label}
                       </button>
                     ))}
-                  </div>
-                  <span className="text-[10px] text-slate-400 hidden lg:inline whitespace-nowrap">clica no mapa para colocar</span>
-                </>
+                    <span className="text-[10px] text-slate-400 whitespace-nowrap shrink-0 hidden lg:inline">clica no mapa para colocar</span>
+                  </>
+                )}
+              </div>
+
+              {/* ROW 2 (só Criar) — objectos da categoria ativa (scrollable) */}
+              {editorTool === 'add' && (
+                <div className="flex items-center gap-1.5 overflow-x-auto pt-1.5 border-t border-slate-800" style={{ scrollbarWidth: 'thin' }}>
+                  {(CREATE_CATALOG.find((c) => c.id === addCat) ?? CREATE_CATALOG[0]).items.map(({ spec, icon: Icon }) => (
+                    <button
+                      key={spec.label}
+                      onClick={() => handleSetAddType(spec)}
+                      className={`shrink-0 flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded border transition ${
+                        addType.label === spec.label
+                          ? 'bg-violet-500 text-black border-violet-300'
+                          : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
+                      }`}
+                    >
+                      <Icon className="w-3 h-3" />
+                      {spec.label}
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
-          )}
+          </div>
         </>
       )}
 
@@ -1327,6 +1392,26 @@ export default function App() {
         const scene = getMainScene();
         if (scene) scene.decoupleAction();
       }} />
+
+      {/* ZOOM CONTROLS (drive mode) — pinch on mobile, buttons everywhere */}
+      {!isEditorMode && (
+        <div className="absolute right-2 sm:right-3 top-14 z-30 flex flex-col gap-1.5">
+          <button
+            onClick={() => { const s = getMainScene(); if (s) s.adjustZoom(1.18); }}
+            className="w-10 h-10 rounded-lg bg-slate-950/90 text-cyan-300 border border-cyan-500/50 hover:bg-slate-800 hover:text-white flex items-center justify-center shadow-lg backdrop-blur-md"
+            title="Aproximar (pinça no telemóvel também funciona)"
+          >
+            <ZoomIn className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => { const s = getMainScene(); if (s) s.adjustZoom(1 / 1.18); }}
+            className="w-10 h-10 rounded-lg bg-slate-950/90 text-cyan-300 border border-cyan-500/50 hover:bg-slate-800 hover:text-white flex items-center justify-center shadow-lg backdrop-blur-md"
+            title="Afastar (pinça no telemóvel também funciona)"
+          >
+            <ZoomOut className="w-4 h-4" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
