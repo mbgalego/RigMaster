@@ -81,8 +81,19 @@ const CREATE_CATALOG: Array<{
     ],
   },
   {
-    id: 'pads',
+    id: 'tr',
     label: 'Atrelados',
+    items: [
+      { spec: { type: 'trailer', w: 46, h: 220, params: { trailer: 'standard' }, label: 'Atrelado' }, icon: Truck },
+      { spec: { type: 'trailer', w: 46, h: 220, params: { trailer: 'fragile_glass' }, label: 'Vidro' }, icon: Truck },
+      { spec: { type: 'trailer', w: 46, h: 310, params: { trailer: 'long_cargo' }, label: 'Pá Eólica' }, icon: Truck },
+      { spec: { type: 'trailer', w: 46, h: 155, params: { trailer: 'bitrem_lead' }, label: 'Bitrem Frente' }, icon: Truck },
+      { spec: { type: 'trailer', w: 46, h: 155, params: { trailer: 'bitrem_pup' }, label: 'Bitrem Trás' }, icon: Truck },
+    ],
+  },
+  {
+    id: 'pads',
+    label: 'Pads',
     items: [
       { spec: { type: 'parking_pad', w: 130, h: 420, params: { trailer: 'standard' }, label: 'Pad C' }, icon: Truck },
       { spec: { type: 'parking_pad', w: 170, h: 640, params: { trailer: 'long_cargo' }, label: 'Pad CE' }, icon: Truck },
@@ -423,6 +434,8 @@ export default function App() {
     if (scene) {
       const ok = scene.world.importJSON(jsonContent);
       if (ok) {
+        // Respawn every loose trailer from the imported pads + 'trailer' objects
+        scene.rebuildTrailers();
         setShowJsonModal(false);
         setJsonError(null);
       } else {
@@ -975,8 +988,8 @@ export default function App() {
                         >
                           Apagar
                         </button>
-                        {objectUI.type === 'parking_pad' && (
-                          ([['C', 'standard'], ['CE', 'long_cargo'], ['H', 'bitrem_lead'], ['X', 'fragile_glass']] as Array<[string, string]>).map(([lbl, val]) => (
+                        {objectUI.type === 'parking_pad' || objectUI.type === 'trailer' ? (
+                          ([['C', 'standard'], ['CE', 'long_cargo'], ['H', 'bitrem_lead'], ['P', 'bitrem_pup'], ['X', 'fragile_glass']] as Array<[string, string]>).map(([lbl, val]) => (
                             <button
                               key={val}
                               onClick={() => { const ed = getEditorScene(); if (ed) ed.setTrailerPadType(objectUI.id, val); }}
@@ -989,7 +1002,7 @@ export default function App() {
                               {lbl}
                             </button>
                           ))
-                        )}
+                        ) : null}
                         <span className="text-[10px] text-slate-400 whitespace-nowrap shrink-0 hidden lg:inline">
                           arrasta = mover · pega rosa = rodar livre{objectUI.resizable ? ' · quadrados brancos = redimensionar' : ''}
                         </span>

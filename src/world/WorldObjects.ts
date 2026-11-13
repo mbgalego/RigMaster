@@ -13,6 +13,7 @@ import { WorldTerrain } from './WorldTerrain';
 export type WObjType =
   | 'dock'            // flat loading platform (hub docks, factory docks)
   | 'parking_pad'     // flat trailer parking slot (params.trailer → spawns one; future capture point)
+  | 'trailer'        // DATA-ONLY: editor-placed loose trailer (params.trailer → live entity, no static body)
   | 'pad_asphalt'     // flat asphalt base pad (yard ground, no collision)
   | 'pad_dirt'        // flat dirt/gravel base pad (yard ground, no collision)
   | 'dock_wall'       // solid wall with loading-dock bays (params.docks)

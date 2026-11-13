@@ -50,6 +50,8 @@ export class Trailer {
   public prevHitchX: number = 0;
   public prevHitchY: number = 0;
   public hasPrevHitch: boolean = false;
+  /** WorldObject id when this loose trailer was placed by the editor (data-only 'trailer' object). */
+  public wobjId?: string;
 
   constructor(scene: Phaser.Scene, config: TrailerConfig) {
     this.scene = scene;

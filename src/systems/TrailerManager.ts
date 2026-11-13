@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { Trailer, TrailerType } from '../entities/Trailer';
 import type { LicenseId } from './LicenseSystem';
+import type { WorldObject } from '../world/WorldObjects';
 
 /** Trailer type -> license required to couple it */
 export const TRAILER_TYPE_TO_LICENSE: Record<TrailerType, LicenseId> = {
@@ -49,6 +50,11 @@ export class TrailerManager {
   public rebuild(pads: Array<{ x: number; y: number; angle: number; type: TrailerType }>) {
     this.destroyAll();
     for (const pad of pads) this.spawnAt(pad.x, pad.y, pad.type, pad.angle);
+    // Editor-placed trailers live as data-only 'trailer' world objects — respawn them
+    const world = (this.scene as any).world;
+    for (const o of (world?.objects?.objects ?? []) as WorldObject[]) {
+      if (o.type === 'trailer' && !o.temp) this.spawnObjectTrailer(o);
+    }
   }
 
   /**
@@ -57,7 +63,7 @@ export class TrailerManager {
    * depot posture: the tractor reverses straight into the nose.
    * Bitrem spots also park a pup behind the lead's rear.
    */
-  public spawnAt(x: number, y: number, type: TrailerType, angle: number = Math.PI) {
+  public spawnAt(x: number, y: number, type: TrailerType, angle: number = Math.PI, withPup: boolean = true): Trailer {
     const noseAngle = angle;
 
     const lead = new Trailer(this.scene, { x, y, angle: noseAngle, type });
@@ -66,7 +72,7 @@ export class TrailerManager {
     this.applyParkedFilter(lead);
     this.loose.push(lead);
 
-    if (type === 'bitrem_lead') {
+    if (withPup && type === 'bitrem_lead') {
       // Pup behind the lead's rear bumper (opposite the nose direction)
       const D = lead.length / 2 + 155 / 2 + 12;
       const px = x - Math.sin(noseAngle) * D;
@@ -76,6 +82,33 @@ export class TrailerManager {
       this.applyParkedFilter(pup);
       this.loose.push(pup);
     }
+    return lead;
+  }
+
+  /** Spawns the live loose trailer backing a data-only 'trailer' world object. */
+  public spawnObjectTrailer(o: WorldObject): Trailer | null {
+    if (o.type !== 'trailer') return null;
+    const type = String(o.params?.trailer || 'standard') as TrailerType;
+    const t = this.spawnAt(o.x, o.y, type, o.angle, false);
+    t.wobjId = o.id;
+    return t;
+  }
+
+  /** Re-syncs the live trailer with its world object after an editor move/rotate. */
+  public syncForObject(o: WorldObject) {
+    if (o.type !== 'trailer') return;
+    const t = this.loose.find((tr) => tr.wobjId === o.id);
+    if (!t) return;
+    t.setPosition(o.x, o.y, o.angle);
+    t.syncBlocker();
+  }
+
+  /** Destroys the live trailer backing a 'trailer' world object (editor delete). */
+  public removeForObject(wobjId: string) {
+    const t = this.loose.find((tr) => tr.wobjId === wobjId);
+    if (!t) return;
+    this.loose = this.loose.filter((tr) => tr !== t);
+    t.destroy();
   }
 
   /**

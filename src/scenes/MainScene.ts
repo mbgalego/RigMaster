@@ -551,10 +551,9 @@ export class MainScene extends Phaser.Scene {
     // under the pup's nose plate to the pin — same corridor as the tractor.
     if (this.trailer) {
       if (this.trailer.type === 'bitrem_lead' && !this.pupTrailer) {
-        const leadHitch = this.getLeadRearHitch(this.trailer);
         const cand = mgr.findCouplablePup(this.trailer, 30, 28);
         if (!cand) { reset(); return; }
-        if (!this.decoupleLockoutArmed(cand.trailer, leadHitch.x, leadHitch.y)) { reset(); return; }
+        if (!this.decoupleLockoutArmed(cand.trailer)) { reset(); return; }
         const key = `pup_${cand.trailer.body.id}`;
         if (!this.licenseSystem.isUnlocked('H')) { fail(key, 'Requer licença H', 'blocked'); return; }
         if (!creepSpeed) { fail(key, 'Ralentiza para engatar o bitrem traseiro', 'info'); return; }
@@ -570,7 +569,7 @@ export class MainScene extends Phaser.Scene {
     const hitch = this.getTruckHitch();
     const cand = mgr.findCouplable(hitch.x, hitch.y, this.truck.body.angle, 30, 28, ['bitrem_pup']);
     if (!cand) { reset(); return; }
-    if (!this.decoupleLockoutArmed(cand.trailer, hitch.x, hitch.y)) { reset(); return; }
+    if (!this.decoupleLockoutArmed(cand.trailer)) { reset(); return; }
 
     const key = `lead_${cand.trailer.body.id}`;
     const lic = TRAILER_TYPE_TO_LICENSE[cand.trailer.type];
@@ -695,6 +694,13 @@ export class MainScene extends Phaser.Scene {
 
     mgr.prepareForCoupling(t);
     mgr.adopt(t);
+    // If this trailer was editor-placed, its data-only world object must go —
+    // otherwise a later rebuild would respawn a duplicate at the old position.
+    if (t.wobjId) {
+      this.world.objects.remove(t.wobjId);
+      this.world.version++;
+      t.wobjId = undefined;
+    }
 
     // No teleport: the trailer stays exactly where the tractor engaged it. The
     // kingpin's gentle per-frame correction settles it onto the fifth wheel with
@@ -743,6 +749,12 @@ export class MainScene extends Phaser.Scene {
 
     // No teleport: same gentle settle as the main coupling
     this.settleTrailerOntoHitch(t, this.getLeadRearHitch(lead));
+    // Editor-placed pup: drop the backing world object (no respawn duplicates)
+    if (t.wobjId) {
+      this.world.objects.remove(t.wobjId);
+      this.world.version++;
+      t.wobjId = undefined;
+    }
 
     this.pupTrailer = t;
     this.decoupleLockout = null;
@@ -795,22 +807,42 @@ export class MainScene extends Phaser.Scene {
 
   /**
    * Re-lock guard after a decouple: the hitch often still sits at the pin, so
-   * the auto-coupler would instantly grab the same trailer back. The trailer
-   * stays locked out until the tractor moves away (pin > 90px from the hitch)
-   * after the cooldown window.
+   * the auto-coupler would instantly grab the same trailer back. Arming is
+   * evaluated EVERY frame (not just when a candidate is in the zone — it could
+   * otherwise never arm): after the cooldown, the lockout releases once the
+   * tractor has genuinely moved away (pin > 90px from the relevant hitch).
    */
-  private decoupleLockoutArmed(t: Trailer, hx: number, hy: number): boolean {
-    if (!this.decoupleLockout || this.decoupleLockout.id !== t.body.id) return true;
-    if (this.decoupleLockout.armed) return true;
-    if (this.time.now < this.decoupleLockoutUntil) return false;
+  private updateDecoupleLockoutArming() {
+    const lock = this.decoupleLockout;
+    if (!lock || lock.armed) return;
+    if (this.time.now < this.decoupleLockoutUntil) return;
+    const t = TrailerManager.getInstance(this).loose.find((tr) => tr.body.id === lock.id);
+    if (!t) { this.decoupleLockout = null; return; }
+
+    // Hitch point that would re-couple it: the truck's fifth wheel for a lead
+    // trailer, the lead's rear fifth wheel for a pup.
+    let hx: number, hy: number;
+    if (this.trailer && this.trailer.type === 'bitrem_lead') {
+      const h = this.getLeadRearHitch(this.trailer);
+      hx = h.x; hy = h.y;
+    } else if (!this.trailer) {
+      const h = this.getTruckHitch();
+      hx = h.x; hy = h.y;
+    } else {
+      return; // a standard trailer is coupled — nothing can couple anyway
+    }
     const a = t.body.angle;
     const kx = t.body.position.x + Math.sin(a) * t.kingpinDist;
     const ky = t.body.position.y - Math.cos(a) * t.kingpinDist;
     if (Phaser.Math.Distance.Between(hx, hy, kx, ky) > 90) {
-      this.decoupleLockout.armed = true;
-      return true;
+      lock.armed = true;
     }
-    return false;
+  }
+
+  /** Candidate-level check: is this trailer past its post-decouple lockout? */
+  private decoupleLockoutArmed(t: Trailer): boolean {
+    const lock = this.decoupleLockout;
+    return !lock || lock.id !== t.body.id || lock.armed;
   }
 
   /** Builds the coupling HUD state (decouple button live / blocked indicator / notice). */
@@ -891,6 +923,11 @@ export class MainScene extends Phaser.Scene {
 
   public reseedWorld() {
     this.world.reseed();
+    TrailerManager.getInstance(this).rebuild(this.world.parkingPads);
+  }
+
+  /** Respawns every loose trailer from pads + editor 'trailer' objects (after JSON import). */
+  public rebuildTrailers() {
     TrailerManager.getInstance(this).rebuild(this.world.parkingPads);
   }
 
@@ -1008,6 +1045,7 @@ export class MainScene extends Phaser.Scene {
       }
 
       // Automatic fifth-wheel coupling (tractor sits in the kingpin zone)
+      this.updateDecoupleLockoutArming();
       this.updateAutoCoupling();
 
       // Check Docking Sensor Proximity

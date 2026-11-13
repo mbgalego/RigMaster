@@ -4,6 +4,7 @@ import { GarageSystem } from '../systems/GarageSystem';
 import { RoadNetwork, RoadData, RoadPoint, RoadSurface } from '../systems/RoadNetwork';
 import { WorldObject, WObjType } from '../world/WorldObjects';
 import { World } from '../world/World';
+import { TrailerManager } from '../systems/TrailerManager';
 
 /** Catalog entry for the 'add' tool (chosen in the UI panel). */
 export interface AddObjectSpec {
@@ -659,21 +660,37 @@ export class EditorScene extends Phaser.Scene {
       const delta = Math.atan2(wp.y - o.y, wp.x - o.x) - (d.startPointerAngle ?? 0);
       this.mainScene.world.objects.setObjectAngle(o.id, (d.startAngle ?? o.angle) + delta);
       o.angle = this.mainScene.world.objects.get(o.id)!.angle; // follow the knob visually
+      if (o.type === 'trailer') TrailerManager.getInstance(this.mainScene).syncForObject(o);
       this.roadDirtySinceRelease = true;
       return;
     }
 
     if (d.mode === 'resize' && this.isResizable(o)) {
-      // Pointer position in the object's local frame (resize from the centre)
+      // Pointer position in the object's local frame
       const dx = wp.x - o.x, dy = wp.y - o.y;
       const c = Math.cos(o.angle), s = Math.sin(o.angle);
       const lx = c * dx + s * dy;
       const ly = -s * dx + c * dy;
-      const w = Math.max(20, Math.abs(2 * lx));
-      const h = Math.max(20, Math.abs(2 * ly));
+      // Anchored resize: the OPPOSITE corner stays pinned and the box grows
+      // only in the direction being dragged (centre shifts, not both edges).
+      const sx = (d.corner ?? 0) % 2 === 0 ? -1 : 1;
+      const sy = (d.corner ?? 0) < 2 ? -1 : 1;
+      const fx = -(sx * (d.startW ?? o.w)) / 2; // fixed corner (local frame)
+      const fy = -(sy * (d.startH ?? o.h)) / 2;
+      const w = Math.max(20, Math.abs(lx - fx));
+      const h = Math.max(20, Math.abs(ly - fy));
       this.mainScene.world.objects.resizeObject(o.id, w, h);
-      o.w = this.mainScene.world.objects.get(o.id)!.w;
-      o.h = this.mainScene.world.objects.get(o.id)!.h;
+      const cur = this.mainScene.world.objects.get(o.id)!;
+      o.w = cur.w; o.h = cur.h;
+      // Keep the fixed corner put: shift the centre by half the size delta
+      // (direction the pointer is on), rotated back into world space.
+      const dirX = lx >= fx ? 1 : -1;
+      const dirY = ly >= fy ? 1 : -1;
+      const ncx = fx + dirX * (cur.w / 2);
+      const ncy = fy + dirY * (cur.h / 2);
+      this.mainScene.world.objects.moveObject(o.id, o.x + ncx * c - ncy * s, o.y + ncx * s + ncy * c);
+      const moved = this.mainScene.world.objects.get(o.id)!;
+      o.x = moved.x; o.y = moved.y;
       this.roadDirtySinceRelease = true;
       return;
     }
@@ -684,6 +701,7 @@ export class EditorScene extends Phaser.Scene {
       this.mainScene.world.objects.moveObject(o.id, o.x + ddx, o.y + ddy);
       d.grabX += ddx;
       d.grabY += ddy;
+      if (o.type === 'trailer') TrailerManager.getInstance(this.mainScene).syncForObject(o);
       this.roadDirtySinceRelease = true; // minimap refresh on release
     }
   }
@@ -691,11 +709,18 @@ export class EditorScene extends Phaser.Scene {
   public rotateSelectedObject(deltaDeg: number) {
     if (!this.selectedObject) return;
     this.mainScene.world.objects.rotateObject(this.selectedObject.id, Phaser.Math.DegToRad(deltaDeg));
+    if (this.selectedObject.type === 'trailer') {
+      TrailerManager.getInstance(this.mainScene).syncForObject(this.selectedObject);
+    }
     this.mainScene.world.version++;
   }
 
   public deleteSelectedObject() {
     if (!this.selectedObject) return;
+    // Editor-placed trailer: kill the live entity backing the data object
+    if (this.selectedObject.type === 'trailer') {
+      TrailerManager.getInstance(this.mainScene).removeForObject(this.selectedObject.id);
+    }
     this.mainScene.world.objects.remove(this.selectedObject.id);
     this.selectedObject = null;
     this.objectDrag = null;
@@ -710,16 +735,27 @@ export class EditorScene extends Phaser.Scene {
       type: o ? o.type : '',
       angleDeg: o ? Math.round(Phaser.Math.RadToDeg(o.angle)) : 0,
       resizable: o ? this.isResizable(o) : false,
-      trailer: o && o.type === 'parking_pad' ? String(o.params?.trailer || 'standard') : '',
+      trailer: o && (o.type === 'parking_pad' || o.type === 'trailer') ? String(o.params?.trailer || 'standard') : '',
     };
   }
 
-  /** Switches the trailer type of a parking pad (re-renders via version bump). */
+  /** Switches the trailer type of a parking pad — or respawns an editor-placed
+   *  trailer object with a new type (re-renders via version bump). */
   public setTrailerPadType(id: string, trailer: string) {
     const o = this.mainScene.world.objects.get(id);
-    if (!o || o.type !== 'parking_pad') return;
-    o.params = { ...(o.params || {}), trailer };
-    this.mainScene.world.version++;
+    if (!o) return;
+    if (o.type === 'parking_pad') {
+      o.params = { ...(o.params || {}), trailer };
+      this.mainScene.world.version++;
+      return;
+    }
+    if (o.type === 'trailer') {
+      // Editor-placed trailer: swap the type and respawn the live entity
+      o.params = { ...(o.params || {}), trailer };
+      TrailerManager.getInstance(this.mainScene).removeForObject(id);
+      TrailerManager.getInstance(this.mainScene).spawnObjectTrailer(o);
+      this.mainScene.world.version++;
+    }
   }
 
   // ======================================================================
@@ -740,6 +776,18 @@ export class EditorScene extends Phaser.Scene {
    *  the Objectos tool so it can be moved/rotated/resized immediately. */
   private addTap(x: number, y: number) {
     const spec = this.addType;
+    if (spec.type === 'trailer') {
+      // Editor-placed loose trailer: data-only world object + live entity
+      const o = this.mainScene.world.objects.add('trailer', Math.round(x), Math.round(y), spec.w, spec.h, {
+        angle: Math.PI, // depot posture: nose SOUTH, tractor reverses into it
+        params: spec.params,
+      });
+      TrailerManager.getInstance(this.mainScene).spawnObjectTrailer(o);
+      this.mainScene.world.version++;
+      this.selectedObject = o;
+      this.setTool('object');
+      return;
+    }
     const o = this.mainScene.world.objects.add(spec.type, Math.round(x), Math.round(y), spec.w, spec.h, {
       variant: spec.variant,
       params: spec.params,
