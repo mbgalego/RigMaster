@@ -2,8 +2,18 @@ import Phaser from 'phaser';
 import { MainScene } from './MainScene';
 import { GarageSystem } from '../systems/GarageSystem';
 import { RoadNetwork, RoadData, RoadPoint, RoadSurface } from '../systems/RoadNetwork';
-import { WorldObject } from '../world/WorldObjects';
+import { WorldObject, WObjType } from '../world/WorldObjects';
 import { World } from '../world/World';
+
+/** Catalog entry for the 'add' tool (chosen in the UI panel). */
+export interface AddObjectSpec {
+  type: WObjType;
+  w: number;
+  h: number;
+  variant?: string;
+  params?: Record<string, any>;
+  label: string;
+}
 
 /**
  * The object-based editor: no tile painting — you edit the world directly.
@@ -15,9 +25,8 @@ export class EditorScene extends Phaser.Scene {
   public mainScene!: MainScene;
   public garageSystem!: GarageSystem;
 
-  public editorTool: 'pan' | 'road' | 'object' | 'spawn' = 'pan';
+  public editorTool: 'pan' | 'road' | 'object' | 'spawn' | 'add' = 'pan';
 
-  private isPointerDown: boolean = false;
   private isDraggingPan: boolean = false;
   private lastDragX: number = 0;
   private lastDragY: number = 0;
@@ -26,6 +35,18 @@ export class EditorScene extends Phaser.Scene {
   // Pinch-to-zoom tracking for touch devices
   private prevPinchDist: number = 0;
 
+  // ---- Gesture model (touch + mouse unified) ----
+  // A press becomes, on first significant move, either a TOOL drag (when it
+  // starts on something editable) or a PAN; released without moving = a TAP,
+  // which executes the tool's click action. Two fingers ALWAYS pan/zoom.
+  private gesture: {
+    screenX: number; screenY: number;
+    worldX: number; worldY: number;
+    isPan: boolean;
+    toolDrag: boolean;
+    decided: boolean;
+  } | null = null;
+
   // ---- Overlay ----
   private roadOverlay!: Phaser.GameObjects.Graphics;
 
@@ -33,7 +54,7 @@ export class EditorScene extends Phaser.Scene {
   private roadNetwork!: RoadNetwork;
   public selectedRoad: RoadData | null = null;
   public selectedPointIndex: number | null = null;
-  private roadDrag: { road: RoadData; kind: 'point' | 'width' | 'road'; index: number | null; grabX: number; grabY: number } | null = null;
+  private roadDrag: { road: RoadData; kind: 'point' | 'width' | 'twist' | 'road'; index: number | null; grabX: number; grabY: number } | null = null;
   private pendingRoad: { surface: RoadSurface; points: RoadPoint[] } | null = null;
   private pointerWorld: { x: number; y: number } = { x: 0, y: 0 };
   private lastClickTime: number = 0;
@@ -46,6 +67,9 @@ export class EditorScene extends Phaser.Scene {
   // ---- Object tool state ----
   public selectedObject: WorldObject | null = null;
   private objectDrag: { obj: WorldObject; grabX: number; grabY: number } | null = null;
+
+  // ---- Add tool (place new objects from the catalog) ----
+  public addType: AddObjectSpec = { type: 'wall', w: 220, h: 26, label: 'Muro' };
 
   public static readonly MIN_ZOOM = 0.04;
   public static readonly MAX_ZOOM = 1.8;
@@ -89,17 +113,18 @@ export class EditorScene extends Phaser.Scene {
       this.cameras.main.scrollY += worldBefore.y - worldAfter.y;
     });
 
-    // Pointer Down (Road / Object / Spawn / Pan / Pinch)
+    // Pointer Down (Pan buttons / two-finger / pending gesture)
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       const p1 = this.input.pointer1;
       const p2 = this.input.pointer2;
 
-      // Two-Finger Pinch / Pan Detection on Touch Screens
+      // Two-Finger Pinch / Pan ALWAYS wins — no matter the active tool, it
+      // cancels any pending gesture or in-progress tool drag.
       if (p1.isDown && p2.isDown) {
+        this.cancelGesture();
         this.prevPinchDist = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
         this.lastDragX = (p1.x + p2.x) / 2;
         this.lastDragY = (p1.y + p2.y) / 2;
-        this.isPointerDown = false;
         return;
       }
 
@@ -107,6 +132,7 @@ export class EditorScene extends Phaser.Scene {
       const shouldPan = this.editorTool === 'pan' || pointer.middleButtonDown() || pointer.rightButtonDown() || isSpaceHeld;
 
       if (shouldPan) {
+        this.cancelGesture();
         this.isDraggingPan = true;
         this.lastDragX = pointer.x;
         this.lastDragY = pointer.y;
@@ -115,14 +141,15 @@ export class EditorScene extends Phaser.Scene {
 
       if (this.mainScene.isPointerOverMinimap(pointer)) return;
 
-      this.isPointerDown = true;
-      if (this.editorTool === 'road') {
-        this.handleRoadPointerDown(pointer);
-      } else if (this.editorTool === 'object') {
-        this.handleObjectPointerDown(pointer);
-      } else if (this.editorTool === 'spawn') {
-        this.handleSpawnPointerDown(pointer);
-      }
+      // Start a pending gesture. Nothing executes yet: on first significant
+      // move it becomes a tool drag (if it starts on something editable) or a
+      // pan; if released without moving it counts as a tap (click action).
+      const wp = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+      this.gesture = {
+        screenX: pointer.x, screenY: pointer.y,
+        worldX: wp.x, worldY: wp.y,
+        isPan: false, toolDrag: false, decided: false,
+      };
     });
 
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
@@ -165,31 +192,77 @@ export class EditorScene extends Phaser.Scene {
       const wp = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
       this.pointerWorld = { x: wp.x, y: wp.y };
 
-      if (this.editorTool === 'road') {
-        this.handleRoadPointerMove(pointer);
-      } else if (this.editorTool === 'object') {
-        this.handleObjectPointerMove(pointer);
+      // Pending gesture: classify on first significant move
+      if (this.gesture) {
+        const gs = this.gesture;
+        if (!gs.decided) {
+          const moved = Phaser.Math.Distance.Between(pointer.x, pointer.y, gs.screenX, gs.screenY);
+          if (moved > 12) {
+            gs.decided = true;
+            gs.toolDrag = this.tryStartToolDrag(gs.worldX, gs.worldY);
+            if (!gs.toolDrag) {
+              gs.isPan = true;
+              this.lastDragX = pointer.x;
+              this.lastDragY = pointer.y;
+            }
+          }
+        }
+        if (gs.isPan) {
+          const dx = pointer.x - this.lastDragX;
+          const dy = pointer.y - this.lastDragY;
+          this.cameras.main.scrollX -= dx / this.cameras.main.zoom;
+          this.cameras.main.scrollY -= dy / this.cameras.main.zoom;
+          this.lastDragX = pointer.x;
+          this.lastDragY = pointer.y;
+        } else if (gs.toolDrag) {
+          this.applyToolDrag(wp);
+        }
       }
     });
 
     const handlePointerRelease = () => {
       const p1 = this.input.pointer1;
       const p2 = this.input.pointer2;
-      if (!p1.isDown && !p2.isDown) {
-        this.isPointerDown = false;
-        this.isDraggingPan = false;
-        this.prevPinchDist = 0;
-        if (this.roadDirtySinceRelease) {
-          this.roadDirtySinceRelease = false;
-          this.mainScene.world.version++; // refresh minimap once per drag
-        }
-        this.roadDrag = null;
-        this.objectDrag = null;
+      if (p1.isDown || p2.isDown) return; // another finger/button still active
+
+      // A gesture that never became a drag is a TAP → run the tool's click action
+      if (this.gesture && !this.gesture.isPan && !this.gesture.toolDrag) {
+        const gs = this.gesture;
+        if (this.editorTool === 'road') this.roadTap(gs.worldX, gs.worldY);
+        else if (this.editorTool === 'object') this.objectTap(gs.worldX, gs.worldY);
+        else if (this.editorTool === 'spawn') this.spawnTap(gs.worldX, gs.worldY);
+        else if (this.editorTool === 'add') this.addTap(gs.worldX, gs.worldY);
+      }
+      this.cancelGesture();
+      this.isDraggingPan = false;
+      this.prevPinchDist = 0;
+      if (this.roadDirtySinceRelease) {
+        this.roadDirtySinceRelease = false;
+        this.mainScene.world.version++; // refresh minimap once per drag
       }
     };
 
     this.input.on('pointerup', handlePointerRelease);
     this.input.on('pointercancel', handlePointerRelease);
+  }
+
+  /** Ends the current gesture and any in-progress tool drag (data is kept). */
+  private cancelGesture() {
+    this.gesture = null;
+    this.roadDrag = null;
+    this.objectDrag = null;
+  }
+
+  /** On first significant move of a gesture: begin a tool drag when the press started on something editable. */
+  private tryStartToolDrag(x: number, y: number): boolean {
+    if (this.editorTool === 'road') return this.tryStartRoadDrag(x, y);
+    if (this.editorTool === 'object') return this.tryStartObjectDrag(x, y);
+    return false; // pan / spawn / add gestures become a pan
+  }
+
+  private applyToolDrag(wp: { x: number; y: number }) {
+    if (this.roadDrag) this.applyRoadDrag(wp);
+    else if (this.objectDrag) this.applyObjectDrag(wp);
   }
 
   private setupKeyboardPan() {
@@ -238,7 +311,7 @@ export class EditorScene extends Phaser.Scene {
   // TOOL SWITCHING
   // ======================================================================
 
-  public setTool(tool: 'pan' | 'road' | 'object' | 'spawn') {
+  public setTool(tool: 'pan' | 'road' | 'object' | 'spawn' | 'add') {
     this.editorTool = tool;
     if (tool !== 'road') {
       this.pendingRoad = null;
@@ -253,12 +326,11 @@ export class EditorScene extends Phaser.Scene {
   }
 
   // ======================================================================
-  // ROAD TOOL (unchanged from v1.9: draw, select, drag, delete)
+  // ROAD TOOL (draw by taps, select, drag; extend + twist on selected road)
   // ======================================================================
 
-  private handleRoadPointerDown(pointer: Phaser.Input.Pointer) {
-    const wp = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
-    const x = wp.x, y = wp.y;
+  /** Tap action of the road tool (called on gesture release without drag). */
+  private roadTap(x: number, y: number) {
     const tol = 16 / this.cameras.main.zoom;
 
     // Double-click / double-tap while drawing finishes the road
@@ -280,26 +352,7 @@ export class EditorScene extends Phaser.Scene {
       return;
     }
 
-    // 1. Width handle of the selected road (edits this section's width exactly)
-    if (this.selectedRoad) {
-      const wi = this.roadNetwork.hitTestWidthHandle(this.selectedRoad, x, y, tol);
-      if (wi !== null) {
-        this.selectedPointIndex = wi;
-        this.roadDrag = { road: this.selectedRoad, kind: 'width', index: wi, grabX: x, grabY: y };
-        return;
-      }
-    }
-
-    // 2. Position handle of any road (nearest within tolerance)
-    const handle = this.roadNetwork.hitTestHandle(x, y, tol);
-    if (handle) {
-      this.selectedRoad = handle.road;
-      this.selectedPointIndex = handle.index;
-      this.roadDrag = { road: handle.road, kind: 'point', index: handle.index, grabX: x, grabY: y };
-      return;
-    }
-
-    // 3. Road body → select; double-click inserts a control point right here
+    // Road body → select; double-click inserts a control point right here
     const body = this.roadNetwork.hitTestRoad(x, y, tol * 0.5);
     if (body) {
       if (isDouble) {
@@ -313,22 +366,82 @@ export class EditorScene extends Phaser.Scene {
       }
       this.selectedRoad = body;
       this.selectedPointIndex = null;
-      // Drag the whole road from this grab point
-      this.roadDrag = { road: body, kind: 'road', index: null, grabX: x, grabY: y };
       return;
     }
 
-    // 4. Empty ground → start a new road
+    // Empty ground → start a new road (first point)
     this.selectedRoad = null;
     this.selectedPointIndex = null;
     this.pendingRoad = { surface: this.newRoadSurface, points: [{ x: Math.round(x), y: Math.round(y), w: this.newRoadWidth }] };
   }
 
-  private handleRoadPointerMove(pointer: Phaser.Input.Pointer) {
-    const wp = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
-    this.pointerWorld = { x: wp.x, y: wp.y };
+  /** Begins a road drag when the press started on a handle or a road body. */
+  private tryStartRoadDrag(x: number, y: number): boolean {
+    const tol = 16 / this.cameras.main.zoom;
 
-    if (!this.isPointerDown || !this.roadDrag) return;
+    // 1. Width handle of the selected road (edits this section's width exactly)
+    if (this.selectedRoad) {
+      const wi = this.roadNetwork.hitTestWidthHandle(this.selectedRoad, x, y, tol);
+      if (wi !== null) {
+        this.selectedPointIndex = wi;
+        this.roadDrag = { road: this.selectedRoad, kind: 'width', index: wi, grabX: x, grabY: y };
+        return true;
+      }
+
+      // 2. Extend handles at the open ends of the selected road
+      if (!this.selectedRoad.closed && this.selectedRoad.points.length >= 2) {
+        for (const which of ['start', 'end'] as const) {
+          const hp = RoadNetwork.extendHandlePos(this.selectedRoad, which);
+          if (Phaser.Math.Distance.Between(x, y, hp.x, hp.y) <= tol) {
+            const end = which === 'end'
+              ? this.selectedRoad.points[this.selectedRoad.points.length - 1]
+              : this.selectedRoad.points[0];
+            const idx = which === 'end'
+              ? this.selectedRoad.points.length
+              : 0;
+            const point = { x: Math.round(hp.x), y: Math.round(hp.y), w: end?.w ?? this.newRoadWidth };
+            this.roadNetwork.addPointAtEnd(this.selectedRoad.id, which, point);
+            this.selectedPointIndex = idx;
+            this.roadDrag = { road: this.selectedRoad, kind: 'point', index: idx, grabX: hp.x, grabY: hp.y };
+            this.roadDirtySinceRelease = true;
+            return true;
+          }
+        }
+      }
+
+      // 3. Twist handle of the selected point (edge direction adjustment)
+      if (this.selectedPointIndex !== null) {
+        const tp = this.twistHandlePos(this.selectedRoad, this.selectedPointIndex);
+        if (tp && Phaser.Math.Distance.Between(x, y, tp.x, tp.y) <= tol) {
+          this.roadDrag = { road: this.selectedRoad, kind: 'twist', index: this.selectedPointIndex, grabX: x, grabY: y };
+          return true;
+        }
+      }
+    }
+
+    // 4. Position handle of any road (nearest within tolerance)
+    const handle = this.roadNetwork.hitTestHandle(x, y, tol);
+    if (handle) {
+      this.selectedRoad = handle.road;
+      this.selectedPointIndex = handle.index;
+      this.roadDrag = { road: handle.road, kind: 'point', index: handle.index, grabX: x, grabY: y };
+      return true;
+    }
+
+    // 5. Road body → select + drag the whole road from this grab point
+    const body = this.roadNetwork.hitTestRoad(x, y, tol * 0.5);
+    if (body) {
+      this.selectedRoad = body;
+      this.selectedPointIndex = null;
+      this.roadDrag = { road: body, kind: 'road', index: null, grabX: x, grabY: y };
+      return true;
+    }
+
+    return false;
+  }
+
+  private applyRoadDrag(wp: { x: number; y: number }) {
+    if (!this.roadDrag) return;
     const d = this.roadDrag;
 
     if (d.kind === 'width' && d.index !== null) {
@@ -340,6 +453,15 @@ export class EditorScene extends Phaser.Scene {
       }
     } else if (d.kind === 'point' && d.index !== null) {
       this.roadNetwork.movePoint(d.road.id, d.index, Math.round(wp.x), Math.round(wp.y));
+    } else if (d.kind === 'twist' && d.index !== null) {
+      const p = d.road.points[d.index];
+      if (p) {
+        const base = RoadNetwork.baseTangentAngle(d.road, d.index);
+        let delta = Math.atan2(wp.y - p.y, wp.x - p.x) - base;
+        while (delta > Math.PI) delta -= Math.PI * 2;
+        while (delta < -Math.PI) delta += Math.PI * 2;
+        this.roadNetwork.setPointTwist(d.road.id, d.index, delta);
+      }
     } else {
       const dx = Math.round(wp.x - d.grabX);
       const dy = Math.round(wp.y - d.grabY);
@@ -401,7 +523,30 @@ export class EditorScene extends Phaser.Scene {
     }
   }
 
-  public getRoadUIState(): { hasSelection: boolean; hasPoint: boolean; surface: RoadSurface; width: number; drawing: boolean } {
+  /** Screen position of the twist handle (edge-direction knob) of a point. */
+  private twistHandlePos(road: RoadData, i: number): { x: number; y: number } | null {
+    const p = road.points[i];
+    if (!p) return null;
+    const t = RoadNetwork.pointTangent(road, i);
+    const dist = p.w / 2 + 52;
+    return { x: p.x + t.tx * dist, y: p.y + t.ty * dist };
+  }
+
+  public nudgeTwist(deltaDeg: number) {
+    if (!this.selectedRoad || this.selectedPointIndex === null) return;
+    const p = this.selectedRoad.points[this.selectedPointIndex];
+    if (!p) return;
+    this.roadNetwork.setPointTwist(this.selectedRoad.id, this.selectedPointIndex, (p.twist ?? 0) + Phaser.Math.DegToRad(deltaDeg));
+    this.mainScene.world.version++;
+  }
+
+  public resetTwist() {
+    if (!this.selectedRoad || this.selectedPointIndex === null) return;
+    this.roadNetwork.setPointTwist(this.selectedRoad.id, this.selectedPointIndex, 0);
+    this.mainScene.world.version++;
+  }
+
+  public getRoadUIState(): { hasSelection: boolean; hasPoint: boolean; surface: RoadSurface; width: number; drawing: boolean; twistDeg: number } {
     const selPoint = this.selectedRoad && this.selectedPointIndex !== null ? this.selectedRoad.points[this.selectedPointIndex] : null;
     return {
       hasSelection: !!this.selectedRoad,
@@ -409,6 +554,7 @@ export class EditorScene extends Phaser.Scene {
       surface: this.selectedRoad ? this.selectedRoad.surface : this.newRoadSurface,
       width: selPoint ? selPoint.w : this.selectedRoad ? this.selectedRoad.points[0]?.w ?? this.newRoadWidth : this.newRoadWidth,
       drawing: !!this.pendingRoad,
+      twistDeg: selPoint ? Math.round(Phaser.Math.RadToDeg(selPoint.twist ?? 0)) : 0,
     };
   }
 
@@ -416,21 +562,25 @@ export class EditorScene extends Phaser.Scene {
   // OBJECT TOOL (select / move / rotate / delete prefabs)
   // ======================================================================
 
-  private handleObjectPointerDown(pointer: Phaser.Input.Pointer) {
-    const wp = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+  /** Tap action: select the object under the pointer, or deselect. */
+  private objectTap(x: number, y: number) {
     const tol = 10 / this.cameras.main.zoom;
-    const hit = this.mainScene.world.objects.hitTest(wp.x, wp.y, tol);
-    if (hit) {
-      this.selectedObject = hit;
-      this.objectDrag = { obj: hit, grabX: wp.x, grabY: wp.y };
-    } else {
-      this.selectedObject = null;
-    }
+    this.selectedObject = this.mainScene.world.objects.hitTest(x, y, tol);
+    this.objectDrag = null;
   }
 
-  private handleObjectPointerMove(pointer: Phaser.Input.Pointer) {
-    if (!this.isPointerDown || !this.objectDrag) return;
-    const wp = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+  /** Begins an object drag when the press started on an object. */
+  private tryStartObjectDrag(x: number, y: number): boolean {
+    const tol = 10 / this.cameras.main.zoom;
+    const hit = this.mainScene.world.objects.hitTest(x, y, tol);
+    if (!hit) return false;
+    this.selectedObject = hit;
+    this.objectDrag = { obj: hit, grabX: x, grabY: y };
+    return true;
+  }
+
+  private applyObjectDrag(wp: { x: number; y: number }) {
+    if (!this.objectDrag) return;
     const dx = Math.round(wp.x - this.objectDrag.grabX);
     const dy = Math.round(wp.y - this.objectDrag.grabY);
     if (dx !== 0 || dy !== 0) {
@@ -464,12 +614,27 @@ export class EditorScene extends Phaser.Scene {
   }
 
   // ======================================================================
-  // SPAWN TOOL
+  // SPAWN TOOL + ADD-OBJECT TOOL
   // ======================================================================
 
-  private handleSpawnPointerDown(pointer: Phaser.Input.Pointer) {
-    const wp = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
-    this.mainScene.world.spawnPoint = { x: Math.round(wp.x), y: Math.round(wp.y), angle: 0 };
+  private spawnTap(x: number, y: number) {
+    this.mainScene.world.spawnPoint = { x: Math.round(x), y: Math.round(y), angle: 0 };
+    this.mainScene.world.version++;
+  }
+
+  /** Object type catalog entry for the 'add' tool (set from the UI panel). */
+  public setAddObjectType(spec: AddObjectSpec) {
+    this.addType = spec;
+  }
+
+  /** Tap action of the 'add' tool: place a new object of the selected type. */
+  private addTap(x: number, y: number) {
+    const spec = this.addType;
+    const o = this.mainScene.world.objects.add(spec.type, Math.round(x), Math.round(y), spec.w, spec.h, {
+      variant: spec.variant,
+      params: spec.params,
+    });
+    this.selectedObject = o; // handy: switch to Objectos and it's already selected
     this.mainScene.world.version++;
   }
 
@@ -571,7 +736,48 @@ export class EditorScene extends Phaser.Scene {
       g.beginPath();
       g.arc(wh.x, wh.y, rr, 0, Math.PI * 2);
       g.strokePath();
+
+      // Twist knob (edge-direction adjustment) on the selected point only
+      if (this.selectedPointIndex === i) {
+        const tp = this.twistHandlePos(road, i);
+        if (tp) {
+          const tActive = !!this.roadDrag && this.roadDrag.road === road && this.roadDrag.index === i && this.roadDrag.kind === 'twist';
+          g.lineStyle(1.5 / z, 0xa78bfa, 0.75);
+          g.beginPath();
+          g.moveTo(p.x, p.y);
+          g.lineTo(tp.x, tp.y);
+          g.strokePath();
+          // Arrow head pointing along the (twisted) tangent
+          g.fillStyle(tActive ? 0xfacc15 : 0xa78bfa, 0.95);
+          g.beginPath();
+          g.arc(tp.x, tp.y, 4.5 / z, 0, Math.PI * 2);
+          g.fillPath();
+          g.lineStyle(1.5 / z, 0x0b1220, 1);
+          g.beginPath();
+          g.arc(tp.x, tp.y, 4.5 / z, 0, Math.PI * 2);
+          g.strokePath();
+        }
+      }
     });
+
+    // Extend handles at both open ends (drag them to lengthen the road)
+    if (!road.closed && road.points.length >= 2) {
+      for (const which of ['start', 'end'] as const) {
+        const hp = RoadNetwork.extendHandlePos(road, which);
+        const er = 6 / z;
+        g.lineStyle(1.5 / z, 0x34d058, 0.9);
+        g.beginPath();
+        g.arc(hp.x, hp.y, er, 0, Math.PI * 2);
+        g.strokePath();
+        g.lineStyle(1.5 / z, 0x34d058, 0.9);
+        g.beginPath();
+        g.moveTo(hp.x - er * 0.55, hp.y);
+        g.lineTo(hp.x + er * 0.55, hp.y);
+        g.moveTo(hp.x, hp.y - er * 0.55);
+        g.lineTo(hp.x, hp.y + er * 0.55);
+        g.strokePath();
+      }
+    }
   }
 
   private drawRoadPreview(g: Phaser.GameObjects.Graphics, z: number) {

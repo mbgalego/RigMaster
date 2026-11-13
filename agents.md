@@ -15,7 +15,7 @@ O **RigMaster** é um simulador 2D top-down de manobra e condução de pesados c
 src/
 ├── config.ts               # Configuração do Phaser 4 e motor Matter.js
 ├── main.ts                 # Ponto de entrada do Phaser e exportação de instâncias de cenas
-├── App.tsx                 # Interface React / HUD minimalista, dock do editor (Mover/Estrada/Objectos/Spawn) e controlos
+├── App.tsx                 # Interface React / HUD minimalista, dock do editor (Mover/Estrada/Objectos/Criar/Spawn) e controlos
 ├── components/
 │   └── TouchControls.tsx   # Volante rotativo (+/-270°), switch de marcha D/R, pedais táteis e botão de acoplamento
 ├── entities/
@@ -34,14 +34,30 @@ src/
 │   └── RoadNetwork.ts      # Rede de estradas vetorial (splines Catmull-Rom, grip por piso, editável)
 └── scenes/
     ├── MainScene.ts        # Loop principal de física, áudio sintético Web Audio e câmara de condução
-    └── EditorScene.ts      # Editor de objectos: Pan, Estrada (splines), Objectos (mover/rodar/apagar), Spawn
+    └── EditorScene.ts      # Editor: gestos (2 dedos/botão do meio = pan), Estrada (extender/twist), Objectos, Criar, Spawn
 ```
 
 ---
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.0.1** (Versão Atual — branch `feature/road-network`)
+### **v2.1.0** (Versão Atual — branch `feature/road-network`)
+- **Editor de gestos (touch + rato unificados):**
+  - **2 dedos = sempre pan/zoom**, em qualquer ferramenta: um gesto de dois dedos **cancela** qualquer acção de ferramenta pendente ou drag em curso (os dados editados mantêm-se). Pinos fazem zoom, arrasto faz pan.
+  - **Modelo de gestos geral**: o "toque" não executa nada imediatamente — no primeiro movimento significativo (>12px de ecrã) o gesto classifica-se: se começou sobre algo editável (pega da estrada, pega de largura, knob de tangente, objecto) vira **drag da ferramenta**; caso contrário vira **pan** (arrastar no vazio = viajar). Soltar sem mover = **toque** (executa a acção de clique da ferramenta: colocar ponto, selecionar, spawn, criar objecto).
+  - **Rato**: arrastar no vazio com qualquer ferramenta faz pan; **botão do meio** (e direito) continuam a fazer pan sempre; Space+drag mantém-se.
+  - Desenho de estradas por toques (tap-tap-tap), duplo toque termina/inserção — mesmo comportamento em touch e rato.
+- **Novos objectos de construção + ferramenta "Criar":**
+  - Novos prefabs em `WorldObjects`: **`wall`** (muro de alvenaria, sólido, rotável), **`entrance`** (laje de entrada/acesso a edifício, plana, sem colisão, com soleira de porta), **`parking_lot`** (parque de estacionamento plano com lugares pintados e corredor central, sem colisão).
+  - Nova ferramenta **Criar (dock, violeta)**: catálogo em banner — Muro, Entrada, Parque, Garagem, Edifício, Barreira, Contentores, Doca — toque/click no mapa coloca o objecto (já selecionado, pronto a ajustar em "Objectos").
+- **Correcção: hitbox física acompanha as edições de objectos:**
+  - `moveObject`/`rotateObject`/`remove`/`add` **reconstruem agora os corpos Matter** de todos os chunks activos tocados pelo AABB do objecto (`refreshSolidBodiesAround`, incluindo objectos grandes que atravessam fronteiras de chunk) — antes o colisor ficava na posição antiga ao mover ("hitbox fantasma").
+- **Manipulação avançada de estradas:**
+  - **Extensão**: pegas verdes "+" nas duas pontas das estradas abertas — arrastar cria um novo ponto de controlo nessa extremidade e estica a estrada.
+  - **Rotação de tangente por ponto (twist)**: cada ponto tem um **knob violeta** ao longo da direcção da faixa — arrastar roda a **direcção da estrada naquele ponto** (±60° máx.), criando curvas assimétricas e ajustes de alinhamento. Interpolada ao longo dos spans no `sampleRoad` (tangente analítica rodada); `pointNormal`/largura/pega de largura seguem o twist. Serializado no JSON (graus), interpolação na inserção de pontos, botões −/±5°/"Reta" no painel.
+- `tsc --noEmit` e `npm run build` OK; física de veículos/acoplamento/exames intactos.
+
+### **v2.0.1** (branch `feature/road-network`)
 - **Correcções de performance (mundo v2.0 degradava progressivamente):**
   - **Fuga de memória real (a "piora progressiva")**: o `Truck` registava um listener `collisionstart` no mundo Matter e o `destroy()` **nunca o removia** — cada respawn (tecla R, início de exame, troca de veículo) acrescentava mais um listener que mantinha o camião velho em memória e re-processava **todas** as colisões do mundo (o `Trailer` já fazia `off` correctamente; o `Truck` não). Agora o handler é guardado e removido no destroy.
   - **Render de prefabs deixou de ser por frame**: todas as frames reconstruíam centenas de comandos Graphics (edifícios, docas, postes…). Agora as camadas estáticas (flats/solids) só são redesenhadas quando a câmara anda >24px, muda de zoom, ou o mundo é editado (`objects.version`); os **semáforos** (animação) vivem numa `Graphics` própria (depth 4) redesenhada por frame — poucos e baratos.

@@ -10,6 +10,7 @@ import { MainScene } from './scenes/MainScene';
 import { LicenseSystem, LicenseInfo, ExamStatus, LicenseId } from './systems/LicenseSystem';
 import { GarageSystem, HubData, WeatherModifier } from './systems/GarageSystem';
 import type { RoadSurface } from './systems/RoadNetwork';
+import type { AddObjectSpec } from './scenes/EditorScene';
 import { TouchControls } from './components/TouchControls';
 import {
   Truck as TruckIcon,
@@ -41,6 +42,11 @@ import {
   ZoomOut,
   Route,
   Box,
+  Plus,
+  BrickWall,
+  Warehouse,
+  CarFront,
+  DoorOpen,
 } from 'lucide-react';
 
 export default function App() {
@@ -70,11 +76,13 @@ export default function App() {
   const [licenses, setLicenses] = useState<LicenseInfo[]>([]);
   const [hubs, setHubs] = useState<HubData[]>([]);
   const [activeWeather, setActiveWeather] = useState<WeatherModifier>('clear');
-  const [editorTool, setEditorTool] = useState<'pan' | 'road' | 'object' | 'spawn'>('pan');
+  const [editorTool, setEditorTool] = useState<'pan' | 'road' | 'object' | 'spawn' | 'add'>('pan');
+  // Catalog selection for the 'add' (Criar) tool
+  const [addType, setAddType] = useState<AddObjectSpec>({ type: 'wall', w: 220, h: 26, label: 'Muro' });
 
   // Road tool live state (polled from EditorScene in the telemetry loop)
-  const [roadUI, setRoadUI] = useState<{ hasSelection: boolean; hasPoint: boolean; surface: RoadSurface; width: number; drawing: boolean }>({
-    hasSelection: false, hasPoint: false, surface: 'asphalt', width: 128, drawing: false,
+  const [roadUI, setRoadUI] = useState<{ hasSelection: boolean; hasPoint: boolean; surface: RoadSurface; width: number; drawing: boolean; twistDeg: number }>({
+    hasSelection: false, hasPoint: false, surface: 'asphalt', width: 128, drawing: false, twistDeg: 0,
   });
   // Object tool live state (polled from EditorScene in the telemetry loop)
   const [objectUI, setObjectUI] = useState<{ hasSelection: boolean; type: string; angleDeg: number }>({
@@ -285,10 +293,19 @@ export default function App() {
     }
   };
 
-  const handleSetEditorTool = (tool: 'pan' | 'road' | 'object' | 'spawn') => {
+  const handleSetEditorTool = (tool: 'pan' | 'road' | 'object' | 'spawn' | 'add') => {
     setEditorTool(tool);
     const edScene = getEditorScene();
-    if (edScene) edScene.setTool(tool);
+    if (edScene) {
+      if (tool === 'add') edScene.setAddObjectType(addType);
+      edScene.setTool(tool);
+    }
+  };
+
+  const handleSetAddType = (spec: AddObjectSpec) => {
+    setAddType(spec);
+    const edScene = getEditorScene();
+    if (edScene) edScene.setAddObjectType(spec);
   };
 
   const handleZoomIn = () => {
@@ -711,6 +728,20 @@ export default function App() {
               <span className="text-[8px] font-bold mt-0.5">Objectos</span>
             </button>
 
+            {/* Tool: Criar (place new objects from the catalog) */}
+            <button
+              onClick={() => handleSetEditorTool('add')}
+              className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border ${
+                editorTool === 'add'
+                  ? 'bg-violet-500 text-black border-violet-300 shadow-md shadow-violet-500/40 animate-pulse'
+                  : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+              }`}
+              title="Criar — Coloca muros, entradas, parques, garagens, edifícios… no mapa"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="text-[8px] font-bold mt-0.5">Criar</span>
+            </button>
+
             {/* Tool: Spawn Point */}
             <button
               onClick={() => handleSetEditorTool('spawn')}
@@ -800,6 +831,16 @@ export default function App() {
                   <span className="text-[10px] font-bold text-slate-200 w-14 text-center">{roadUI.hasPoint ? 'Secção ' : ''}{Math.round(roadUI.width)}px</span>
                   <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeRoadWidth(16); }} className="text-slate-300 hover:text-white px-1 font-black text-xs" title="Aumentar largura (secção selecionada ou estrada toda)">+</button>
                 </div>
+                {/* Tangent rotation at the selected point (edge direction) */}
+                {roadUI.hasPoint && (
+                  <div className="flex items-center gap-1 bg-slate-900 border border-violet-500/60 rounded px-1.5 py-0.5">
+                    <span className="text-[9px] font-bold text-violet-300 px-0.5">Tangente</span>
+                    <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeTwist(-5); }} className="text-slate-300 hover:text-white px-1 font-black text-xs">−</button>
+                    <span className="text-[10px] font-bold text-slate-200 w-10 text-center">{roadUI.twistDeg}°</span>
+                    <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeTwist(5); }} className="text-slate-300 hover:text-white px-1 font-black text-xs">+</button>
+                    <button onClick={() => { const ed = getEditorScene(); if (ed) ed.resetTwist(); }} className="text-[9px] font-bold text-violet-300 hover:text-white px-1">Reta</button>
+                  </div>
+                )}
                 {roadUI.drawing && (
                   <>
                     <button onClick={() => { const ed = getEditorScene(); if (ed) ed.removeLastPendingPoint(); }} className="text-[10px] font-bold bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800 px-2 py-1 rounded">Retroceder Ponto</button>
@@ -811,7 +852,7 @@ export default function App() {
                 )}
               </div>
               <span className="text-[10px] text-slate-400 text-center">
-                Clica: pontos · Enter/duplo clique: terminar · Duplo clique na estrada: inserir ponto · Círculo laranja: largura da secção · Esc: cancelar · Backspace: apagar ponto · Del: apagar estrada
+                Clica: pontos · Enter/duplo clique: terminar · Duplo clique na estrada: inserir ponto · Círculo laranja: largura · Botão verde +: estender a estrada na ponta · Knob violeta: roda a direcção da faixa · Esc: cancelar · Del: apagar estrada
               </span>
             </div>
           )}
@@ -820,7 +861,7 @@ export default function App() {
               {editorTool === 'pan' && (
                 <>
                   <Hand className="w-4 h-4 text-cyan-400 animate-bounce" />
-                  <span className="text-xs font-bold text-cyan-300">MODO MOVER (PAN): Arrasta no ecrã com rato ou toque para viajar pelo mapa</span>
+                  <span className="text-xs font-bold text-cyan-300">MODO MOVER (PAN): Arrasta com o rato (botão do meio também) ou 2 dedos — funciona sempre, em qualquer ferramenta</span>
                 </>
               )}
               {editorTool === 'object' && (
@@ -859,6 +900,40 @@ export default function App() {
                 <>
                   <Compass className="w-4 h-4 text-emerald-400 animate-spin" />
                   <span className="text-xs font-bold text-emerald-300">MODO SPAWN: Clica no mapa para definir o ponto de partida do camião</span>
+                </>
+              )}
+              {editorTool === 'add' && (
+                <>
+                  <Plus className="w-4 h-4 text-violet-400" />
+                  <span className="text-xs font-bold text-violet-300 whitespace-nowrap">CRIAR:</span>
+                  <div className="flex gap-1 flex-wrap justify-center">
+                    {(
+                      [
+                        { spec: { type: 'wall', w: 220, h: 26, label: 'Muro' }, icon: BrickWall, tint: 'violet' },
+                        { spec: { type: 'entrance', w: 140, h: 220, label: 'Entrada' }, icon: DoorOpen, tint: 'violet' },
+                        { spec: { type: 'parking_lot', w: 520, h: 340, label: 'Parque' }, icon: CarFront, tint: 'violet' },
+                        { spec: { type: 'building', w: 320, h: 220, variant: 'garage', label: 'Garagem' }, icon: Warehouse, tint: 'violet' },
+                        { spec: { type: 'building', w: 300, h: 200, variant: 'warehouse', label: 'Edifício' }, icon: Warehouse, tint: 'violet' },
+                        { spec: { type: 'jersey_barrier', w: 140, h: 26, label: 'Barreira' }, icon: BrickWall, tint: 'violet' },
+                        { spec: { type: 'container_stack', w: 180, h: 140, label: 'Contentores' }, icon: Box, tint: 'violet' },
+                        { spec: { type: 'dock', w: 128, h: 128, label: 'Doca' }, icon: Warehouse, tint: 'violet' },
+                      ] as Array<{ spec: AddObjectSpec; icon: React.ComponentType<{ className?: string }>; tint: string }>
+                    ).map(({ spec, icon: Icon }) => (
+                      <button
+                        key={spec.label}
+                        onClick={() => handleSetAddType(spec)}
+                        className={`flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded border transition ${
+                          addType.label === spec.label
+                            ? 'bg-violet-500 text-black border-violet-300'
+                            : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
+                        }`}
+                      >
+                        <Icon className="w-3 h-3" />
+                        {spec.label}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="text-[10px] text-slate-400 hidden lg:inline whitespace-nowrap">clica no mapa para colocar</span>
                 </>
               )}
             </div>

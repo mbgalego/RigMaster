@@ -13,6 +13,9 @@ import { WorldTerrain } from './WorldTerrain';
 export type WObjType =
   | 'dock'            // flat loading platform (hub docks, factory docks)
   | 'parking_pad'     // flat trailer parking slot (params.trailer → spawns one)
+  | 'parking_lot'     // flat car/truck parking area with painted slots
+  | 'entrance'        // flat concrete apron in front of a building/garage
+  | 'wall'            // solid masonry wall (rotatable, any length)
   | 'jersey_barrier'  // solid concrete barrier (rotatable)
   | 'building'        // solid box with roof detail (variant: 'warehouse'|'garage'|'archway'|'church')
   | 'container_stack' // solid stack of shipping containers (variant: colour)
@@ -45,7 +48,7 @@ const OBJ_CELL = 1024;
 const CHUNK_PX = 2048;
 
 const SOLID_TYPES = new Set<WObjType>([
-  'jersey_barrier', 'building', 'container_stack', 'silo',
+  'wall', 'jersey_barrier', 'building', 'container_stack', 'silo',
   'gas_pump', 'price_sign', 'lamp', 'sign', 'traffic_light',
 ]);
 
@@ -88,14 +91,17 @@ export class WorldObjects {
     };
     this.objects.push(o);
     this.rebuildIndex();
+    this.refreshSolidBodiesAround(o.x, o.y, o);
     return o;
   }
 
   public remove(id: string): boolean {
+    const victim = this.objects.find((o) => o.id === id);
     const before = this.objects.length;
     this.objects = this.objects.filter((o) => o.id !== id);
     if (this.objects.length !== before) {
       this.rebuildIndex();
+      if (victim) this.refreshSolidBodiesAround(victim.x, victim.y, victim);
       return true;
     }
     return false;
@@ -108,9 +114,13 @@ export class WorldObjects {
   public moveObject(id: string, x: number, y: number) {
     const o = this.get(id);
     if (!o) return;
+    const oldX = o.x, oldY = o.y;
     o.x = Math.round(x);
     o.y = Math.round(y);
     this.rebuildIndex();
+    // Physics: the collider must follow the object to its new position
+    this.refreshSolidBodiesAround(oldX, oldY, o);
+    this.refreshSolidBodiesAround(o.x, o.y, o);
   }
 
   public rotateObject(id: string, deltaRad: number) {
@@ -118,6 +128,7 @@ export class WorldObjects {
     if (!o) return;
     o.angle = Phaser.Math.Wrap(o.angle + deltaRad, -Math.PI, Math.PI);
     this.rebuildIndex();
+    this.refreshSolidBodiesAround(o.x, o.y, o);
   }
 
   public clear() {
@@ -203,25 +214,53 @@ export class WorldObjects {
     for (const key of wanted) {
       if (this.activeChunks.has(key)) continue;
       this.activeChunks.add(key);
-      const [ccx, ccy] = key.split('_').map(Number);
-      const bodies: MatterJS.BodyType[] = [];
-      const x0 = ccx * CHUNK_PX, x1 = x0 + CHUNK_PX;
-      const y0 = ccy * CHUNK_PX, y1 = y0 + CHUNK_PX;
-      for (const o of this.objects) {
-        if (!SOLID_TYPES.has(o.type)) continue;
-        const r = Math.max(o.w, o.h) / 2 + 8;
-        if (o.x + r < x0 || o.x - r > x1 || o.y + r < y0 || o.y - r > y1) continue;
-        const body = this.scene.matter.add.rectangle(o.x, o.y, o.w, o.h, {
-          angle: o.angle,
-          isStatic: true,
-          friction: 0.8,
-          restitution: 0.1,
-          label: `obstacle_${o.type}`,
-          collisionFilter: { category: 0x0001, mask: 0xffff },
-        }) as unknown as MatterJS.BodyType;
-        bodies.push(body);
-      }
-      this.bodiesByChunk.set(key, bodies);
+      this.buildChunkBodies(key);
+    }
+  }
+
+  /** Builds (or rebuilds) the static colliders of one active chunk from the object data */
+  private buildChunkBodies(key: string) {
+    const bodies: MatterJS.BodyType[] = [];
+    const [ccx, ccy] = key.split('_').map(Number);
+    const x0 = ccx * CHUNK_PX, x1 = x0 + CHUNK_PX;
+    const y0 = ccy * CHUNK_PX, y1 = y0 + CHUNK_PX;
+    for (const o of this.objects) {
+      if (!SOLID_TYPES.has(o.type)) continue;
+      const r = Math.max(o.w, o.h) / 2 + 8;
+      if (o.x + r < x0 || o.x - r > x1 || o.y + r < y0 || o.y - r > y1) continue;
+      const body = this.scene.matter.add.rectangle(o.x, o.y, o.w, o.h, {
+        angle: o.angle,
+        isStatic: true,
+        friction: 0.8,
+        restitution: 0.1,
+        label: `obstacle_${o.type}`,
+        collisionFilter: { category: 0x0001, mask: 0xffff },
+      }) as unknown as MatterJS.BodyType;
+      bodies.push(body);
+    }
+    // Replace any previous body set for this chunk
+    const old = this.bodiesByChunk.get(key);
+    if (old) {
+      for (const b of old) this.scene.matter.world.remove(b);
+    }
+    this.bodiesByChunk.set(key, bodies);
+  }
+
+  /**
+   * Rebuilds the colliders of every ACTIVE chunk the object's bounding box
+   * touches — called after any object mutation so the physical hitbox always
+   * matches what you see (including big objects spanning chunk borders).
+   */
+  private refreshSolidBodiesAround(x: number, y: number, o?: WorldObject) {
+    const r = o ? Math.max(o.w, o.h) / 2 + 16 : 0;
+    const keys = new Set<string>();
+    for (const [px, py] of [
+      [x - r, y - r], [x + r, y - r], [x - r, y + r], [x + r, y + r],
+    ]) {
+      keys.add(`${Math.floor(px / CHUNK_PX)}_${Math.floor(py / CHUNK_PX)}`);
+    }
+    for (const key of keys) {
+      if (this.activeChunks.has(key)) this.buildChunkBodies(key);
     }
   }
 
@@ -459,7 +498,7 @@ export class WorldObjects {
           if (drawn.has(o.id)) continue;
           drawn.add(o.id);
           if (o.type === 'traffic_light') continue; // animated: rendered every frame by renderLights
-          if (o.type === 'gas_canopy' || o.type === 'parking_pad' || o.type === 'exam_dock' || o.type === 'dock') {
+          if (o.type === 'gas_canopy' || o.type === 'parking_pad' || o.type === 'parking_lot' || o.type === 'entrance' || o.type === 'exam_dock' || o.type === 'dock') {
             this.drawFlat(flats, o);
           } else {
             this.drawSolid(solids, o);
@@ -540,6 +579,48 @@ export class WorldObjects {
           }
           break;
         }
+        case 'parking_lot': {
+          g.fillStyle(0x1c2027, 1);
+          g.fillRect(x0, y0, o.w, o.h);
+          g.lineStyle(2, 0xe2e8f0, 0.5);
+          g.strokeRect(x0 + 3, y0 + 3, o.w - 6, o.h - 6);
+          // Slot rows painted along the short axis, aisle down the middle
+          g.lineStyle(2, 0xe2e8f0, 0.38);
+          const along = Math.max(o.w, o.h);
+          const depth = Math.min(o.w, o.h);
+          const horizontal = o.w >= o.h;
+          const slot = 64;
+          const slots = Math.floor(along / slot);
+          const start = -along / 2 + (along - slots * slot) / 2 + slot;
+          for (let i = 0; i < slots - 1; i++) {
+            const pos = start + i * slot;
+            if (horizontal) {
+              g.lineBetween(o.x + pos, y0 + 6, o.x + pos, y0 + depth / 2 - 14);
+              g.lineBetween(o.x + pos, y0 + depth / 2 + 14, o.x + pos, y0 + depth - 6);
+            } else {
+              g.lineBetween(x0 + 6, o.y + pos, x0 + depth / 2 - 14, o.y + pos);
+              g.lineBetween(x0 + depth / 2 + 14, o.y + pos, x0 + depth - 6, o.y + pos);
+            }
+          }
+          g.lineStyle(2, 0xfacc15, 0.25);
+          if (horizontal) g.lineBetween(x0 + 6, o.y, x0 + o.w - 6, o.y);
+          else g.lineBetween(o.x, y0 + 6, o.x, y0 + o.h - 6);
+          break;
+        }
+        case 'entrance': {
+          g.fillStyle(0x2e333d, 1);
+          g.fillRect(x0, y0, o.w, o.h);
+          g.lineStyle(2, 0xe2e8f0, 0.45);
+          g.strokeRect(x0 + 3, y0 + 3, o.w - 6, o.h - 6);
+          // Door sill stripes on the far edge + centre guide dashes
+          g.fillStyle(0xe2e8f0, 0.5);
+          g.fillRect(x0 + 10, y0 + o.h - 10, o.w - 20, 5);
+          g.lineStyle(2, 0xe2e8f0, 0.3);
+          for (let yy = y0 + 24; yy < y0 + o.h - 20; yy += 34) {
+            g.lineBetween(o.x - 5, yy, o.x + 5, yy + 16);
+          }
+          break;
+        }
         case 'gas_canopy': {
           g.fillStyle(0x4a505c, 1);
           g.fillRect(x0 - 6, y0 - 6, 10, o.h + 12);  // pillars
@@ -560,6 +641,27 @@ export class WorldObjects {
     this.rotated(g, o, () => {
       const x0 = o.x - o.w / 2, y0 = o.y - o.h / 2;
       switch (o.type) {
+        case 'wall': {
+          g.fillStyle(0x000000, 0.25);
+          g.fillRect(x0 + 4, y0 + 5, o.w, o.h);
+          g.fillStyle(0x3a3d44, 1);
+          g.fillRect(x0, y0, o.w, o.h);
+          g.fillStyle(0x565b66, 1); // lit top face
+          g.fillRect(x0, y0, o.w, Math.min(6, o.h / 3));
+          // Masonry seams
+          g.lineStyle(1, 0x2b2e35, 0.8);
+          const seamStep = 34;
+          if (o.w >= o.h) {
+            for (let sx = x0 + seamStep; sx < x0 + o.w - 4; sx += seamStep) {
+              g.lineBetween(sx, y0, sx, y0 + o.h);
+            }
+          } else {
+            for (let sy = y0 + seamStep; sy < y0 + o.h - 4; sy += seamStep) {
+              g.lineBetween(x0, sy, x0 + o.w, sy);
+            }
+          }
+          break;
+        }
         case 'jersey_barrier': {
           g.fillStyle(0x8f97a3, 1);
           g.fillRect(x0, y0, o.w, o.h);

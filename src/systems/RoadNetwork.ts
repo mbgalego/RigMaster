@@ -20,6 +20,8 @@ export interface RoadPoint {
   y: number;
   /** Full carriageway width in px (per point — allows taper) */
   w: number;
+  /** Tangent rotation offset in radians (asymmetric curve control) */
+  twist?: number;
 }
 
 export interface RoadData {
@@ -64,6 +66,8 @@ const CELL = 1024;
 
 const MIN_ROAD_WIDTH = 44;
 const MAX_ROAD_WIDTH = 420;
+/** Max tangent rotation per control point (±60°) */
+const MAX_TWIST = Math.PI / 3;
 
 export class RoadNetwork {
   private static instance: RoadNetwork | null = null;
@@ -148,6 +152,28 @@ export class RoadNetwork {
     this.rebuildIndex();
   }
 
+  /** Tangent rotation at a single control point (asymmetric curve control) */
+  public setPointTwist(id: string, index: number, twistRad: number) {
+    const p = this.getRoad(id)?.points[index];
+    if (!p) return;
+    p.twist = Phaser.Math.Clamp(twistRad, -MAX_TWIST, MAX_TWIST);
+    if (Math.abs(p.twist) < 0.001) p.twist = undefined;
+    this.rebuildIndex();
+  }
+
+  public getPointTwist(id: string, index: number): number {
+    return this.getRoad(id)?.points[index]?.twist ?? 0;
+  }
+
+  /** Appends/unshifts a point at the start or end of an open road (extend tool). */
+  public addPointAtEnd(id: string, which: 'start' | 'end', point: RoadPoint) {
+    const road = this.getRoad(id);
+    if (!road || road.closed) return;
+    if (which === 'end') road.points.push(point);
+    else road.points.unshift(point);
+    this.rebuildIndex();
+  }
+
   /**
    * Inserts a control point on the road segment nearest to (x, y), at the
    * closest point on that segment (width interpolated). Returns the inserted
@@ -176,7 +202,13 @@ export class RoadNetwork {
     const a = best.road.points[best.segIndex];
     const b = best.road.points[(best.segIndex + 1) % best.road.points.length];
     const w = Math.round(a.w + (b.w - a.w) * best.t);
-    const point: RoadPoint = { x: Math.round(a.x + (b.x - a.x) * best.t), y: Math.round(a.y + (b.y - a.y) * best.t), w };
+    const tw = (a.twist ?? 0) + ((b.twist ?? 0) - (a.twist ?? 0)) * best.t;
+    const point: RoadPoint = {
+      x: Math.round(a.x + (b.x - a.x) * best.t),
+      y: Math.round(a.y + (b.y - a.y) * best.t),
+      w,
+      ...(tw ? { twist: tw } : {}),
+    };
     best.road.points.splice(best.segIndex + 1, 0, point);
     this.rebuildIndex();
     return { road: best.road, index: best.segIndex + 1 };
@@ -329,6 +361,17 @@ export class RoadNetwork {
         dx /= len;
         dy /= len;
 
+        // Per-point twist (asymmetric curves): blend the rotation offset
+        // between the span's endpoints and rotate the analytic tangent
+        const tw = (p1.twist ?? 0) + ((p2.twist ?? 0) - (p1.twist ?? 0)) * t;
+        if (tw !== 0) {
+          const c = Math.cos(tw), s = Math.sin(tw);
+          const rx = dx * c - dy * s;
+          const ry = dx * s + dy * c;
+          dx = rx;
+          dy = ry;
+        }
+
         out.push({ x, y, w, tx: dx, ty: dy });
       }
     }
@@ -338,7 +381,17 @@ export class RoadNetwork {
       const a = pts[n - 2];
       const b = pts[n - 1];
       const len = Phaser.Math.Distance.Between(a.x, a.y, b.x, b.y) || 1;
-      out.push({ x: b.x, y: b.y, w: b.w, tx: (b.x - a.x) / len, ty: (b.y - a.y) / len });
+      let tx = (b.x - a.x) / len;
+      let ty = (b.y - a.y) / len;
+      const tw = b.twist ?? 0;
+      if (tw !== 0) {
+        const c = Math.cos(tw), s = Math.sin(tw);
+        const rx = tx * c - ty * s;
+        const ry = tx * s + ty * c;
+        tx = rx;
+        ty = ry;
+      }
+      out.push({ x: b.x, y: b.y, w: b.w, tx, ty });
     }
     return out;
   }
@@ -365,7 +418,7 @@ export class RoadNetwork {
     return best ? { road: best.road, index: best.index } : null;
   }
 
-  /** Perpendicular unit vector at a control point (average of neighbours) */
+  /** Perpendicular unit vector at a control point (tangent rotated by its twist) */
   public static pointNormal(road: RoadData, i: number): { nx: number; ny: number } {
     const pts = road.points;
     const n = pts.length;
@@ -374,7 +427,55 @@ export class RoadNetwork {
     let tx = b.x - a.x, ty = b.y - a.y;
     const len = Math.hypot(tx, ty) || 1;
     tx /= len; ty /= len;
+    const tw = pts[i].twist ?? 0;
+    if (tw !== 0) {
+      const c = Math.cos(tw), s = Math.sin(tw);
+      const rx = tx * c - ty * s;
+      const ry = tx * s + ty * c;
+      tx = rx;
+      ty = ry;
+    }
     return { nx: -ty, ny: tx };
+  }
+
+  /** Tangent unit vector at a control point (rotated by its twist) */
+  public static pointTangent(road: RoadData, i: number): { tx: number; ty: number } {
+    const nrm = RoadNetwork.pointNormal(road, i);
+    return { tx: nrm.ny, ty: -nrm.nx };
+  }
+
+  /** Tangent angle at a control point IGNORING twist (twist-handle math base) */
+  public static baseTangentAngle(road: RoadData, i: number): number {
+    const pts = road.points;
+    const n = pts.length;
+    const a = pts[i > 0 ? i - 1 : road.closed ? n - 1 : 0];
+    const b = pts[i < n - 1 ? i + 1 : road.closed ? 0 : n - 1];
+    return Math.atan2(b.y - a.y, b.x - a.x);
+  }
+
+  /**
+   * Position of the little "+" extend handle beyond an open road's endpoint
+   * (along the end direction, rotated by that endpoint's twist).
+   */
+  public static extendHandlePos(road: RoadData, which: 'start' | 'end'): { x: number; y: number } {
+    const pts = road.points;
+    const n = pts.length;
+    const idx = which === 'end' ? n - 1 : 0;
+    const other = which === 'end' ? n - 2 : 1;
+    const p = pts[idx] ?? { x: 0, y: 0, w: 0 };
+    const o = pts[other] ?? { x: p.x + 1, y: p.y, w: 0 };
+    let dx = p.x - o.x;
+    let dy = p.y - o.y;
+    const len = Math.hypot(dx, dy) || 1;
+    dx /= len; dy /= len;
+    const tw = p.twist ?? 0;
+    if (tw !== 0) {
+      const c = Math.cos(tw), s = Math.sin(tw);
+      const rx = dx * c - dy * s;
+      const ry = dx * s + dy * c;
+      dx = rx; dy = ry;
+    }
+    return { x: p.x + dx * 70, y: p.y + dy * 70 };
   }
 
   /** Width handle of a control point (sits at half-width, perpendicular) */
@@ -402,7 +503,10 @@ export class RoadNetwork {
       id: r.id,
       surface: r.surface,
       closed: r.closed,
-      points: r.points.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y), w: Math.round(p.w) })),
+      points: r.points.map((p) => ({
+        x: Math.round(p.x), y: Math.round(p.y), w: Math.round(p.w),
+        ...(p.twist ? { twist: Math.round(Phaser.Math.RadToDeg(p.twist) * 10) / 10 } : {}),
+      })),
     }));
   }
 
@@ -415,7 +519,12 @@ export class RoadNetwork {
         const surface: RoadSurface = ['asphalt', 'dirt', 'cobble'].includes(raw.surface) ? raw.surface : 'asphalt';
         const points: RoadPoint[] = raw.points
           .filter((p: any) => p && Number.isFinite(p.x) && Number.isFinite(p.y))
-          .map((p: any) => ({ x: p.x, y: p.y, w: Phaser.Math.Clamp(Number(p.w) || 128, MIN_ROAD_WIDTH, MAX_ROAD_WIDTH) }));
+          .map((p: any) => ({
+            x: p.x,
+            y: p.y,
+            w: Phaser.Math.Clamp(Number(p.w) || 128, MIN_ROAD_WIDTH, MAX_ROAD_WIDTH),
+            ...(Number.isFinite(p.twist) ? { twist: Phaser.Math.Clamp(Phaser.Math.DegToRad(Number(p.twist)), -MAX_TWIST, MAX_TWIST) } : {}),
+          }));
         if (points.length < 2) continue;
         const road: RoadData = {
           id: typeof raw.id === 'string' ? raw.id : `rd_${this.nextId++}`,
