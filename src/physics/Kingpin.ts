@@ -50,7 +50,7 @@ export class Kingpin {
     this.trailerLength = trailerLength;
 
     this.parentOffset = options.parentOffset || { x: 0, y: 35 };
-    this.trailerOffset = options.trailerOffset || { x: 0, y: -trailerLength / 2 + 30 };
+    this.trailerOffset = options.trailerOffset || { x: 0, y: -trailerLength / 2 + 14 };
 
     this.jackknifeLimitDeg = options.jackknifeLimitDeg || 65;
     this.mechanicalLockDeg = options.mechanicalLockDeg || 75;
@@ -136,7 +136,9 @@ export class Kingpin {
     const jointX = this.parentBody.position.x - Math.sin(this.parentBody.angle) * this.parentOffset.y;
     const jointY = this.parentBody.position.y + Math.cos(this.parentBody.angle) * this.parentOffset.y;
 
-    const kingpinDist = (this.trailerLength / 2) - 30;
+    // Derive the pin point from the configured trailer offset (pin distance
+    // from the nose edge), instead of a stale hardcoded overhang.
+    const kingpinDist = -this.trailerOffset.y;
     const pinX = this.trailerBody.position.x + Math.sin(this.trailerBody.angle) * kingpinDist;
     const pinY = this.trailerBody.position.y - Math.cos(this.trailerBody.angle) * kingpinDist;
 

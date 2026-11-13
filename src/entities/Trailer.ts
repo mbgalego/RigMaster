@@ -79,12 +79,16 @@ export class Trailer {
     this.rearAxleY = this.length * 0.28;
     this.rearOverhang = (this.length / 2) - this.rearAxleY;
 
+    // Nose overhang past the kingpin pin: ~14px (18 for the long-cargo pole
+    // trailer). Keeps the nose plate over the fifth-wheel seat only — a bigger
+    // overhang visually covers the tractor cab and lets the nose corners hit
+    // the tractor's front-solid zone during articulation.
     if (this.type === 'long_cargo') {
-      this.kingpinDist = (this.length / 2) - 35;
+      this.kingpinDist = (this.length / 2) - 18;
     } else if (this.type === 'bitrem_lead' || this.type === 'bitrem_pup') {
-      this.kingpinDist = (this.length / 2) - 25;
+      this.kingpinDist = (this.length / 2) - 14;
     } else {
-      this.kingpinDist = (this.length / 2) - 30;
+      this.kingpinDist = (this.length / 2) - 14;
     }
     this.wheelbase = this.kingpinDist + this.rearAxleY;
 

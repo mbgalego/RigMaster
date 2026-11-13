@@ -330,7 +330,7 @@ export class MainScene extends Phaser.Scene {
 
       this.kingpin = new Kingpin(this, this.truck.body, this.trailer.body, this.trailer.length, {
         parentOffset: { x: 0, y: 35 },
-        trailerOffset: { x: 0, y: -this.trailer.length / 2 + 30 },
+        trailerOffset: { x: 0, y: -this.trailer.length / 2 + 14 },
         jackknifeLimitDeg: 75,
         mechanicalLockDeg: 95,
       });
@@ -348,7 +348,7 @@ export class MainScene extends Phaser.Scene {
 
       this.kingpin = new Kingpin(this, this.truck.body, this.trailer.body, this.trailer.length, {
         parentOffset: { x: 0, y: 35 },
-        trailerOffset: { x: 0, y: -this.trailer.length / 2 + 35 },
+        trailerOffset: { x: 0, y: -this.trailer.length / 2 + 18 },
         jackknifeLimitDeg: 72,
         mechanicalLockDeg: 95,
       });
@@ -366,7 +366,7 @@ export class MainScene extends Phaser.Scene {
 
       this.kingpin = new Kingpin(this, this.truck.body, this.trailer.body, this.trailer.length, {
         parentOffset: { x: 0, y: 35 },
-        trailerOffset: { x: 0, y: -this.trailer.length / 2 + 25 },
+        trailerOffset: { x: 0, y: -this.trailer.length / 2 + 14 },
         jackknifeLimitDeg: 75,
         mechanicalLockDeg: 95,
       });
@@ -384,7 +384,7 @@ export class MainScene extends Phaser.Scene {
 
       this.pupKingpin = new Kingpin(this, this.trailer.body, this.pupTrailer.body, this.pupTrailer.length, {
         parentOffset: { x: 0, y: this.trailer.length / 2 - 18 },
-        trailerOffset: { x: 0, y: -this.pupTrailer.length / 2 + 25 },
+        trailerOffset: { x: 0, y: -this.pupTrailer.length / 2 + 14 },
         jackknifeLimitDeg: 75,
         mechanicalLockDeg: 95,
       });
@@ -565,13 +565,13 @@ export class MainScene extends Phaser.Scene {
     let trailerOffY: number;
     let jackknife: number;
     if (t.type === 'long_cargo') {
-      trailerOffY = -t.length / 2 + 35;
+      trailerOffY = -t.length / 2 + 18;
       jackknife = 72;
     } else if (t.type === 'bitrem_lead') {
-      trailerOffY = -t.length / 2 + 25;
+      trailerOffY = -t.length / 2 + 14;
       jackknife = 75;
     } else {
-      trailerOffY = -t.length / 2 + 30;
+      trailerOffY = -t.length / 2 + 14;
       jackknife = 75;
     }
 
@@ -607,7 +607,7 @@ export class MainScene extends Phaser.Scene {
     this.pupTrailer = t;
     this.pupKingpin = new Kingpin(this, lead.body, t.body, t.length, {
       parentOffset: { x: 0, y: lead.length / 2 - 18 },
-      trailerOffset: { x: 0, y: -t.length / 2 + 25 },
+      trailerOffset: { x: 0, y: -t.length / 2 + 14 },
       jackknifeLimitDeg: 75,
       mechanicalLockDeg: 95,
     });

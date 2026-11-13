@@ -41,7 +41,11 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.3.1** (Versão Atual — branch `feature/road-network`)
+### **v2.3.2** (Versão Atual — branch `feature/road-network`)
+- **Nariz do atrelado já não invade a cabine**: a saliência do nariz além do pino (kingpin) foi reduzida de 30px para **14px** (18 no porta-pá eolico, 14 no bitrem) — a chapa do nariz cobre apenas a zona da roda quinta, como num semi real. Antes o nariz cobria metade do trator e as quinas do nariz chegavam a colidir com a *zona sólida frontal* do trator durante a articulação (empurrões visíveis).
+- Valores sincronizados em todos os acoplamentos (spawn, acoplamento manual, pup do bitrem), no `Trailer.kingpinDist` (detoção de acoplamento/blocker) e no debug do `Kingpin` (pin agora derivado do `trailerOffset` real, não hardcoded).
+
+### **v2.3.1** (branch `feature/road-network`)
 - **Rotunda agora aparece (bug de render)**: o caso de desenho tinha ficado no layer *flats* (depth 1) enquanto o routing a mandava para *solids* (depth 3) — resultado: invisível sob as ribbons das estradas, **com colisor circular invisível**. O desenho foi movido para `drawSolid`.
 - **Escala adaptada ao camião** (trator 96×48, atrelados até 310px):
   - Lugares de estacionamento: 64px → **100px**; carros 44×20 → **64×28** (com parasóis/pára-vidas).
