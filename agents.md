@@ -41,7 +41,11 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.4.1** (Versão Atual — branch `feature/road-network`)
+### **v2.4.2** (Versão Atual — branch `feature/road-network`)
+- **Captura de doca cobre os dois tipos de doca**: o assistente agora também cobre as portas do **Armazém Docas** (`warehouse_docks`) — antes só funcionava no Muro Docas, e o deslize continuava na fachada lisa do edifício. Geometria: portões uniformemente espaçados, meia-boca 30px, face da parede como topo.
+- **Engage mais firme**: kill da componente de aproximação 26px antes do topo (toque suave, sem penetração), travagem lateral do trator enquanto capturado (a máquina cinemática deixava de empurrar), caminhar da traseira de volta ao eixo da baia (passo limitado 1.5px/frame) e esquadrejamento mais firme (±0.57°/frame).
+
+### **v2.4.1** (branch `feature/road-network`)
 - **Assistente de captura de doca**: com o atrelado engatado e a traseira dentro da boca de uma baia do `dock_wall`, a velocidade de rastejo activa o "agarre dos pneus traseiros" — amortece o bamboleio lateral/yaw, puxa suavemente para o eixo da baia (±15° de tolerância) e absorve o impacto nos topes de borracha. Causa: o seguidor cinemático do pino (`followHitch`) sobrepõe-se ao solver de contactos e a traseira deslizava de lado nas faces dos brutaços.
 - Geometria das baias partilhada (`WorldObjects.dockWallBays`) entre a física (corpos dos brutaços/topes) e o assistente — um só ponto de verdade para boca/pier.
 

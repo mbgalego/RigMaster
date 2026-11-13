@@ -555,6 +555,7 @@ export class MainScene extends Phaser.Scene {
    * damped, the trailer is softly squared to the wall and settles against the
    * stop bumpers. Without this the kinematic hitch follower overpowers the
    * contact solver and the tail slides sideways along the pier faces.
+   * Covers both dock kinds: `dock_wall` bays and `warehouse_docks` doors.
    */
   private updateDockCapture() {
     if (!this.trailer || !this.kingpin) return;
@@ -568,17 +569,36 @@ export class MainScene extends Phaser.Scene {
     const tailY = bw.position.y + Math.cos(angle) * (t.length / 2);
 
     for (const o of this.world.objects.objects) {
-      if (o.type !== 'dock_wall') continue;
+      if (o.type !== 'dock_wall' && !(o.type === 'building' && o.variant === 'warehouse_docks')) continue;
       const c = Math.cos(o.angle), s = Math.sin(o.angle);
       const dx = tailX - o.x, dy = tailY - o.y;
       const lx = dx * c + dy * s;
       const ly = -dx * s + dy * c;
-      // Bays open toward local +y (apron side); stop bumpers sit at local -y
-      if (ly > o.h / 2 + 30 || ly < -o.h / 2 - 12) continue;
-      const { centres, gap } = this.world.objects.dockWallBays(o);
+
+      // Per-kind bay geometry: door centres, mouth half-width, settle face
+      let centres: number[] = [];
+      let halfMouth: number;
+      let stopLy: number;
+      if (o.type === 'dock_wall') {
+        const bays = this.world.objects.dockWallBays(o);
+        centres = bays.centres;
+        halfMouth = bays.gap / 2 - 4;
+        stopLy = -o.h / 2 + 10; // stop bumpers inside the bay (local -y end)
+        // Tail must be inside the bay mouth (approaching from the +y side)
+        if (ly > o.h / 2 + 30 || ly < -o.h / 2 - 12) continue;
+      } else {
+        // warehouse_docks: doors evenly spaced along the SOUTH wall (local +y)
+        const nd = Math.max(1, Math.floor(Number(o.params?.docks) || 5));
+        const spacing = o.w / nd;
+        for (let i = 0; i < nd; i++) centres.push(-o.w / 2 + (i + 0.5) * spacing);
+        halfMouth = 30;
+        stopLy = o.h / 2; // the wall face itself is the stop
+        if (ly > o.h / 2 + 46 || ly < -o.h / 2) continue;
+      }
+
       let bayCx: number | null = null;
       for (const cx of centres) {
-        if (Math.abs(lx - cx) <= gap / 2 - 4) { bayCx = cx; break; }
+        if (Math.abs(lx - cx) <= halfMouth) { bayCx = cx; break; }
       }
       if (bayCx === null) continue;
       // Alignment: trailer axis must be near-perpendicular to the wall (mod π)
@@ -591,21 +611,38 @@ export class MainScene extends Phaser.Scene {
       const nx = -s, ny = c; // wall local +y (bay mouth side)
       const tx = c, ty = s;  // along the wall
       let vx = bw.velocity.x, vy = bw.velocity.y;
-      // Absorb into the rubber stop: kill approach once the tail is on the bumper
-      if (ly < -o.h / 2 + 26) {
+      // Absorb into the rubber stop: kill approach once the tail is ~26px
+      // from the settle face
+      if (ly - stopLy < 26) {
         const vn = vx * nx + vy * ny;
         if (vn < 0) { vx -= vn * nx; vy -= vn * ny; }
       }
       // Rear tyres grip: damp drift along the wall
       const vt = vx * tx + vy * ty;
-      vx -= vt * 0.22; vy -= vt * 0.22;
+      vx -= vt * 0.25; vy -= vt * 0.25;
       // Gentle pull toward the bay axis
       const pull = Phaser.Math.Clamp(-(lx - bayCx) * 0.015, -0.4, 0.4);
       vx += pull * tx; vy += pull * ty;
       this.matter.body.setVelocity(bw, { x: vx, y: vy });
-      // Damp yaw + softly square the trailer to the wall
+      // Walk the tail back onto the bay axis (soft lateral clamp, capped step)
+      const latErr = bayCx - lx;
+      if (Math.abs(latErr) > 1) {
+        const step = Phaser.Math.Clamp(latErr * 0.15, -1.5, 1.5);
+        this.matter.body.setPosition(bw, {
+          x: bw.position.x + step * tx,
+          y: bw.position.y + step * ty,
+        });
+      }
+      // Damp yaw + square the trailer to the wall (firm while captured)
       this.matter.body.setAngularVelocity(bw, bw.angularVelocity * 0.75);
-      this.matter.body.setAngle(bw, angle + Phaser.Math.Clamp(d, -1, 1) * 0.012);
+      this.matter.body.setAngle(bw, angle + Phaser.Math.Clamp(d * 0.1, -0.01, 0.01));
+      // The tractor is kinematic — clamp its push into the dock too, or the
+      // hitch follower keeps pressing and re-generates the sideways slide.
+      const tb = this.truck.body;
+      const tvn = tb.velocity.x * nx + tb.velocity.y * ny;
+      if (tvn < 0) {
+        this.matter.body.setVelocity(tb, { x: tb.velocity.x - tvn * nx, y: tb.velocity.y - tvn * ny });
+      }
       break;
     }
   }
