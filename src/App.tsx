@@ -13,7 +13,6 @@ import type { RoadSurface } from './systems/RoadNetwork';
 import type { AddObjectSpec } from './scenes/EditorScene';
 import { TouchControls } from './components/TouchControls';
 import {
-  Truck as TruckIcon,
   RotateCcw,
   Volume2,
   VolumeX,
@@ -526,12 +525,7 @@ export default function App() {
       {/* TOP COMPACT INDUSTRIAL APP BAR */}
       <header className="absolute top-0 left-0 right-0 h-12 bg-slate-950/85 backdrop-blur-md border-b border-cyan-500/30 px-2 sm:px-4 flex items-center justify-between z-30 shadow-lg shadow-black/50">
         <div className="flex items-center gap-1.5 sm:gap-2.5">
-          <div className="flex items-center gap-1.5 bg-cyan-950/60 border border-cyan-500/40 px-2 py-1 rounded">
-            <TruckIcon className="w-4 h-4 text-cyan-400" />
-            <span className="font-black tracking-wider text-cyan-400 text-xs">RIGMASTER</span>
-          </div>
-
-          {/* Paint & Drive Mode Switcher */}
+        {/* Paint & Drive Mode Switcher */}
           <button
             onClick={handleToggleMode}
             className={`flex items-center gap-1.5 px-2 sm:px-2.5 py-1 rounded text-[11px] font-bold transition-all border ${

@@ -1,6 +1,14 @@
 ## 2. Histórico de Versões & Changelog
 
-### **v2.6.7** (Versão Atual — branch `fix/hud-improvements`)
+### **v2.6.8** (Versão Atual — branch `fix/hud-improvements`)
+- **Removido "RIGMASTER"** do cabeçalho superior — o primeiro botão à esquerda é agora o alternar modo (Editor/Condução).
+- **Velocidade no HUD** não ocupa 2 linhas em ecrãs pequenos (`whitespace-nowrap`).
+- **Botão "Drive" renomeado para "Editor"** (alternar modo Condução/Editor).
+- **Minimapa com tamanho fixo** no canto superior direito — não muda de tamanho com o zoom da câmara nem com redimensionamento da janela.
+- **Novo menu "Definições"** no dropdown: volume/mute + opção de ocultar a parte Touch do HUD.
+- **Opção "Néon Wireframe" renomeada para "Mostrar hitbox (P)"** no menu.
+
+### **v2.6.7** (branch `fix/hud-improvements`)
 - **Removido botão falso "RIG"** no cabeçalho superior (não tinha função).
 - **Velocidade no HUD** não ocupa 2 linhas em ecrãs pequenos (`whitespace-nowrap`).
 - **Botão "Drive" renomeado para "Editor"** (alternar modo Condução/Editor).
