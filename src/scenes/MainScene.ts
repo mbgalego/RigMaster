@@ -1541,7 +1541,8 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
-  /** Draws a highlight ring around the nearest gas pump (and a pulse while refuelling). */
+  /** Draws a highlight ring around the gas pump when the truck is within refuel range,
+   *  and a brighter ring while actively refuelling that pump. */
   private renderPumps() {
     const g = this.pumpGraphics;
     if (!g) return;
@@ -1551,41 +1552,58 @@ export class MainScene extends Phaser.Scene {
     const view = cam.worldView;
     const M = 160;
 
-    const drawPump = (x: number, y: number, active: boolean) => {
+    const tx = this.truck.body.position.x;
+    const ty = this.truck.body.position.y;
+
+    const drawPump = (x: number, y: number, mode: 'near' | 'active') => {
       // Cull to viewport
-      if (x + 60 < view.x - M || x - 60 > view.x + view.width + M ||
-          y + 60 < view.y - M || y - 60 > view.y + view.height + M) return;
+      if (x + 80 < view.x - M || x - 80 > view.x + view.width + M ||
+          y + 80 < view.y - M || y - 80 > view.y + view.height + M) return;
 
       const pulse = Math.sin(this.pumpPulsePhase * Math.PI * 2) * 0.5 + 0.5;
-      const ringR = active ? 34 + pulse * 8 : 30 + pulse * 4;
+      const isActive = mode === 'active';
+      const ringR = isActive ? 40 + pulse * 10 : 36 + pulse * 6;
 
-      g.lineStyle(active ? 4 : 2, active ? 0x22c55e : 0x10b981, active ? 0.9 : 0.5);
+      // Outer pulsing ring — clearly indicates "interactive zone"
+      g.lineStyle(isActive ? 5 : 3, isActive ? 0x22c55e : 0x10b981, isActive ? 1 : 0.7);
       g.beginPath();
       g.arc(x, y, ringR, 0, Math.PI * 2);
       g.strokePath();
 
-      // Inner glow
-      g.fillStyle(active ? 0x22c55e : 0x10b981, active ? 0.25 : 0.12);
+      // Inner fill
+      g.fillStyle(isActive ? 0x22c55e : 0x10b981, isActive ? 0.3 : 0.15);
       g.beginPath();
-      g.arc(x, y, ringR * 0.5, 0, Math.PI * 2);
+      g.arc(x, y, ringR * 0.45, 0, Math.PI * 2);
       g.fillPath();
 
-      // Small "drop" marker at top of ring
-      g.fillStyle(active ? 0x22c55e : 0x10b981, 1);
+      // Drop marker at top
+      g.fillStyle(isActive ? 0x22c55e : 0x10b981, 1);
       g.beginPath();
-      g.arc(x, y - ringR - 6, 4, 0, Math.PI * 2);
+      g.arc(x, y - ringR - 8, 5, 0, Math.PI * 2);
       g.fillPath();
 
-      // Prompt text when nearby but not refuelling
-      if (!active) {
-        // We can't draw text easily in Graphics; keep it to the ring + HUD hint
+      // When nearby: a secondary larger ring as a "tap here" hint
+      if (!isActive) {
+        g.lineStyle(1, 0x10b981, 0.35);
+        g.beginPath();
+        g.arc(x, y, ringR + 12, 0, Math.PI * 2);
+        g.strokePath();
       }
     };
 
     for (const o of this.world.objects.objects) {
       if (o.type !== 'gas_pump') continue;
-      const active = !!this.refuellingPump && this.refuellingPump.x === o.x && this.refuellingPump.y === o.y;
-      drawPump(o.x, o.y, active);
+
+      const dist = Phaser.Math.Distance.Between(tx, ty, o.x, o.y);
+
+      if (this.refuellingPump && this.refuellingPump.x === o.x && this.refuellingPump.y === o.y) {
+        // Actively refuelling this pump — always show
+        drawPump(o.x, o.y, 'active');
+      } else if (dist <= 110) {
+        // Within refuel range — show the "near" highlight
+        drawPump(o.x, o.y, 'near');
+      }
+      // Otherwise: nothing drawn — pump is invisible until you get close
     }
   }
 

@@ -41,7 +41,14 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.6.1** (Versão Atual — branch `feature/fuel-system`)
+### **v2.6.2** (Versão Atual — branch `feature/fuel-system`)
+- **Highlight de bomba só quando perto**: o anel verde pulsante agora só aparece à volta da bomba quando o camião está dentro da range de abastecimento (≤110px). Fora dessa distância a bomba não tem anel nenhum — deixa de haver círculos pulsantes por todo o mapa.
+- **Indicação visual mais clara**: anel exterior maior (zona interativa) + anel secundário como "toque aqui" quando perto; anel mais brilhante e maior durante o abastecimento activo.
+- **Clique/toque na bomba**: iniciar abastecimento ao tocar na bomba (além da tecla F).
+- **Sons**: fluído a correr durante o abastecimento + "clunk" no fim.
+- HUD avisa "Bomba por perto — toque ou F para abastecer".
+
+### **v2.6.1** (branch `feature/fuel-system`)
 - **Interação com bombas de combustível**:
   - Highlight visual (anel verde pulsante) à volta da bomba quando o camião está perto (≤110px).
   - Clique ou toque na bomba inicia o abastecimento (além da tecla F).
