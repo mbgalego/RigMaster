@@ -67,6 +67,11 @@ export function createGameConfig(options: GameConfigOptions): Phaser.Types.Core.
       },
     },
     scene: [MainScene, EditorScene],
+    input: {
+      // Default is 1 touch pointer (mouse + 1 touch). Pinch-to-zoom needs 2,
+      // plus a spare so a third finger never steals a pointer.
+      activePointers: 3,
+    },
     fps: {
       target: 60,
       forceSetTimeOut: false,

@@ -303,22 +303,16 @@ export const TouchControls: React.FC<TouchControlsProps> = ({ visible, coupling,
           <div className="flex flex-col items-center gap-1">
             {fuelPercent !== undefined && (
               <div
-                className="flex items-center gap-1"
+                className="relative w-16 h-3.5 bg-slate-700 rounded overflow-hidden border border-white/20 shadow-inner"
                 title={fuelLevel !== undefined ? `${Math.round(fuelLevel)} L no tanque` : undefined}
               >
-                <div className="relative w-14 h-1.5 bg-slate-700 rounded overflow-hidden border border-white/10 shadow-inner">
-                  <div
-                    className={`absolute left-0 top-0 h-full transition-all duration-100 ${
-                      fuelPercent < 20 ? 'bg-red-500' : fuelPercent < 40 ? 'bg-amber-400' : 'bg-cyan-400'
-                    }`}
-                    style={{ width: `${Math.max(0, Math.min(100, fuelPercent))}%` }}
-                  />
-                </div>
-                <span
-                  className={`text-[9px] font-black font-mono ${
-                    fuelPercent < 20 ? 'text-red-400' : fuelPercent < 40 ? 'text-amber-400' : 'text-cyan-300'
+                <div
+                  className={`absolute left-0 top-0 h-full transition-all duration-100 ${
+                    fuelPercent < 20 ? 'bg-red-500' : fuelPercent < 40 ? 'bg-amber-400' : 'bg-cyan-400'
                   }`}
-                >
+                  style={{ width: `${Math.max(0, Math.min(100, fuelPercent))}%` }}
+                />
+                <span className="absolute inset-0 flex items-center justify-center text-[9px] font-black font-mono leading-none text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.95)]">
                   {Math.round(fuelPercent)}%
                 </span>
               </div>

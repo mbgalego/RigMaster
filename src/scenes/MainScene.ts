@@ -215,7 +215,11 @@ export class MainScene extends Phaser.Scene {
 
     // Pinch-to-zoom (touch devices, drive mode): two fingers control the zoom
     this.pinchStartDist = 0;
-    const activePointers = () => ((this.input as any).activePointers as any[]).filter((pt) => pt.isDown);
+    // NOTE: the Pointer pool lives on the InputManager (`scene.input.manager.pointers`).
+    // There is no `input.activePointers` property (that's only a Game Config option), so
+    // using it here would throw and silently break tap-to-refuel / pinch-to-zoom.
+    const activePointers = () =>
+      this.input.manager.pointers.filter((pt: Phaser.Input.Pointer) => pt.isDown);
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
       if (this.isEditorMode) return;
       const active = activePointers();
@@ -241,26 +245,34 @@ export class MainScene extends Phaser.Scene {
     // Click / tap on a gas pump to refuel (single pointer, not a pinch)
     this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
       if (this.isEditorMode) return;
-      // Ignore if this was part of a pinch (two fingers)
-      if (pointer.pointerId !== 0 && pointer.pointerId !== 1) return;
+      // Another finger still down → this was a pinch/pan, not a tap
       const active = activePointers();
-      if (active.length > 0) return; // another finger still down → pinch/pan, not a tap
+      if (active.length > 0) return;
       // Convert screen pointer to world coords
-      const worldPt = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+      const cam = this.cameras.main;
+      const worldPt = cam.getWorldPoint(pointer.x, pointer.y);
       const tx = this.truck.body.position.x;
       const ty = this.truck.body.position.y;
       for (const o of this.world.objects.objects) {
         if (o.type !== 'gas_pump') continue;
-        const d = Phaser.Math.Distance.Between(worldPt.x, worldPt.y, o.x, o.y);
-        if (d < 40) { // tap tolerance on the pump
-          const distToTruck = Phaser.Math.Distance.Between(tx, ty, o.x, o.y);
-          if (distToTruck < 110) {
-            const pumpX = o.x;
-            const pumpY = o.y;
-            this.tryRefuel(pumpX, pumpY);
-            return;
-          }
+        // Hit-test the pump footprint (not a tiny radius) with screen-space padding
+        // that stays comfortable at any zoom — phones start zoomed out (~0.5).
+        const pad = 20 / cam.zoom;
+        const halfW = o.w / 2 + pad;
+        const halfH = o.h / 2 + pad;
+        const inside =
+          Math.abs(worldPt.x - o.x) <= halfW &&
+          Math.abs(worldPt.y - o.y) <= halfH;
+        if (!inside) continue;
+        const distToTruck = Phaser.Math.Distance.Between(tx, ty, o.x, o.y);
+        if (distToTruck < 120) {
+          const pumpX = o.x;
+          const pumpY = o.y;
+          this.tryRefuel(pumpX, pumpY);
+        } else {
+          this.setCouplingNotice('Aproxime-se da bomba para abastecer', 'info');
         }
+        return;
       }
     });
 

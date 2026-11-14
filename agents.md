@@ -41,7 +41,17 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.6.5** (Versão Atual — branch `feature/fuel-system`)
+### **v2.6.6** (Versão Atual — branch `feature/fuel-system`)
+- **Percentagem dentro da barra**: o indicador de combustível mostra agora a percentagem centrada **dentro** da barra (texto branco com sombra escura para legibilidade em qualquer cor de fundo).
+- **Corrigido: tocar na bomba não abastecia em ecrã touch**. Causa raiz: o handler usava `(this.input as any).activePointers`, que **não existe** (é apenas uma opção de Game Config). Isso lançava `TypeError` e abortava o handler antes de chegar à lógica de abastecer.
+  - Passou a usar `this.input.manager.pointers.filter(pt => pt.isDown)`.
+  - Removido o filtro `pointer.pointerId` (no rato é `null`, o que bloqueava todos os cliques).
+  - Área de toque passou de um raio de 40px (a bomba tem 110px de altura) para um hit-test do footprint da bomba com padding ajustado ao zoom.
+  - Toque numa bomba fora de alcance mostra toast "Aproxime-se da bomba para abastecer".
+- **Pinch-to-zoom corrigido**: adicionado `input.activePointers: 3` na config. O default do Phaser é 1 ponteiro de toque, pelo que o gesto de 2 dedos nunca podia funcionar.
+- **Teste headless**: `smoke-fuel.mjs` passa a simular um clique/toque real na bomba e verificar o abastecimento + ausência de erros JS.
+
+### **v2.6.5** (branch `feature/fuel-system`)
 - **Barra de combustível por cima do D/R**: corrigido o posicionamento nos touch controls. A barra fica agora empilhada verticalmente **por cima** do switch de marcha (D/R), em vez de ao lado. Reduz a largura horizontal da fila de controlos para caber em ecrãs de telemóvel.
 - **Combustível compacto**: barra fina (w-14) + percentagem inteira logo acima dos botões D/R; litros disponíveis no tooltip.
 

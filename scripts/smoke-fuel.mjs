@@ -16,6 +16,8 @@ const check = (name, ok, detail = '') => {
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+const pageErrors = [];
+page.on('pageerror', (e) => pageErrors.push(String(e)));
 await page.goto(URL, { waitUntil: 'domcontentloaded' });
 await page.waitForFunction(() => !!window.__rig, { timeout: 30000 });
 await page.waitForTimeout(2000);
@@ -65,10 +67,12 @@ for (let i = 0; i < 50; i++) {
   }
 }
 check('combustível chega a 0 após movimento suficiente', emptyReached, `movido ${totalMoved}px`);
-const fuelEmpty = await page.evaluate(() => window.__rig.telemetry.fuelPercent);
-check('fuelPercent ≈ 0 quando vazio', fuelEmpty <= 2, `${fuelEmpty}%`);
-const isOut = await page.evaluate(() => window.__rig.telemetry.isOutOfFuel);
-check('isOutOfFuel = true quando vazio', isOut === true);
+const emptyState = await page.evaluate(() => ({
+  percent: window.__rig.truck.fuelPercent,
+  isOutOfFuel: window.__rig.truck.isOutOfFuel,
+}));
+check('fuelPercent ≈ 0 quando vazio', emptyState.percent <= 2, `${emptyState.percent.toFixed(1)}%`);
+check('isOutOfFuel = true quando vazio', emptyState.isOutOfFuel === true);
 
 // 4. Try to accelerate when out of fuel - speed should not increase
 await page.keyboard.down('w');
@@ -83,14 +87,62 @@ const nearPump = await page.evaluate(() => {
   const rig = window.__rig;
   const truck = rig.truck;
   const matter = rig.matter;
-  matter.body.setPosition(truck.body, { x: 3140, y: 2350 });
+  // Stop ~80px away from the pump (tank is empty from step 3)
+  matter.body.setPosition(truck.body, { x: 3060, y: 2350 });
   matter.body.setVelocity(truck.body, { x: 0, y: 0 });
   truck.vLong = 0;
   truck.currentSpeed = 0;
+  // Avoid a phantom "moved" delta (teleport) being turned into fuel burn next frame.
+  truck._lastBodyX = truck.body.position.x;
+  truck._lastBodyY = truck.body.position.y;
   truck.update(16, 16);
   return { x: truck.body.position.x, y: truck.body.position.y, fuel: truck.fuelLevel };
 });
 console.log('teleported near pump:', JSON.stringify(nearPump));
+
+// 5b. Tap/click the pump (pointerup) — regression test: `input.activePointers`
+//     does not exist, which used to throw and silently break this handler.
+pageErrors.length = 0; // only care about errors during the tap
+// The follow camera lerps; snap it onto the pump so the target is on-screen.
+await page.evaluate(() => {
+  const cam = window.__rig.cameras.main;
+  cam.stopFollow();
+  cam.centerOn(3100, 2350);
+});
+await page.waitForTimeout(300);
+const tapTarget = await page.evaluate(() => {
+  const rig = window.__rig;
+  const cam = rig.cameras.main;
+  const rect = document.querySelector('canvas').getBoundingClientRect();
+  const zoom = cam.zoom;
+  return {
+    sx: rect.left + (3140 - cam.worldView.x) * zoom,
+    sy: rect.top + (2350 - cam.worldView.y) * zoom,
+    zoom,
+  };
+});
+console.log('tap target:', JSON.stringify(tapTarget));
+const preTap = await page.evaluate(() => {
+  const rig = window.__rig;
+  return {
+    truck: { x: rig.truck.body.position.x, y: rig.truck.body.position.y },
+    fuel: rig.truck.fuelLevel,
+    speed: rig.truck.speedKmh,
+  };
+});
+console.log('pre-tap:', JSON.stringify(preTap));
+await page.mouse.move(tapTarget.sx, tapTarget.sy);
+await page.mouse.down();
+await page.mouse.up();
+await page.waitForTimeout(800);
+const afterTap = await page.evaluate(() => ({
+  fuelLevel: window.__rig.truck.fuelLevel,
+  isRefuelling: window.__rig.isRefuelling,
+  truck: { x: window.__rig.truck.body.position.x, y: window.__rig.truck.body.position.y },
+}));
+console.log('post-tap:', JSON.stringify(afterTap));
+check('toque/clique na bomba abastece', afterTap.fuelLevel >= 499, `${afterTap.fuelLevel.toFixed(1)}L`);
+check('handler de toque sem erros JS', pageErrors.length === 0, pageErrors.slice(0, 2).join(' | '));
 
 await page.waitForTimeout(300);
 // Test refuelToFull() directly
