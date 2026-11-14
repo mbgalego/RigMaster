@@ -207,16 +207,16 @@ export default function App() {
   const prevJackknifed = useRef(telemetry.isJackknifed);
   const prevFragileHealth = useRef(telemetry.fragileHealth);
 
-  const addToast = (text: string, kind: 'info' | 'success' | 'blocked' = 'info') => {
+  const addToast = (text: string, kind: 'info' | 'success' | 'blocked' | 'fuel' = 'info', durationMs = 3000) => {
     const id = ++toastIdRef.current;
     setToasts((t) => [...t.slice(-2), { id, text, kind }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3000);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), durationMs);
   };
 
-  // Out of fuel → toast
+  // Out of fuel → toast (engine shutoff)
   useEffect(() => {
     if (!prevOutOfFuel.current && telemetry.isOutOfFuel) {
-      addToast('SEM COMBUSTÍVEL — pare e abasteça numa bomba', 'blocked');
+      addToast('Sem combustível — motor desligado', 'fuel', 4500);
     }
     prevOutOfFuel.current = telemetry.isOutOfFuel;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1422,21 +1422,28 @@ export default function App() {
         </div>
       )}
 
-      {/* TOASTS (coupling feedback notifications — only on coupling attempts) */}
+      {/* TOASTS (coupling feedback + persistent <=20% low-fuel reserve toaster) */}
       {!isEditorMode && (
         <div className="absolute top-14 inset-x-0 z-40 flex flex-col items-center gap-2 pointer-events-none px-4">
+          {telemetry.fuelPercent <= 20 && !telemetry.isOutOfFuel && (
+            <div className="px-4 py-2 rounded-lg border shadow-lg text-xs font-bold bg-red-950/95 border-amber-400/90 text-amber-100 shadow-amber-500/30 animate-pulse">
+              ⛽ Combustível na reserva ({Math.round(telemetry.fuelPercent)}% ≤ 20%) — abasteça numa bomba
+            </div>
+          )}
           {toasts.map((t) => (
             <div
               key={t.id}
               className={`px-4 py-2 rounded-lg border shadow-lg text-xs font-bold ${
-                t.kind === 'blocked'
-                  ? 'bg-amber-950/90 border-amber-500/60 text-amber-200 shadow-amber-500/20'
-                  : t.kind === 'success'
-                    ? 'bg-emerald-950/90 border-emerald-500/60 text-emerald-200 shadow-emerald-500/20'
-                    : 'bg-slate-900/90 border-cyan-500/50 text-cyan-100 shadow-cyan-500/20'
+                t.kind === 'fuel'
+                  ? 'bg-red-950/95 border-red-400/80 text-red-100 shadow-red-500/30'
+                  : t.kind === 'blocked'
+                    ? 'bg-amber-950/90 border-amber-500/60 text-amber-200 shadow-amber-500/20'
+                    : t.kind === 'success'
+                      ? 'bg-emerald-950/90 border-emerald-500/60 text-emerald-200 shadow-emerald-500/20'
+                      : 'bg-slate-900/90 border-cyan-500/50 text-cyan-100 shadow-cyan-500/20'
               }`}
             >
-              {t.kind === 'blocked' ? '🔒 ' : t.kind === 'success' ? '✅ ' : 'ℹ️ '}
+              {t.kind === 'fuel' ? '⛽ ' : t.kind === 'blocked' ? '🔒 ' : t.kind === 'success' ? '✅ ' : 'ℹ️ '}
               {t.text}
             </div>
           ))}
@@ -1449,9 +1456,9 @@ export default function App() {
         if (scene) scene.decoupleAction();
       }} />
 
-      {/* ZOOM CONTROLS (drive mode) — pinch on mobile, buttons everywhere */}
+      {/* ZOOM CONTROLS (drive mode) — positioned clear of the top-right minimap */}
       {!isEditorMode && (
-        <div className="absolute right-2 sm:right-3 top-14 z-30 flex flex-col gap-1.5">
+        <div className="absolute right-[168px] top-14 z-30 flex flex-col gap-1.5">
           <button
             onClick={() => { const s = getMainScene(); if (s) s.adjustZoom(1.18); }}
             className="w-10 h-10 rounded-lg bg-slate-950/90 text-cyan-300 border border-cyan-500/50 hover:bg-slate-800 hover:text-white flex items-center justify-center shadow-lg backdrop-blur-md"

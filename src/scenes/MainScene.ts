@@ -96,11 +96,8 @@ export class MainScene extends Phaser.Scene {
     { id: 'historic', label: 'HISTÓRICO', c: 8, r: 72 },
   ];
 
-  // Minimap (full-map HUD overview with live camera viewport & truck marker)
-  private minimapImage: Phaser.GameObjects.Image | null = null;
-  private minimapOverlay: Phaser.GameObjects.Graphics | null = null;
+  // Minimap (rendered in dedicated MinimapScene with locked zoom = 1)
   private minimapVisible: boolean = true;
-  private lastMinimapVersion: number = -1;
 
   // Audio Context (Procedural synthesized audio)
   private audioCtx: AudioContext | null = null;
@@ -244,6 +241,7 @@ export class MainScene extends Phaser.Scene {
     // Click / tap on a gas pump to refuel (single pointer, not a pinch)
     this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
       if (this.isEditorMode) return;
+      if (this.isPointerOverMinimap(pointer)) return;
       // Another finger still down → this was a pinch/pan, not a tap
       const active = activePointers();
       if (active.length > 0) return;
@@ -280,7 +278,7 @@ export class MainScene extends Phaser.Scene {
     this.weatherGraphics.setDepth(20);
     this.weatherGraphics.setScrollFactor(0); // Fixed to screen
 
-    // 4b. Minimap HUD (top-right overview of the whole map)
+    // 4b. Minimap HUD (dedicated overlay scene so camera zoom never scales it)
     this.createMinimap();
 
     // 5. Keyboard Hotkeys
@@ -503,6 +501,7 @@ export class MainScene extends Phaser.Scene {
     const backwardY = Math.cos(spawnAngleRad);
 
     this.truck.setPosition(spawn.x, spawn.y, spawnAngleRad);
+    this.truck.refuelToFull();
 
     if (this.trailer) {
       let offset = 115;
@@ -1086,11 +1085,13 @@ export class MainScene extends Phaser.Scene {
       this.cameras.main.removeBounds();
       this.scene.launch('EditorScene');
       this.scene.bringToTop('EditorScene');
+      this.scene.bringToTop('MinimapScene');
     } else {
       this.scene.stop('EditorScene');
       this.cameras.main.setBounds(0, 0, World.WORLD_W, World.WORLD_H);
       this.cameras.main.setZoom(this.preEditorZoom);
       this.cameras.main.startFollow(this.truck.container, true, 0.1, 0.1);
+      this.scene.bringToTop('MinimapScene');
     }
   }
 
@@ -1284,9 +1285,6 @@ export class MainScene extends Phaser.Scene {
       // Sound Updates
       this.updateSyntheticAudio(time);
     }
-
-    // Minimap HUD (base texture redraws only when the map changed; overlay is cheap)
-    this.updateMinimap(time);
 
     // Render Weather Environment
     this.renderWeather(time, delta);
@@ -1668,53 +1666,39 @@ export class MainScene extends Phaser.Scene {
   }
 
   // ==========================================
-  // MINIMAP (full-map HUD overview)
+  // MINIMAP (full-map HUD overview in MinimapScene)
   // ==========================================
 
-  private static readonly MINIMAP_PX_PER_TILE = 2;
-
   private createMinimap() {
-    const mmW = Math.round((World.WORLD_W / 128) * MainScene.MINIMAP_PX_PER_TILE);
-    const mmH = Math.round((World.WORLD_H / 128) * MainScene.MINIMAP_PX_PER_TILE);
-
-    // Fixed display size — minimap stays the same size regardless of viewport or camera zoom
-    const FIXED_DISPLAY_SIZE = 150; // px
-
-    if (this.textures.exists('minimap_base')) this.textures.remove('minimap_base');
-    const texture = this.textures.createCanvas('minimap_base', mmW, mmH);
-    if (!texture) return;
-
-    this.minimapImage = this.add.image(0, 0, 'minimap_base')
-      .setOrigin(0, 0)
-      .setScrollFactor(0)
-      .setDepth(120)
-      .setAlpha(0.92)
-      .setDisplaySize(FIXED_DISPLAY_SIZE, FIXED_DISPLAY_SIZE);
-    this.minimapOverlay = this.add.graphics().setScrollFactor(0).setDepth(121);
-
-    this.repositionMinimap();
-    this.lastMinimapVersion = -1;
+    this.scene.launch('MinimapScene');
+    this.scene.bringToTop('MinimapScene');
 
     // Toggle with M (desktop)
     if (this.input.keyboard) {
       this.input.keyboard.on('keydown-M', () => this.toggleMinimap());
     }
-    this.scale.on('resize', () => this.repositionMinimap());
-
-    // Paint immediately so the first rendered frame already shows it
-    this.updateMinimap(0);
   }
 
-  private repositionMinimap() {
-    if (!this.minimapImage) return;
-    // Fixed size — no rescaling on viewport resize or camera zoom
-    this.minimapImage.setPosition(this.scale.width - this.minimapImage.displayWidth - 10, 58);
-  }
-
-  private toggleMinimap() {
+  public toggleMinimap() {
     this.minimapVisible = !this.minimapVisible;
-    if (this.minimapImage) this.minimapImage.setVisible(this.minimapVisible);
-    this.lastMinimapVersion = -1; // forces redraw when turned back on
+  }
+
+  public isMinimapVisible(): boolean {
+    return this.minimapVisible;
+  }
+
+  public getExamDockWorld(): LicenseExam['targetDock'] | null {
+    return this.examDockWorld;
+  }
+
+  public getMinimapRect(): { x: number; y: number; width: number; height: number } {
+    const size = 150;
+    return {
+      x: this.scale.width - size - 10,
+      y: 58,
+      width: size,
+      height: size,
+    };
   }
 
   /**
@@ -1722,138 +1706,15 @@ export class MainScene extends Phaser.Scene {
    * tiles underneath it.
    */
   public isPointerOverMinimap(pointer: Phaser.Input.Pointer): boolean {
-    if (!this.minimapVisible || !this.minimapImage) return false;
+    if (!this.minimapVisible) return false;
+    const r = this.getMinimapRect();
     const m = 5; // small tolerance for the border glow
     return (
-      pointer.x >= this.minimapImage.x - m &&
-      pointer.y >= this.minimapImage.y - m &&
-      pointer.x <= this.minimapImage.x + this.minimapImage.displayWidth + m &&
-      pointer.y <= this.minimapImage.y + this.minimapImage.displayHeight + m
+      pointer.x >= r.x - m &&
+      pointer.y >= r.y - m &&
+      pointer.x <= r.x + r.width + m &&
+      pointer.y <= r.y + r.height + m
     );
-  }
-
-  private updateMinimap(time: number) {
-    if (!this.minimapOverlay || !this.minimapImage) return;
-    if (!this.minimapVisible) {
-      this.minimapOverlay.clear();
-      return;
-    }
-    if (this.lastMinimapVersion !== this.world.version) {
-      this.lastMinimapVersion = this.world.version;
-      this.redrawMinimapBase();
-    }
-    this.drawMinimapOverlay(time);
-  }
-
-  /**
-   * Rasterizes the island into a small canvas: ocean, land silhouette,
-   * vector roads and prefab highlights. Only runs when the world version
-   * changed — edits/import/reseed trigger exactly one redraw.
-   */
-  private redrawMinimapBase() {
-    const texture = this.textures.get('minimap_base') as Phaser.Textures.CanvasTexture | null;
-    if (!texture) return;
-    const ctx = texture.getContext();
-    const px = MainScene.MINIMAP_PX_PER_TILE;
-    const mmW = texture.width;
-    const mmH = texture.height;
-    const scale = mmW / World.WORLD_W;
-
-    // Ocean + land silhouette (coarse terrain sampling)
-    ctx.fillStyle = '#0a2338';
-    ctx.fillRect(0, 0, mmW, mmH);
-    const terrain = this.world.terrain;
-    for (let my = 0; my < mmH; my++) {
-      for (let mx = 0; mx < mmW; mx++) {
-        const wx = mx / scale, wy = my / scale;
-        if (terrain.isWater(wx, wy)) continue;
-        ctx.fillStyle = terrain.isBeach(wx, wy) ? '#8a744d' : '#22381f';
-        ctx.fillRect(mx, my, px, px);
-      }
-    }
-
-    // Vector roads (centreline strokes scaled to minimap resolution)
-    const roadColors: Record<string, string> = { asphalt: '#5a6478', cobble: '#707788', dirt: '#8a6438' };
-    for (const road of this.roadNetwork.roads) {
-      ctx.strokeStyle = roadColors[road.surface] || roadColors.asphalt;
-      ctx.lineWidth = Math.max(1, road.points.reduce((m, p) => Math.max(m, p.w), 0) * scale);
-      ctx.lineJoin = 'round';
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      road.points.forEach((p, i) => {
-        const mx = p.x * scale, my = p.y * scale;
-        if (i === 0) ctx.moveTo(mx, my); else ctx.lineTo(mx, my);
-      });
-      if (road.closed) ctx.closePath();
-      ctx.stroke();
-    }
-
-    // Prefab highlights: docks (amber), parking pads (pink), buildings (slate)
-    for (const o of this.world.objects.objects) {
-      let color: string | null = null;
-      if (o.type === 'dock' || o.type === 'exam_dock') color = '#eab308';
-      else if (o.type === 'parking_pad') color = '#ec4899';
-      else if (o.type === 'building' || o.type === 'silo') color = '#475569';
-      else if (o.type === 'gas_pump') color = '#34d058';
-      if (!color) continue;
-      ctx.fillStyle = color;
-      ctx.fillRect(o.x * scale - px / 2, o.y * scale - px / 2, px, px);
-    }
-    texture.refresh();
-  }
-
-  private drawMinimapOverlay(time: number) {
-    const g = this.minimapOverlay;
-    const img = this.minimapImage;
-    if (!g || !img) return;
-    g.clear();
-
-    const worldW = World.WORLD_W;
-    const worldH = World.WORLD_H;
-    const toMapX = (wx: number) => img.x + (wx / worldW) * img.displayWidth;
-    const toMapY = (wy: number) => img.y + (wy / worldH) * img.displayHeight;
-
-    // Cyan border glow
-    g.lineStyle(2, 0x22d3ee, 0.9);
-    g.strokeRect(img.x - 1, img.y - 1, img.displayWidth + 2, img.displayHeight + 2);
-
-    // Camera viewport rectangle (works in drive & editor mode — the cameras are synced)
-    const view = this.cameras.main.worldView;
-    g.lineStyle(1.5, 0xfacc15, 0.85);
-    g.strokeRect(
-      toMapX(view.x),
-      toMapY(view.y),
-      (view.width / worldW) * img.displayWidth,
-      (view.height / worldH) * img.displayHeight
-    );
-
-    // Exam target marker (pulsing cyan)
-    if (this.examDockWorld) {
-      const ex = toMapX(this.examDockWorld.x);
-      const ey = toMapY(this.examDockWorld.y);
-      const pulse = 0.55 + Math.sin(time * 0.005) * 0.35;
-      g.lineStyle(2, 0x22d3ee, pulse);
-      g.strokeCircle(ex, ey, 5);
-      g.fillStyle(0x22d3ee, pulse);
-      g.fillCircle(ex, ey, 2.5);
-    }
-
-    // Parked / loose trailers (white dots)
-    for (const t of TrailerManager.getInstance(this).loose) {
-      g.fillStyle(0xe2e8f0, 0.95);
-      g.fillRect(toMapX(t.body.position.x) - 1.5, toMapY(t.body.position.y) - 1.5, 3, 3);
-    }
-
-    // Truck arrow marker
-    const tx = toMapX(this.truck.body.position.x);
-    const ty = toMapY(this.truck.body.position.y);
-    const ang = this.truck.body.angle;
-    const size = 7;
-    const p1 = { x: tx + Math.cos(ang) * size, y: ty + Math.sin(ang) * size };
-    const p2 = { x: tx + Math.cos(ang + 2.5) * size * 0.75, y: ty + Math.sin(ang + 2.5) * size * 0.75 };
-    const p3 = { x: tx + Math.cos(ang - 2.5) * size * 0.75, y: ty + Math.sin(ang - 2.5) * size * 0.75 };
-    g.fillStyle(0xfb923c, 1);
-    g.fillTriangle(p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
   }
 
   private renderWeather(time: number, delta: number) {
@@ -1944,6 +1805,14 @@ export class MainScene extends Phaser.Scene {
       this.audioCtx.resume();
     }
 
+    // Engine off when out of fuel — silence engine & reverse beep while coasting
+    if (this.truck.isOutOfFuel) {
+      this.engineGain.gain.setTargetAtTime(0, this.audioCtx.currentTime, 0.06);
+      return;
+    }
+
+    this.engineGain.gain.setTargetAtTime(0.04, this.audioCtx.currentTime, 0.06);
+
     // Engine RPM Pitch based on truck speed & throttle
     const speedRatio = Math.min(this.truck.speedKmh / 65, 1.0);
     const targetFreq = 34 + speedRatio * 48 + (this.truck.isAccelerating ? 12 : 0);
@@ -2007,7 +1876,8 @@ export class MainScene extends Phaser.Scene {
   public setSoundEnabled(enabled: boolean) {
     this.soundEnabled = enabled;
     if (this.engineGain && this.audioCtx) {
-      this.engineGain.gain.setValueAtTime(enabled ? 0.04 : 0, this.audioCtx.currentTime);
+      const targetGain = enabled && !this.truck?.isOutOfFuel ? 0.04 : 0;
+      this.engineGain.gain.setValueAtTime(targetGain, this.audioCtx.currentTime);
     }
   }
 }

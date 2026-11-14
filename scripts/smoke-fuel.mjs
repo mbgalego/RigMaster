@@ -5,6 +5,7 @@
  * Tests fuel consumption via direct body movement (reliable) and
  * out-of-engine behavior.
  */
+import fs from 'node:fs';
 import { chromium } from 'playwright';
 
 const URL = process.env.SMOKE_URL || 'http://localhost:3000';
@@ -14,7 +15,9 @@ const check = (name, ok, detail = '') => {
   if (!ok) failures++;
 };
 
-const browser = await chromium.launch();
+const fallbackExe = '/ms-playwright/chrome-headless-shell-linux64/chrome-headless-shell';
+const executablePath = !fs.existsSync(chromium.executablePath()) && fs.existsSync(fallbackExe) ? fallbackExe : undefined;
+const browser = await chromium.launch(executablePath ? { executablePath } : {});
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 const pageErrors = [];
 page.on('pageerror', (e) => pageErrors.push(String(e)));
@@ -55,6 +58,50 @@ check('combustível desce ao movimentar', r1.consumed > 0, `consumiu ${r1.consum
 check('consumo correto', Math.abs(r1.consumed - r1.expected) < 0.01, `esperado ${r1.expected}L, obtido ${r1.consumed.toFixed(2)}L`);
 check('combustível não negativo', r1.endFuel >= 0);
 
+// 2b. Drop fuel to ~19% -> 20% low-fuel toast appears BEFORE reaching 0%
+await page.evaluate(() => {
+  const truck = window.__rig.truck;
+  truck.fuelLevel = truck.fuelCapacity * 0.19;
+  truck.isOutOfFuel = false;
+  window.__rig.update(0, 16);
+});
+let lowFuelToastFound = false;
+try {
+  await page.waitForFunction(() => document.body.innerText.includes('20%') && document.body.innerText.includes('abasteça'), { timeout: 2000 });
+  lowFuelToastFound = true;
+} catch {
+  lowFuelToastFound = false;
+}
+const lowFuelDiag = await page.evaluate(() => ({
+  fuelPercent: window.__rig.telemetry.fuelPercent,
+  text: document.body.innerText.slice(0, 200),
+}));
+check('aviso de combustível baixo aparece aos <=20%', lowFuelToastFound, `fuel=${lowFuelDiag.fuelPercent}%`);
+
+// 2c. Minimap size/position stays fixed when MainScene camera zoom changes (0.45 vs 1.7)
+const minimapZoomCheck = await page.evaluate(() => {
+  const rig = window.__rig;
+  const mm = rig.scene.get('MinimapScene');
+  rig.cameras.main.setZoom(0.45);
+  mm.update(100);
+  const z1 = { camZoom: mm.cameras.main.zoom, imgW: mm.minimapImage?.displayWidth, imgX: mm.minimapImage?.x, imgY: mm.minimapImage?.y };
+  rig.cameras.main.setZoom(1.7);
+  mm.update(200);
+  const z2 = { camZoom: mm.cameras.main.zoom, imgW: mm.minimapImage?.displayWidth, imgX: mm.minimapImage?.x, imgY: mm.minimapImage?.y };
+  rig.cameras.main.setZoom(1.0);
+  return { z1, z2 };
+});
+check(
+  'minimapa mantém tamanho e posição fixos com mudança de zoom',
+  minimapZoomCheck.z1.camZoom === 1 &&
+  minimapZoomCheck.z2.camZoom === 1 &&
+  minimapZoomCheck.z1.imgW === 150 &&
+  minimapZoomCheck.z2.imgW === 150 &&
+  minimapZoomCheck.z1.imgX === minimapZoomCheck.z2.imgX &&
+  minimapZoomCheck.z1.imgY === minimapZoomCheck.z2.imgY,
+  JSON.stringify(minimapZoomCheck),
+);
+
 // 3. Drive until empty (move in chunks)
 let totalMoved = 1000;
 let emptyReached = false;
@@ -73,6 +120,43 @@ const emptyState = await page.evaluate(() => ({
 }));
 check('fuelPercent ≈ 0 quando vazio', emptyState.percent <= 2, `${emptyState.percent.toFixed(1)}%`);
 check('isOutOfFuel = true quando vazio', emptyState.isOutOfFuel === true);
+
+// 3b. Coasting & trailer coupling stability when running out of fuel at speed
+await page.evaluate(() => {
+  const rig = window.__rig;
+  const truck = rig.truck;
+  truck.vLong = 140; // ~31 km/h moving forward
+  truck.currentSpeed = 140;
+  truck.isOutOfFuel = true;
+  truck.fuelLevel = 0;
+});
+await page.waitForTimeout(250);
+const coastMid = await page.evaluate(() => {
+  const rig = window.__rig;
+  const t = rig.truck;
+  const tr = rig.trailer;
+  const ta = t.body.angle;
+  const hx = t.body.position.x - Math.sin(ta) * 35;
+  const hy = t.body.position.y + Math.cos(ta) * 35;
+  const tra = tr.body.angle;
+  const px = tr.body.position.x + Math.sin(tra) * tr.kingpinDist;
+  const py = tr.body.position.y - Math.cos(tra) * tr.kingpinDist;
+  return {
+    speedKmh: t.speedKmh,
+    vLong: t.vLong,
+    hitchDist: Math.hypot(hx - px, hy - py),
+  };
+});
+check('camião desliza (não para instantaneamente) ao acabar combustível', coastMid.speedKmh > 10 && coastMid.vLong > 50, `${coastMid.speedKmh} km/h`);
+check('atrelado permanece acoplado durante deslize sem combustível', coastMid.hitchDist < 18, `dist=${coastMid.hitchDist.toFixed(1)}px`);
+
+// Stop velocity cleanly for next checks
+await page.evaluate(() => {
+  const rig = window.__rig;
+  rig.truck.vLong = 0;
+  rig.truck.currentSpeed = 0;
+  rig.matter.body.setVelocity(rig.truck.body, { x: 0, y: 0 });
+});
 
 // 4. Try to accelerate when out of fuel - speed should not increase
 await page.keyboard.down('w');
@@ -172,6 +256,21 @@ const afterRefuel = await page.evaluate(() => {
 });
 check('tanque cheio após abastecer (F)', afterRefuel.fuelLevel >= 499, `${afterRefuel.fuelLevel}L`);
 check('isOutOfFuel = false após abastecer', afterRefuel.isOutOfFuel === false);
+
+// 6. Respawn (R) refills tank to 100%
+await page.evaluate(() => {
+  const truck = window.__rig.truck;
+  truck.fuelLevel = 50;
+  truck.isOutOfFuel = false;
+});
+await page.keyboard.press('r');
+await page.waitForTimeout(400);
+const afterRespawn = await page.evaluate(() => ({
+  fuelLevel: window.__rig.truck.fuelLevel,
+  fuelPercent: window.__rig.truck.fuelPercent,
+  isOutOfFuel: window.__rig.truck.isOutOfFuel,
+}));
+check('respawn (R) coloca combustível a 100%', afterRespawn.fuelPercent >= 99.9 && afterRespawn.isOutOfFuel === false, `${afterRespawn.fuelPercent.toFixed(1)}%`);
 
 await page.screenshot({ path: '/tmp/opencode/fuel-end.png' });
 await browser.close();

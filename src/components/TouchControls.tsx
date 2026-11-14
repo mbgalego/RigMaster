@@ -308,7 +308,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({ visible, coupling,
               >
                 <div
                   className={`absolute left-0 top-0 h-full transition-all duration-100 ${
-                    fuelPercent < 20 ? 'bg-red-500' : fuelPercent < 40 ? 'bg-amber-400' : 'bg-cyan-400'
+                    fuelPercent <= 20 ? 'bg-red-500 animate-pulse' : fuelPercent < 40 ? 'bg-amber-400' : 'bg-cyan-400'
                   }`}
                   style={{ width: `${Math.max(0, Math.min(100, fuelPercent))}%` }}
                 />

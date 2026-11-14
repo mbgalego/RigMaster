@@ -7,6 +7,7 @@
  *  2. Atrelado default (carta C) acoplado no spawn.
  *  3. Respawn (R) mantém estradas + atrelado, mesmo após conduzir para longe.
  */
+import fs from 'node:fs';
 import { chromium } from 'playwright';
 
 const URL = process.env.SMOKE_URL || 'http://localhost:3000';
@@ -18,7 +19,9 @@ const check = (name, ok, detail = '') => {
   if (!ok) failures++;
 };
 
-const browser = await chromium.launch();
+const fallbackExe = '/ms-playwright/chrome-headless-shell-linux64/chrome-headless-shell';
+const executablePath = !fs.existsSync(chromium.executablePath()) && fs.existsSync(fallbackExe) ? fallbackExe : undefined;
+const browser = await chromium.launch(executablePath ? { executablePath } : {});
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 await page.goto(URL, { waitUntil: 'domcontentloaded' });
 await page.waitForFunction(() => !!window.__rig, { timeout: 30000 });

@@ -61,7 +61,7 @@ export class Truck {
   public fuelCapacity: number = 500;      // liters — heavy truck tank
   public fuelLevel: number = 500;         // current liters in the tank
   public fuelConsumptionPerPx: number = 0.012; // liters per pixel driven (~3 min autonomy at cruising speed)
-  public fuelWarningThreshold: number = 60; // liters below which the HUD warns
+  public fuelWarningThreshold: number = 100; // liters below which the HUD warns (20%)
   public isOutOfFuel: boolean = false;
   public isRefuelling: boolean = false;
   private _lastBodyX: number = 0;
@@ -286,35 +286,10 @@ export class Truck {
     );
 
     // 2. Throttle & Brake: Continuous Weighted Diesel Acceleration
-    const isThrottleActive = keyUp || this.touchInput.throttle > 0.05;
+    // When out of fuel, the engine is off: throttle produces no torque (natural coasting instead).
+    const isThrottleActive = !this.isOutOfFuel && (keyUp || this.touchInput.throttle > 0.05);
     const isBrakeActive = keyDown || this.touchInput.brake > 0.05;
     const isHandbrake = keyHandbrake || this.touchInput.handbrake;
-
-    // Out of fuel: engine dead — no forward/reverse drive, only braking/coasting
-    if (this.isOutOfFuel) {
-      this.isAccelerating = false;
-      this.isBraking = isBrakeActive || isHandbrake;
-      // coast to a stop without engine torque
-      if (!isBrakeActive && !isHandbrake) {
-        const coastDecel = 18 * dt;
-        if (this.vLong > coastDecel) this.vLong -= coastDecel;
-        else if (this.vLong < -coastDecel) this.vLong += coastDecel;
-        else this.vLong = 0;
-      } else if (this.vLong > 1.5) {
-        this.vLong = Math.max(0, this.vLong - this.brakeForce * dt);
-      } else if (this.vLong < -1.5) {
-        this.vLong = Math.min(0, this.vLong + this.brakeForce * dt);
-      } else {
-        this.vLong = 0;
-      }
-      this.isReversing = this.vLong < -2;
-      this.speedKmh = Math.round(Math.abs(this.vLong) / 4.5);
-      this.currentSpeed = this.vLong;
-      this.syncFrontBody();
-      this.drawWheels();
-      this.drawLights();
-      return;
-    }
 
     this.isBraking = false;
     this.isAccelerating = false;
@@ -358,8 +333,9 @@ export class Truck {
       this.isBraking = true;
       const brakeMult = keyDown ? 1.0 : this.touchInput.brake;
 
-      if (!keyDown) {
-        // Service foot brake pedal (Touch) - always decelerates truck to a complete stop in D or R
+      if (!keyDown || this.isOutOfFuel) {
+        // Service foot brake pedal (Touch) OR S key when out of fuel:
+        // always decelerates truck to a complete stop (no reverse drive without fuel)
         if (this.vLong > 1.5) {
           this.vLong = Math.max(0, this.vLong - this.brakeForce * brakeMult * dt);
         } else if (this.vLong < -1.5) {
@@ -643,11 +619,17 @@ export class Truck {
   public setPosition(x: number, y: number, angle: number = 0) {
     this.vLong = 0;
     this.vLat = 0;
+    this.vx = 0;
+    this.vy = 0;
+    this.omega = 0;
+    this.speedKmh = 0;
     this.currentSpeed = 0;
     this.currentSteerAngle = 0;
     this.touchInput.steer = 0;
     this.touchInput.throttle = 0;
     this.touchInput.brake = 0;
+    this._lastBodyX = x;
+    this._lastBodyY = y;
     this.scene.matter.body.setPosition(this.body, { x, y });
     this.scene.matter.body.setAngle(this.body, angle);
     this.scene.matter.body.setVelocity(this.body, { x: 0, y: 0 });
