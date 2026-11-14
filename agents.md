@@ -1,6 +1,7 @@
 ## 2. Histórico de Versões & Changelog
 
-### **v2.6.8** (Versão Atual — branch `fix/hud-improvements`)
+### **v2.6.9** (Versão Atual — branch `fix/hud-improvements`)
+- **Removido botões duplicados do topo**: show/ocultar Touch e volume/mute foram removidos do HUD superior — ficam agora apenas no menu Definições.
 - **Removido "RIGMASTER"** do cabeçalho superior — o primeiro botão à esquerda é agora o alternar modo (Editor/Condução).
 - **Velocidade no HUD** não ocupa 2 linhas em ecrãs pequenos (`whitespace-nowrap`).
 - **Botão "Drive" renomeado para "Editor"** (alternar modo Condução/Editor).

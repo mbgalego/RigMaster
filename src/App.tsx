@@ -568,29 +568,6 @@ export default function App() {
             {isFullscreen ? <Minimize className="w-3.5 h-3.5" /> : <Maximize className="w-3.5 h-3.5" />}
           </button>
 
-          {/* Quick Touch Controls Toggle */}
-          <button
-            onClick={() => setShowTouchControls(!showTouchControls)}
-            className={`p-1.5 sm:px-2 sm:py-1 rounded border transition flex items-center gap-1 text-[11px] font-semibold ${
-              showTouchControls ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/50' : 'bg-slate-900 text-slate-500 border-slate-800'
-            }`}
-            title="Ativar/Desativar Comandos Touch"
-          >
-            <Smartphone className="w-3.5 h-3.5" />
-            <span className="hidden md:inline text-[10px]">Touch</span>
-          </button>
-
-          {/* Quick Sound Toggle */}
-          <button
-            onClick={handleToggleSound}
-            className={`p-1.5 rounded border transition ${
-              soundEnabled ? 'bg-slate-900 text-cyan-400 border-slate-700' : 'bg-slate-900 text-slate-600 border-slate-800'
-            }`}
-            title="Efeitos Sonoros"
-          >
-            {soundEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
-          </button>
-
           {/* Quick Reset Spawn Button */}
           <button
             onClick={handleReset}
