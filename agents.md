@@ -41,7 +41,15 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.6.0** (Versão Atual — branch `feature/fuel-system`)
+### **v2.6.1** (Versão Atual — branch `feature/fuel-system`)
+- **Interação com bombas de combustível**:
+  - Highlight visual (anel verde pulsante) à volta da bomba quando o camião está perto (≤110px).
+  - Clique ou toque na bomba inicia o abastecimento (além da tecla F).
+  - Feedback visual durante o abastecimento: anel mais brilhante + pulso na bomba seleccionada.
+  - Som de abastecimento (fluído a correr) e som de fim ("clunk") quando o tanque enche.
+  - HUD mostra aviso "Bomba por perto — toque ou F para abastecer" quando próximo.
+
+### **v2.6.0** (branch `feature/fuel-system`)
 - **Sistema de combustível (diesel)**: depósito de 500 L, consumo por distância, motor morre a 0 L, indicador no HUD, abastecimento com **F** junto a uma bomba.
 - **Bombas e totens de preço redesenhados (2D, sem tecto)**: `gas_pump` e `price_sign` com três linhas de preço.
 

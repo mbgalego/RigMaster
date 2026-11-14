@@ -194,6 +194,7 @@ export default function App() {
     isOutOfFuel: false,
     isRefuelling: false,
     fuelPrice: 1.749,
+    nearbyPump: null,
     coupling: { decoupleReady: false, coupledName: null, blocked: null, notice: null, noticeKind: 'info', noticeSeq: 0 },
   });
 
@@ -535,6 +536,16 @@ export default function App() {
             <span className="text-[10px] font-black text-emerald-400 font-bold">
               {telemetry.fuelPrice.toFixed(3)} €/L
             </span>
+            {telemetry.nearbyPump && (
+              <>
+                <div className="w-px h-3 bg-white/20" />
+                <span className="text-[10px] font-black text-cyan-300 flex items-center gap-0.5">
+                  <Droplet className="w-3 h-3 text-cyan-300" />
+                  <span className="hidden md:inline">Bomba por perto — toque ou F para abastecer</span>
+                  <span className="md:hidden">⛽</span>
+                </span>
+              </>
+            )}
             {telemetry.isRefuelling && (
               <>
                 <div className="w-px h-3 bg-white/20" />

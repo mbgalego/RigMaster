@@ -30,6 +30,7 @@ export class MainScene extends Phaser.Scene {
   // Vector road network (Phase 1: spline roads over the tile ground)
   public roadNetwork!: RoadNetwork;
   private roadGraphics: Phaser.GameObjects.Graphics | null = null;
+  private pumpGraphics: Phaser.GameObjects.Graphics | null = null;
   private roadRenderVersion: number = -1;
   private roadCamX: number = Number.NaN;
   private roadCamY: number = Number.NaN;
@@ -54,6 +55,18 @@ export class MainScene extends Phaser.Scene {
   private decoupleLockout: { id: number; armed: boolean } | null = null;
   private decoupleLockoutUntil: number = 0;
   private pinchStartDist: number = 0;
+
+  // Gas pump interaction
+  /** Nearest gas pump within highlight range (set each frame in update). */
+  private nearbyPump: { x: number; y: number } | null = null;
+  /** The pump currently being refuelled (visual feedback). */
+  private refuellingPump: { x: number; y: number } | null = null;
+  /** Highlight pulse phase for the nearby pump (0..1). */
+  private pumpPulsePhase: number = 0;
+
+  // Audio
+  private refuelOsc: OscillatorNode | null = null;
+  private refuelGain: GainNode | null = null;
 
   // Environmental layers
   private weatherGraphics!: Phaser.GameObjects.Graphics;
@@ -118,6 +131,7 @@ export class MainScene extends Phaser.Scene {
     isOutOfFuel: boolean;
     isRefuelling: boolean;
     fuelPrice: number;
+    nearbyPump: { x: number; y: number } | null;
     coupling: {
       decoupleReady: boolean;      // coupled && stopped — the red decouple button is live
       coupledName: string | null;  // cargo of the trailer currently coupled
@@ -146,6 +160,7 @@ export class MainScene extends Phaser.Scene {
     isOutOfFuel: false,
     isRefuelling: false,
     fuelPrice: 1.749,
+    nearbyPump: null,
     coupling: { decoupleReady: false, coupledName: null, blocked: null, notice: null, noticeKind: 'info', noticeSeq: 0 },
   };
 
@@ -170,6 +185,8 @@ export class MainScene extends Phaser.Scene {
 
     // Vector road ribbon renderer (above flats, below solids/vehicles)
     this.roadGraphics = this.add.graphics().setDepth(2);
+    // Gas pump highlight layer (above vehicles, depth 10)
+    this.pumpGraphics = this.add.graphics().setDepth(11);
 
     // Set world physics bounds (island edge)
     const worldW = World.WORLD_W;
@@ -220,6 +237,32 @@ export class MainScene extends Phaser.Scene {
     };
     this.input.on('pointerup', endPinch);
     this.input.on('pointerupoutside', endPinch);
+
+    // Click / tap on a gas pump to refuel (single pointer, not a pinch)
+    this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
+      if (this.isEditorMode) return;
+      // Ignore if this was part of a pinch (two fingers)
+      if (pointer.pointerId !== 0 && pointer.pointerId !== 1) return;
+      const active = activePointers();
+      if (active.length > 0) return; // another finger still down → pinch/pan, not a tap
+      // Convert screen pointer to world coords
+      const worldPt = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+      const tx = this.truck.body.position.x;
+      const ty = this.truck.body.position.y;
+      for (const o of this.world.objects.objects) {
+        if (o.type !== 'gas_pump') continue;
+        const d = Phaser.Math.Distance.Between(worldPt.x, worldPt.y, o.x, o.y);
+        if (d < 40) { // tap tolerance on the pump
+          const distToTruck = Phaser.Math.Distance.Between(tx, ty, o.x, o.y);
+          if (distToTruck < 110) {
+            const pumpX = o.x;
+            const pumpY = o.y;
+            this.tryRefuel(pumpX, pumpY);
+            return;
+          }
+        }
+      }
+    });
 
     // 4. Weather Overlay
     this.weatherGraphics = this.add.graphics();
@@ -549,7 +592,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   /** Try to refuel at a nearby gas pump. Press F while stopped next to a pump. */
-  public tryRefuel() {
+  public tryRefuel(pumpX?: number, pumpY?: number) {
     if (!this.truck || this.isEditorMode) return;
 
     // Kill any residual velocity from a teleport so the "stopped" check passes
@@ -563,18 +606,22 @@ export class MainScene extends Phaser.Scene {
       return;
     }
 
-    // Find the nearest gas pump within reach
+    // Find the nearest gas pump within reach if none was passed
     const tx = this.truck.body.position.x;
     const ty = this.truck.body.position.y;
     let nearest: { x: number; y: number } | null = null;
-    let nearestDist = 90; // reach distance
+    let nearestDist = pumpX !== undefined ? 0 : 90; // reach distance
 
-    for (const o of this.world.objects.objects) {
-      if (o.type !== 'gas_pump') continue;
-      const d = Phaser.Math.Distance.Between(tx, ty, o.x, o.y);
-      if (d < nearestDist) {
-        nearestDist = d;
-        nearest = { x: o.x, y: o.y };
+    if (pumpX !== undefined) {
+      nearest = { x: pumpX, y: pumpY! };
+    } else {
+      for (const o of this.world.objects.objects) {
+        if (o.type !== 'gas_pump') continue;
+        const d = Phaser.Math.Distance.Between(tx, ty, o.x, o.y);
+        if (d < nearestDist) {
+          nearestDist = d;
+          nearest = { x: o.x, y: o.y };
+        }
       }
     }
 
@@ -589,12 +636,58 @@ export class MainScene extends Phaser.Scene {
     const cost = added * pricePerLiter;
 
     this.isRefuelling = true;
+    this.refuellingPump = nearest;
     this.setCouplingNotice(`Abastecido: +${added.toFixed(0)} L · ${cost.toFixed(2)} €`, 'success');
+
+    // Play refuel sound
+    this.playRefuelSound();
 
     // Auto-clear the refuelling flag after a moment
     this.time.delayedCall(1200, () => {
       this.isRefuelling = false;
+      this.refuellingPump = null;
+      this.playRefuelEndSound();
     });
+  }
+
+  /** Short refuel pump sound (fuel flowing). */
+  private playRefuelSound() {
+    if (!this.audioCtx || !this.soundEnabled) return;
+    try {
+      const osc = this.audioCtx.createOscillator();
+      const gain = this.audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(600, this.audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(900, this.audioCtx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.05, this.audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + 0.3);
+      osc.connect(gain);
+      gain.connect(this.audioCtx.destination);
+      osc.start();
+      osc.stop(this.audioCtx.currentTime + 0.3);
+    } catch (e) {
+      // Ignore audio errors
+    }
+  }
+
+  /** Short "clunk" sound when refuelling finishes. */
+  private playRefuelEndSound() {
+    if (!this.audioCtx || !this.soundEnabled) return;
+    try {
+      const osc = this.audioCtx.createOscillator();
+      const gain = this.audioCtx.createGain();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(440, this.audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(880, this.audioCtx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.08, this.audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + 0.25);
+      osc.connect(gain);
+      gain.connect(this.audioCtx.destination);
+      osc.start();
+      osc.stop(this.audioCtx.currentTime + 0.25);
+    } catch (e) {
+      // Ignore audio errors
+    }
   }
 
   /**
@@ -1021,6 +1114,8 @@ export class MainScene extends Phaser.Scene {
 
     // Vector road ribbons (also visible in editor mode)
     this.renderRoads();
+    // Gas pump highlight (nearby / refuelling)
+    this.renderPumps();
 
     // Prefab objects: the animated traffic lights redraw every frame (few, cheap);
     // the heavy static layers only redraw when the camera moved/zoomed or the
@@ -1134,6 +1229,22 @@ export class MainScene extends Phaser.Scene {
         );
       }
 
+      // Gas pump proximity highlight — find nearest pump within highlight range
+      this.nearbyPump = null;
+      const tx = this.truck.body.position.x;
+      const ty = this.truck.body.position.y;
+      let nearestDist = 110; // highlight distance
+      for (const o of this.world.objects.objects) {
+        if (o.type !== 'gas_pump') continue;
+        const d = Phaser.Math.Distance.Between(tx, ty, o.x, o.y);
+        if (d < nearestDist) {
+          nearestDist = d;
+          this.nearbyPump = { x: o.x, y: o.y };
+        }
+      }
+      // Pulse animation for the highlight
+      this.pumpPulsePhase = (this.pumpPulsePhase + dt * 2) % 1;
+
       // Update Telemetry Cache
       this.telemetry = {
         speedKmh: this.truck.speedKmh,
@@ -1155,6 +1266,7 @@ export class MainScene extends Phaser.Scene {
         isOutOfFuel: this.truck.isOutOfFuel,
         isRefuelling: this.isRefuelling,
         fuelPrice: 1.749,
+        nearbyPump: this.nearbyPump,
         coupling: this.computeCouplingState(time),
       };
 
@@ -1426,6 +1538,54 @@ export class MainScene extends Phaser.Scene {
           }
         }
       }
+    }
+  }
+
+  /** Draws a highlight ring around the nearest gas pump (and a pulse while refuelling). */
+  private renderPumps() {
+    const g = this.pumpGraphics;
+    if (!g) return;
+    g.clear();
+
+    const cam = this.cameras.main;
+    const view = cam.worldView;
+    const M = 160;
+
+    const drawPump = (x: number, y: number, active: boolean) => {
+      // Cull to viewport
+      if (x + 60 < view.x - M || x - 60 > view.x + view.width + M ||
+          y + 60 < view.y - M || y - 60 > view.y + view.height + M) return;
+
+      const pulse = Math.sin(this.pumpPulsePhase * Math.PI * 2) * 0.5 + 0.5;
+      const ringR = active ? 34 + pulse * 8 : 30 + pulse * 4;
+
+      g.lineStyle(active ? 4 : 2, active ? 0x22c55e : 0x10b981, active ? 0.9 : 0.5);
+      g.beginPath();
+      g.arc(x, y, ringR, 0, Math.PI * 2);
+      g.strokePath();
+
+      // Inner glow
+      g.fillStyle(active ? 0x22c55e : 0x10b981, active ? 0.25 : 0.12);
+      g.beginPath();
+      g.arc(x, y, ringR * 0.5, 0, Math.PI * 2);
+      g.fillPath();
+
+      // Small "drop" marker at top of ring
+      g.fillStyle(active ? 0x22c55e : 0x10b981, 1);
+      g.beginPath();
+      g.arc(x, y - ringR - 6, 4, 0, Math.PI * 2);
+      g.fillPath();
+
+      // Prompt text when nearby but not refuelling
+      if (!active) {
+        // We can't draw text easily in Graphics; keep it to the ring + HUD hint
+      }
+    };
+
+    for (const o of this.world.objects.objects) {
+      if (o.type !== 'gas_pump') continue;
+      const active = !!this.refuellingPump && this.refuellingPump.x === o.x && this.refuellingPump.y === o.y;
+      drawPump(o.x, o.y, active);
     }
   }
 
