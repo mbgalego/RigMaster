@@ -41,7 +41,14 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.6.3** (Versão Atual — branch `feature/fuel-system`)
+### **v2.6.4** (Versão Atual — branch `feature/fuel-system`)
+- **Barra de combustível nos touch controls**: a barra de estado do combustível (nível + percentagem inteira) fica agora logo acima dos botões de marcha atrás (D/R) nos comandos de ecrã táctil, para ser visível em ecrãs pequenos sem ocupar o hub do topo.
+- **HUD do topo simplificado**: apenas velocidade + marcha (removido combustível, preço, avisos).
+- **Avisos como toast**: "SEM COMBUSTÍVEL", "Bomba por perto — toque ou F para abastecer", "JACKKNIFE" e "Carga frágil danificada" passam a ser notificações toast temporárias.
+- **Combustível sem decimais**: percentagem agora é inteira.
+- **Highlight de bomba só quando perto**: o anel verde pulsante só aparece quando o camião está dentro da range de abastecimento (≤110px).
+
+### **v2.6.3** (branch `feature/fuel-system`)
 - **HUD do topo simplificado**: removida a barra de combustível, preço €/L, bomba por perto, abastecer, sem combustível, jackknife e carga frágil do hub superior. Fica apenas velocidade + marcha.
 - **Avisos como toast**: "SEM COMBUSTÍVEL", "Bomba por perto — toque ou F para abastecer", "JACKKNIFE" e "Carga frágil danificada" passam a ser notificações toast temporárias (edge-triggered, aparecem na transição).
 - **Combustível sem decimais**: percentagem agora é inteira (sem casas decimais).

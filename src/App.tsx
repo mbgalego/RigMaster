@@ -1441,7 +1441,7 @@ export default function App() {
       )}
 
       {/* TOUCH CONTROLS (STEERING WHEEL LEFT, THROTTLE & BRAKE RIGHT) */}
-      <TouchControls visible={!isEditorMode && showTouchControls} coupling={telemetry.coupling} onDecouple={() => {
+      <TouchControls visible={!isEditorMode && showTouchControls} coupling={telemetry.coupling} fuelPercent={telemetry.fuelPercent} fuelLevel={telemetry.fuelLevel} onDecouple={() => {
         const scene = getMainScene();
         if (scene) scene.decoupleAction();
       }} />

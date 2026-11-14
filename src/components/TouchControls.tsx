@@ -5,10 +5,12 @@ import type { MainScene } from '../scenes/MainScene';
 interface TouchControlsProps {
   visible: boolean;
   coupling?: MainScene['telemetry']['coupling'];
+  fuelPercent?: number;
+  fuelLevel?: number;
   onDecouple?: () => void;
 }
 
-export const TouchControls: React.FC<TouchControlsProps> = ({ visible, coupling, onDecouple }) => {
+export const TouchControls: React.FC<TouchControlsProps> = ({ visible, coupling, fuelPercent, fuelLevel, onDecouple }) => {
   const wheelRef = useRef<HTMLDivElement>(null);
   const [wheelAngleDeg, setWheelAngleDeg] = useState<number>(0);
   const [isDraggingWheel, setIsDraggingWheel] = useState<boolean>(false);
@@ -296,6 +298,27 @@ export const TouchControls: React.FC<TouchControlsProps> = ({ visible, coupling,
           >
             (P)
           </button>
+
+          {/* Fuel status bar above gear switch */}
+          {fuelPercent !== undefined && (
+            <div className="flex flex-col items-center gap-0.5">
+              <div className="relative w-20 h-2 bg-slate-700 rounded overflow-hidden border border-white/10 shadow-inner">
+                <div
+                  className={`absolute left-0 top-0 h-full transition-all duration-100 ${
+                    fuelPercent < 20 ? 'bg-red-500' : fuelPercent < 40 ? 'bg-amber-400' : 'bg-cyan-400'
+                  }`}
+                  style={{ width: `${Math.max(0, Math.min(100, fuelPercent))}%` }}
+                />
+              </div>
+              <span
+                className={`text-[9px] font-black font-mono ${
+                  fuelPercent < 20 ? 'text-red-400' : fuelPercent < 40 ? 'text-amber-400' : 'text-cyan-300'
+                }`}
+              >
+                {Math.round(fuelPercent)}% {fuelLevel !== undefined ? `· ${Math.round(fuelLevel)}L` : ''}
+              </span>
+            </div>
+          )}
 
           {/* Compact Gear Switch Pill (D / R) */}
           <div
