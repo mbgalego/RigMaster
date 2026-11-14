@@ -187,6 +187,13 @@ export default function App() {
     fragileHealth: 100,
     weather: 'clear',
     activeLicenseExam: null,
+    fuelLevel: 500,
+    fuelCapacity: 500,
+    fuelPercent: 100,
+    isOutOfFuel: false,
+    isRefuelling: false,
+    fuelPrice: 1.749,
+    nearbyPump: null,
     coupling: { decoupleReady: false, coupledName: null, blocked: null, notice: null, noticeKind: 'info', noticeSeq: 0 },
   });
 
@@ -194,6 +201,54 @@ export default function App() {
   const [toasts, setToasts] = useState<Array<{ id: number; text: string; kind: string }>>([]);
   const toastIdRef = useRef(0);
   const noticeSeq = telemetry.coupling?.noticeSeq ?? 0;
+
+  // Track previous warning states to detect transitions (edge-triggered toasts)
+  const prevOutOfFuel = useRef(telemetry.isOutOfFuel);
+  const prevNearbyPump = useRef(telemetry.nearbyPump);
+  const prevJackknifed = useRef(telemetry.isJackknifed);
+  const prevFragileHealth = useRef(telemetry.fragileHealth);
+
+  const addToast = (text: string, kind: 'info' | 'success' | 'blocked' = 'info') => {
+    const id = ++toastIdRef.current;
+    setToasts((t) => [...t.slice(-2), { id, text, kind }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3000);
+  };
+
+  // Out of fuel → toast
+  useEffect(() => {
+    if (!prevOutOfFuel.current && telemetry.isOutOfFuel) {
+      addToast('SEM COMBUSTÍVEL — pare e abasteça numa bomba', 'blocked');
+    }
+    prevOutOfFuel.current = telemetry.isOutOfFuel;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [telemetry.isOutOfFuel]);
+
+  // Nearby pump → toast (only when entering range)
+  useEffect(() => {
+    if (!prevNearbyPump.current && telemetry.nearbyPump) {
+      addToast('Bomba por perto — toque ou F para abastecer', 'info');
+    }
+    prevNearbyPump.current = telemetry.nearbyPump;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [telemetry.nearbyPump]);
+
+  // Jackknife → toast
+  useEffect(() => {
+    if (!prevJackknifed.current && telemetry.isJackknifed) {
+      addToast('JACKKNIFE — corrija a articulação', 'blocked');
+    }
+    prevJackknifed.current = telemetry.isJackknifed;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [telemetry.isJackknifed]);
+
+  // Fragile health warning → toast
+  useEffect(() => {
+    if (prevFragileHealth.current > telemetry.fragileHealth && telemetry.fragileHealth <= 50) {
+      addToast(`Carga frágil danificada: ${telemetry.fragileHealth}%`, 'blocked');
+    }
+    prevFragileHealth.current = telemetry.fragileHealth;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [telemetry.fragileHealth]);
 
   useEffect(() => {
     const n = telemetry.coupling?.notice;
@@ -493,7 +548,7 @@ export default function App() {
           </button>
         </div>
 
-        {/* TOP SPEED & GEAR HUD (Discreet, does not obstruct game) */}
+        {/* TOP SPEED & GEAR HUD (minimal — warnings are toasts) */}
         {!isEditorMode && (
           <div className="flex items-center gap-2 bg-black/60 border border-cyan-500/40 px-2.5 sm:px-3.5 py-1 rounded-full shadow-inner">
             <div className="flex items-baseline gap-1">
@@ -504,21 +559,6 @@ export default function App() {
             <span className={`font-mono text-xs font-black ${telemetry.isReversing ? 'text-amber-400' : 'text-cyan-400'}`}>
               {telemetry.isReversing ? 'R' : 'D'}
             </span>
-            {telemetry.isJackknifed && (
-              <>
-                <div className="w-px h-3 bg-white/20" />
-                <span className="text-[10px] text-red-400 font-black animate-pulse flex items-center gap-0.5">
-                  <AlertTriangle className="w-3 h-3 text-red-400" /> JACKKNIFE
-                </span>
-              </>
-            )}            {vehicleConfig === 'fragile_glass' && (
-              <>
-                <div className="w-px h-3 bg-white/20" />
-                <span className="text-[10px] font-mono text-emerald-400 font-bold">
-                  {telemetry.fragileHealth}%
-                </span>
-              </>
-            )}
           </div>
         )}
 
@@ -1401,7 +1441,7 @@ export default function App() {
       )}
 
       {/* TOUCH CONTROLS (STEERING WHEEL LEFT, THROTTLE & BRAKE RIGHT) */}
-      <TouchControls visible={!isEditorMode && showTouchControls} coupling={telemetry.coupling} onDecouple={() => {
+      <TouchControls visible={!isEditorMode && showTouchControls} coupling={telemetry.coupling} fuelPercent={telemetry.fuelPercent} fuelLevel={telemetry.fuelLevel} onDecouple={() => {
         const scene = getMainScene();
         if (scene) scene.decoupleAction();
       }} />

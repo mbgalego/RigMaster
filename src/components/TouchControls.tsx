@@ -5,10 +5,12 @@ import type { MainScene } from '../scenes/MainScene';
 interface TouchControlsProps {
   visible: boolean;
   coupling?: MainScene['telemetry']['coupling'];
+  fuelPercent?: number;
+  fuelLevel?: number;
   onDecouple?: () => void;
 }
 
-export const TouchControls: React.FC<TouchControlsProps> = ({ visible, coupling, onDecouple }) => {
+export const TouchControls: React.FC<TouchControlsProps> = ({ visible, coupling, fuelPercent, fuelLevel, onDecouple }) => {
   const wheelRef = useRef<HTMLDivElement>(null);
   const [wheelAngleDeg, setWheelAngleDeg] = useState<number>(0);
   const [isDraggingWheel, setIsDraggingWheel] = useState<boolean>(false);
@@ -252,7 +254,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({ visible, coupling,
       {/* ======================================================== */}
       <div className="flex flex-col items-end gap-2.5 pointer-events-auto">
         {/* Compact Switch de Direção de Marcha (D / R) & Handbrake */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-end gap-2">
           {/* Desacoplar (C) / bloqueado — icon-only, junto ao travão de mão */}
           {coupling && coupling.decoupleReady && (
             <button
@@ -297,55 +299,75 @@ export const TouchControls: React.FC<TouchControlsProps> = ({ visible, coupling,
             (P)
           </button>
 
-          {/* Compact Gear Switch Pill (D / R) */}
-          <div
-            className="flex items-center bg-black/45 backdrop-blur-md p-1 rounded-full border border-white/20 shadow-lg select-none touch-none"
-            style={{ touchAction: 'none' }}
-          >
-            <button
-              type="button"
-              onPointerDown={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setGear('D');
-              }}
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setGear('D');
-              }}
+          {/* Fuel bar stacked directly ABOVE the gear switch (D / R) */}
+          <div className="flex flex-col items-center gap-1">
+            {fuelPercent !== undefined && (
+              <div
+                className="relative w-16 h-3.5 bg-slate-700 rounded overflow-hidden border border-white/20 shadow-inner"
+                title={fuelLevel !== undefined ? `${Math.round(fuelLevel)} L no tanque` : undefined}
+              >
+                <div
+                  className={`absolute left-0 top-0 h-full transition-all duration-100 ${
+                    fuelPercent < 20 ? 'bg-red-500' : fuelPercent < 40 ? 'bg-amber-400' : 'bg-cyan-400'
+                  }`}
+                  style={{ width: `${Math.max(0, Math.min(100, fuelPercent))}%` }}
+                />
+                <span className="absolute inset-0 flex items-center justify-center text-[9px] font-black font-mono leading-none text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.95)]">
+                  {Math.round(fuelPercent)}%
+                </span>
+              </div>
+            )}
+
+            {/* Compact Gear Switch Pill (D / R) */}
+            <div
+              className="flex items-center bg-black/45 backdrop-blur-md p-1 rounded-full border border-white/20 shadow-lg select-none touch-none"
               style={{ touchAction: 'none' }}
-              className={`px-3 py-1 rounded-full text-xs font-black transition-all select-none touch-none ${
-                currentGear === 'D'
-                  ? 'bg-cyan-500 text-black shadow-md shadow-cyan-500/40'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-              title="Marcha para a Frente"
             >
-              D
-            </button>
-            <button
-              type="button"
-              onPointerDown={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setGear('R');
-              }}
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setGear('R');
-              }}
-              style={{ touchAction: 'none' }}
-              className={`px-3 py-1 rounded-full text-xs font-black transition-all select-none touch-none ${
-                currentGear === 'R'
-                  ? 'bg-amber-500 text-black shadow-md shadow-amber-500/40'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-              title="Marcha-Atrás (R)"
-            >
-              R
-            </button>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setGear('D');
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setGear('D');
+                }}
+                style={{ touchAction: 'none' }}
+                className={`px-3 py-1 rounded-full text-xs font-black transition-all select-none touch-none ${
+                  currentGear === 'D'
+                    ? 'bg-cyan-500 text-black shadow-md shadow-cyan-500/40'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="Marcha para a Frente"
+              >
+                D
+              </button>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setGear('R');
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setGear('R');
+                }}
+                style={{ touchAction: 'none' }}
+                className={`px-3 py-1 rounded-full text-xs font-black transition-all select-none touch-none ${
+                  currentGear === 'R'
+                    ? 'bg-amber-500 text-black shadow-md shadow-amber-500/40'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="Marcha-Atrás (R)"
+              >
+                R
+              </button>
+            </div>
           </div>
         </div>
 

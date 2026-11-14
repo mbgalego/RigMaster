@@ -1179,23 +1179,70 @@ export class WorldObjects {
           break;
         }
         case 'gas_pump': {
+          // Fuel pump island — 2D silhouette (no canopy roof), inspired by real
+          // forecourt pumps.
+          const island = o.w + 16;
+          g.fillStyle(0x2e333e, 1);
+          g.fillRect(x0 - 8, y0, island, o.h); // concrete island
+          g.lineStyle(2, 0x4a505c, 0.6);
+          g.strokeRect(x0 - 8, y0, island, o.h);
+          // Pump body
           g.fillStyle(0x3a4150, 1);
-          g.fillRect(x0 - 8, y0, o.w + 16, o.h); // concrete island
-          g.fillStyle(0xb33a3a, 1);
           g.fillRect(x0, y0 + 10, o.w, o.h - 20);
+          g.lineStyle(1, 0x5b6370, 0.5);
+          g.strokeRect(x0, y0 + 10, o.w, o.h - 20);
+          // Display screen (digital, glowing)
+          g.fillStyle(0x0b1016, 1);
+          g.fillRect(x0 + 6, y0 + 16, o.w - 12, 26);
+          g.fillStyle(0x22c55e, 0.9);
+          g.fillRect(x0 + 10, y0 + 22, o.w - 20, 5);
+          g.fillRect(x0 + 10, y0 + 32, o.w - 30, 4);
+          // Nozzle holster on the right side
           g.fillStyle(0x1c2027, 1);
-          g.fillRect(x0 + 6, y0 + 18, o.w - 12, 18);
+          g.fillRect(x0 + o.w - 10, y0 + 40, 6, 22);
+          // Hose loop hint
+          g.lineStyle(2, 0x4a505c, 0.4);
+          g.beginPath();
+          g.arc(x0 + o.w / 2, y0 + o.h - 12, 8, 0, Math.PI);
+          g.strokePath();
           break;
         }
         case 'price_sign': {
+          // Fuel price totem — tall vertical pylon, 2D, no roof.
           g.fillStyle(0x4a505c, 1);
-          g.fillRect(o.x - 3, y0 + o.h * 0.4, 6, o.h * 0.6);
+          g.fillRect(o.x - 3, y0 + o.h * 0.4, 6, o.h * 0.6); // pylon stem
+          // Header with brand band
           g.fillStyle(0x14261c, 1);
-          g.fillRect(x0, y0, o.w, o.h * 0.45);
-          // fuel digits as blocks (no text API in Graphics)
-          g.fillStyle(0x34d058, 1);
-          g.fillRect(x0 + 6, y0 + o.h * 0.16, o.w - 12, 4);
-          g.fillRect(x0 + 6, y0 + o.h * 0.28, o.w - 20, 4);
+          g.fillRect(x0, y0, o.w, o.h * 0.16);
+          g.fillStyle(0x10b981, 1);
+          g.fillRect(x0 + 4, y0 + o.h * 0.05, o.w - 8, o.h * 0.08); // green brand stripe
+          // Three price rows (diesel / gasoline 95 / gasoline 98)
+          const rowH = o.h * 0.26;
+          const rowY = y0 + o.h * 0.2;
+          const prices = [
+            { label: 'Gasóleo', value: '1,749', color: 0xef4444 },     // red
+            { label: 'Gasolina 95', value: '1,799', color: 0xf59e0b }, // amber
+            { label: 'Gasolina 98', value: '1,849', color: 0x22c55e }, // green
+          ];
+          for (let i = 0; i < 3; i++) {
+            const ry = rowY + i * rowH;
+            // Row background
+            g.fillStyle(i % 2 === 0 ? 0x0f172a : 0x1e293b, 1);
+            g.fillRect(x0, ry, o.w, rowH - 2);
+            // Label (left-aligned blocks)
+            g.fillStyle(0x94a3b8, 1);
+            g.fillRect(x0 + 6, ry + 4, o.w - 40, 3);
+            // Price digits (right-aligned glowing blocks)
+            g.fillStyle(prices[i].color, 1);
+            g.fillRect(x0 + o.w - 34, ry + 4, 28, rowH * 0.5);
+            g.fillRect(x0 + o.w - 34, ry + rowH * 0.6, 20, rowH * 0.3);
+            // Unit
+            g.fillStyle(0x64748b, 1);
+            g.fillRect(x0 + o.w - 12, ry + rowH * 0.55, 6, 6);
+          }
+          // Footer band
+          g.fillStyle(0x10b981, 1);
+          g.fillRect(x0, y0 + o.h * 0.98, o.w, o.h * 0.02);
           break;
         }
         case 'lamp': {
