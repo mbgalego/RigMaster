@@ -55,6 +55,48 @@ export class Truck {
   public collisionCount: number = 0;
   public headlightsOn: boolean = true;
 
+  // ========================================================================
+  // FUEL SYSTEM (diesel)
+  // ========================================================================
+  public fuelCapacity: number = 500;      // liters — heavy truck tank
+  public fuelLevel: number = 500;         // current liters in the tank
+  public fuelConsumptionPerPx: number = 0.012; // liters per pixel driven (~3 min autonomy at cruising speed)
+  public fuelWarningThreshold: number = 60; // liters below which the HUD warns
+  public isOutOfFuel: boolean = false;
+  public isRefuelling: boolean = false;
+  private _lastBodyX: number = 0;
+  private _lastBodyY: number = 0;
+  private _refuelTimer: number = 0;
+
+  /** Refills the tank by `liters` (clamped to capacity). Returns liters actually added. */
+  public refuel(liters: number): number {
+    const space = this.fuelCapacity - this.fuelLevel;
+    const added = Math.max(0, Math.min(liters, space));
+    this.fuelLevel += added;
+    this.isOutOfFuel = this.fuelLevel <= 0;
+    return added;
+  }
+
+  /** Fills the tank to 100%. */
+  public refuelToFull(): number {
+    return this.refuel(this.fuelCapacity);
+  }
+
+  /** Consumes fuel based on distance driven this frame. Call once per update. */
+  private consumeFuel(distancePx: number) {
+    if (distancePx <= 0 || this.fuelLevel <= 0) return;
+    const burnt = distancePx * this.fuelConsumptionPerPx;
+    this.fuelLevel = Math.max(0, this.fuelLevel - burnt);
+    if (this.fuelLevel <= 0) {
+      this.fuelLevel = 0;
+      this.isOutOfFuel = true;
+    }
+  }
+
+  public get fuelPercent(): number {
+    return (this.fuelLevel / this.fuelCapacity) * 100;
+  }
+
   // Touch inputs
   public touchInput = {
     steer: 0, // -1 (left) to +1 (right)
@@ -83,6 +125,8 @@ export class Truck {
     this.steerSpeed = config.steerSpeed || 2.4;
     this.maxSteerAngle = config.maxSteerAngle || 0.56; // ~32 degrees
     this.surfaceGrip = config.surfaceGrip !== undefined ? config.surfaceGrip : 1.0;
+    this._lastBodyX = config.x;
+    this._lastBodyY = config.y;
 
     const spawnX = config.x;
     const spawnY = config.y;
@@ -246,6 +290,32 @@ export class Truck {
     const isBrakeActive = keyDown || this.touchInput.brake > 0.05;
     const isHandbrake = keyHandbrake || this.touchInput.handbrake;
 
+    // Out of fuel: engine dead — no forward/reverse drive, only braking/coasting
+    if (this.isOutOfFuel) {
+      this.isAccelerating = false;
+      this.isBraking = isBrakeActive || isHandbrake;
+      // coast to a stop without engine torque
+      if (!isBrakeActive && !isHandbrake) {
+        const coastDecel = 18 * dt;
+        if (this.vLong > coastDecel) this.vLong -= coastDecel;
+        else if (this.vLong < -coastDecel) this.vLong += coastDecel;
+        else this.vLong = 0;
+      } else if (this.vLong > 1.5) {
+        this.vLong = Math.max(0, this.vLong - this.brakeForce * dt);
+      } else if (this.vLong < -1.5) {
+        this.vLong = Math.min(0, this.vLong + this.brakeForce * dt);
+      } else {
+        this.vLong = 0;
+      }
+      this.isReversing = this.vLong < -2;
+      this.speedKmh = Math.round(Math.abs(this.vLong) / 4.5);
+      this.currentSpeed = this.vLong;
+      this.syncFrontBody();
+      this.drawWheels();
+      this.drawLights();
+      return;
+    }
+
     this.isBraking = false;
     this.isAccelerating = false;
 
@@ -364,6 +434,14 @@ export class Truck {
     // 6. Visual container follows physics body
     this.container.setPosition(this.body.position.x, this.body.position.y);
     this.container.setRotation(this.body.angle);
+
+    // ---- Fuel consumption (diesel) ---------------------------------------
+    const dx = this.body.position.x - this._lastBodyX;
+    const dy = this.body.position.y - this._lastBodyY;
+    const moved = Math.hypot(dx, dy);
+    this._lastBodyX = this.body.position.x;
+    this._lastBodyY = this.body.position.y;
+    this.consumeFuel(moved);
 
     // 7. Keep the front-solid zone proxy glued to the tractor
     this.syncFrontBody();

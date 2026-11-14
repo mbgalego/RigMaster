@@ -1,7 +1,7 @@
 {
   "name": "rigmaster",
   "private": true,
-  "version": "2.5.3",
+  "version": "2.6.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test:smoke": "node scripts/smoke-test.mjs"
+    "test:smoke": "node scripts/smoke-test.mjs",
+    "test:smoke:fuel": "node scripts/smoke-fuel.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

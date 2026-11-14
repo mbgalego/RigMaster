@@ -47,6 +47,7 @@ import {
   Warehouse,
   CarFront,
   DoorOpen,
+  Droplet,
   Building2,
   Factory,
   Circle,
@@ -187,6 +188,12 @@ export default function App() {
     fragileHealth: 100,
     weather: 'clear',
     activeLicenseExam: null,
+    fuelLevel: 500,
+    fuelCapacity: 500,
+    fuelPercent: 100,
+    isOutOfFuel: false,
+    isRefuelling: false,
+    fuelPrice: 1.749,
     coupling: { decoupleReady: false, coupledName: null, blocked: null, notice: null, noticeKind: 'info', noticeSeq: 0 },
   });
 
@@ -504,6 +511,50 @@ export default function App() {
             <span className={`font-mono text-xs font-black ${telemetry.isReversing ? 'text-amber-400' : 'text-cyan-400'}`}>
               {telemetry.isReversing ? 'R' : 'D'}
             </span>
+
+            {/* Fuel indicator */}
+            <div className="w-px h-3 bg-white/20" />
+            <div className="flex items-center gap-1">
+              <div className="relative w-8 h-4 bg-slate-700 rounded overflow-hidden border border-white/10">
+                <div
+                  className={`absolute left-0 top-0 h-full transition-all duration-100 ${
+                  telemetry.fuelPercent < 20 ? 'bg-red-500' : telemetry.fuelPercent < 40 ? 'bg-amber-400' : 'bg-cyan-400'
+                }`}
+                  style={{ width: `${Math.max(0, Math.min(100, telemetry.fuelPercent))}%` }}
+                />
+              </div>
+              <span
+                className={`font-mono text-[10px] font-black ${
+                  telemetry.fuelPercent < 20 ? 'text-red-400 animate-pulse' : telemetry.fuelPercent < 40 ? 'text-amber-400' : 'text-cyan-300'
+                }`}
+              >
+                {telemetry.fuelPercent.toFixed(1)}%
+              </span>
+            </div>
+            <div className="w-px h-3 bg-white/20" />
+            <span className="text-[10px] font-black text-emerald-400 font-bold">
+              {telemetry.fuelPrice.toFixed(3)} €/L
+            </span>
+            {telemetry.isRefuelling && (
+              <>
+                <div className="w-px h-3 bg-white/20" />
+                <span className="text-[10px] font-black text-emerald-400 animate-pulse flex items-center gap-0.5">
+                  <Droplet className="w-3 h-3 text-emerald-400" />
+                  <span className="hidden md:inline">A ABASTECER</span>
+                  <span className="md:hidden">⛽</span>
+                </span>
+              </>
+            )}
+            {telemetry.isOutOfFuel && (
+              <>
+                <div className="w-px h-3 bg-white/20" />
+                <span className="text-[10px] font-black text-red-400 animate-pulse flex items-center gap-0.5">
+                  <AlertTriangle className="w-3 h-3 text-red-400" />
+                  <span className="hidden md:inline">SEM COMBUSTÍVEL</span>
+                  <span className="md:hidden">🚫</span>
+                </span>
+              </>
+            )}
             {telemetry.isJackknifed && (
               <>
                 <div className="w-px h-3 bg-white/20" />
@@ -511,7 +562,8 @@ export default function App() {
                   <AlertTriangle className="w-3 h-3 text-red-400" /> JACKKNIFE
                 </span>
               </>
-            )}            {vehicleConfig === 'fragile_glass' && (
+            )}
+            {vehicleConfig === 'fragile_glass' && (
               <>
                 <div className="w-px h-3 bg-white/20" />
                 <span className="text-[10px] font-mono text-emerald-400 font-bold">

@@ -41,6 +41,10 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
+### **v2.6.0** (Versão Atual — branch `feature/fuel-system`)
+- **Sistema de combustível (diesel)**: depósito de 500 L, consumo por distância, motor morre a 0 L, indicador no HUD, abastecimento com **F** junto a uma bomba.
+- **Bombas e totens de preço redesenhados (2D, sem tecto)**: `gas_pump` e `price_sign` com três linhas de preço.
+
 ### **v2.5.3** (Versão Atual — `main`)
 - **Estradas invisíveis no load/respawn corrigidas**: na 1.ª frame o `cam.worldView` do Phaser está **stale** (só é calculado no 1.º `preRender`) enquanto `scrollX` já está correcto — o `renderRoads` desenhava com a view em (0,0) (oceano: zero ribbons) mas **registava os marcadores** (`roadCamX/roadRenderVersion`) com o scroll correcto → o early-return bloqueava qualquer redraw até a câmara andar >4px/zoom. Fix: o view é agora **derivado do scrollX/Y + zoom** pela fórmula do próprio Phaser (`midX = scrollX + width/2; vwx = midX − (width/zoom)/2`), tornando o 1.º draw correcto e imediato.
 - **Respawn/com load nascem com atrelado**: `currentVehicleConfig` default no MainScene era `'solo'` enquanto o App usa `'standard'` — no primeiro load o rig nascia tractor puro. Default passado a `'standard'` (spawn com atrelado C de origem, consistente com a UI).

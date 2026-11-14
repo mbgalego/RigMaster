@@ -39,6 +39,8 @@ export class MainScene extends Phaser.Scene {
   public debugMatter: boolean = true;
   public currentVehicleConfig: 'solo' | 'standard' | 'long_cargo' | 'bitrem' | 'fragile_glass' = 'standard';
   private preEditorZoom: number = 1.0;
+  /** Refuelling in progress (set by tryRefuel, cleared after a toast delay). */
+  private isRefuelling: boolean = false;
 
   // Trailer coupling (free-drive fifth wheel): transient action notice (toast)
   private couplingNotice: string | null = null;
@@ -110,6 +112,12 @@ export class MainScene extends Phaser.Scene {
     fragileHealth: number;
     weather: WeatherModifier;
     activeLicenseExam: any;
+    fuelLevel: number;
+    fuelCapacity: number;
+    fuelPercent: number;
+    isOutOfFuel: boolean;
+    isRefuelling: boolean;
+    fuelPrice: number;
     coupling: {
       decoupleReady: boolean;      // coupled && stopped — the red decouple button is live
       coupledName: string | null;  // cargo of the trailer currently coupled
@@ -132,6 +140,12 @@ export class MainScene extends Phaser.Scene {
     fragileHealth: 100,
     weather: 'clear',
     activeLicenseExam: null,
+    fuelLevel: 500,
+    fuelCapacity: 500,
+    fuelPercent: 100,
+    isOutOfFuel: false,
+    isRefuelling: false,
+    fuelPrice: 1.749,
     coupling: { decoupleReady: false, coupledName: null, blocked: null, notice: null, noticeKind: 'info', noticeSeq: 0 },
   };
 
@@ -235,6 +249,9 @@ export class MainScene extends Phaser.Scene {
 
       // Decouple trailers with C (coupling itself is automatic)
       this.input.keyboard.on('keydown-C', () => this.decoupleAction());
+
+      // Refuel at a gas pump with F
+      this.input.keyboard.on('keydown-F', () => this.tryRefuel());
     }
 
     // 6. Sound Synthesis Init on First User Interaction
@@ -529,6 +546,55 @@ export class MainScene extends Phaser.Scene {
       return;
     }
     // Nothing coupled — coupling is automatic; nothing to do here
+  }
+
+  /** Try to refuel at a nearby gas pump. Press F while stopped next to a pump. */
+  public tryRefuel() {
+    if (!this.truck || this.isEditorMode) return;
+
+    // Kill any residual velocity from a teleport so the "stopped" check passes
+    this.matter.body.setVelocity(this.truck.body, { x: 0, y: 0 });
+    this.truck.vLong = 0;
+    this.truck.currentSpeed = 0;
+
+    // Must be (nearly) stopped to refuel safely
+    if (Math.abs(this.truck.speedKmh) > 3) {
+      this.setCouplingNotice('Pare totalmente para abastecer', 'info');
+      return;
+    }
+
+    // Find the nearest gas pump within reach
+    const tx = this.truck.body.position.x;
+    const ty = this.truck.body.position.y;
+    let nearest: { x: number; y: number } | null = null;
+    let nearestDist = 90; // reach distance
+
+    for (const o of this.world.objects.objects) {
+      if (o.type !== 'gas_pump') continue;
+      const d = Phaser.Math.Distance.Between(tx, ty, o.x, o.y);
+      if (d < nearestDist) {
+        nearestDist = d;
+        nearest = { x: o.x, y: o.y };
+      }
+    }
+
+    if (!nearest) {
+      this.setCouplingNotice('Não há bomba de combustível por perto', 'info');
+      return;
+    }
+
+    // Full tank refill at the diesel price
+    const pricePerLiter = 1.749;
+    const added = this.truck.refuelToFull();
+    const cost = added * pricePerLiter;
+
+    this.isRefuelling = true;
+    this.setCouplingNotice(`Abastecido: +${added.toFixed(0)} L · ${cost.toFixed(2)} €`, 'success');
+
+    // Auto-clear the refuelling flag after a moment
+    this.time.delayedCall(1200, () => {
+      this.isRefuelling = false;
+    });
   }
 
   /**
@@ -1083,6 +1149,12 @@ export class MainScene extends Phaser.Scene {
         fragileHealth: Math.round(this.trailer?.fragileHealth || 100),
         weather: this.garageSystem.getActiveModifier(),
         activeLicenseExam: this.licenseSystem.getActiveExam(),
+        fuelLevel: Math.round(this.truck.fuelLevel * 10) / 10,
+        fuelCapacity: this.truck.fuelCapacity,
+        fuelPercent: this.truck.isOutOfFuel ? 0 : Math.round(this.truck.fuelPercent * 10) / 10,
+        isOutOfFuel: this.truck.isOutOfFuel,
+        isRefuelling: this.isRefuelling,
+        fuelPrice: 1.749,
         coupling: this.computeCouplingState(time),
       };
 
