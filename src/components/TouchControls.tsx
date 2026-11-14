@@ -254,7 +254,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({ visible, coupling,
       {/* ======================================================== */}
       <div className="flex flex-col items-end gap-2.5 pointer-events-auto">
         {/* Compact Switch de Direção de Marcha (D / R) & Handbrake */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-end gap-2">
           {/* Desacoplar (C) / bloqueado — icon-only, junto ao travão de mão */}
           {coupling && coupling.decoupleReady && (
             <button
@@ -299,76 +299,81 @@ export const TouchControls: React.FC<TouchControlsProps> = ({ visible, coupling,
             (P)
           </button>
 
-          {/* Fuel status bar above gear switch */}
-          {fuelPercent !== undefined && (
-            <div className="flex flex-col items-center gap-0.5">
-              <div className="relative w-20 h-2 bg-slate-700 rounded overflow-hidden border border-white/10 shadow-inner">
-                <div
-                  className={`absolute left-0 top-0 h-full transition-all duration-100 ${
-                    fuelPercent < 20 ? 'bg-red-500' : fuelPercent < 40 ? 'bg-amber-400' : 'bg-cyan-400'
-                  }`}
-                  style={{ width: `${Math.max(0, Math.min(100, fuelPercent))}%` }}
-                />
-              </div>
-              <span
-                className={`text-[9px] font-black font-mono ${
-                  fuelPercent < 20 ? 'text-red-400' : fuelPercent < 40 ? 'text-amber-400' : 'text-cyan-300'
-                }`}
+          {/* Fuel bar stacked directly ABOVE the gear switch (D / R) */}
+          <div className="flex flex-col items-center gap-1">
+            {fuelPercent !== undefined && (
+              <div
+                className="flex items-center gap-1"
+                title={fuelLevel !== undefined ? `${Math.round(fuelLevel)} L no tanque` : undefined}
               >
-                {Math.round(fuelPercent)}% {fuelLevel !== undefined ? `· ${Math.round(fuelLevel)}L` : ''}
-              </span>
-            </div>
-          )}
+                <div className="relative w-14 h-1.5 bg-slate-700 rounded overflow-hidden border border-white/10 shadow-inner">
+                  <div
+                    className={`absolute left-0 top-0 h-full transition-all duration-100 ${
+                      fuelPercent < 20 ? 'bg-red-500' : fuelPercent < 40 ? 'bg-amber-400' : 'bg-cyan-400'
+                    }`}
+                    style={{ width: `${Math.max(0, Math.min(100, fuelPercent))}%` }}
+                  />
+                </div>
+                <span
+                  className={`text-[9px] font-black font-mono ${
+                    fuelPercent < 20 ? 'text-red-400' : fuelPercent < 40 ? 'text-amber-400' : 'text-cyan-300'
+                  }`}
+                >
+                  {Math.round(fuelPercent)}%
+                </span>
+              </div>
+            )}
 
-          {/* Compact Gear Switch Pill (D / R) */}
-          <div
-            className="flex items-center bg-black/45 backdrop-blur-md p-1 rounded-full border border-white/20 shadow-lg select-none touch-none"
-            style={{ touchAction: 'none' }}
-          >
-            <button
-              type="button"
-              onPointerDown={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setGear('D');
-              }}
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setGear('D');
-              }}
+            {/* Compact Gear Switch Pill (D / R) */}
+            <div
+              className="flex items-center bg-black/45 backdrop-blur-md p-1 rounded-full border border-white/20 shadow-lg select-none touch-none"
               style={{ touchAction: 'none' }}
-              className={`px-3 py-1 rounded-full text-xs font-black transition-all select-none touch-none ${
-                currentGear === 'D'
-                  ? 'bg-cyan-500 text-black shadow-md shadow-cyan-500/40'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-              title="Marcha para a Frente"
             >
-              D
-            </button>
-            <button
-              type="button"
-              onPointerDown={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setGear('R');
-              }}
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setGear('R');
-              }}
-              style={{ touchAction: 'none' }}
-              className={`px-3 py-1 rounded-full text-xs font-black transition-all select-none touch-none ${
-                currentGear === 'R'
-                  ? 'bg-amber-500 text-black shadow-md shadow-amber-500/40'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-              title="Marcha-Atrás (R)"
-            >
-              R
-            </button>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setGear('D');
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setGear('D');
+                }}
+                style={{ touchAction: 'none' }}
+                className={`px-3 py-1 rounded-full text-xs font-black transition-all select-none touch-none ${
+                  currentGear === 'D'
+                    ? 'bg-cyan-500 text-black shadow-md shadow-cyan-500/40'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="Marcha para a Frente"
+              >
+                D
+              </button>
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setGear('R');
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setGear('R');
+                }}
+                style={{ touchAction: 'none' }}
+                className={`px-3 py-1 rounded-full text-xs font-black transition-all select-none touch-none ${
+                  currentGear === 'R'
+                    ? 'bg-amber-500 text-black shadow-md shadow-amber-500/40'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="Marcha-Atrás (R)"
+              >
+                R
+              </button>
+            </div>
           </div>
         </div>
 

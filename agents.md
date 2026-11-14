@@ -41,7 +41,11 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.6.4** (Versão Atual — branch `feature/fuel-system`)
+### **v2.6.5** (Versão Atual — branch `feature/fuel-system`)
+- **Barra de combustível por cima do D/R**: corrigido o posicionamento nos touch controls. A barra fica agora empilhada verticalmente **por cima** do switch de marcha (D/R), em vez de ao lado. Reduz a largura horizontal da fila de controlos para caber em ecrãs de telemóvel.
+- **Combustível compacto**: barra fina (w-14) + percentagem inteira logo acima dos botões D/R; litros disponíveis no tooltip.
+
+### **v2.6.4** (branch `feature/fuel-system`)
 - **Barra de combustível nos touch controls**: a barra de estado do combustível (nível + percentagem inteira) fica agora logo acima dos botões de marcha atrás (D/R) nos comandos de ecrã táctil, para ser visível em ecrãs pequenos sem ocupar o hub do topo.
 - **HUD do topo simplificado**: apenas velocidade + marcha (removido combustível, preço, avisos).
 - **Avisos como toast**: "SEM COMBUSTÍVEL", "Bomba por perto — toque ou F para abastecer", "JACKKNIFE" e "Carga frágil danificada" passam a ser notificações toast temporárias.
