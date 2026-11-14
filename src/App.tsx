@@ -528,8 +528,7 @@ export default function App() {
         <div className="flex items-center gap-1.5 sm:gap-2.5">
           <div className="flex items-center gap-1.5 bg-cyan-950/60 border border-cyan-500/40 px-2 py-1 rounded">
             <TruckIcon className="w-4 h-4 text-cyan-400" />
-            <span className="font-black tracking-wider text-cyan-400 text-xs hidden sm:inline">RIGMASTER</span>
-            <span className="font-black tracking-wider text-cyan-400 text-xs sm:hidden">RIG</span>
+            <span className="font-black tracking-wider text-cyan-400 text-xs">RIGMASTER</span>
           </div>
 
           {/* Paint & Drive Mode Switcher */}
@@ -543,17 +542,17 @@ export default function App() {
             title="Alternar Modo (Tab)"
           >
             {isEditorMode ? <Layers className="w-3.5 h-3.5 text-amber-400" /> : <Play className="w-3.5 h-3.5 text-cyan-400" />}
-            <span className="hidden md:inline">{isEditorMode ? 'Modo Editor (Paint)' : 'Modo Condução (Drive)'}</span>
-            <span className="md:hidden">{isEditorMode ? 'Paint' : 'Drive'}</span>
+            <span className="hidden md:inline">{isEditorMode ? 'Modo Editor (Paint)' : 'Modo Condução (Editor)'}</span>
+            <span className="md:hidden">{isEditorMode ? 'Paint' : 'Editor'}</span>
           </button>
         </div>
 
         {/* TOP SPEED & GEAR HUD (minimal — warnings are toasts) */}
         {!isEditorMode && (
           <div className="flex items-center gap-2 bg-black/60 border border-cyan-500/40 px-2.5 sm:px-3.5 py-1 rounded-full shadow-inner">
-            <div className="flex items-baseline gap-1">
-              <span className="font-mono text-xs sm:text-sm font-black text-white">{telemetry.speedKmh}</span>
-              <span className="text-[9px] text-slate-400 font-bold uppercase">km/h</span>
+            <div className="flex items-baseline gap-1 whitespace-nowrap">
+              <span className="font-mono text-xs font-black text-white">{telemetry.speedKmh}</span>
+              <span className="text-[9px] text-slate-400 font-bold uppercase whitespace-nowrap">km/h</span>
             </div>
             <div className="w-px h-3 bg-white/20" />
             <span className={`font-mono text-xs font-black ${telemetry.isReversing ? 'text-amber-400' : 'text-cyan-400'}`}>
@@ -726,8 +725,41 @@ export default function App() {
                     className="text-left px-2 py-1.5 rounded text-slate-300 hover:bg-slate-900 flex items-center gap-2"
                   >
                     <Eye className="w-4 h-4 text-slate-400" />
-                    <span>Néon Wireframe: {debugWireframe ? 'ON' : 'OFF'} (P)</span>
+                    <span>Mostrar hitbox: {debugWireframe ? 'ON' : 'OFF'} (P)</span>
                   </button>
+                </div>
+
+                <div className="h-px bg-slate-800" />
+
+                {/* 5. Settings */}
+                <div>
+                  <div className="text-[10px] font-mono uppercase tracking-wider text-cyan-400 px-2 py-0.5 font-bold">
+                    Definições
+                  </div>
+                  <div className="flex flex-col gap-0.5 mt-1">
+                    <button
+                      onClick={() => {
+                        handleToggleSound();
+                        setIsMenuOpen(false);
+                      }}
+                      className="text-left px-2 py-1.5 rounded text-slate-300 hover:bg-slate-900 flex items-center gap-2"
+                    >
+                      {soundEnabled ? <Volume2 className="w-4 h-4 text-cyan-400" /> : <VolumeX className="w-4 h-4 text-slate-600" />}
+                      <span>Som</span>
+                      <span className="ml-auto text-[10px]">{soundEnabled ? 'Ligado' : 'Mudo'}</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowTouchControls(!showTouchControls);
+                        setIsMenuOpen(false);
+                      }}
+                      className="text-left px-2 py-1.5 rounded text-slate-300 hover:bg-slate-900 flex items-center gap-2"
+                    >
+                      <Smartphone className="w-4 h-4 text-cyan-400" />
+                      <span>Comandos Touch no HUD</span>
+                      <span className="ml-auto text-[10px]">{showTouchControls ? 'Visíveis' : 'Ocultos'}</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
