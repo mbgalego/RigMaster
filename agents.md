@@ -1,6 +1,23 @@
 ## 2. Histórico de Versões & Changelog
 
-### **v2.6.6** (Versão Atual — branch main)
+### **v2.6.9** (Versão Atual — branch `fix/hud-improvements`)
+- **Removido botões duplicados do topo**: show/ocultar Touch e volume/mute foram removidos do HUD superior — ficam agora apenas no menu Definições.
+- **Removido "RIGMASTER"** do cabeçalho superior — o primeiro botão à esquerda é agora o alternar modo (Editor/Condução).
+- **Velocidade no HUD** não ocupa 2 linhas em ecrãs pequenos (`whitespace-nowrap`).
+- **Botão "Drive" renomeado para "Editor"** (alternar modo Condução/Editor).
+- **Minimapa com tamanho fixo** no canto superior direito — não muda de tamanho com o zoom da câmara nem com redimensionamento da janela.
+- **Novo menu "Definições"** no dropdown: volume/mute + opção de ocultar a parte Touch do HUD.
+- **Opção "Néon Wireframe" renomeada para "Mostrar hitbox (P)"** no menu.
+
+### **v2.6.7** (branch `fix/hud-improvements`)
+- **Removido botão falso "RIG"** no cabeçalho superior (não tinha função).
+- **Velocidade no HUD** não ocupa 2 linhas em ecrãs pequenos (`whitespace-nowrap`).
+- **Botão "Drive" renomeado para "Editor"** (alternar modo Condução/Editor).
+- **Minimapa com tamanho fixo** no canto superior direito — não muda de tamanho com o zoom da câmara nem com redimensionamento da janela.
+- **Novo menu "Definições"** no dropdown: volume/mute + opção de ocultar a parte Touch do HUD.
+- **Opção "Néon Wireframe" renomeada para "Mostrar hitbox (P)"** no menu.
+
+### **v2.6.6** (branch main)
 - **HUD simplificado**: removido do topo as barras de combustível, preço €/L, bomba por perto, abastecer, sem combustível, jackknife e carga frágil. Fica apenas velocidade + marcha.
 - **Percentagem dentro da barra**: indicador de combustível mostra percentagem centrada dentro da barra (texto branco com sombra escura para legibilidade).
 - **Correção: toque na bomba não abastecia em ecrã touch**. Causa raiz: uso de `(this.input as any).activePointers`, que **não existe** (é apenas um Game Config option). Isso lançava `TypeError` e abortava o handler de `pointerup` antes de chegar à lógica de abastecer.

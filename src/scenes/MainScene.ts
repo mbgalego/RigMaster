@@ -99,7 +99,6 @@ export class MainScene extends Phaser.Scene {
   // Minimap (full-map HUD overview with live camera viewport & truck marker)
   private minimapImage: Phaser.GameObjects.Image | null = null;
   private minimapOverlay: Phaser.GameObjects.Graphics | null = null;
-  private minimapScale: number = 1;
   private minimapVisible: boolean = true;
   private lastMinimapVersion: number = -1;
 
@@ -1678,11 +1677,8 @@ export class MainScene extends Phaser.Scene {
     const mmW = Math.round((World.WORLD_W / 128) * MainScene.MINIMAP_PX_PER_TILE);
     const mmH = Math.round((World.WORLD_H / 128) * MainScene.MINIMAP_PX_PER_TILE);
 
-    // Adaptive display scale: ~26% of the smaller viewport dimension, clamped
-    this.minimapScale = Phaser.Math.Clamp(
-      (Math.min(this.scale.width, this.scale.height) * 0.26) / mmW,
-      0.5, 1.6
-    );
+    // Fixed display size — minimap stays the same size regardless of viewport or camera zoom
+    const FIXED_DISPLAY_SIZE = 150; // px
 
     if (this.textures.exists('minimap_base')) this.textures.remove('minimap_base');
     const texture = this.textures.createCanvas('minimap_base', mmW, mmH);
@@ -1693,7 +1689,7 @@ export class MainScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(120)
       .setAlpha(0.92)
-      .setScale(this.minimapScale);
+      .setDisplaySize(FIXED_DISPLAY_SIZE, FIXED_DISPLAY_SIZE);
     this.minimapOverlay = this.add.graphics().setScrollFactor(0).setDepth(121);
 
     this.repositionMinimap();
@@ -1711,13 +1707,7 @@ export class MainScene extends Phaser.Scene {
 
   private repositionMinimap() {
     if (!this.minimapImage) return;
-    const mmW = Math.round((World.WORLD_W / 128) * MainScene.MINIMAP_PX_PER_TILE);
-    this.minimapScale = Phaser.Math.Clamp(
-      (Math.min(this.scale.width, this.scale.height) * 0.26) / mmW,
-      0.5, 1.6
-    );
-    this.minimapImage.setScale(this.minimapScale);
-    // Below the 48px HTML top bar, right edge with a small margin
+    // Fixed size — no rescaling on viewport resize or camera zoom
     this.minimapImage.setPosition(this.scale.width - this.minimapImage.displayWidth - 10, 58);
   }
 
