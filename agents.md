@@ -41,7 +41,12 @@ src/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.5.2** (Versão Atual — branch `feature/road-network`)
+### **v2.5.3** (Versão Atual — `main`)
+- **Estradas invisíveis no load/respawn corrigidas**: na 1.ª frame o `cam.worldView` do Phaser está **stale** (só é calculado no 1.º `preRender`) enquanto `scrollX` já está correcto — o `renderRoads` desenhava com a view em (0,0) (oceano: zero ribbons) mas **registava os marcadores** (`roadCamX/roadRenderVersion`) com o scroll correcto → o early-return bloqueava qualquer redraw até a câmara andar >4px/zoom. Fix: o view é agora **derivado do scrollX/Y + zoom** pela fórmula do próprio Phaser (`midX = scrollX + width/2; vwx = midX − (width/zoom)/2`), tornando o 1.º draw correcto e imediato.
+- **Respawn/com load nascem com atrelado**: `currentVehicleConfig` default no MainScene era `'solo'` enquanto o App usa `'standard'` — no primeiro load o rig nascia tractor puro. Default passado a `'standard'` (spawn com atrelado C de origem, consistente com a UI).
+- **Smoke test headless**: Playwright (devDependency) + `scripts/smoke-test.mjs` (`npm run test:smoke`) — valida sem interacção humana: estradas renderizadas no load (commandBuffer >1000 cmds), atrelado default acoplado, respawn local e após conduzir para longe. Hook de debug `window.__rig` no `MainScene.create()` para inspecção nos testes.
+
+### **v2.5.2** (`main`)
 - **Redimensionamento ancorado — refactor do mecanismo**: a v2.5.1 congelava após o 1.º evento (o canto fixo era recalculado com o tamanho inicial no frame local, cuja origem se desloca a cada frame). Agora o canto oposto é **capturado em coordenadas do mundo** no início do drag (`pinX/pinY`) e todas as medidas correm a partir dele: largura/altura = distância ponteiro↔pino no frame local, centro = ponto médio entre pino e canto extremo. Estável frame a frame, inclusive quando o ponteiro cruza o pino (a caixa vira de lado mantendo o pino fixo). `resizeCornerPos` ganhou o parâmetro `opposite`.
 - **Re-acoplamento — distância reduzida 90→45px**: o raio de acoplamento automático é 30px; agora basta o trator sair ligeiramente da zona do pino (45px) após os 1.2s de arrefecimento para o atrelado desbloquear.
 - **Passadeiras acima das estradas**: o crosswalk passou da camada flats (depth 1) para a camada solids (depth 3) — acima dos ribbons de estrada (depth 2). Colocar uma passadeira sobre uma estrada deixou de a esconder (era pintada por baixo do asfalto).

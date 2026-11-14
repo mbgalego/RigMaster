@@ -37,7 +37,7 @@ export class MainScene extends Phaser.Scene {
 
   public isEditorMode: boolean = false;
   public debugMatter: boolean = true;
-  public currentVehicleConfig: 'solo' | 'standard' | 'long_cargo' | 'bitrem' | 'fragile_glass' = 'solo';
+  public currentVehicleConfig: 'solo' | 'standard' | 'long_cargo' | 'bitrem' | 'fragile_glass' = 'standard';
   private preEditorZoom: number = 1.0;
 
   // Trailer coupling (free-drive fifth wheel): transient action notice (toast)
@@ -142,6 +142,8 @@ export class MainScene extends Phaser.Scene {
   public create() {
     this.licenseSystem = LicenseSystem.getInstance();
     this.garageSystem = GarageSystem.getInstance();
+    // Debug hook para testes headless (scripts/smoke-test.mjs usa window.__rig)
+    (window as any).__rig = this;
 
     // 1. Build the single procedural island world (terrain + vector roads + prefabs)
     this.world = new World(this);
@@ -1255,7 +1257,15 @@ export class MainScene extends Phaser.Scene {
     const g = this.roadGraphics;
     g.clear();
 
-    const view = cam.worldView;
+    // Derive the view from scrollX/Y directly — `cam.worldView` is stale until
+    // the first preRender, which poisoned the first draw (empty view → no
+    // ribbons → markers already recorded → skip forever until a real move).
+    const view = new Phaser.Geom.Rectangle(
+      cam.scrollX + cam.width / 2 - cam.width / (2 * cam.zoom),
+      cam.scrollY + cam.height / 2 - cam.height / (2 * cam.zoom),
+      cam.width / cam.zoom,
+      cam.height / cam.zoom,
+    );
     const M = 220; // margin so ribbons don't pop in at the screen edge
     const vx0 = view.x - M, vy0 = view.y - M, vx1 = view.x + view.width + M, vy1 = view.y + view.height + M;
 
