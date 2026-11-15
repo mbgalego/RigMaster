@@ -988,23 +988,36 @@ export class WorldObjects {
           const R = Math.min(o.w, o.h) / 2;
           g.fillStyle(0x000000, 0.22);
           g.fillCircle(o.x + 4, o.y + 5, R);
-          g.fillStyle(0x39404d, 1); // circulating carriageway
+          g.fillStyle(0x1e2634, 1); // circulating carriageway — matches asphalt road colour
           g.fillCircle(o.x, o.y, R);
-          // Chevron marks on the circulating lane (counter-clockwise, right-hand traffic)
-          g.lineStyle(3, 0xe2e8f0, 0.4);
-          const chevR = R * 0.68;
-          const nChev = 10;
-          for (let i = 0; i < nChev; i++) {
-            const a = (i / nChev) * Math.PI * 2;
-            const ax = o.x + Math.cos(a) * chevR;
-            const ay = o.y + Math.sin(a) * chevR;
-            const ta = a + Math.PI / 2; // tangent, counter-clockwise
-            const sz = Math.max(7, R * 0.09);
-            g.beginPath();
-            g.moveTo(ax - Math.cos(ta) * sz + Math.cos(a) * sz * 0.7, ay - Math.sin(ta) * sz + Math.sin(a) * sz * 0.7);
-            g.lineTo(ax + Math.cos(ta) * sz * 0.6, ay + Math.sin(ta) * sz * 0.6);
-            g.lineTo(ax - Math.cos(ta) * sz - Math.cos(a) * sz * 0.7, ay - Math.sin(ta) * sz - Math.sin(a) * sz * 0.7);
-            g.strokePath();
+          // Outer kerb — slightly lighter edge like road edges
+          g.lineStyle(2, 0x3a4457, 1);
+          g.beginPath();
+          g.arc(o.x, o.y, R, 0, Math.PI * 2);
+          g.strokePath();
+          // Dashed lane markings: one dashed concentric circle per lane.
+          // Right-hand traffic — no direction arrows needed.
+          // The drivable ring sits between the central island (R*0.44) and the outer kerb (R).
+          g.lineStyle(3, 0xfacc15, 0.6); // yellow dashed lane lines, like road centre dashes
+          const laneWidth = 110; // wider lanes — fewer, clearer markings
+          const islandR = R * 0.44;
+          const usableWidth = R - islandR;
+          const nLanes = Math.max(1, Math.floor(usableWidth / laneWidth));
+          for (let l = 0; l < nLanes; l++) {
+            // Centre of each lane, evenly spaced across the usable ring
+            const laneR = islandR + usableWidth * (l + 0.5) / nLanes;
+            const dashPx = Math.max(20, laneWidth * 0.5);   // dash length in px
+            const gapPx = Math.max(14, laneWidth * 0.35);   // gap length in px
+            const dashAngle = dashPx / laneR;               // dash angle in radians
+            const gapAngle = gapPx / laneR;                 // gap angle in radians
+            let angle = 0;
+            while (angle < Math.PI * 2 - 0.01) {
+              const endAngle = Math.min(angle + dashAngle, Math.PI * 2);
+              g.beginPath();
+              g.arc(o.x, o.y, laneR, angle, endAngle);
+              g.strokePath();
+              angle += dashAngle + gapAngle;
+            }
           }
           // Kerb ring + landscaped island
           g.fillStyle(0x8a93a8, 1);
