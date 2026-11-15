@@ -988,12 +988,17 @@ export class WorldObjects {
           const R = Math.min(o.w, o.h) / 2;
           g.fillStyle(0x000000, 0.22);
           g.fillCircle(o.x + 4, o.y + 5, R);
-          g.fillStyle(0x39404d, 1); // circulating carriageway
+          g.fillStyle(0x1e2634, 1); // circulating carriageway — matches asphalt road colour
           g.fillCircle(o.x, o.y, R);
+          // Outer kerb — slightly lighter edge like road edges
+          g.lineStyle(2, 0x3a4457, 1);
+          g.beginPath();
+          g.arc(o.x, o.y, R, 0, Math.PI * 2);
+          g.strokePath();
           // Dashed lane markings: one dashed concentric circle per lane.
           // Right-hand traffic — no direction arrows needed.
           // The drivable ring sits between the central island (R*0.44) and the outer kerb (R).
-          g.lineStyle(2, 0xe2e8f0, 0.45);
+          g.lineStyle(3, 0xfacc15, 0.6); // yellow dashed lane lines, like road centre dashes
           const laneWidth = 110; // wider lanes — fewer, clearer markings
           const islandR = R * 0.44;
           const usableWidth = R - islandR;
@@ -1002,8 +1007,8 @@ export class WorldObjects {
             // Centre of each lane, evenly spaced across the usable ring
             const laneR = islandR + usableWidth * (l + 0.5) / nLanes;
             const circumference = 2 * Math.PI * laneR;
-            const dash = Math.max(16, laneWidth * 0.45);
-            const gap = Math.max(10, laneWidth * 0.3);
+            const dash = Math.max(20, laneWidth * 0.5);
+            const gap = Math.max(14, laneWidth * 0.35);
             const step = dash + gap;
             const nDashes = Math.max(4, Math.floor(circumference / step));
             for (let d = 0; d < nDashes; d++) {
