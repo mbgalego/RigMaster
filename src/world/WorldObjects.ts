@@ -993,8 +993,8 @@ export class WorldObjects {
           // Dashed lane markings: one dashed concentric circle per lane.
           // Right-hand traffic — no direction arrows needed.
           // The drivable ring sits between the central island (R*0.44) and the outer kerb (R).
-          g.lineStyle(1.5, 0xe2e8f0, 0.35);
-          const laneWidth = 70; // approx. lane width in px
+          g.lineStyle(2, 0xe2e8f0, 0.45);
+          const laneWidth = 110; // wider lanes — fewer, clearer markings
           const islandR = R * 0.44;
           const usableWidth = R - islandR;
           const nLanes = Math.max(1, Math.floor(usableWidth / laneWidth));
@@ -1002,8 +1002,8 @@ export class WorldObjects {
             // Centre of each lane, evenly spaced across the usable ring
             const laneR = islandR + usableWidth * (l + 0.5) / nLanes;
             const circumference = 2 * Math.PI * laneR;
-            const dash = Math.max(8, laneWidth * 0.5);
-            const gap = Math.max(5, laneWidth * 0.3);
+            const dash = Math.max(16, laneWidth * 0.45);
+            const gap = Math.max(10, laneWidth * 0.3);
             const step = dash + gap;
             const nDashes = Math.max(4, Math.floor(circumference / step));
             for (let d = 0; d < nDashes; d++) {
