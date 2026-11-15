@@ -136,6 +136,14 @@ const CREATE_CATALOG: Array<{
   },
 ];
 
+/** Ícone de período do dia usado pelo relógio 24h do HUD superior. */
+const PERIOD_ICONS: Record<TimePeriod, React.ComponentType<{ className?: string }>> = {
+  dawn: Sunrise,
+  day: Sun,
+  dusk: Sunset,
+  night: Moon,
+};
+
 export default function App() {
   const gameContainerRef = useRef<HTMLDivElement>(null);
   const [isEditorMode, setIsEditorMode] = useState<boolean>(false);
@@ -537,6 +545,9 @@ export default function App() {
     }
   };
 
+  // Relógio 24h no HUD superior segue o período atual do ciclo dia/noite
+  const PeriodIcon = PERIOD_ICONS[telemetry.timePeriod] ?? Sun;
+
   return (
     <div className="relative w-screen h-dvh overflow-hidden bg-[#0c0f17] font-sans text-slate-100 select-none">
       {/* Phaser Canvas Viewport */}
@@ -580,6 +591,11 @@ export default function App() {
             <div className="w-px h-3 bg-white/20" />
             <span className={`font-mono text-xs font-black ${telemetry.isReversing ? 'text-amber-400' : 'text-cyan-400'}`}>
               {telemetry.isReversing ? 'R' : 'D'}
+            </span>
+            <div className="w-px h-3 bg-white/20" />
+            <span className="flex items-center gap-1 whitespace-nowrap" title="Hora do mundo (24h)">
+              <PeriodIcon className="w-3 h-3 text-amber-300" />
+              <span className="font-mono text-xs font-black text-amber-100 tabular-nums">{telemetry.timeClock}</span>
             </span>
           </div>
         )}
