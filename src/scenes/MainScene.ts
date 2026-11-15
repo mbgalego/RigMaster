@@ -36,6 +36,8 @@ export class MainScene extends Phaser.Scene {
   private flatsGraphics: Phaser.GameObjects.Graphics | null = null;
   private solidsGraphics: Phaser.GameObjects.Graphics | null = null;
   private lightsGraphics: Phaser.GameObjects.Graphics | null = null;
+  private overheadGraphics: Phaser.GameObjects.Graphics | null = null;
+  private overheadLightsGraphics: Phaser.GameObjects.Graphics | null = null;
   // Static object layers are redrawn only when the camera or the world changed
   private lastObjRender = { x: NaN, y: NaN, zoom: NaN, version: -1 };
 
@@ -204,8 +206,11 @@ export class MainScene extends Phaser.Scene {
     // Ground layers: flats (docks/pads) under the roads, solids above them
     this.flatsGraphics = this.add.graphics().setDepth(1).setLighting(false);
     this.solidsGraphics = this.add.graphics().setDepth(3).setLighting(false);
-    // Traffic light LEDs & streetlamp bulb cores stay emissive (unlit)
+    // Traffic light LEDs stay emissive (unlit) at depth 4
     this.lightsGraphics = this.add.graphics().setDepth(4).setLighting(false);
+    // Overhead streetlamp arms & luminaires render above trucks/trailers (depth 10..12)
+    this.overheadGraphics = this.add.graphics().setDepth(14).setLighting(false);
+    this.overheadLightsGraphics = this.add.graphics().setDepth(14.5).setLighting(false);
 
     // Vector road ribbon renderer (above flats, below solids/vehicles)
     this.roadGraphics = this.add.graphics().setDepth(2).setLighting(false);
@@ -1182,7 +1187,12 @@ export class MainScene extends Phaser.Scene {
     // world was edited — otherwise the Graphics command buffer is reused as-is.
     const cam = this.cameras.main;
     if (this.flatsGraphics && this.solidsGraphics && this.lightsGraphics && cam.zoom >= 0.12) {
-      this.world.objects.renderLights(this.lightsGraphics, cam.worldView, this.isEditorMode ? 0 : timeSnap.lampFactor);
+      this.world.objects.renderLights(
+        this.lightsGraphics,
+        cam.worldView,
+        this.isEditorMode ? 0 : timeSnap.lampFactor,
+        this.overheadLightsGraphics ?? undefined,
+      );
       const last = this.lastObjRender;
       const needsFull =
         Number.isNaN(last.x) ||
@@ -1192,13 +1202,21 @@ export class MainScene extends Phaser.Scene {
       if (needsFull) {
         this.flatsGraphics.clear();
         this.solidsGraphics.clear();
-        this.world.objects.render(this.flatsGraphics, this.solidsGraphics, cam.worldView);
+        this.overheadGraphics?.clear();
+        this.world.objects.render(
+          this.flatsGraphics,
+          this.solidsGraphics,
+          cam.worldView,
+          this.overheadGraphics ?? undefined,
+        );
         this.lastObjRender = { x: cam.midPoint.x, y: cam.midPoint.y, zoom: cam.zoom, version: this.world.objects.version };
       }
     } else if (this.flatsGraphics && this.solidsGraphics && this.lightsGraphics) {
       this.flatsGraphics.clear();
       this.solidsGraphics.clear();
       this.lightsGraphics.clear();
+      this.overheadGraphics?.clear();
+      this.overheadLightsGraphics?.clear();
     }
 
     // Stream physics + terrain chunks around the player; cycle the traffic lights
@@ -1801,6 +1819,7 @@ export class MainScene extends Phaser.Scene {
     this.flatsGraphics?.setLighting(enabled);
     this.roadGraphics?.setLighting(enabled);
     this.solidsGraphics?.setLighting(enabled);
+    this.overheadGraphics?.setLighting(enabled);
     this.truck?.setLightingEnabled(enabled);
     this.trailer?.setLightingEnabled(enabled);
     this.pupTrailer?.setLightingEnabled(enabled);

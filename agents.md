@@ -56,7 +56,7 @@ Simulador de condução pesada em **2D Top-Down** (Phaser 4 + Matter.js + React 
 
 ### **v2.8.5** (Versão Atual — branch main)
 - **Candeeiros de rua visíveis de dia & Semáforos com fases opostas (Passo 1)**:
-  - **Candeeiros (`WorldObjects.ts` / `MainScene.ts`)**: redesenhados com base metálica, sombra projetada, braço saliente orientado para a faixa (`angle`) e luminária clara com difusor visível durante o dia; lâmpada noturna emissiva e ponto de luz WebGL alinhados na ponta da luminária (`WorldObjects.getLampBulbPos()`), evitando cruzamentos transversais.
+  - **Candeeiros (`WorldObjects.ts` / `MainScene.ts`)**: redesenhados com base metálica, sombra projetada, braço saliente orientado para a faixa (`angle`) e luminária clara com difusor visível durante o dia; lâmpada noturna emissiva e ponto de luz WebGL alinhados na ponta da luminária (`WorldObjects.getLampBulbPos()`), evitando cruzamentos transversais. Braço, luminária (`overheadGraphics`, `depth: 14`) e brilho noturno (`overheadLightsGraphics`, `depth: 14.5`) renderizados acima do camião e dos atrelados para que o conjunto passe por baixo da luminária mantendo a base e a hitbox no solo.
   - **Semáforos (`WorldObjects.ts`)**: corrigido o bug em `seedWorld` que atribuía o mesmo `group` a todos os semáforos do cruzamento; eixos Norte-Sul (`group 0`) e Este-Oeste (`group 1`) passam a alternar em fases opostas com `1.0s` de intervalo de segurança todo-vermelho (`TL_ALL_RED = 1000ms`), colocados seletivamente apenas nos `7` cruzamentos arteriais principais e rodados conforme a direção da via.
 
 ### **v2.8.4** (branch main)

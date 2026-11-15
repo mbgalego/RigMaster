@@ -626,7 +626,12 @@ export class WorldObjects {
   // RENDERING (flats under roads, solids above)
   // ======================================================================
 
-  public render(flats: Phaser.GameObjects.Graphics, solids: Phaser.GameObjects.Graphics, view: Phaser.Geom.Rectangle) {
+  public render(
+    flats: Phaser.GameObjects.Graphics,
+    solids: Phaser.GameObjects.Graphics,
+    view: Phaser.Geom.Rectangle,
+    overhead?: Phaser.GameObjects.Graphics,
+  ) {
     const M = 120;
     const x0 = Math.floor((view.x - M) / OBJ_CELL), x1 = Math.floor((view.x + view.width + M) / OBJ_CELL);
     const y0 = Math.floor((view.y - M) / OBJ_CELL), y1 = Math.floor((view.y + view.height + M) / OBJ_CELL);
@@ -646,6 +651,9 @@ export class WorldObjects {
             this.drawFlat(flats, o);
           } else {
             this.drawSolid(solids, o);
+            if (o.type === 'lamp' && overhead) {
+              this.drawOverhead(overhead, o);
+            }
           }
         }
       }
@@ -656,8 +664,14 @@ export class WorldObjects {
    * Traffic lights + glowing streetlamp bulbs — unlit emissive layer.
    * Actual ground/building illumination is handled by Phaser 4 WebGL Lights.
    */
-  public renderLights(lights: Phaser.GameObjects.Graphics, view: Phaser.Geom.Rectangle, lampFactor = 0) {
+  public renderLights(
+    lights: Phaser.GameObjects.Graphics,
+    view: Phaser.Geom.Rectangle,
+    lampFactor = 0,
+    overheadLights?: Phaser.GameObjects.Graphics,
+  ) {
     lights.clear();
+    overheadLights?.clear();
     const M = 160;
     const x0 = Math.floor((view.x - M) / OBJ_CELL), x1 = Math.floor((view.x + view.width + M) / OBJ_CELL);
     const y0 = Math.floor((view.y - M) / OBJ_CELL), y1 = Math.floor((view.y + view.height + M) / OBJ_CELL);
@@ -673,11 +687,12 @@ export class WorldObjects {
             this.drawSolid(lights, o);
           } else if (o.type === 'lamp' && lampFactor > 0.05) {
             drawn.add(o.id);
+            const target = overheadLights ?? lights;
             const bulb = WorldObjects.getLampBulbPos(o);
-            lights.fillStyle(0xffe7a8, 0.38 * lampFactor);
-            lights.fillCircle(bulb.x, bulb.y, 9);
-            lights.fillStyle(0xfff6d6, 0.96 * lampFactor);
-            lights.fillCircle(bulb.x, bulb.y, 4);
+            target.fillStyle(0xffe7a8, 0.38 * lampFactor);
+            target.fillCircle(bulb.x, bulb.y, 9);
+            target.fillStyle(0xfff6d6, 0.96 * lampFactor);
+            target.fillCircle(bulb.x, bulb.y, 4);
           }
         }
       }
@@ -1298,7 +1313,7 @@ export class WorldObjects {
           break;
         }
         case 'lamp': {
-          // Drop shadow under post, cantilevered arm & cobra-head luminaire
+          // Drop shadow under post, cantilevered arm & cobra-head luminaire (ground level)
           g.fillStyle(0x000000, 0.28);
           g.fillCircle(o.x + 3, o.y + 4, 6);
           g.fillRect(o.x + 3, o.y + 2, 20, 3);
@@ -1310,18 +1325,6 @@ export class WorldObjects {
           g.strokeCircle(o.x, o.y, 6);
           g.fillStyle(0x94a3b8, 1);
           g.fillCircle(o.x, o.y, 3.2);
-          // Cantilevered galvanized steel arm (+x toward carriageway)
-          g.lineStyle(3.5, 0xcbd5e1, 1);
-          g.lineBetween(o.x + 2, o.y, o.x + 20, o.y);
-          g.lineStyle(1, 0x475569, 0.7);
-          g.lineBetween(o.x + 3, o.y + 1.5, o.x + 19, o.y + 1.5);
-          // Cobra-head luminaire housing + visible daylight diffuser lens
-          g.fillStyle(0xe2e8f0, 1);
-          g.fillRoundedRect(o.x + 14, o.y - 5, 14, 10, 4);
-          g.lineStyle(1.5, 0x334155, 0.95);
-          g.strokeRoundedRect(o.x + 14, o.y - 5, 14, 10, 4);
-          g.fillStyle(0xfef3c7, 0.9);
-          g.fillCircle(o.x + 22, o.y, 3.4);
           break;
         }
         case 'sign': {
@@ -1365,6 +1368,25 @@ export class WorldObjects {
           break;
         }
       }
+    });
+  }
+
+  /** Overhead parts rendered above vehicles (e.g. streetlamp arm & luminaire head). */
+  private drawOverhead(g: Phaser.GameObjects.Graphics, o: WorldObject) {
+    if (o.type !== 'lamp') return;
+    this.rotated(g, o, () => {
+      // Cantilevered galvanized steel arm (+x toward carriageway)
+      g.lineStyle(3.5, 0xcbd5e1, 1);
+      g.lineBetween(o.x + 2, o.y, o.x + 20, o.y);
+      g.lineStyle(1, 0x475569, 0.7);
+      g.lineBetween(o.x + 3, o.y + 1.5, o.x + 19, o.y + 1.5);
+      // Cobra-head luminaire housing + visible daylight diffuser lens
+      g.fillStyle(0xe2e8f0, 1);
+      g.fillRoundedRect(o.x + 14, o.y - 5, 14, 10, 4);
+      g.lineStyle(1.5, 0x334155, 0.95);
+      g.strokeRoundedRect(o.x + 14, o.y - 5, 14, 10, 4);
+      g.fillStyle(0xfef3c7, 0.9);
+      g.fillCircle(o.x + 22, o.y, 3.4);
     });
   }
 
