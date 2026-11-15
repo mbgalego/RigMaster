@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { IntersectionSystem } from './IntersectionSystem';
 
 /**
  * Vector road network — the Phase 1 "à la ETS2" layer.
@@ -30,6 +31,10 @@ export interface RoadData {
   closed: boolean;
   /** No carriageway split — single direction, no centre dashes */
   oneWay?: boolean;
+  /** Vertical layer for level crossings: 0 = ground, >0 viaduct, <0 tunnel.
+   * Roads on different layers never form an intersection node (future-proof
+   * for viadutos/túneis). Defaults to 0. */
+  layer?: number;
   points: RoadPoint[];
 }
 
@@ -295,6 +300,14 @@ export class RoadNetwork {
       }
     }
     this.version++;
+
+    // Recompute intersection nodes whenever the network topology changes
+    IntersectionSystem.getInstance().rebuild(this);
+  }
+
+  /** Manually trigger intersection-node recomputation (useful after batch edits). */
+  public rebuildIntersections(): void {
+    IntersectionSystem.getInstance().rebuild(this);
   }
 
   /** Cells (cx,cy) around a point that can reach anything within `radius` */
@@ -543,6 +556,7 @@ export class RoadNetwork {
       surface: r.surface,
       closed: r.closed,
       ...(r.oneWay ? { oneWay: true } : {}),
+      ...(r.layer !== undefined && r.layer !== 0 ? { layer: r.layer } : {}),
       points: r.points.map((p) => ({
         x: Math.round(p.x), y: Math.round(p.y), w: Math.round(p.w),
         ...(p.twist ? { twist: Math.round(Phaser.Math.RadToDeg(p.twist) * 10) / 10 } : {}),
@@ -571,6 +585,7 @@ export class RoadNetwork {
           surface,
           closed: !!raw.closed,
           ...(raw.oneWay ? { oneWay: true } : {}),
+          ...(Number.isFinite(raw.layer) ? { layer: Number(raw.layer) } : {}),
           points,
         };
         // Keep nextId ahead of imported ids
