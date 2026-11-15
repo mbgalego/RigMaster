@@ -1006,17 +1006,17 @@ export class WorldObjects {
           for (let l = 0; l < nLanes; l++) {
             // Centre of each lane, evenly spaced across the usable ring
             const laneR = islandR + usableWidth * (l + 0.5) / nLanes;
-            const circumference = 2 * Math.PI * laneR;
-            const dash = Math.max(20, laneWidth * 0.5);
-            const gap = Math.max(14, laneWidth * 0.35);
-            const step = dash + gap;
-            const nDashes = Math.max(4, Math.floor(circumference / step));
-            for (let d = 0; d < nDashes; d++) {
-              const a0 = (d / nDashes) * Math.PI * 2;
-              const a1 = ((d + dash / step / nDashes) * Math.PI * 2) % (Math.PI * 2);
+            const dashPx = Math.max(20, laneWidth * 0.5);   // dash length in px
+            const gapPx = Math.max(14, laneWidth * 0.35);   // gap length in px
+            const dashAngle = dashPx / laneR;               // dash angle in radians
+            const gapAngle = gapPx / laneR;                 // gap angle in radians
+            let angle = 0;
+            while (angle < Math.PI * 2 - 0.01) {
+              const endAngle = Math.min(angle + dashAngle, Math.PI * 2);
               g.beginPath();
-              g.arc(o.x, o.y, laneR, a0, a1);
+              g.arc(o.x, o.y, laneR, angle, endAngle);
               g.strokePath();
+              angle += dashAngle + gapAngle;
             }
           }
           // Kerb ring + landscaped island
