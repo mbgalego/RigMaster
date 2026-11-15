@@ -620,6 +620,36 @@ export class WorldObjects {
       const y = hRows[r] + 135;
       if (!terrain.isWater(x, y)) this.add('sign', x, y, 18, 18, { variant: 'stop' });
     }
+
+    // ---- Garage depot (just above the spawn area, east of arterial x=5760) ----
+    {
+      const rnp = RoadNetwork.getInstance();
+      // Access spur from the y=3072 arterial down into the depot yard
+      rnp.addRoad('asphalt', [
+        { x: 6998, y: 3129, w: 193 }, { x: 6998, y: 3185, w: 128 },
+        { x: 6995, y: 3348, w: 128 }, { x: 6997, y: 3456, w: 261 },
+      ]);
+      const deg = Phaser.Math.DegToRad;
+      this.add('building', 7258, 3857, 217, 265, { variant: 'warehouse' });
+      this.add('pad_asphalt', 6890, 3778, 1085, 645);
+      this.add('container_stack', 6740, 3773, 103, 240);
+      this.add('jersey_barrier', 6922, 3267, 164, 20, { angle: deg(-89.7) });
+      this.add('wall', 6891, 4094, 1109, 20);
+      this.add('parking_pad', 6611, 3994, 130, 420, { angle: deg(-90.6), params: { trailer: 'standard' } });
+      this.add('container_stack', 6605, 3771, 110, 226);
+      this.add('wall', 6342, 3775, 643, 20, { angle: deg(89.8) });
+      this.add('container_stack', 6466, 3776, 109, 225);
+      this.add('wall', 6608, 3441, 532, 20);
+      this.add('wall', 7449, 3774, 638, 20, { angle: deg(-90.2) });
+      this.add('wall', 7289, 3442, 329, 20);
+      this.add('jersey_barrier', 7070, 3264, 161, 20, { angle: deg(89.8) });
+      this.add('trailer', 6535, 3995, 46, 220, { angle: deg(89.4), params: { trailer: 'standard' } });
+      this.add('trailer', 7262, 3667, 46, 220, { angle: deg(-89.9), params: { trailer: 'fragile_glass' } });
+      this.add('trailer', 6549, 3501, 46, 310, { angle: deg(89.6), params: { trailer: 'long_cargo' } });
+      this.add('trailer', 7269, 3576, 46, 220, { angle: deg(-90.4), params: { trailer: 'standard' } });
+      this.add('dock', 7252, 3580, 66, 286, { angle: deg(-90.1) });
+      this.add('dock', 7253, 3664, 70, 284, { angle: deg(-90.5) });
+    }
   }
 
   // ======================================================================
