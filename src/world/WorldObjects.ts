@@ -636,6 +636,7 @@ export class WorldObjects {
     const x0 = Math.floor((view.x - M) / OBJ_CELL), x1 = Math.floor((view.x + view.width + M) / OBJ_CELL);
     const y0 = Math.floor((view.y - M) / OBJ_CELL), y1 = Math.floor((view.y + view.height + M) / OBJ_CELL);
     const drawn = new Set<string>();
+    const flatObjs: WorldObject[] = [];
     for (let cy = y0; cy <= y1; cy++) {
       for (let cx = x0; cx <= x1; cx++) {
         const list = this.grid.get(`${cx}_${cy}`);
@@ -648,7 +649,10 @@ export class WorldObjects {
           // island sits above the road ribbons at a junction.
           // Crosswalks too — road paint belongs above the asphalt (see drawSolid).
           if (o.type === 'gas_canopy' || o.type === 'parking_pad' || o.type === 'parking_lot' || o.type === 'entrance' || o.type === 'exam_dock' || o.type === 'dock' || o.type === 'pad_asphalt' || o.type === 'pad_dirt') {
-            this.drawFlat(flats, o);
+            // Flats are collected and drawn in z order below so a base pad
+            // painted after (or in a later grid cell than) a decorated floor
+            // can never cover it — parking lots always sit on top of pads.
+            flatObjs.push(o);
           } else {
             this.drawSolid(solids, o);
             if (o.type === 'lamp' && overhead) {
@@ -657,6 +661,25 @@ export class WorldObjects {
           }
         }
       }
+    }
+    // Base pads first, painted floors on top (Array.sort is stable, so
+    // objects with the same z keep their original insertion order).
+    flatObjs.sort((a, b) => this.flatZ(a) - this.flatZ(b));
+    for (const o of flatObjs) this.drawFlat(flats, o);
+  }
+
+  /** Paint order within the FLATS layer — lower = drawn first (underneath). */
+  private flatZ(o: WorldObject): number {
+    switch (o.type) {
+      case 'pad_dirt': return 0;
+      case 'pad_asphalt': return 1;
+      case 'dock':
+      case 'exam_dock': return 2;
+      case 'parking_lot': return 3;
+      case 'parking_pad': return 4;
+      case 'entrance': return 5;
+      case 'gas_canopy': return 6;
+      default: return 3;
     }
   }
 
