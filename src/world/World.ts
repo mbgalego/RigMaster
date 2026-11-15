@@ -2,14 +2,16 @@ import Phaser from 'phaser';
 import { WorldTerrain } from './WorldTerrain';
 import { WorldObjects } from './WorldObjects';
 import { RoadNetwork, RoadData } from '../systems/RoadNetwork';
+// The authored world, versioned as data (edited in-game, exported, committed).
+import worldData from './ilha_atlantica.json';
 
 /**
  * The single, bounded world — a giant island. One terrain (procedural,
  * seeded), one vector road network, one prefab object layer. No tiles.
  *
- * Everything editable lives here: roads (splines) and objects (prefabs) are
- * serialized together in a tiny JSON (seed + list), the editor manipulates
- * them directly, and the minimap reads the same data.
+ * The world content (roads + objects + spawn) is authored as data in
+ * `ilha_atlantica.json` — edited in-game, exported and committed. The
+ * procedural seed remains as a dev fallback / reset-to-default tool.
  */
 export class World {
   public static readonly WORLD_W = 13824;
@@ -34,10 +36,12 @@ export class World {
     ]);
     this.objects = new WorldObjects(scene);
     this.roads = RoadNetwork.getInstance();
-    this.seed();
+    // The fixed world comes from data; seed() is the dev fallback (also the
+    // "Reseed" button) when the data file is missing or fails validation.
+    if (!this.loadData(worldData)) this.seed();
   }
 
-  /** Deterministic default island: road grid + hubs + parks + furniture. */
+  /** Deterministic default island: road grid + hubs + parks + furniture (dev fallback). */
   public seed() {
     this.seedRoads();
     this.objects.seedWorld(this.terrain);
@@ -110,18 +114,33 @@ export class World {
     return JSON.stringify(data, null, 2);
   }
 
-  public importJSON(jsonStr: string): boolean {
+  /**
+   * Loads a parsed world payload (embedded world file, editor import, …).
+   * Returns false if the payload is missing or malformed — the caller
+   * decides the fallback (seed()).
+   */
+  public loadData(data: unknown): boolean {
     try {
-      const data = JSON.parse(jsonStr);
-      if (!data || (!Array.isArray(data.roads) && !Array.isArray(data.objects))) return false;
-      this.roads.fromJSON(data.roads || []);
-      this.objects.fromJSON(data.objects || []);
-      if (data.spawn && Number.isFinite(data.spawn.x) && Number.isFinite(data.spawn.y)) {
-        this.spawnPoint = { x: data.spawn.x, y: data.spawn.y, angle: data.spawn.angle || 0 };
+      if (!data || typeof data !== 'object') return false;
+      const d = data as Record<string, any>;
+      if (!Array.isArray(d.roads) && !Array.isArray(d.objects)) return false;
+      this.roads.fromJSON(d.roads || []);
+      this.objects.fromJSON(d.objects || []);
+      if (d.spawn && Number.isFinite(d.spawn.x) && Number.isFinite(d.spawn.y)) {
+        this.spawnPoint = { x: d.spawn.x, y: d.spawn.y, angle: d.spawn.angle || 0 };
       }
-      if (typeof data.name === 'string') this.name = data.name;
+      if (typeof d.name === 'string') this.name = d.name;
       this.version++;
       return true;
+    } catch (e) {
+      console.error('Failed to load world data:', e);
+      return false;
+    }
+  }
+
+  public importJSON(jsonStr: string): boolean {
+    try {
+      return this.loadData(JSON.parse(jsonStr));
     } catch (e) {
       console.error('Failed to parse world JSON:', e);
       return false;
