@@ -990,16 +990,20 @@ export class WorldObjects {
           g.fillCircle(o.x + 4, o.y + 5, R);
           g.fillStyle(0x39404d, 1); // circulating carriageway
           g.fillCircle(o.x, o.y, R);
-          // Dashed lane markings: one dashed concentric circle per lane, sized by diameter.
+          // Dashed lane markings: one dashed concentric circle per lane.
           // Right-hand traffic — no direction arrows needed.
-          g.lineStyle(2, 0xe2e8f0, 0.35);
+          // The drivable ring sits between the central island (R*0.44) and the outer kerb (R).
+          g.lineStyle(1.5, 0xe2e8f0, 0.35);
           const laneWidth = 70; // approx. lane width in px
-          const nLanes = Math.max(1, Math.floor((R * 2) / laneWidth));
-          for (let l = 1; l <= nLanes; l++) {
-            const laneR = R * (0.45 + 0.5 * (l / nLanes)); // keep inside the carriageway
+          const islandR = R * 0.44;
+          const usableWidth = R - islandR;
+          const nLanes = Math.max(1, Math.floor(usableWidth / laneWidth));
+          for (let l = 0; l < nLanes; l++) {
+            // Centre of each lane, evenly spaced across the usable ring
+            const laneR = islandR + usableWidth * (l + 0.5) / nLanes;
             const circumference = 2 * Math.PI * laneR;
-            const dash = Math.max(10, laneWidth * 0.55);
-            const gap = Math.max(6, laneWidth * 0.35);
+            const dash = Math.max(8, laneWidth * 0.5);
+            const gap = Math.max(5, laneWidth * 0.3);
             const step = dash + gap;
             const nDashes = Math.max(4, Math.floor(circumference / step));
             for (let d = 0; d < nDashes; d++) {
