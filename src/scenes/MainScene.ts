@@ -138,6 +138,7 @@ export class MainScene extends Phaser.Scene {
     timePeriod: TimePeriod;
     timeClock: string;
     autoTimeCycle: boolean;
+    timeRealTime: boolean;
     activeLicenseExam: any;
     fuelLevel: number;
     fuelCapacity: number;
@@ -171,6 +172,7 @@ export class MainScene extends Phaser.Scene {
     timePeriod: 'day',
     timeClock: '12:28',
     autoTimeCycle: false,
+    timeRealTime: true,
     activeLicenseExam: null,
     fuelLevel: 500,
     fuelCapacity: 500,
@@ -1345,6 +1347,7 @@ export class MainScene extends Phaser.Scene {
         timePeriod: timeSnap.period,
         timeClock: timeSnap.clockText,
         autoTimeCycle: timeSnap.autoCycle,
+        timeRealTime: timeSnap.realTime,
         activeLicenseExam: this.licenseSystem.getActiveExam(),
         fuelLevel: Math.round(this.truck.fuelLevel * 10) / 10,
         fuelCapacity: this.truck.fuelCapacity,

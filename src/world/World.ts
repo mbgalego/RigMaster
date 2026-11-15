@@ -25,6 +25,12 @@ export class World {
   public version: number = 0; // bumped on any edit → minimap refresh
   public spawnPoint: { x: number; y: number; angle: number } = { x: 5760, y: 4700, angle: 0 };
 
+  // --- Draft autosave (localStorage) — protects in-editor edits from loss ---
+  private static readonly DRAFT_KEY = 'rigmaster_world_draft';
+  private static readonly DRAFT_DEBOUNCE_MS = 2000;
+  private draftTimer = 0;
+  private lastSavedVersion = -1;
+
   constructor(private scene: Phaser.Scene) {
     this.terrain = new WorldTerrain(scene);
     this.terrain.ensureOverview();
@@ -39,6 +45,7 @@ export class World {
     // The fixed world comes from data; seed() is the dev fallback (also the
     // "Reseed" button) when the data file is missing or fails validation.
     if (!this.loadData(worldData)) this.seed();
+    this.lastSavedVersion = this.version; // baseline: don't autosave the loaded state
   }
 
   /** Deterministic default island: road grid + hubs + parks + furniture (dev fallback). */
@@ -51,6 +58,8 @@ export class World {
   public reseed() {
     this.spawnPoint = { x: 5760, y: 4700, angle: 0 };
     this.seed();
+    World.clearDraft();
+    this.lastSavedVersion = this.version; // a reseed is an explicit reset, not a draft
   }
 
   private seedRoads() {
@@ -90,6 +99,43 @@ export class World {
 
   public update(delta: number) {
     this.objects.update(delta);
+    this.autosaveDraft(delta);
+  }
+
+  // ======================================================================
+  // DRAFT AUTOSAVE (localStorage) — ~2s after the last edit, the current
+  // world is written to a draft slot. The UI offers to restore it on the
+  // next launch; it never silently overrides the loaded world file.
+  // ======================================================================
+
+  private autosaveDraft(delta: number) {
+    if (this.version === this.lastSavedVersion) return;
+    this.draftTimer += delta;
+    if (this.draftTimer < World.DRAFT_DEBOUNCE_MS) return;
+    this.draftTimer = 0;
+    this.lastSavedVersion = this.version;
+    try {
+      localStorage.setItem(World.DRAFT_KEY, this.exportJSON());
+    } catch { /* storage unavailable/full — best-effort only */ }
+  }
+
+  /** True when an editor draft is waiting in localStorage. */
+  public static hasDraft(): boolean {
+    try { return !!localStorage.getItem(World.DRAFT_KEY); } catch { return false; }
+  }
+
+  /** Removes the draft slot without touching the running world. */
+  public static clearDraft() {
+    try { localStorage.removeItem(World.DRAFT_KEY); } catch { /* noop */ }
+  }
+
+  /** Loads the draft into the running world (IDs preserved). */
+  public restoreDraft(): boolean {
+    try {
+      const raw = localStorage.getItem(World.DRAFT_KEY);
+      if (!raw) return false;
+      return this.importJSON(raw);
+    } catch { return false; }
   }
 
   public updateActiveChunks(centerX: number, centerY: number, view?: Phaser.Geom.Rectangle) {

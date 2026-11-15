@@ -33,6 +33,7 @@ export interface TimeOfDaySnapshot {
   dayProgress: number;
   clockText: string;
   autoCycle: boolean;
+  realTime: boolean;
   ambientColor: number;
   ambientRgb: { r: number; g: number; b: number };
   lampFactor: number;
@@ -41,9 +42,11 @@ export interface TimeOfDaySnapshot {
 export class TimeOfDaySystem {
   private static instance: TimeOfDaySystem;
 
-  private dayProgress: number = PERIOD_TARGETS.day;
+  private dayProgress: number = TimeOfDaySystem.getRealTimeProgress();
   private targetProgress: number | null = null;
   private autoCycle: boolean = false;
+  // Real-time mode: the in-game clock follows the device/browser clock (default).
+  private realTime: boolean = true;
   // 1 full 24h cycle in ~180s when autoCycle is enabled
   private cycleSpeedPerSec: number = 1 / 180;
   private listeners: Array<() => void> = [];
@@ -62,6 +65,7 @@ export class TimeOfDaySystem {
   public setPeriod(period: TimePeriod, immediate = false) {
     const target = PERIOD_TARGETS[period];
     this.autoCycle = false;
+    this.realTime = false;
     if (immediate) {
       this.dayProgress = target;
       this.targetProgress = null;
@@ -75,12 +79,38 @@ export class TimeOfDaySystem {
     this.autoCycle = enabled;
     if (enabled) {
       this.targetProgress = null;
+      // Simulated cycle and real-time clock are mutually exclusive.
+      this.realTime = false;
     }
     this.notify();
   }
 
   public isAutoCycle(): boolean {
     return this.autoCycle;
+  }
+
+  /**
+   * Real-time mode: the in-game time mirrors the real clock of the
+   * device/browser where the game is running (00:00–24:00 mapped to 0..1).
+   */
+  public setRealTime(enabled: boolean) {
+    this.realTime = enabled;
+    if (enabled) {
+      this.autoCycle = false;
+      this.targetProgress = null;
+      this.dayProgress = TimeOfDaySystem.getRealTimeProgress();
+    }
+    this.notify();
+  }
+
+  public isRealTime(): boolean {
+    return this.realTime;
+  }
+
+  /** Progress (0..1) derived from the real device/browser clock. */
+  private static getRealTimeProgress(): number {
+    const now = new Date();
+    return (now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds()) / 86400;
   }
 
   public getPeriod(): TimePeriod {
@@ -95,7 +125,11 @@ export class TimeOfDaySystem {
     const dt = Math.min(deltaMs / 1000, 0.1);
     let changed = false;
 
-    if (this.autoCycle) {
+    if (this.realTime) {
+      // Follow the real device/browser clock exactly.
+      this.dayProgress = TimeOfDaySystem.getRealTimeProgress();
+      changed = true;
+    } else if (this.autoCycle) {
       this.dayProgress = (this.dayProgress + this.cycleSpeedPerSec * dt) % 1;
       changed = true;
     } else if (this.targetProgress !== null) {
@@ -183,6 +217,7 @@ export class TimeOfDaySystem {
       dayProgress: this.dayProgress,
       clockText: this.getClockText(),
       autoCycle: this.autoCycle,
+      realTime: this.realTime,
       ambientColor: info.ambientColor,
       ambientRgb: info.ambientRgb,
       lampFactor: info.lampFactor,
