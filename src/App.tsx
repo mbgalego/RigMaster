@@ -9,6 +9,7 @@ import {
 import { MainScene } from './scenes/MainScene';
 import { LicenseSystem, LicenseInfo, ExamStatus, LicenseId } from './systems/LicenseSystem';
 import { GarageSystem, HubData, WeatherModifier } from './systems/GarageSystem';
+import { TimeOfDaySystem, TimePeriod } from './systems/TimeOfDaySystem';
 import type { RoadSurface } from './systems/RoadNetwork';
 import type { AddObjectSpec } from './scenes/EditorScene';
 import { TouchControls } from './components/TouchControls';
@@ -52,6 +53,11 @@ import {
   Equal,
   Mountain,
   Truck,
+  Sun,
+  Sunrise,
+  Sunset,
+  Moon,
+  Clock,
 } from 'lucide-react';
 
 /** Catálogo do Criar organizado por categorias (régua de 2 linhas do editor). */
@@ -138,6 +144,8 @@ export default function App() {
   const [showTouchControls, setShowTouchControls] = useState<boolean>(true);
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [cameraZoom, setCameraZoom] = useState<number>(1.0);
+  const lastZoomRef = useRef<number>(1.0);
 
   useEffect(() => {
     const handleFsChange = () => setIsFullscreen(!!document.fullscreenElement);
@@ -185,6 +193,10 @@ export default function App() {
     collisions: 0,
     fragileHealth: 100,
     weather: 'clear',
+    headlightMode: 'low',
+    timePeriod: 'day',
+    timeClock: '12:28',
+    autoTimeCycle: false,
     activeLicenseExam: null,
     fuelLevel: 500,
     fuelCapacity: 500,
@@ -295,12 +307,19 @@ export default function App() {
     // Telemetry polling loop from MainScene
     const interval = setInterval(() => {
       const scene = getMainScene();
+      const edScene = getEditorScene();
       if (scene) {
         setTelemetry({ ...scene.telemetry });
         setIsEditorMode(scene.isEditorMode);
         setActiveExam(licSys.getActiveExam());
+        const activeZoom =
+          (scene.isEditorMode ? edScene?.cameras?.main?.zoom : scene.cameras?.main?.zoom) ?? 1;
+        const roundedZoom = Math.round(activeZoom * 100) / 100;
+        if (Math.abs(roundedZoom - lastZoomRef.current) >= 0.01) {
+          lastZoomRef.current = roundedZoom;
+          setCameraZoom(roundedZoom);
+        }
       }
-      const edScene = getEditorScene();
       if (edScene) {
         setRoadUI(edScene.getRoadUIState());
         setObjectUI(edScene.getObjectUIState());
@@ -518,12 +537,21 @@ export default function App() {
   };
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-[#0c0f17] font-sans text-slate-100 select-none">
+    <div className="relative w-screen h-dvh overflow-hidden bg-[#0c0f17] font-sans text-slate-100 select-none">
       {/* Phaser Canvas Viewport */}
       <div ref={gameContainerRef} className={`w-full h-full cursor-crosshair ${modalOpen ? 'pointer-events-none' : ''}`} />
 
+      {/* MENU CLICK-AWAY BACKDROP (blocks TouchControls/canvas taps while menu is open) */}
+      {isMenuOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/25"
+          onClick={() => setIsMenuOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
       {/* TOP COMPACT INDUSTRIAL APP BAR */}
-      <header className="absolute top-0 left-0 right-0 h-12 bg-slate-950/85 backdrop-blur-md border-b border-cyan-500/30 px-2 sm:px-4 flex items-center justify-between z-30 shadow-lg shadow-black/50">
+      <header className="absolute top-0 left-0 right-0 h-12 bg-slate-950/85 backdrop-blur-md border-b border-cyan-500/30 px-2 sm:px-4 flex items-center justify-between z-50 shadow-lg shadow-black/50">
         <div className="flex items-center gap-1.5 sm:gap-2.5">
         {/* Paint & Drive Mode Switcher */}
           <button
@@ -590,7 +618,10 @@ export default function App() {
 
             {/* Dropdown Menu Overlay */}
             {isMenuOpen && (
-              <div className="absolute right-0 top-full mt-2 w-72 bg-slate-950 border border-cyan-500/50 rounded-xl shadow-2xl p-2.5 z-50 text-xs flex flex-col gap-2.5 backdrop-blur-xl">
+              <div
+                data-testid="hud-menu-dropdown"
+                className="absolute right-0 top-full mt-2 w-72 max-w-[calc(100vw-1rem)] max-h-[calc(100dvh-4.25rem)] overflow-y-auto overscroll-contain touch-pan-y bg-slate-950 border border-cyan-500/50 rounded-xl shadow-2xl p-2.5 z-50 text-xs flex flex-col gap-2.5 backdrop-blur-xl"
+              >
                 {/* 1. Vehicles */}
                 <div>
                   <div className="text-[10px] font-mono uppercase tracking-wider text-cyan-400 px-2 py-0.5 font-bold">
@@ -702,6 +733,76 @@ export default function App() {
 
                 <div className="h-px bg-slate-800" />
 
+                {/* 4.5 Time of Day / WebGL Lighting */}
+                <div>
+                  <div className="flex items-center justify-between px-2 py-0.5">
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-amber-300 font-bold">
+                      Período do Dia
+                    </span>
+                    <span className="font-mono text-[10px] text-slate-300 flex items-center gap-1" data-testid="time-clock">
+                      <Clock className="w-3 h-3 text-amber-300" />
+                      {telemetry.timeClock}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1 mt-1">
+                    {([
+                      { id: 'dawn' as TimePeriod, label: 'Amanhecer', icon: Sunrise },
+                      { id: 'day' as TimePeriod, label: 'Dia', icon: Sun },
+                      { id: 'dusk' as TimePeriod, label: 'Entardecer', icon: Sunset },
+                      { id: 'night' as TimePeriod, label: 'Noite', icon: Moon },
+                    ]).map((p) => {
+                      const Icon = p.icon;
+                      const active = !telemetry.autoTimeCycle && telemetry.timePeriod === p.id;
+                      return (
+                        <button
+                          key={p.id}
+                          data-testid={`btn-period-${p.id}`}
+                          onClick={() => {
+                            const garSys = GarageSystem.getInstance();
+                            if (p.id !== 'night' && garSys.getActiveModifier() === 'night') {
+                              garSys.setActiveModifier('clear');
+                            }
+                            TimeOfDaySystem.getInstance().setPeriod(p.id);
+                          }}
+                          className={`px-2 py-1.5 rounded flex items-center gap-1.5 text-[11px] transition border ${
+                            active
+                              ? 'bg-amber-400 text-black font-bold border-amber-300'
+                              : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-900'
+                          }`}
+                        >
+                          <Icon className={`w-3.5 h-3.5 ${active ? 'text-black' : 'text-amber-300'}`} />
+                          <span>{p.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button
+                    data-testid="btn-time-autocycle"
+                    onClick={() => {
+                      const garSys = GarageSystem.getInstance();
+                      if (garSys.getActiveModifier() === 'night') {
+                        garSys.setActiveModifier('clear');
+                      }
+                      TimeOfDaySystem.getInstance().setAutoCycle(!telemetry.autoTimeCycle);
+                    }}
+                    className={`mt-1 w-full text-left px-2 py-1.5 rounded flex items-center justify-between transition border ${
+                      telemetry.autoTimeCycle
+                        ? 'bg-cyan-500/20 border-cyan-400/60 text-cyan-200 font-bold'
+                        : 'bg-slate-900/50 border-slate-800/80 text-slate-300 hover:bg-slate-900'
+                    }`}
+                  >
+                    <span className="flex items-center gap-1.5 text-[11px]">
+                      <Clock className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Ciclo Automático 24h</span>
+                    </span>
+                    <span className="text-[10px] font-mono">
+                      {telemetry.autoTimeCycle ? 'ON' : 'OFF'}
+                    </span>
+                  </button>
+                </div>
+
+                <div className="h-px bg-slate-800" />
+
                 {/* 5. Settings */}
                 <div>
                   <div className="text-[10px] font-mono uppercase tracking-wider text-cyan-400 px-2 py-0.5 font-bold">
@@ -730,6 +831,39 @@ export default function App() {
                       <span>Comandos Touch no HUD</span>
                       <span className="ml-auto text-[10px]">{showTouchControls ? 'Visíveis' : 'Ocultos'}</span>
                     </button>
+
+                    {/* Zoom Slider (covers exceptions without wheel/pinch) */}
+                    <div className="px-2 py-1.5 rounded bg-slate-900/60 border border-slate-800/80 flex flex-col gap-1.5 mt-0.5">
+                      <div className="flex items-center justify-between text-slate-300">
+                        <span className="flex items-center gap-1.5">
+                          <ZoomIn className="w-3.5 h-3.5 text-cyan-400" />
+                          <span>Zoom da Câmara</span>
+                        </span>
+                        <span className="font-mono text-[10px] text-cyan-300 font-bold">
+                          {Math.round(cameraZoom * 100)}%
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={isEditorMode ? 0.04 : 0.45}
+                        max={1.8}
+                        step={0.02}
+                        value={Math.max(isEditorMode ? 0.04 : 0.45, Math.min(1.8, cameraZoom))}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          lastZoomRef.current = val;
+                          setCameraZoom(val);
+                          const scene = getMainScene();
+                          const edScene = getEditorScene();
+                          if (scene?.isEditorMode && edScene) {
+                            edScene.cameras.main.setZoom(Math.max(0.04, Math.min(1.8, val)));
+                          } else if (scene) {
+                            scene.setZoom(val);
+                          }
+                        }}
+                        className="w-full accent-cyan-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -782,7 +916,7 @@ export default function App() {
 
       {/* EXAM RESULT POPUP */}
       {activeExam && (activeExam.isPassed || activeExam.isFailed) && (
-        <div className="absolute inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div className="absolute inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4 pointer-events-none">
           <div className="bg-slate-900 border border-slate-700 max-w-md w-full p-6 rounded-xl shadow-2xl text-center pointer-events-auto">
             {activeExam.isPassed ? (
               <>
@@ -1109,7 +1243,7 @@ export default function App() {
 
       {/* LICENSE SYSTEM MODAL */}
       {showLicenseModal && (
-        <div className="absolute inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/75 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
           <div className="bg-slate-950 border border-cyan-500/50 max-w-3xl w-full rounded-2xl shadow-2xl p-6 flex flex-col max-h-[90vh] overflow-hidden">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
               <div className="flex items-center gap-3">
@@ -1207,7 +1341,7 @@ export default function App() {
 
       {/* GARAGE & REGIONAL HUBS MODAL */}
       {showGarageModal && (
-        <div className="absolute inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/75 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
           <div className="bg-slate-950 border border-amber-500/50 max-w-3xl w-full rounded-2xl shadow-2xl p-6 flex flex-col max-h-[90vh] overflow-hidden">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
               <div className="flex items-center gap-3">
@@ -1364,7 +1498,7 @@ export default function App() {
 
       {/* JSON EXPORT & IMPORT MODAL */}
       {showJsonModal && (
-        <div className="absolute inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/75 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
           <div className="bg-slate-950 border border-slate-700 max-w-2xl w-full rounded-2xl shadow-2xl p-6 flex flex-col max-h-[90vh]">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
               <div className="flex items-center gap-2">
@@ -1451,30 +1585,25 @@ export default function App() {
       )}
 
       {/* TOUCH CONTROLS (STEERING WHEEL LEFT, THROTTLE & BRAKE RIGHT) */}
-      <TouchControls visible={!isEditorMode && showTouchControls} coupling={telemetry.coupling} fuelPercent={telemetry.fuelPercent} fuelLevel={telemetry.fuelLevel} onDecouple={() => {
-        const scene = getMainScene();
-        if (scene) scene.decoupleAction();
-      }} />
-
-      {/* ZOOM CONTROLS (drive mode) — positioned clear of the top-right minimap */}
-      {!isEditorMode && (
-        <div className="absolute right-[168px] top-14 z-30 flex flex-col gap-1.5">
-          <button
-            onClick={() => { const s = getMainScene(); if (s) s.adjustZoom(1.18); }}
-            className="w-10 h-10 rounded-lg bg-slate-950/90 text-cyan-300 border border-cyan-500/50 hover:bg-slate-800 hover:text-white flex items-center justify-center shadow-lg backdrop-blur-md"
-            title="Aproximar (pinça no telemóvel também funciona)"
-          >
-            <ZoomIn className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => { const s = getMainScene(); if (s) s.adjustZoom(1 / 1.18); }}
-            className="w-10 h-10 rounded-lg bg-slate-950/90 text-cyan-300 border border-cyan-500/50 hover:bg-slate-800 hover:text-white flex items-center justify-center shadow-lg backdrop-blur-md"
-            title="Afastar (pinça no telemóvel também funciona)"
-          >
-            <ZoomOut className="w-4 h-4" />
-          </button>
-        </div>
-      )}
+      <TouchControls
+        visible={!isEditorMode && showTouchControls}
+        coupling={telemetry.coupling}
+        fuelPercent={telemetry.fuelPercent}
+        fuelLevel={telemetry.fuelLevel}
+        headlightMode={telemetry.headlightMode}
+        onToggleLowBeam={() => {
+          const scene = getMainScene();
+          if (scene?.truck) scene.truck.toggleLowBeam();
+        }}
+        onToggleHighBeam={() => {
+          const scene = getMainScene();
+          if (scene?.truck) scene.truck.toggleHighBeam();
+        }}
+        onDecouple={() => {
+          const scene = getMainScene();
+          if (scene) scene.decoupleAction();
+        }}
+      />
     </div>
   );
 }

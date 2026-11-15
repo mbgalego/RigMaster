@@ -1,10 +1,12 @@
 import Phaser from 'phaser';
-import { Truck } from '../entities/Truck';
+import { Truck, HeadlightMode } from '../entities/Truck';
 import { Trailer, TrailerType } from '../entities/Trailer';
 import { Kingpin, ArticulationTelemetry } from '../physics/Kingpin';
 import { World } from '../world/World';
+import { WorldObjects } from '../world/WorldObjects';
 import { LicenseSystem, LicenseExam, LicenseId } from '../systems/LicenseSystem';
 import { GarageSystem, WeatherModifier } from '../systems/GarageSystem';
+import { TimeOfDaySystem, TimePeriod, TimeOfDaySnapshot } from '../systems/TimeOfDaySystem';
 import { TrailerManager, TRAILER_TYPE_TO_LICENSE, CouplingCandidate } from '../systems/TrailerManager';
 import { RoadNetwork, RoadData, RoadSample } from '../systems/RoadNetwork';
 
@@ -18,6 +20,16 @@ export class MainScene extends Phaser.Scene {
   
   public licenseSystem!: LicenseSystem;
   public garageSystem!: GarageSystem;
+  public timeOfDaySystem!: TimeOfDaySystem;
+
+  // WebGL Lights (Phaser 4 LightsPlugin: 2 headlights + brake + reverse + 6 world emitters = 10)
+  private static readonly MAX_WORLD_LIGHTS = 6;
+  private webglLightingActive: boolean = false;
+  private headlightLeft: Phaser.GameObjects.Light | null = null;
+  private headlightRight: Phaser.GameObjects.Light | null = null;
+  private brakeLight: Phaser.GameObjects.Light | null = null;
+  private reverseLight: Phaser.GameObjects.Light | null = null;
+  private worldLightPool: Phaser.GameObjects.Light[] = [];
 
   // The single procedural island world (no tiles)
   public world!: World;
@@ -120,6 +132,10 @@ export class MainScene extends Phaser.Scene {
     collisions: number;
     fragileHealth: number;
     weather: WeatherModifier;
+    headlightMode: HeadlightMode;
+    timePeriod: TimePeriod;
+    timeClock: string;
+    autoTimeCycle: boolean;
     activeLicenseExam: any;
     fuelLevel: number;
     fuelCapacity: number;
@@ -149,6 +165,10 @@ export class MainScene extends Phaser.Scene {
     collisions: 0,
     fragileHealth: 100,
     weather: 'clear',
+    headlightMode: 'low',
+    timePeriod: 'day',
+    timeClock: '12:28',
+    autoTimeCycle: false,
     activeLicenseExam: null,
     fuelLevel: 500,
     fuelCapacity: 500,
@@ -167,22 +187,30 @@ export class MainScene extends Phaser.Scene {
   public create() {
     this.licenseSystem = LicenseSystem.getInstance();
     this.garageSystem = GarageSystem.getInstance();
+    this.timeOfDaySystem = TimeOfDaySystem.getInstance();
     // Debug hook para testes headless (scripts/smoke-test.mjs usa window.__rig)
     (window as any).__rig = this;
+
+    // 0. Initialize Phaser 4 WebGL dynamic lighting pool (activated dynamically outside clear noon / editor)
+    this.lights.enable();
+    this.lights.setAmbientColor(0xffffff);
+    this.initLightPool();
+    this.lights.disable();
 
     // 1. Build the single procedural island world (terrain + vector roads + prefabs)
     this.world = new World(this);
     this.roadNetwork = RoadNetwork.getInstance();
 
     // Ground layers: flats (docks/pads) under the roads, solids above them
-    this.flatsGraphics = this.add.graphics().setDepth(1);
-    this.solidsGraphics = this.add.graphics().setDepth(3);
-    this.lightsGraphics = this.add.graphics().setDepth(4);
+    this.flatsGraphics = this.add.graphics().setDepth(1).setLighting(false);
+    this.solidsGraphics = this.add.graphics().setDepth(3).setLighting(false);
+    // Traffic light LEDs & streetlamp bulb cores stay emissive (unlit)
+    this.lightsGraphics = this.add.graphics().setDepth(4).setLighting(false);
 
     // Vector road ribbon renderer (above flats, below solids/vehicles)
-    this.roadGraphics = this.add.graphics().setDepth(2);
+    this.roadGraphics = this.add.graphics().setDepth(2).setLighting(false);
     // Gas pump highlight layer (above vehicles, depth 10)
-    this.pumpGraphics = this.add.graphics().setDepth(11);
+    this.pumpGraphics = this.add.graphics().setDepth(11).setLighting(false);
 
     // Set world physics bounds (island edge)
     const worldW = World.WORLD_W;
@@ -283,10 +311,10 @@ export class MainScene extends Phaser.Scene {
 
     // 5. Keyboard Hotkeys
     if (this.input.keyboard) {
-      // Toggle Editor Mode with Tab
+      // Toggle Editor Mode with Tab (EditorScene handles exiting when active)
       this.input.keyboard.on('keydown-TAB', (event: KeyboardEvent) => {
         event.preventDefault();
-        this.toggleEditorMode();
+        if (!this.isEditorMode) this.toggleEditorMode();
       });
 
       // Toggle Debug Wireframe with P
@@ -304,6 +332,13 @@ export class MainScene extends Phaser.Scene {
 
       // Refuel at a gas pump with F
       this.input.keyboard.on('keydown-F', () => this.tryRefuel());
+
+      // Cycle headlights (Off -> Low -> High -> Off) with L
+      this.input.keyboard.on('keydown-L', () => {
+        if (!this.isEditorMode && this.truck) {
+          this.truck.cycleHeadlights();
+        }
+      });
     }
 
     // 6. Sound Synthesis Init on First User Interaction
@@ -492,6 +527,10 @@ export class MainScene extends Phaser.Scene {
         mechanicalLockDeg: 95,
       });
     }
+
+    this.truck?.setLightingEnabled(this.webglLightingActive);
+    this.trailer?.setLightingEnabled(this.webglLightingActive);
+    this.pupTrailer?.setLightingEnabled(this.webglLightingActive);
   }
 
   public resetVehicleToSpawn() {
@@ -569,10 +608,16 @@ export class MainScene extends Phaser.Scene {
    * tractor sits in the correct kingpin position (updateAutoCoupling). The
    * bitrem pup comes off first.
    */
-  /** Camera zoom step for the HUD buttons (drive mode only). */
+  /** Camera zoom step for programmatic zoom adjustments (drive mode only). */
   public adjustZoom(factor: number) {
     if (this.isEditorMode) return;
     this.cameras.main.setZoom(Phaser.Math.Clamp(this.cameras.main.zoom * factor, 0.45, 1.8));
+  }
+
+  /** Set exact camera zoom (drive mode only, clamped to [0.45, 1.8]). */
+  public setZoom(zoom: number) {
+    if (this.isEditorMode) return;
+    this.cameras.main.setZoom(Phaser.Math.Clamp(zoom, 0.45, 1.8));
   }
 
   public decoupleAction() {
@@ -1115,7 +1160,10 @@ export class MainScene extends Phaser.Scene {
   public update(time: number, delta: number) {
     const dt = delta / 1000;
 
-    // Coordinated traffic light cycle (prefab layer)
+    // Time of day progression + coordinated traffic light cycle
+    this.timeOfDaySystem.update(delta);
+    const forceNight = this.garageSystem.getActiveModifier() === 'night';
+    const timeSnap = this.timeOfDaySystem.getSnapshot(forceNight);
     this.world.update(delta);
 
     // Keep exam target dock (marker + painted dock tile) in sync with the active exam
@@ -1134,7 +1182,7 @@ export class MainScene extends Phaser.Scene {
     // world was edited — otherwise the Graphics command buffer is reused as-is.
     const cam = this.cameras.main;
     if (this.flatsGraphics && this.solidsGraphics && this.lightsGraphics && cam.zoom >= 0.12) {
-      this.world.objects.renderLights(this.lightsGraphics, cam.worldView);
+      this.world.objects.renderLights(this.lightsGraphics, cam.worldView, this.isEditorMode ? 0 : timeSnap.lampFactor);
       const last = this.lastObjRender;
       const needsFull =
         Number.isNaN(last.x) ||
@@ -1162,6 +1210,7 @@ export class MainScene extends Phaser.Scene {
 
     // When not in editor mode, update vehicle driving physics
     if (!this.isEditorMode) {
+      this.truck.ambientDarkness = timeSnap.lampFactor;
       this.truck.update(delta);
 
       // If the coupled trailer's tail is blocked by an obstacle, the tractor
@@ -1271,6 +1320,10 @@ export class MainScene extends Phaser.Scene {
         collisions: this.truck.collisionCount + (this.trailer?.impactCount || 0),
         fragileHealth: Math.round(this.trailer?.fragileHealth || 100),
         weather: this.garageSystem.getActiveModifier(),
+        headlightMode: this.truck.headlightMode,
+        timePeriod: timeSnap.period,
+        timeClock: timeSnap.clockText,
+        autoTimeCycle: timeSnap.autoCycle,
         activeLicenseExam: this.licenseSystem.getActiveExam(),
         fuelLevel: Math.round(this.truck.fuelLevel * 10) / 10,
         fuelCapacity: this.truck.fuelCapacity,
@@ -1286,8 +1339,9 @@ export class MainScene extends Phaser.Scene {
       this.updateSyntheticAudio(time);
     }
 
-    // Render Weather Environment
-    this.renderWeather(time, delta);
+    // Real Phaser 4 WebGL dynamic lighting & atmospheric weather
+    this.updateWebGLLighting(timeSnap, cam);
+    this.renderWeather(time, delta, timeSnap);
   }
 
   private checkDockAlignment(): { inZone: boolean; alignmentDeg: number } {
@@ -1717,7 +1771,303 @@ export class MainScene extends Phaser.Scene {
     );
   }
 
-  private renderWeather(time: number, delta: number) {
+  // ==========================================
+  // PHASER 4 WEBGL DYNAMIC LIGHTING
+  // ==========================================
+
+  private initLightPool() {
+    this.headlightLeft = this.lights.addConeLight(0, 0, 360, 0xfff3d1, 0, 0, 0.44, 0.90, 120).setVisible(false);
+    this.headlightRight = this.lights.addConeLight(0, 0, 360, 0xfff3d1, 0, 0, 0.44, 0.90, 120).setVisible(false);
+    this.brakeLight = this.lights.addLight(0, 0, 155, 0xff1e4d, 0, 55).setVisible(false);
+    this.reverseLight = this.lights.addLight(0, 0, 185, 0xf8fafc, 0, 62).setVisible(false);
+
+    this.worldLightPool = [];
+    for (let i = 0; i < MainScene.MAX_WORLD_LIGHTS; i++) {
+      this.worldLightPool.push(this.lights.addLight(0, 0, 220, 0xffcf70, 0, 85).setVisible(false));
+    }
+  }
+
+  private setWebGLLightingActive(enabled: boolean) {
+    if (this.webglLightingActive === enabled) return;
+    this.webglLightingActive = enabled;
+
+    if (enabled) {
+      this.lights.enable();
+    } else {
+      this.lights.disable();
+    }
+
+    this.world?.terrain?.setLightingEnabled(enabled);
+    this.flatsGraphics?.setLighting(enabled);
+    this.roadGraphics?.setLighting(enabled);
+    this.solidsGraphics?.setLighting(enabled);
+    this.truck?.setLightingEnabled(enabled);
+    this.trailer?.setLightingEnabled(enabled);
+    this.pupTrailer?.setLightingEnabled(enabled);
+    for (const t of TrailerManager.getInstance(this).loose) {
+      t.setLightingEnabled(enabled);
+    }
+  }
+
+  private updateWebGLLighting(snap: TimeOfDaySnapshot, cam: Phaser.Cameras.Scene2D.Camera) {
+    if (this.isEditorMode || !this.truck) {
+      this.setWebGLLightingActive(false);
+      this.lights.setAmbientColor(0xffffff);
+      cam.setBackgroundColor(0x0a2338);
+      this.headlightLeft?.setVisible(false);
+      this.headlightRight?.setVisible(false);
+      this.brakeLight?.setVisible(false);
+      this.reverseLight?.setVisible(false);
+      for (const l of this.worldLightPool) l.setVisible(false);
+      return;
+    }
+
+    // Apply weather overcast attenuation subtly over time-of-day ambient
+    const weather = this.garageSystem.getActiveModifier();
+    let { r, g, b } = snap.ambientRgb;
+    if (weather === 'rain') {
+      r = Math.round(r * 0.78);
+      g = Math.round(g * 0.84);
+      b = Math.round(b * 0.95);
+    } else if (weather === 'fog') {
+      r = Math.round(r * 0.88);
+      g = Math.round(g * 0.90);
+      b = Math.round(b * 0.94);
+    }
+    const ambientHex = (r << 16) | (g << 8) | b;
+
+    // Only pay the WebGL lighting shader cost when the scene isn't already 100% sunlit white
+    const needsWebGLLighting = ambientHex !== 0xffffff || snap.lampFactor > 0.01;
+    this.setWebGLLightingActive(needsWebGLLighting);
+    if (!needsWebGLLighting) {
+      this.lights.setAmbientColor(0xffffff);
+      cam.setBackgroundColor(0x0a2338);
+      this.headlightLeft?.setVisible(false);
+      this.headlightRight?.setVisible(false);
+      this.brakeLight?.setVisible(false);
+      this.reverseLight?.setVisible(false);
+      for (const l of this.worldLightPool) l.setVisible(false);
+      return;
+    }
+
+    this.lights.setAmbientColor(ambientHex);
+
+    // Match ocean background outside chunk bounds with darkened ocean tint
+    const bgR = Math.round((0x0a * r) / 255);
+    const bgG = Math.round((0x23 * g) / 255);
+    const bgB = Math.round((0x38 * b) / 255);
+    cam.setBackgroundColor((bgR << 16) | (bgG << 8) | bgB);
+
+    const lampFactor = snap.lampFactor;
+    const a = this.truck.body.angle;
+    const fwdX = Math.sin(a);
+    const fwdY = -Math.cos(a);
+    const rightX = Math.cos(a);
+    const rightY = Math.sin(a);
+    const hw = this.truck.width / 2;
+    const hl = this.truck.length / 2;
+
+    // 1. Truck Headlights (Phaser 4 ConeLight shaders illuminating terrain/roads/buildings/vehicles)
+    const mode = this.truck.headlightMode;
+    if (mode === 'off') {
+      this.headlightLeft?.setVisible(false);
+      this.headlightRight?.setVisible(false);
+    } else {
+      const isHigh = mode === 'high';
+      const radius = isHigh ? 720 : 420;
+      const color = isHigh ? 0xeef6ff : 0xfff3d1;
+      const intensity = isHigh ? (0.50 + lampFactor * 3.10) : (0.35 + lampFactor * 2.35);
+      const inner = isHigh ? 0.32 : 0.40;
+      const outer = isHigh ? 0.76 : 0.95;
+      const z = isHigh ? 180 : 110;
+      const heading = a - Math.PI / 2;
+
+      const frontOffset = hl - 4;
+      const latOffset = hw - 8;
+      const lx = this.truck.body.position.x + fwdX * frontOffset - rightX * latOffset;
+      const ly = this.truck.body.position.y + fwdY * frontOffset - rightY * latOffset;
+      const rx = this.truck.body.position.x + fwdX * frontOffset + rightX * latOffset;
+      const ry = this.truck.body.position.y + fwdY * frontOffset + rightY * latOffset;
+
+      if (this.headlightLeft) {
+        this.headlightLeft
+          .setVisible(true)
+          .setPosition(lx, ly)
+          .setRadius(radius)
+          .setColor(color)
+          .setIntensity(intensity)
+          .setZ(z)
+          .setCone(heading - 0.03, inner, outer);
+      }
+      if (this.headlightRight) {
+        this.headlightRight
+          .setVisible(true)
+          .setPosition(rx, ry)
+          .setRadius(radius)
+          .setColor(color)
+          .setIntensity(intensity)
+          .setZ(z)
+          .setCone(heading + 0.03, inner, outer);
+      }
+    }
+
+    // 2. Rear Brake / Tail Light & Reverse Light on rearmost coupled unit
+    const rearEntity = this.pupTrailer || this.trailer || this.truck;
+    const ra = rearEntity.body.angle;
+    const rearLen = rearEntity.length;
+    const tailX = rearEntity.body.position.x - Math.sin(ra) * (rearLen / 2 - 2);
+    const tailY = rearEntity.body.position.y + Math.cos(ra) * (rearLen / 2 - 2);
+
+    if (this.brakeLight) {
+      if (this.truck.isBraking) {
+        this.brakeLight
+          .setVisible(true)
+          .setPosition(tailX, tailY)
+          .setRadius(155)
+          .setColor(0xff1e4d)
+          .setIntensity(0.55 + lampFactor * 1.15)
+          .setZ(55);
+      } else if (mode !== 'off' && lampFactor > 0.1) {
+        this.brakeLight
+          .setVisible(true)
+          .setPosition(tailX, tailY)
+          .setRadius(95)
+          .setColor(0xdc2626)
+          .setIntensity(lampFactor * 0.65)
+          .setZ(45);
+      } else {
+        this.brakeLight.setVisible(false);
+      }
+    }
+
+    if (this.reverseLight) {
+      if (this.truck.isReversing) {
+        this.reverseLight
+          .setVisible(true)
+          .setPosition(tailX, tailY)
+          .setRadius(185)
+          .setColor(0xf8fafc)
+          .setIntensity(0.75 + lampFactor * 1.60)
+          .setZ(62);
+      } else {
+        this.reverseLight.setVisible(false);
+      }
+    }
+
+    // 3. World Emitters Pool (streetlamps, traffic lights, gas forecourts, dominated hub neon signs)
+    const emitters = this.world.objects.getEmittersInView(cam.worldView, 400);
+    const cx = cam.midPoint.x;
+    const cy = cam.midPoint.y;
+
+    interface LightCandidate {
+      x: number;
+      y: number;
+      radius: number;
+      color: number;
+      intensity: number;
+      z: number;
+      distSq: number;
+    }
+
+    const candidates: LightCandidate[] = [];
+    for (const o of emitters) {
+      const dx = o.x - cx;
+      const dy = o.y - cy;
+      const distSq = dx * dx + dy * dy;
+
+      if (o.type === 'lamp') {
+        if (lampFactor <= 0.04) continue;
+        const bulb = WorldObjects.getLampBulbPos(o);
+        candidates.push({
+          x: bulb.x,
+          y: bulb.y,
+          radius: 270,
+          color: 0xffcf70,
+          intensity: lampFactor * 1.65,
+          z: 95,
+          distSq,
+        });
+      } else if (o.type === 'gas_canopy') {
+        if (lampFactor <= 0.04) continue;
+        candidates.push({
+          x: o.x,
+          y: o.y,
+          radius: 300,
+          color: 0xfff0cc,
+          intensity: lampFactor * 1.55,
+          z: 115,
+          distSq,
+        });
+      } else if (o.type === 'gas_pump') {
+        if (lampFactor <= 0.04) continue;
+        candidates.push({
+          x: o.x,
+          y: o.y,
+          radius: 145,
+          color: 0x4ade80,
+          intensity: lampFactor * 0.9,
+          z: 55,
+          distSq,
+        });
+      } else if (o.type === 'traffic_light') {
+        const st = this.world.objects.lightState((o.params?.group ?? 0) as 0 | 1);
+        const col = st.red ? 0xff3b30 : st.amber ? 0xffb020 : 0x34d058;
+        const tlInt = 0.20 + lampFactor * 1.0;
+        candidates.push({
+          x: o.x,
+          y: o.y,
+          radius: 135,
+          color: col,
+          intensity: tlInt,
+          z: 55,
+          distSq,
+        });
+      }
+    }
+
+    if (lampFactor > 0.05) {
+      const ts = 128;
+      for (const spot of MainScene.HUB_SIGN_TILES) {
+        const hub = this.garageSystem.getHub(spot.id as any);
+        if (!hub || !hub.isDominant) continue;
+        const hx = spot.c * ts + ts / 2;
+        const hy = spot.r * ts + ts / 2;
+        const dx = hx - cx;
+        const dy = hy - cy;
+        if (Math.abs(dx) > cam.worldView.width + 320 || Math.abs(dy) > cam.worldView.height + 320) continue;
+        candidates.push({
+          x: hx,
+          y: hy,
+          radius: 220,
+          color: hub.neonColorHex,
+          intensity: lampFactor * 1.25,
+          z: 80,
+          distSq: dx * dx + dy * dy,
+        });
+      }
+    }
+
+    candidates.sort((c1, c2) => c1.distSq - c2.distSq);
+
+    const limit = Math.min(candidates.length, this.worldLightPool.length);
+    for (let i = 0; i < this.worldLightPool.length; i++) {
+      const light = this.worldLightPool[i];
+      if (i < limit) {
+        const c = candidates[i];
+        light
+          .setVisible(true)
+          .setPosition(c.x, c.y)
+          .setRadius(c.radius)
+          .setColor(c.color)
+          .setIntensity(c.intensity)
+          .setZ(c.z);
+      } else {
+        light.setVisible(false);
+      }
+    }
+  }
+
+  private renderWeather(time: number, delta: number, snap: TimeOfDaySnapshot) {
     const g = this.weatherGraphics;
     g.clear();
 
@@ -1726,18 +2076,16 @@ export class MainScene extends Phaser.Scene {
     const weather = this.garageSystem.getActiveModifier();
     const dt = Math.min(delta / 1000, 0.05);
 
-    if (weather === 'night') {
-      // Night Darkness Mask (Deep midnight blue tint)
-      g.fillStyle(0x020617, 0.78);
-      g.fillRect(0, 0, w, h);
-    } else if (weather === 'fog') {
-      // Atmospheric Fog (Milky cyan-gray haze with undulating alpha)
-      const fogAlpha = 0.55 + Math.sin(time * 0.001) * 0.08;
-      g.fillStyle(0x334155, fogAlpha);
+    if (weather === 'fog') {
+      // Atmospheric Fog (adapts tone to time of day)
+      const isDark = snap.lampFactor > 0.5;
+      const fogColor = isDark ? 0x1e293b : 0x64748b;
+      const fogAlpha = (isDark ? 0.38 : 0.45) + Math.sin(time * 0.001) * 0.06;
+      g.fillStyle(fogColor, fogAlpha);
       g.fillRect(0, 0, w, h);
     } else if (weather === 'rain') {
       // Rain Streaks & Water Sheen
-      g.fillStyle(0x0284c7, 0.12);
+      g.fillStyle(0x0284c7, 0.08);
       g.fillRect(0, 0, w, h);
 
       // Rain drop simulation

@@ -7,18 +7,18 @@ Simulador de condução pesada em **2D Top-Down** (Phaser 4 + Matter.js + React 
 
 ### 1.2 Estado Atual da Arquitetura (`src/`)
 - **Motor & Cenas (`scenes/`, `config.ts`, `main.ts`)**:
-  - `MainScene`: simulação de condução, física Matter.js, acoplamento quinta-roda, semáforos, bombas de combustível, som sintetizado Web Audio e ciclo dia/meteorologia.
+  - `MainScene`: simulação de condução, física Matter.js, acoplamento quinta-roda, semáforos, bombas de combustível, som sintetizado Web Audio e iluminação dinâmica WebGL (`LightsManager` + `ConeLight` + pool de emissores).
   - `EditorScene`: editor de mundo ao vivo (estradas por splines, objetos/prefabs, redimensionamento, rotação, spawn e exportação/importação JSON).
   - `MinimapScene`: cena dedicada com zoom bloqueado em `1.0` no canto superior direito.
 - **Veículos & Física (`entities/`, `physics/`)**:
-  - `Truck`: direção Ackermann, curva de binário diesel, consumo e reserva de combustível (`≤20%`), deslize natural sem combustível e respawn com depósito a `100%`.
+  - `Truck`: direção Ackermann, curva de binário diesel, consumo e reserva de combustível (`≤20%`), deslize natural sem combustível, respawn com depósito a `100%` e modos de faróis (`off` / `low` / `high`).
   - `Trailer` & `Kingpin`: atrelado standard (13.6m), pá eólica (62m), bitrem B-Double e vidro frágil, com cinemática anti-derrapagem lateral e proteção de jackknife.
 - **Mundo & Sistemas (`world/`, `systems/`)**:
   - `World`, `WorldTerrain`, `WorldObjects`: ilha contínua com streaming de chunks e hitboxes estáticas.
   - `RoadNetwork`: rede vetorial por splines Hermite com largura variável, sentido único/duplo e aderência por piso (`asphalt`, `cobble`, `dirt`).
-  - `LicenseSystem`, `GarageSystem`, `TrailerManager`: progressão de licenças com exames práticos, hubs regionais com modificadores meteorológicos e acoplamento livre.
+  - `LicenseSystem`, `GarageSystem`, `TimeOfDaySystem`, `TrailerManager`: progressão de licenças com exames práticos, hubs regionais com modificadores meteorológicos, períodos do dia com ciclo 24h e acoplamento livre.
 - **Interface & Controlos (`App.tsx`, `components/TouchControls.tsx`)**:
-  - HUD minimalista com velocímetro/marcha, notificações toast (incluindo reserva `≤20%` persistente), volante/pedais touch semi-transparentes e switch `D/R`.
+  - HUD minimalista com velocímetro/marcha, notificações toast (incluindo reserva `≤20%` persistente), volante/pedais touch semi-transparentes, botões de **Médios/Máximos** e switch `D/R`.
 - **Testes Automáticos (`scripts/`)**:
   - `smoke-test.mjs` (estradas, atrelado, respawn) e `smoke-fuel.mjs` (consumo, aviso 20%, minimapa, deslize sem combustível, abastecimento, respawn).
 
@@ -44,6 +44,7 @@ Simulador de condução pesada em **2D Top-Down** (Phaser 4 + Matter.js + React 
 #### Fase D — Evolução Visual (Texturas 2D & Iluminação WebGL)
 9. **Pipeline 2D Totalmente Texturizado**: substituir desenhos vetoriais simples por sprites e texturas detalhadas (asfalto com desgaste, bermas/passeios, terreno, edifícios industriais, água, cabines de camiões e reboques) mantendo estética 2D nítida e apelativa.
 10. **Sistema de Iluminação Realista em WebGL**: iluminação dinâmica (Light2D / shaders WebGL) com faróis volumétricos, lanternas de travagem/marcha-atrás, postes de iluminação, semáforos e reflexão atmosférica ajustada a dia, noite, chuva e nevoeiro.
+11. **Oclusão de Luz com Ray2D / Sombras**: raycasting 2D para bloquear e projetar sombras reais dos faróis e candeeiros contra edifícios, muros e restantes elementos do mapa.
 
 ### 1.4 Regras de Manutenção
 - Manter sempre o **`agents.md`** e o **`package.json`** atualizados a cada versão.
@@ -53,7 +54,42 @@ Simulador de condução pesada em **2D Top-Down** (Phaser 4 + Matter.js + React 
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.7.2** (Versão Atual — branch main)
+### **v2.8.5** (Versão Atual — branch main)
+- **Candeeiros de rua visíveis de dia & Semáforos com fases opostas (Passo 1)**:
+  - **Candeeiros (`WorldObjects.ts` / `MainScene.ts`)**: redesenhados com base metálica, sombra projetada, braço saliente orientado para a faixa (`angle`) e luminária clara com difusor visível durante o dia; lâmpada noturna emissiva e ponto de luz WebGL alinhados na ponta da luminária (`WorldObjects.getLampBulbPos()`), evitando cruzamentos transversais.
+  - **Semáforos (`WorldObjects.ts`)**: corrigido o bug em `seedWorld` que atribuía o mesmo `group` a todos os semáforos do cruzamento; eixos Norte-Sul (`group 0`) e Este-Oeste (`group 1`) passam a alternar em fases opostas com `1.0s` de intervalo de segurança todo-vermelho (`TL_ALL_RED = 1000ms`), colocados seletivamente apenas nos `7` cruzamentos arteriais principais e rodados conforme a direção da via.
+
+### **v2.8.4** (branch main)
+- **Menu do HUD sempre acima dos Touch Controls e com scroll adaptado a ecrãs pequenos**:
+  - Elevado o `<header>` de `z-30` para `z-50` (resolvendo o contexto de empilhamento que fazia o dropdown ficar literalmente atrás dos `TouchControls` `z-30` e dos toasts `z-40`) e os modais de ecrã inteiro para `z-[60]`;
+  - Adicionado backdrop (`z-40`) ao abrir o Menu para fechar ao tocar fora e impedir toques acidentais nos pedais por baixo;
+  - Ajustada a viewport para `h-dvh` e o dropdown do menu para `max-h-[calc(100dvh-4.25rem)] max-w-[calc(100vw-1rem)] overscroll-contain touch-pan-y`, garantindo scroll vertical suave no telemóvel sem nunca sair do ecrã ou ficar tapado pelos controlos táteis.
+
+### **v2.8.3** (branch main)
+- **Bloqueio do menu de contexto nativo nos pedais táteis (telemóvel)**: corrigido o problema em que manter apenas o acelerador (`ACEL.`) ou travão (`TRAVÃO`) pressionado continuamente abria o menu do browser:
+  - Listeners nativos `touchstart` (`{ passive: false }`) e `contextmenu` no volante e pedais (`TouchControls.tsx`) mantendo `PointerEvents` (`onPointerDown`/`onPointerUp`) intactos;
+  - `onContextMenu` / `onDragStart` suprimidos, conteúdo interno dos pedais com `pointer-events-none select-none` e regras globais em `index.css` (`-webkit-touch-callout: none`, `user-select: none`, `overscroll-behavior: none`, mantendo `input`/`textarea` selecionáveis).
+
+### **v2.8.2** (branch main)
+- **Direção progressiva e sensível à velocidade para teclado (`Truck.ts`)**: substituído o salto linear instantâneo de teclado por uma curva progressiva + limite de ângulo dependente da velocidade (`keyboardSteer`):
+  - **Precisão em linha reta / velocidade de estrada**: micro-toques em `A`/`D` ou `←`/`→` aplicam correções finas sem oscilação exagerada e regressam suavemente ao centro;
+  - **Manobras preservadas**: parado, em marcha lenta (`≤35 px/s`) ou em marcha-atrás mantém `100%` do ângulo máximo de viragem (`0.56 rad`) e resposta rápida para manobras apertadas e contra-esterço ágil;
+  - Volante tátil (`touchInput.steer`) mantém controlo analógico direto.
+
+### **v2.8.1** (branch main)
+- **Luz de marcha-atrás radial (sem cone)**: substituída a luz cónica traseira da marcha-atrás (`addConeLight`) por uma luz pontual radial (`addLight`, igual no comportamento à luz de travagem/stops), em branco nítido (`0xf8fafc`), ligeiramente mais intensa e com maior alcance (`radius: 185`, `intensity: 0.75 + lampFactor * 1.60`, `z: 62`) do que os stops (`radius: 155`, `intensity: 0.55 + lampFactor * 1.15`, `z: 55`).
+
+### **v2.8.0** (branch main)
+- **Iluminação Real em WebGL (Phaser 4 `LightsManager`)**: substituído o antigo overlay preto plano e círculos estáticos por iluminação dinâmica nativa em WebGL (`this.lights.enable()` + `.setLighting(true)` no terreno, estradas, edifícios, veículos e atrelados):
+  - **Faróis cónicos nativos (`addConeLight`)**: dois feixes frontais com alcances e aberturas diferenciadas entre médios e máximos e lanternas radiais de presença/travagem e marcha-atrás no veículo ou atrelado mais recuado;
+  - **Pool dinâmica de emissores do mapa (`MAX_WORLD_LIGHTS = 6`, 10 luzes totais WebGL)**: candeeiros de rua, semáforos dinâmicos (vermelho/amarelo/verde), coberturas/bombas de combustível e letreiros de hubs iluminam as superfícies reais em redor quando visíveis.
+- **Períodos do Dia (`TimeOfDaySystem`)**: novos períodos suaves com interpolação de cor ambiente (`Amanhecer`, `Dia`, `Entardecer`, `Noite`) + relógio e opção **Ciclo Automático 24h** disponíveis em `Menu → Período do Dia`.
+- **Controlos de Faróis no HUD (`Médios` e `Máximos`)**: adicionados dois botões dedicados com simbologia ISO logo acima dos botões de desengate/travão de mão e imediatamente à esquerda do mostrador de combustível (também suportada a tecla `L`).
+
+### **v2.7.3** (branch main)
+- **HUD de condução mais limpo (zoom movido para Definições)**: removidos os botões flutuantes de zoom (`+`/`-`) do HUD em modo condução (onde roda do rato e gesto de pinça já funcionam nativamente) e adicionado um **slider de Zoom da Câmara** dentro de `Menu → Definições` sincronizado com a câmara ativa.
+
+### **v2.7.2** (branch main)
 - **Combustível a 100% no respawn**: `resetVehicleToSpawn` (tecla `R`, botão Repor Camião ou início de exame) passa a atestar o depósito a `100%` e sincroniza `_lastBodyX`/`_lastBodyY` em `Truck.setPosition` para evitar consumo fantasma após teleporte.
 
 ### **v2.7.1** (branch main)

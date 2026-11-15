@@ -150,12 +150,16 @@ export class Trailer {
     // the pup rides above the lead trailer of the bitrem.
     this.container.setDepth(this.type === 'bitrem_pup' ? 12 : 11);
 
-    this.graphics = scene.add.graphics();
-    this.lightsGraphics = scene.add.graphics();
+    this.graphics = scene.add.graphics().setLighting(false);
+    this.lightsGraphics = scene.add.graphics().setLighting(false);
     this.container.add([this.graphics, this.lightsGraphics]);
 
     this.setupCollisionTracking();
     this.drawTrailer();
+  }
+
+  public setLightingEnabled(enabled: boolean) {
+    this.graphics.setLighting(enabled);
   }
 
   private onCollisionStart = (event: any) => {
@@ -417,13 +421,19 @@ export class Trailer {
 
     const hw = this.width / 2;
     const hl = this.length / 2;
+    const truck = (this.scene as any)?.truck;
+    const runningLightsOn = truck ? truck.headlightMode !== 'off' : false;
 
     if (isBraking) {
       g.fillStyle(0xff0055, 1);
       g.fillCircle(-hw + 8, hl - 2, 5);
       g.fillCircle(hw - 8, hl - 2, 5);
+    } else if (runningLightsOn) {
+      g.fillStyle(0xef4444, 0.9);
+      g.fillCircle(-hw + 8, hl - 2, 3.5);
+      g.fillCircle(hw - 8, hl - 2, 3.5);
     } else {
-      g.fillStyle(0xb91c1c, 0.85);
+      g.fillStyle(0x7f1d1d, 0.75);
       g.fillCircle(-hw + 8, hl - 2, 3);
       g.fillCircle(hw - 8, hl - 2, 3);
     }
@@ -434,7 +444,7 @@ export class Trailer {
       g.fillCircle(-hw + 16, hl - 2, 5);
       g.fillCircle(hw - 16, hl - 2, 5);
     } else {
-      g.fillStyle(0x94a3b8, 0.85);
+      g.fillStyle(0x64748b, 0.75);
       g.fillCircle(-hw + 16, hl - 2, 3);
       g.fillCircle(hw - 16, hl - 2, 3);
     }

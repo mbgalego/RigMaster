@@ -282,7 +282,7 @@ export class EditorScene extends Phaser.Scene {
     // Instant Drive Test with Tab
     this.input.keyboard.on('keydown-TAB', (e: KeyboardEvent) => {
       e.preventDefault();
-      this.mainScene.toggleEditorMode();
+      if (this.mainScene.isEditorMode) this.mainScene.toggleEditorMode();
     });
 
     // Road tool shortcuts

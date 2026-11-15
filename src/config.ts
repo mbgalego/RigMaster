@@ -19,6 +19,9 @@ export function createGameConfig(options: GameConfigOptions): Phaser.Types.Core.
     width: options.width || 1280,
     height: options.height || 720,
     backgroundColor: '#0c0f17',
+    render: {
+      maxLights: 10,
+    },
     scale: {
       mode: Phaser.Scale.RESIZE,
       autoCenter: Phaser.Scale.CENTER_BOTH,

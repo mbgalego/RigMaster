@@ -19,9 +19,22 @@ export class WorldTerrain {
   private scene: Phaser.Scene;
   private seed: number;
   private chunks = new Map<string, Phaser.GameObjects.Image>();
+  private overviewImg: Phaser.GameObjects.Image | null = null;
+  private lightingEnabled: boolean = false;
   private order: string[] = [];
   /** Rects of guaranteed land (coastal hubs: port, shipyard…) */
   private landPatches: Array<{ x0: number; y0: number; x1: number; y1: number }> = [];
+
+  public setLightingEnabled(enabled: boolean) {
+    if (this.lightingEnabled === enabled) return;
+    this.lightingEnabled = enabled;
+    for (const img of this.chunks.values()) {
+      img.setLighting(enabled);
+    }
+    if (this.overviewImg) {
+      this.overviewImg.setLighting(enabled && this.chunks.size < 2);
+    }
+  }
 
   constructor(scene: Phaser.Scene, seed = 20260111) {
     this.scene = scene;
@@ -143,7 +156,11 @@ export class WorldTerrain {
     const count = (c1x - c0x + 1) * (c1y - c0y + 1);
     if (count > 80) {
       this.evictAll();
+      if (this.overviewImg) this.overviewImg.setLighting(this.lightingEnabled);
       return;
+    }
+    if (this.overviewImg && this.chunks.size >= 2) {
+      this.overviewImg.setLighting(false);
     }
 
     for (let cy = c0y; cy <= c1y; cy++) {
@@ -217,10 +234,11 @@ export class WorldTerrain {
       }
     }
     tex.refresh();
-    this.scene.add.image(0, 0, 'terrain_overview')
+    this.overviewImg = this.scene.add.image(0, 0, 'terrain_overview')
       .setOrigin(0, 0)
       .setDisplaySize(WorldTerrain.WORLD_W, WorldTerrain.WORLD_H)
-      .setDepth(-1);
+      .setDepth(-1)
+      .setLighting(this.lightingEnabled && this.chunks.size < 2);
   }
 
   private ensureChunk(cx: number, cy: number) {
@@ -238,7 +256,8 @@ export class WorldTerrain {
     const img = this.scene.add.image(cx * CHUNK, cy * CHUNK, texKey)
       .setOrigin(0, 0)
       .setDisplaySize(CHUNK, CHUNK)
-      .setDepth(0);
+      .setDepth(0)
+      .setLighting(this.lightingEnabled);
     this.chunks.set(key, img);
   }
 

@@ -59,12 +59,12 @@ const SOLID_TYPES = new Set<WObjType>([
   'dock_wall',
 ]);
 
-// Traffic light cycle (ms) — coordinated European 4-phase junction
-const TL_GREEN = 7500;
+// Traffic light cycle (ms) — coordinated 2-axis cycle with 1s ALL-RED safety buffer
+const TL_GREEN = 6500;
 const TL_YELLOW = 1500;
-const TL_RED = 7500;
-const TL_RED_YELLOW = 1500;
-const TL_CYCLE = TL_GREEN + TL_YELLOW + TL_RED + TL_RED_YELLOW;
+const TL_ALL_RED = 1000;
+const TL_HALF = TL_GREEN + TL_YELLOW + TL_ALL_RED; // 9000ms per axis
+const TL_CYCLE = TL_HALF * 2;                     // 18000ms full cycle
 
 export class WorldObjects {
   private scene: Phaser.Scene;
@@ -78,6 +78,15 @@ export class WorldObjects {
   private lastCY = NaN;
   private nextId = 1;
   private lightClock = 0;
+
+  /** World position of the streetlamp luminaire head (offset +22px along its arm). */
+  public static getLampBulbPos(o: WorldObject): { x: number; y: number } {
+    const reach = 22;
+    return {
+      x: o.x + Math.cos(o.angle) * reach,
+      y: o.y + Math.sin(o.angle) * reach,
+    };
+  }
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -361,17 +370,16 @@ export class WorldObjects {
     this.lastCY = NaN;
   }
 
-  /** Coordinated European light cycle — global clock, alternating groups */
+  /** Coordinated 2-axis signal cycle — Group 0 & Group 1 are strictly opposite with a 1s all-red clearance. */
   public update(delta: number) {
     this.lightClock = (this.lightClock + delta) % TL_CYCLE;
   }
 
   public lightState(group: 0 | 1): { red: boolean; amber: boolean; green: boolean } {
-    const t = group === 0 ? this.lightClock : (this.lightClock + TL_GREEN + TL_YELLOW) % TL_CYCLE;
+    const t = group === 0 ? this.lightClock : (this.lightClock + TL_HALF) % TL_CYCLE;
     if (t < TL_GREEN) return { red: false, amber: false, green: true };
     if (t < TL_GREEN + TL_YELLOW) return { red: false, amber: true, green: false };
-    if (t < TL_GREEN + TL_YELLOW + TL_RED) return { red: true, amber: false, green: false };
-    return { red: true, amber: true, green: false }; // red+amber preparation
+    return { red: true, amber: false, green: false };
   }
 
   // ======================================================================
@@ -561,41 +569,55 @@ export class WorldObjects {
       }
     }
 
-    // ---- Street lamps along the arterial grid (well clear of the road edge) ----
+    // ---- Street lamps along the arterial grid (clear of intersections, arm angled toward road) ----
     const vCols = [1152, 3456, 5760, 8064, 10368, 12672];
     const hRows = [1024, 3072, 5120, 7168, 9216];
     for (const x of vCols) {
       for (let y = 900; y < 9600; y += 900) {
-        if (terrain.isWater(x - 100, y) || terrain.isBeach(x - 100, y)) continue;
-        this.add('lamp', x - 100, y, 12, 12);
+        if (hRows.some((ry) => Math.abs(y - ry) < 220)) continue;
+        if (terrain.isWater(x - 98, y) || terrain.isBeach(x - 98, y)) continue;
+        this.add('lamp', x - 98, y, 14, 14, { angle: 0 });
       }
     }
     for (const y of hRows) {
       for (let x = 900; x < 13200; x += 900) {
-        if (terrain.isWater(x, y - 100) || terrain.isBeach(x, y - 100)) continue;
-        this.add('lamp', x, y - 100, 12, 12);
+        if (vCols.some((cx) => Math.abs(x - cx) < 220)) continue;
+        if (terrain.isWater(x, y - 98) || terrain.isBeach(x, y - 98)) continue;
+        this.add('lamp', x, y - 98, 14, 14, { angle: Math.PI / 2 });
       }
     }
 
-    // ---- Traffic lights at half of the arterial intersections ----
-    let idx = 0;
-    for (const y of hRows) {
-      for (const x of vCols) {
-        if (idx % 2 === 0) {
-          const group = ((idx >> 1) % 2) as 0 | 1;
-          if (!terrain.isWater(x + 96, y + 256)) this.add('traffic_light', x + 96, y + 256, 22, 22, { params: { dir: 'n', group } });
-          if (!terrain.isWater(x - 96, y - 256)) this.add('traffic_light', x - 96, y - 256, 22, 22, { params: { dir: 's', group } });
-          if (!terrain.isWater(x - 256, y + 96)) this.add('traffic_light', x - 256, y + 96, 22, 22, { params: { dir: 'e', group } });
-          if (!terrain.isWater(x + 256, y - 96)) this.add('traffic_light', x + 256, y - 96, 22, 22, { params: { dir: 'w', group } });
+    // ---- Traffic lights ONLY at select major arterial intersections (opposite N/S vs E/W phases) ----
+    const signalizedIntersections = new Set(['1,1', '2,1', '2,2', '3,2', '1,3', '3,3', '4,2']);
+    for (let r = 0; r < hRows.length; r++) {
+      for (let c = 0; c < vCols.length; c++) {
+        if (!signalizedIntersections.has(`${c},${r}`)) continue;
+        const x = vCols[c];
+        const y = hRows[r];
+        const nsGroup = ((c + r) % 2) as 0 | 1;
+        const ewGroup = (1 - nsGroup) as 0 | 1;
+        if (!terrain.isWater(x + 92, y + 132)) {
+          this.add('traffic_light', x + 92, y + 132, 22, 22, { angle: 0, params: { dir: 'n', group: nsGroup } });
         }
-        idx++;
+        if (!terrain.isWater(x - 92, y - 132)) {
+          this.add('traffic_light', x - 92, y - 132, 22, 22, { angle: Math.PI, params: { dir: 's', group: nsGroup } });
+        }
+        if (!terrain.isWater(x - 132, y + 92)) {
+          this.add('traffic_light', x - 132, y + 92, 22, 22, { angle: Math.PI / 2, params: { dir: 'e', group: ewGroup } });
+        }
+        if (!terrain.isWater(x + 132, y - 92)) {
+          this.add('traffic_light', x + 132, y - 92, 22, 22, { angle: -Math.PI / 2, params: { dir: 'w', group: ewGroup } });
+        }
       }
     }
 
-    // ---- A few stop signs near junctions ----
+    // ---- Stop signs near select unsignalized junctions ----
     for (let i = 0; i < 8; i++) {
-      const x = vCols[i % vCols.length] - 200;
-      const y = hRows[(i + 1) % hRows.length] + 200;
+      const c = i % vCols.length;
+      const r = (i + 1) % hRows.length;
+      if (signalizedIntersections.has(`${c},${r}`)) continue;
+      const x = vCols[c] - 110;
+      const y = hRows[r] + 135;
       if (!terrain.isWater(x, y)) this.add('sign', x, y, 18, 18, { variant: 'stop' });
     }
   }
@@ -631,13 +653,12 @@ export class WorldObjects {
   }
 
   /**
-   * Traffic lights only — animated every frame (cheap: a handful of visible
-   * lights). Kept separate so the heavy static object layers can be redrawn
-   * only when the camera moves or the world is edited.
+   * Traffic lights + glowing streetlamp bulbs — unlit emissive layer.
+   * Actual ground/building illumination is handled by Phaser 4 WebGL Lights.
    */
-  public renderLights(lights: Phaser.GameObjects.Graphics, view: Phaser.Geom.Rectangle) {
+  public renderLights(lights: Phaser.GameObjects.Graphics, view: Phaser.Geom.Rectangle, lampFactor = 0) {
     lights.clear();
-    const M = 120;
+    const M = 160;
     const x0 = Math.floor((view.x - M) / OBJ_CELL), x1 = Math.floor((view.x + view.width + M) / OBJ_CELL);
     const y0 = Math.floor((view.y - M) / OBJ_CELL), y1 = Math.floor((view.y + view.height + M) / OBJ_CELL);
     const drawn = new Set<string>();
@@ -646,12 +667,43 @@ export class WorldObjects {
         const list = this.grid.get(`${cx}_${cy}`);
         if (!list) continue;
         for (const o of list) {
-          if (o.type !== 'traffic_light' || drawn.has(o.id)) continue;
-          drawn.add(o.id);
-          this.drawSolid(lights, o);
+          if (drawn.has(o.id)) continue;
+          if (o.type === 'traffic_light') {
+            drawn.add(o.id);
+            this.drawSolid(lights, o);
+          } else if (o.type === 'lamp' && lampFactor > 0.05) {
+            drawn.add(o.id);
+            const bulb = WorldObjects.getLampBulbPos(o);
+            lights.fillStyle(0xffe7a8, 0.38 * lampFactor);
+            lights.fillCircle(bulb.x, bulb.y, 9);
+            lights.fillStyle(0xfff6d6, 0.96 * lampFactor);
+            lights.fillCircle(bulb.x, bulb.y, 4);
+          }
         }
       }
     }
+  }
+
+  /** Fast spatial-grid lookup of light-emitting prefabs intersecting the view. */
+  public getEmittersInView(view: Phaser.Geom.Rectangle, margin = 380): WorldObject[] {
+    const x0 = Math.floor((view.x - margin) / OBJ_CELL), x1 = Math.floor((view.x + view.width + margin) / OBJ_CELL);
+    const y0 = Math.floor((view.y - margin) / OBJ_CELL), y1 = Math.floor((view.y + view.height + margin) / OBJ_CELL);
+    const seen = new Set<string>();
+    const out: WorldObject[] = [];
+    for (let cy = y0; cy <= y1; cy++) {
+      for (let cx = x0; cx <= x1; cx++) {
+        const list = this.grid.get(`${cx}_${cy}`);
+        if (!list) continue;
+        for (const o of list) {
+          if (seen.has(o.id)) continue;
+          if (o.type === 'lamp' || o.type === 'traffic_light' || o.type === 'gas_canopy' || o.type === 'gas_pump') {
+            seen.add(o.id);
+            out.push(o);
+          }
+        }
+      }
+    }
+    return out;
   }
 
   private rotated(g: Phaser.GameObjects.Graphics, o: WorldObject, fn: () => void) {
@@ -1246,12 +1298,30 @@ export class WorldObjects {
           break;
         }
         case 'lamp': {
-          g.fillStyle(0x4a505c, 1);
-          g.fillRect(o.x - 3, o.y - 3, 6, 6);
-          g.fillStyle(0xf5d67a, 0.22);
-          g.beginPath(); g.arc(o.x, o.y, 26, 0, Math.PI * 2); g.fillPath();
-          g.fillStyle(0xf5d67a, 0.9);
-          g.beginPath(); g.arc(o.x, o.y, 3.5, 0, Math.PI * 2); g.fillPath();
+          // Drop shadow under post, cantilevered arm & cobra-head luminaire
+          g.fillStyle(0x000000, 0.28);
+          g.fillCircle(o.x + 3, o.y + 4, 6);
+          g.fillRect(o.x + 3, o.y + 2, 20, 3);
+          g.fillRoundedRect(o.x + 17, o.y - 1, 14, 10, 4);
+          // Steel mast base & pole flange
+          g.fillStyle(0x334155, 1);
+          g.fillCircle(o.x, o.y, 6);
+          g.lineStyle(1.5, 0x0f172a, 0.9);
+          g.strokeCircle(o.x, o.y, 6);
+          g.fillStyle(0x94a3b8, 1);
+          g.fillCircle(o.x, o.y, 3.2);
+          // Cantilevered galvanized steel arm (+x toward carriageway)
+          g.lineStyle(3.5, 0xcbd5e1, 1);
+          g.lineBetween(o.x + 2, o.y, o.x + 20, o.y);
+          g.lineStyle(1, 0x475569, 0.7);
+          g.lineBetween(o.x + 3, o.y + 1.5, o.x + 19, o.y + 1.5);
+          // Cobra-head luminaire housing + visible daylight diffuser lens
+          g.fillStyle(0xe2e8f0, 1);
+          g.fillRoundedRect(o.x + 14, o.y - 5, 14, 10, 4);
+          g.lineStyle(1.5, 0x334155, 0.95);
+          g.strokeRoundedRect(o.x + 14, o.y - 5, 14, 10, 4);
+          g.fillStyle(0xfef3c7, 0.9);
+          g.fillCircle(o.x + 22, o.y, 3.4);
           break;
         }
         case 'sign': {
@@ -1268,26 +1338,30 @@ export class WorldObjects {
         }
         case 'traffic_light': {
           const st = this.lightState((o.params?.group ?? 0) as 0 | 1);
-          // pole
-          g.fillStyle(0x3a4150, 1);
-          g.fillRect(o.x - 3, o.y - 3, 6, 6);
-          // head: 3 stacked lenses
-          const hw = 12, hh = 32;
-          g.fillStyle(0x14171d, 1);
-          g.fillRect(o.x - hw / 2, o.y - hh / 2, hw, hh);
-          g.lineStyle(1.5, 0x2b2f38, 1);
-          g.strokeRect(o.x - hw / 2, o.y - hh / 2, hw, hh);
+          // Pole base & steel post
+          g.fillStyle(0x000000, 0.25);
+          g.fillCircle(o.x + 2, o.y + 3, 5.5);
+          g.fillStyle(0x475569, 1);
+          g.fillCircle(o.x, o.y, 5);
+          g.lineStyle(1.5, 0x0f172a, 0.9);
+          g.strokeCircle(o.x, o.y, 5);
+          // Signal head: 3 stacked lenses, rotated via this.rotated(g, o, ...)
+          const hw = 14, hh = 32;
+          g.fillStyle(0x11151d, 1);
+          g.fillRoundedRect(o.x - hw / 2, o.y - hh / 2, hw, hh, 3);
+          g.lineStyle(1.5, 0x475569, 0.95);
+          g.strokeRoundedRect(o.x - hw / 2, o.y - hh / 2, hw, hh, 3);
           const lens = (cy: number, on: boolean, col: number) => {
-            g.fillStyle(on ? col : 0x23262c, 1);
+            if (on) {
+              g.fillStyle(col, 0.35);
+              g.beginPath(); g.arc(o.x, cy, 6.5, 0, Math.PI * 2); g.fillPath();
+            }
+            g.fillStyle(on ? col : 0x262a33, 1);
             g.beginPath(); g.arc(o.x, cy, 4, 0, Math.PI * 2); g.fillPath();
           };
           lens(o.y - 10, st.red, 0xff3b30);
           lens(o.y, st.amber, 0xffb020);
           lens(o.y + 10, st.green, 0x34d058);
-          if (st.red || st.amber) {
-            g.fillStyle(0xff3b30, 0.15);
-            g.beginPath(); g.arc(o.x, o.y, 22, 0, Math.PI * 2); g.fillPath();
-          }
           break;
         }
       }

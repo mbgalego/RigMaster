@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 
+export type HeadlightMode = 'off' | 'low' | 'high';
+
 export interface TruckConfig {
   x: number;
   y: number;
@@ -20,6 +22,7 @@ export class Truck {
   // Rear dual tires draw ABOVE the chassis so both tires of each pair stay visible
   public rearWheelsGraphics: Phaser.GameObjects.Graphics;
   public lightsGraphics: Phaser.GameObjects.Graphics;
+  public beamGraphics: Phaser.GameObjects.Graphics;
 
   public width: number;
   public length: number;
@@ -53,7 +56,16 @@ export class Truck {
   public impactDetected: boolean = false;
   public peakImpactSpeed: number = 0;
   public collisionCount: number = 0;
-  public headlightsOn: boolean = true;
+  public headlightMode: HeadlightMode = 'low';
+  public ambientDarkness: number = 0; // 0 = day, 1 = night (drives volumetric beam scatter)
+
+  public get headlightsOn(): boolean {
+    return this.headlightMode !== 'off';
+  }
+
+  public set headlightsOn(value: boolean) {
+    this.headlightMode = value ? 'low' : 'off';
+  }
 
   // ========================================================================
   // FUEL SYSTEM (diesel)
@@ -113,6 +125,7 @@ export class Truck {
   private keyS!: Phaser.Input.Keyboard.Key;
   private keyD!: Phaser.Input.Keyboard.Key;
   private keySpace!: Phaser.Input.Keyboard.Key;
+  private keyboardSteer: number = 0; // normalized [-1..+1] progressive keyboard wheel target
 
   constructor(scene: Phaser.Scene, config: TruckConfig) {
     this.scene = scene;
@@ -178,12 +191,19 @@ export class Truck {
     this.container = scene.add.container(spawnX, spawnY);
     this.container.setDepth(10);
 
-    this.wheelGraphics = scene.add.graphics();
-    this.rearWheelsGraphics = scene.add.graphics();
-    this.cabGraphics = scene.add.graphics();
-    this.lightsGraphics = scene.add.graphics();
+    this.wheelGraphics = scene.add.graphics().setLighting(false);
+    this.rearWheelsGraphics = scene.add.graphics().setLighting(false);
+    this.cabGraphics = scene.add.graphics().setLighting(false);
+    this.beamGraphics = scene.add.graphics().setBlendMode(Phaser.BlendModes.ADD).setLighting(false);
+    this.lightsGraphics = scene.add.graphics().setLighting(false);
 
-    this.container.add([this.wheelGraphics, this.cabGraphics, this.rearWheelsGraphics, this.lightsGraphics]);
+    this.container.add([
+      this.wheelGraphics,
+      this.cabGraphics,
+      this.rearWheelsGraphics,
+      this.beamGraphics,
+      this.lightsGraphics,
+    ]);
 
     this.setupInput();
     this.setupCollisions();
@@ -257,6 +277,31 @@ export class Truck {
     this.touchInput.handbrake = handbrake;
   }
 
+  public setLightingEnabled(enabled: boolean) {
+    this.wheelGraphics.setLighting(enabled);
+    this.rearWheelsGraphics.setLighting(enabled);
+    this.cabGraphics.setLighting(enabled);
+  }
+
+  public setHeadlightMode(mode: HeadlightMode) {
+    this.headlightMode = mode;
+    this.drawLights();
+  }
+
+  public toggleLowBeam() {
+    this.setHeadlightMode(this.headlightMode === 'low' ? 'off' : 'low');
+  }
+
+  public toggleHighBeam() {
+    this.setHeadlightMode(this.headlightMode === 'high' ? 'off' : 'high');
+  }
+
+  public cycleHeadlights() {
+    const next: HeadlightMode =
+      this.headlightMode === 'off' ? 'low' : this.headlightMode === 'low' ? 'high' : 'off';
+    this.setHeadlightMode(next);
+  }
+
   public update(delta: number) {
     if (!this.body) return;
 
@@ -264,26 +309,77 @@ export class Truck {
     const dt = Math.max(Math.min(delta / 1000, 0.033), 0.001);
     this.impactDetected = false;
 
-    // 1. Steering Input
+    // 1. Steering Input (Analog Touch direct; Keyboard speed-sensitive & progressive)
     const keyUp = (this.cursors && this.cursors.up.isDown) || (this.keyW && this.keyW.isDown);
     const keyDown = (this.cursors && this.cursors.down.isDown) || (this.keyS && this.keyS.isDown);
     const keyLeft = (this.cursors && this.cursors.left.isDown) || (this.keyA && this.keyA.isDown);
     const keyRight = (this.cursors && this.cursors.right.isDown) || (this.keyD && this.keyD.isDown);
     const keyHandbrake = this.keySpace && this.keySpace.isDown;
 
-    let targetSteer = 0;
-    if (keyLeft) targetSteer -= this.maxSteerAngle;
-    if (keyRight) targetSteer += this.maxSteerAngle;
     if (Math.abs(this.touchInput.steer) > 0.02) {
-      targetSteer = this.touchInput.steer * this.maxSteerAngle;
-    }
+      const targetSteer = this.touchInput.steer * this.maxSteerAngle;
+      this.keyboardSteer = this.touchInput.steer;
+      this.currentSteerAngle = Phaser.Math.Linear(
+        this.currentSteerAngle,
+        targetSteer,
+        this.steerSpeed * dt * 3.5
+      );
+    } else {
+      const kbDir = (keyRight ? 1 : 0) - (keyLeft ? 1 : 0);
+      // Keep full steering authority when stopped, creeping or reversing (<= 35 px/s forward)
+      const speedNorm = Phaser.Math.Clamp((Math.max(0, this.vLong) - 35) / (this.maxForwardSpeed - 35), 0, 1);
 
-    // Smoothly turn front wheels
-    this.currentSteerAngle = Phaser.Math.Linear(
-      this.currentSteerAngle,
-      targetSteer,
-      this.steerSpeed * dt * 3.5
-    );
+      if (kbDir !== 0) {
+        if (kbDir * this.keyboardSteer < -0.02) {
+          // Brisk counter-steering back toward center so corrections never feel sluggish
+          const counterRate = Phaser.Math.Linear(4.8, 3.6, speedNorm);
+          const step = counterRate * dt;
+          if (Math.abs(this.keyboardSteer) <= step) {
+            this.keyboardSteer = 0;
+          } else {
+            this.keyboardSteer += kbDir * step;
+          }
+        } else {
+          // Progressive ramp: micro-taps near center stay gentle at road speed while
+          // holding the key still reaches full lock rapidly during slow maneuvers
+          const absKb = Math.abs(this.keyboardSteer);
+          const minRate = Phaser.Math.Linear(1.9, 1.05, speedNorm);
+          const maxRate = Phaser.Math.Linear(3.8, 2.3, speedNorm);
+          const rate = Phaser.Math.Linear(minRate, maxRate, absKb);
+          this.keyboardSteer = Phaser.Math.Clamp(this.keyboardSteer + kbDir * rate * dt, -1, 1);
+        }
+      } else {
+        // Self-aligning centering torque when keys are released
+        const rollFactor = Phaser.Math.Clamp(Math.abs(this.vLong) / 80, 0, 1);
+        const centerRate = Phaser.Math.Linear(2.2, 4.2, rollFactor);
+        const step = centerRate * dt;
+        if (Math.abs(this.keyboardSteer) <= step) {
+          this.keyboardSteer = 0;
+        } else {
+          this.keyboardSteer -= Math.sign(this.keyboardSteer) * step;
+        }
+      }
+
+      // Non-linear sensitivity curve (finer control near straight-ahead, full 1.0 at lock)
+      const absKb = Math.abs(this.keyboardSteer);
+      const linearWeight = Phaser.Math.Linear(0.70, 0.45, speedNorm);
+      const curvedNorm =
+        Math.sign(this.keyboardSteer) * (linearWeight * absKb + (1 - linearWeight) * absKb * absKb);
+
+      // Speed-dependent max keyboard angle (100% at maneuvers/reverse, ~52% at top forward speed)
+      const maxKbAngleScale = Phaser.Math.Linear(1.0, 0.52, speedNorm);
+      const targetSteer = curvedNorm * this.maxSteerAngle * maxKbAngleScale;
+
+      const wheelTrackRate = Phaser.Math.Linear(14, 11, speedNorm);
+      this.currentSteerAngle = Phaser.Math.Linear(
+        this.currentSteerAngle,
+        targetSteer,
+        Math.min(1, wheelTrackRate * dt)
+      );
+      if (kbDir === 0 && Math.abs(this.currentSteerAngle) < 0.002) {
+        this.currentSteerAngle = 0;
+      }
+    }
 
     // 2. Throttle & Brake: Continuous Weighted Diesel Acceleration
     // When out of fuel, the engine is off: throttle produces no torque (natural coasting instead).
@@ -567,38 +663,58 @@ export class Truck {
 
   private drawLights() {
     const g = this.lightsGraphics;
+    const bg = this.beamGraphics;
     g.clear();
+    bg.clear();
 
     const hw = this.width / 2;
     const hl = this.length / 2;
+    const dark = this.ambientDarkness;
 
-    if (this.headlightsOn) {
-      g.fillStyle(0xe0f2fe, 0.15);
-      g.beginPath();
-      g.moveTo(-hw + 8, -hl);
-      g.lineTo(-hw - 70, -hl - 220);
-      g.lineTo(-hw + 35, -hl - 220);
-      g.closePath();
-      g.fillPath();
+    if (this.headlightMode === 'low') {
+      // Ultra-subtle near-lens atmospheric bloom (real cone illumination comes from Phaser 4 WebGL ConeLights)
+      if (dark > 0.05) {
+        bg.fillStyle(0xfff2cf, 0.035 * dark);
+        bg.fillCircle(-hw + 8, -hl - 16, 22);
+        bg.fillCircle(hw - 8, -hl - 16, 22);
+      }
 
-      g.beginPath();
-      g.moveTo(hw - 8, -hl);
-      g.lineTo(hw - 35, -hl - 220);
-      g.lineTo(hw + 70, -hl - 220);
-      g.closePath();
-      g.fillPath();
-
-      g.fillStyle(0xffffff, 1);
+      // Emissive warm-white headlamp lenses
+      g.fillStyle(0xfff6dc, 1);
       g.fillCircle(-hw + 8, -hl + 2, 4);
       g.fillCircle(hw - 8, -hl + 2, 4);
+    } else if (this.headlightMode === 'high') {
+      // Subtle near-lens cool-white bloom (real long-range beam comes from Phaser 4 WebGL ConeLights)
+      if (dark > 0.05) {
+        bg.fillStyle(0xe8f4ff, 0.055 * dark);
+        bg.fillCircle(-hw + 8, -hl - 24, 30);
+        bg.fillCircle(hw - 8, -hl - 24, 30);
+        bg.fillStyle(0xffffff, 0.04 * dark);
+        bg.fillCircle(-hw + 8, -hl - 8, 14);
+        bg.fillCircle(hw - 8, -hl - 8, 14);
+      }
+
+      // Intense cool-white high-beam lenses
+      g.fillStyle(0xffffff, 1);
+      g.fillCircle(-hw + 8, -hl + 2, 4.5);
+      g.fillCircle(hw - 8, -hl + 2, 4.5);
+    } else {
+      // Unlit headlamps
+      g.fillStyle(0x475569, 0.85);
+      g.fillCircle(-hw + 8, -hl + 2, 3.5);
+      g.fillCircle(hw - 8, -hl + 2, 3.5);
     }
 
     if (this.isBraking) {
       g.fillStyle(0xff0055, 1);
       g.fillCircle(-hw + 8, hl - 2, 5);
       g.fillCircle(hw - 8, hl - 2, 5);
+    } else if (this.headlightMode !== 'off') {
+      g.fillStyle(0xef4444, 0.9);
+      g.fillCircle(-hw + 8, hl - 2, 3.5);
+      g.fillCircle(hw - 8, hl - 2, 3.5);
     } else {
-      g.fillStyle(0xb91c1c, 0.85);
+      g.fillStyle(0x7f1d1d, 0.75);
       g.fillCircle(-hw + 8, hl - 2, 3);
       g.fillCircle(hw - 8, hl - 2, 3);
     }
@@ -610,7 +726,7 @@ export class Truck {
       g.fillCircle(hw - 16, hl - 2, 5);
     } else {
       // Unlit reverse lens next to the brake lamps
-      g.fillStyle(0x94a3b8, 0.85);
+      g.fillStyle(0x64748b, 0.75);
       g.fillCircle(-hw + 16, hl - 2, 3);
       g.fillCircle(hw - 16, hl - 2, 3);
     }
@@ -625,6 +741,7 @@ export class Truck {
     this.speedKmh = 0;
     this.currentSpeed = 0;
     this.currentSteerAngle = 0;
+    this.keyboardSteer = 0;
     this.touchInput.steer = 0;
     this.touchInput.throttle = 0;
     this.touchInput.brake = 0;
