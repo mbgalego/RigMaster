@@ -1187,9 +1187,12 @@ export class MainScene extends Phaser.Scene {
     // world was edited — otherwise the Graphics command buffer is reused as-is.
     const cam = this.cameras.main;
     if (this.flatsGraphics && this.solidsGraphics && this.lightsGraphics && cam.zoom >= 0.12) {
+      // `cam.worldView` is stale before the first preRender — deriving the view
+      // from scroll/zoom guarantees the first static draw actually draws.
+      const liveView = this.getCameraView(cam);
       this.world.objects.renderLights(
         this.lightsGraphics,
-        cam.worldView,
+        liveView,
         this.isEditorMode ? 0 : timeSnap.lampFactor,
         this.overheadLightsGraphics ?? undefined,
       );
@@ -1206,7 +1209,7 @@ export class MainScene extends Phaser.Scene {
         this.world.objects.render(
           this.flatsGraphics,
           this.solidsGraphics,
-          cam.worldView,
+          liveView,
           this.overheadGraphics ?? undefined,
         );
         this.lastObjRender = { x: cam.midPoint.x, y: cam.midPoint.y, zoom: cam.zoom, version: this.world.objects.version };
@@ -1221,7 +1224,7 @@ export class MainScene extends Phaser.Scene {
 
     // Stream physics + terrain chunks around the player; cycle the traffic lights
     if (this.truck) {
-      this.world.updateActiveChunks(this.truck.body.position.x, this.truck.body.position.y, this.cameras.main.worldView);
+      this.world.updateActiveChunks(this.truck.body.position.x, this.truck.body.position.y, this.getCameraView(this.cameras.main));
       // Surface grip from the road network (asphalt/cobble/dirt vs off-road)
       this.truck.setRoadGrip(this.roadNetwork.gripAt(this.truck.body.position.x, this.truck.body.position.y));
     }
@@ -1503,6 +1506,23 @@ export class MainScene extends Phaser.Scene {
   private static readonly ROAD_DASH_GAP = 22;
 
   /**
+   * Live camera view derived from scroll/zoom. `cam.worldView` is only filled
+   * during preRender, so reading it in update() before the first preRender
+   * returns an empty rect — that poisoned the first static-object draw (empty
+   * view → nothing drawn → `lastObjRender` recorded → no redraw until the
+   * camera actually moved), which is why lamps only appeared after a zoom
+   * or once the truck drove.
+   */
+  private getCameraView(cam: Phaser.Cameras.Scene2D.Camera): Phaser.Geom.Rectangle {
+    return new Phaser.Geom.Rectangle(
+      cam.scrollX + cam.width / 2 - cam.width / (2 * cam.zoom),
+      cam.scrollY + cam.height / 2 - cam.height / (2 * cam.zoom),
+      cam.width / cam.zoom,
+      cam.height / cam.zoom,
+    );
+  }
+
+  /**
    * Draws the visible road ribbons into a retained Graphics. Redraws only when
    * the network changed or the camera moved/zoomed enough to matter.
    */
@@ -1522,15 +1542,8 @@ export class MainScene extends Phaser.Scene {
     const g = this.roadGraphics;
     g.clear();
 
-    // Derive the view from scrollX/Y directly — `cam.worldView` is stale until
-    // the first preRender, which poisoned the first draw (empty view → no
-    // ribbons → markers already recorded → skip forever until a real move).
-    const view = new Phaser.Geom.Rectangle(
-      cam.scrollX + cam.width / 2 - cam.width / (2 * cam.zoom),
-      cam.scrollY + cam.height / 2 - cam.height / (2 * cam.zoom),
-      cam.width / cam.zoom,
-      cam.height / cam.zoom,
-    );
+    // `cam.worldView` is stale until the first preRender — use the live view
+    const view = this.getCameraView(cam);
     const M = 220; // margin so ribbons don't pop in at the screen edge
     const vx0 = view.x - M, vy0 = view.y - M, vx1 = view.x + view.width + M, vy1 = view.y + view.height + M;
 
