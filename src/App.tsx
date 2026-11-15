@@ -43,6 +43,7 @@ import {
   Route,
   Box,
   Plus,
+  Lamp,
   BrickWall,
   Warehouse,
   CarFront,
@@ -1149,6 +1150,53 @@ export default function App() {
                       <button onClick={() => { const ed = getEditorScene(); if (ed) ed.deleteSelectedRoad(); }} className="shrink-0 text-[10px] font-bold bg-red-500 text-white border border-red-300 hover:bg-red-400 px-2 py-1 rounded">Apagar Selecionada</button>
                     )}
                     <span className="text-[10px] text-slate-400 whitespace-nowrap shrink-0 hidden lg:inline">Enter/duplo clique: terminar · Del: apagar · Esc: cancelar</span>
+                    {roadUI.hasSelection === false && (
+                      <>
+                        <div className="shrink-0 h-px bg-slate-800 mx-1" />
+                        <Lamp className="w-4 h-4 text-slate-400 shrink-0" />
+                        <span className="text-xs font-bold text-slate-400 whitespace-nowrap shrink-0">
+                          INTERSEÇÕES: clica num cruzamento para selecionar
+                        </span>
+                      </>
+                    )}
+                  </>
+                )}
+                {editorTool === 'road' && roadUI.hasSelection === false && (
+                  <>
+                    <div className="shrink-0 flex items-center gap-1 bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5">
+                      <Lamp className="w-4 h-4 text-slate-400 shrink-0" />
+                      <span className="text-[10px] text-slate-400 whitespace-nowrap shrink-0 hidden lg:inline">cruzamentos detectados automaticamente</span>
+                    </div>
+                  </>
+                )}
+                {editorTool === 'road' && (
+                  <>
+                    {(() => {
+                      const ed = getEditorScene();
+                      const intUI = ed ? ed.getIntersectionUIState() : null;
+                      if (!intUI) return null;
+                      return (
+                        <>
+                          <div className="shrink-0 h-px bg-amber-500/40 mx-1" />
+                          <span className="text-[10px] font-bold text-amber-300 whitespace-nowrap shrink-0">
+                            CRUZAMENTO {intUI.armCount} braços · {intUI.phaseCount} fase{intUI.phaseCount !== 1 ? 's' : ''} · camada {intUI.layer}
+                          </span>
+                          <button
+                            onClick={() => { const ed = getEditorScene(); if (ed) ed.toggleIntersectionSignalized(); }}
+                            className={`shrink-0 text-[10px] font-bold px-2 py-1 rounded border transition ${
+                              intUI.signalized
+                                ? 'bg-amber-400 text-slate-900 border-amber-200 shadow-md shadow-amber-500/30'
+                                : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
+                            }`}
+                          >
+                            {intUI.signalized ? 'Semáforos: ON' : 'Semáforos: OFF'}
+                          </button>
+                          <span className="text-[10px] text-slate-500 whitespace-nowrap shrink-0 hidden lg:inline">
+                            {intUI.signalized ? 'semáforos automáticos nos braços' : 'stop / cedência / sem sinal'}
+                          </span>
+                        </>
+                      );
+                    })()}
                   </>
                 )}
                 {editorTool === 'object' && (

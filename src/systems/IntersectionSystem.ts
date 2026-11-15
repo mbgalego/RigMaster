@@ -78,6 +78,29 @@ const DEFAULT_ALL_RED_MS = 1000;
 /** Max angle difference (radians) for two arms to share the same axis. */
 const AXIS_MERGE_RAD = Phaser.Math.DegToRad(15);
 
+/** Distance before the node where a traffic light is placed (px). */
+const TL_STOP_OFFSET = 14;
+
+/** Extra margin from the carriageway edge to the traffic light (px). */
+const TL_SHOULDER_MARGIN = 12;
+
+/** Specification for a traffic-light world object to be created by the editor. */
+export interface TrafficLightSpec {
+  x: number;
+  y: number;
+  angle: number;
+  params: { dir: 'n' | 's' | 'e' | 'w'; group: number; intersectionNode: string };
+}
+
+/** Direction hint from an angle (used for the legacy dir param on traffic_light). */
+function angleToDir(angle: number): 'n' | 's' | 'e' | 'w' {
+  const a = wrapAngle(angle);
+  if (a > -Math.PI / 4 && a <= Math.PI / 4) return 'e';
+  if (a > Math.PI / 4 && a <= 3 * Math.PI / 4) return 's';
+  if (a > -3 * Math.PI / 4 && a <= -Math.PI / 4) return 'n';
+  return 'w';
+}
+
 /** Wrap an angle to [-PI, PI]. */
 function wrapAngle(a: number): number {
   while (a > Math.PI) a -= 2 * Math.PI;
@@ -228,6 +251,54 @@ export class IntersectionSystem {
   /** Get all nodes touching a given road. */
   public getNodesForRoad(roadId: string): IntersectionNode[] {
     return this.nodes.filter((n) => n.arms.some((a) => a.roadId === roadId));
+  }
+
+  /** Toggle whether a node has traffic lights. Returns the new state. */
+  public setSignalized(nodeId: string, signalized: boolean): boolean {
+    const node = this.nodes.find((n) => n.id === nodeId);
+    if (!node) return false;
+    node.signalized = signalized;
+    return signalized;
+  }
+
+  /**
+   * Generate traffic-light world-object specs for every arm of a signalized
+   * node. Each light is placed on the right-hand side of its lane, before the
+   * node (where approaching drivers see it), rotated to face them.
+   */
+  public getTrafficLightSpecs(nodeId: string): TrafficLightSpec[] {
+    const node = this.nodes.find((n) => n.id === nodeId);
+    if (!node || !node.signalized) return [];
+
+    const specs: TrafficLightSpec[] = [];
+    let group = 0;
+    for (const phase of node.phases) {
+      for (const armIdx of phase.armIndices) {
+        const arm = node.arms[armIdx];
+        // Perpendicular to the right of the direction of travel
+        const rightAngle = arm.entryAngle - Math.PI / 2;
+        const offset = arm.width / 2 + TL_SHOULDER_MARGIN;
+        const rx = Math.cos(rightAngle) * offset;
+        const ry = Math.sin(rightAngle) * offset;
+        // Place before the node (against the direction of travel)
+        const x = arm.entryX - Math.cos(arm.entryAngle) * TL_STOP_OFFSET + rx;
+        const y = arm.entryY - Math.sin(arm.entryAngle) * TL_STOP_OFFSET + ry;
+        // The signal head faces the approaching driver
+        const angle = arm.entryAngle;
+        specs.push({
+          x: Math.round(x),
+          y: Math.round(y),
+          angle,
+          params: {
+            dir: angleToDir(angle),
+            group: phase.index,
+            intersectionNode: nodeId,
+          },
+        });
+      }
+      group++;
+    }
+    return specs;
   }
 
   // ========================================================================

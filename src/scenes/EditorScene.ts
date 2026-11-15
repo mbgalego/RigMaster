@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { MainScene } from './MainScene';
 import { GarageSystem } from '../systems/GarageSystem';
 import { RoadNetwork, RoadData, RoadPoint, RoadSurface } from '../systems/RoadNetwork';
+import { IntersectionSystem, IntersectionNode, TrafficLightSpec } from '../systems/IntersectionSystem';
 import { WorldObject, WObjType } from '../world/WorldObjects';
 import { World } from '../world/World';
 import { TrailerManager } from '../systems/TrailerManager';
@@ -66,6 +67,13 @@ export class EditorScene extends Phaser.Scene {
   public newRoadOneWay: boolean = false;
   private roadDirtySinceRelease: boolean = false;
 
+  // ---- Intersection tool state ----
+  public selectedIntersectionNode: IntersectionNode | null = null;
+  private intersectionOverlay!: Phaser.GameObjects.Graphics;
+  private intersectionSystem!: IntersectionSystem;
+  /** Traffic-light world objects created by the editor for signalized nodes. */
+  public intersectionTrafficLights: Map<string, string[]> = new Map(); // nodeId -> object ids
+
   // ---- Object tool state ----
   public selectedObject: WorldObject | null = null;
   private objectDrag: {
@@ -102,6 +110,11 @@ export class EditorScene extends Phaser.Scene {
 
     this.roadOverlay = this.add.graphics();
     this.roadOverlay.setDepth(102);
+
+    this.intersectionOverlay = this.add.graphics();
+    this.intersectionOverlay.setDepth(103);
+
+    this.intersectionSystem = IntersectionSystem.getInstance();
 
     this.setupPointerInteractions();
     this.setupKeyboardPan();
@@ -332,6 +345,8 @@ export class EditorScene extends Phaser.Scene {
       this.selectedObject = null;
       this.objectDrag = null;
     }
+    // Intersection selection persists across tools so the user can toggle
+    // signals from any tool; cleared explicitly via clearIntersectionSelection.
   }
 
   // ======================================================================
@@ -361,6 +376,17 @@ export class EditorScene extends Phaser.Scene {
       return;
     }
 
+    // Intersection node → select the node (clears road selection)
+    const node = this.intersectionSystem.getNodeAt(x, y, 30 / this.cameras.main.zoom);
+    if (node) {
+      this.selectedIntersectionNode = node;
+      this.selectedRoad = null;
+      this.selectedPointIndex = null;
+      this.roadDrag = null;
+      this.drawIntersectionOverlay();
+      return;
+    }
+
     // Road body → select; double-click inserts a control point right here
     const body = this.roadNetwork.hitTestRoad(x, y, tol * 0.5);
     if (body) {
@@ -387,6 +413,9 @@ export class EditorScene extends Phaser.Scene {
   /** Begins a road drag when the press started on a handle or a road body. */
   private tryStartRoadDrag(x: number, y: number): boolean {
     const tol = 16 / this.cameras.main.zoom;
+
+    // Never start a road drag from an intersection node
+    if (this.intersectionSystem.getNodeAt(x, y, 30 / this.cameras.main.zoom)) return false;
 
     // 1. Width handle of the selected road (edits this section's width exactly)
     if (this.selectedRoad) {
@@ -578,6 +607,78 @@ export class EditorScene extends Phaser.Scene {
   }
 
   // ======================================================================
+  // INTERSECTION TOOL (select node, toggle signals, visualise phases)
+  // ======================================================================
+
+  /** Toggle traffic lights on the currently selected intersection node. */
+  public toggleIntersectionSignalized(): boolean {
+    const node = this.selectedIntersectionNode;
+    if (!node) return false;
+    const next = !node.signalized;
+    this.intersectionSystem.setSignalized(node.id, next);
+    if (next) {
+      this.createIntersectionTrafficLights(node.id);
+    } else {
+      this.removeIntersectionTrafficLights(node.id);
+    }
+    this.mainScene.world.version++;
+    this.drawIntersectionOverlay();
+    return next;
+  }
+
+  /** Create traffic-light world objects for a signalized node. */
+  private createIntersectionTrafficLights(nodeId: string): void {
+    const specs = this.intersectionSystem.getTrafficLightSpecs(nodeId);
+    const ids: string[] = [];
+    for (const spec of specs) {
+      const o = this.mainScene.world.objects.add('traffic_light', spec.x, spec.y, 22, 22, {
+        angle: spec.angle,
+        params: spec.params,
+      });
+      ids.push(o.id);
+    }
+    this.intersectionTrafficLights.set(nodeId, ids);
+  }
+
+  /** Remove all traffic-light world objects for a node. */
+  public removeIntersectionTrafficLights(nodeId: string): void {
+    const ids = this.intersectionTrafficLights.get(nodeId);
+    if (ids) {
+      for (const id of ids) {
+        this.mainScene.world.objects.remove(id);
+      }
+      this.intersectionTrafficLights.delete(nodeId);
+    }
+  }
+
+  /** Remove intersection node selection and any traffic lights tied to deleted roads. */
+  public clearIntersectionSelection(): void {
+    this.selectedIntersectionNode = null;
+    this.drawIntersectionOverlay();
+  }
+
+  /** UI state for the intersection panel. */
+  public getIntersectionUIState(): {
+    hasNode: boolean;
+    nodeId: string;
+    signalized: boolean;
+    armCount: number;
+    phaseCount: number;
+    layer: number;
+  } | null {
+    const n = this.selectedIntersectionNode;
+    if (!n) return null;
+    return {
+      hasNode: true,
+      nodeId: n.id,
+      signalized: n.signalized,
+      armCount: n.arms.length,
+      phaseCount: n.phases.length,
+      layer: n.layer,
+    };
+  }
+
+  // ======================================================================
   // OBJECT TOOL (select / move / free-rotate / resize / delete prefabs)
   // ======================================================================
 
@@ -736,6 +837,62 @@ export class EditorScene extends Phaser.Scene {
       resizable: o ? this.isResizable(o) : false,
       trailer: o && (o.type === 'parking_pad' || o.type === 'trailer') ? String(o.params?.trailer || 'standard') : '',
     };
+  }
+
+  /** Draw intersection nodes, arms and phases on the editor overlay. */
+  public drawIntersectionOverlay(): void {
+    const g = this.intersectionOverlay;
+    g.clear();
+    const z = this.cameras.main.zoom;
+
+    // Draw ALL nodes (faint) so the user can see where intersections are
+    for (const n of this.intersectionSystem.nodes) {
+      const isSel = this.selectedIntersectionNode?.id === n.id;
+
+      // Node centre
+      g.fillStyle(isSel ? 0xffd166 : 0x00f0ff, isSel ? 0.9 : 0.35);
+      g.beginPath();
+      g.arc(n.x, n.y, (isSel ? 10 : 6) / z, 0, Math.PI * 2);
+      g.fillPath();
+      g.lineStyle(1.5 / z, 0x0b1220, 0.9);
+      g.beginPath();
+      g.arc(n.x, n.y, (isSel ? 10 : 6) / z, 0, Math.PI * 2);
+      g.strokePath();
+
+      // Arms + phases (only for the selected node, or faintly for all)
+      const showArms = isSel;
+      for (const arm of n.arms) {
+        // Phase colour
+        const phase = n.phases.find((p) => p.armIndices.includes(n.arms.indexOf(arm)));
+        const phaseIdx = phase ? phase.index : 0;
+        const phaseColors = [0x00f0ff, 0xffd166, 0x4ade80, 0xf472b6, 0xa78bfa, 0xfb923c];
+        const col = phaseColors[phaseIdx % phaseColors.length];
+
+        // Line from node centre along the arm (away from node)
+        const len = Math.max(arm.width, 60);
+        const ex = n.x + Math.cos(arm.exitAngle) * len;
+        const ey = n.y + Math.sin(arm.exitAngle) * len;
+
+        g.lineStyle(showArms ? 3 / z : 1 / z, col, showArms ? 0.9 : 0.25);
+        g.beginPath();
+        g.moveTo(n.x, n.y);
+        g.lineTo(ex, ey);
+        g.strokePath();
+
+        // Small dot at the entry point
+        g.fillStyle(col, 1);
+        g.fillRect(arm.entryX - 2 / z, arm.entryY - 2 / z, 4 / z, 4 / z);
+      }
+
+      // Label with node id + signal status
+      if (isSel || n.signalized) {
+        const label = `INT ${n.layer}${n.signalized ? ' ●' : ''}`;
+        g.fillStyle(0x000000, 0.6);
+        g.fillRect(n.x - 40 / z, n.y - 14 / z, 80 / z, 10 / z);
+        g.fillStyle(0xffffff, 1);
+        // Note: text not drawn in Graphics; label shown via UI panel instead
+      }
+    }
   }
 
   /** Switches the trailer type of a parking pad — or respawns an editor-placed
@@ -1002,6 +1159,9 @@ export class EditorScene extends Phaser.Scene {
       g.fillStyle(col, 1);
       g.fillRect(p.x - hs / 2, p.y - hs / 2, hs, hs);
     }
+
+    // Intersection overlay (nodes, arms, phases)
+    this.drawIntersectionOverlay();
   }
 
   // ======================================================================
