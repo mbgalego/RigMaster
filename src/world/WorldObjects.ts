@@ -990,21 +990,25 @@ export class WorldObjects {
           g.fillCircle(o.x + 4, o.y + 5, R);
           g.fillStyle(0x39404d, 1); // circulating carriageway
           g.fillCircle(o.x, o.y, R);
-          // Chevron marks on the circulating lane (counter-clockwise, right-hand traffic)
-          g.lineStyle(3, 0xe2e8f0, 0.4);
-          const chevR = R * 0.68;
-          const nChev = 10;
-          for (let i = 0; i < nChev; i++) {
-            const a = (i / nChev) * Math.PI * 2;
-            const ax = o.x + Math.cos(a) * chevR;
-            const ay = o.y + Math.sin(a) * chevR;
-            const ta = a + Math.PI / 2; // tangent, counter-clockwise
-            const sz = Math.max(7, R * 0.09);
-            g.beginPath();
-            g.moveTo(ax - Math.cos(ta) * sz + Math.cos(a) * sz * 0.7, ay - Math.sin(ta) * sz + Math.sin(a) * sz * 0.7);
-            g.lineTo(ax + Math.cos(ta) * sz * 0.6, ay + Math.sin(ta) * sz * 0.6);
-            g.lineTo(ax - Math.cos(ta) * sz - Math.cos(a) * sz * 0.7, ay - Math.sin(ta) * sz - Math.sin(a) * sz * 0.7);
-            g.strokePath();
+          // Dashed lane markings: one dashed concentric circle per lane, sized by diameter.
+          // Right-hand traffic — no direction arrows needed.
+          g.lineStyle(2, 0xe2e8f0, 0.35);
+          const laneWidth = 70; // approx. lane width in px
+          const nLanes = Math.max(1, Math.floor((R * 2) / laneWidth));
+          for (let l = 1; l <= nLanes; l++) {
+            const laneR = R * (0.45 + 0.5 * (l / nLanes)); // keep inside the carriageway
+            const circumference = 2 * Math.PI * laneR;
+            const dash = Math.max(10, laneWidth * 0.55);
+            const gap = Math.max(6, laneWidth * 0.35);
+            const step = dash + gap;
+            const nDashes = Math.max(4, Math.floor(circumference / step));
+            for (let d = 0; d < nDashes; d++) {
+              const a0 = (d / nDashes) * Math.PI * 2;
+              const a1 = ((d + dash / step / nDashes) * Math.PI * 2) % (Math.PI * 2);
+              g.beginPath();
+              g.arc(o.x, o.y, laneR, a0, a1);
+              g.strokePath();
+            }
           }
           // Kerb ring + landscaped island
           g.fillStyle(0x8a93a8, 1);
