@@ -29,3 +29,67 @@ canvas {
   user-select: none;
   touch-action: none;
 }
+
+/* ======================================================================
+   Escala de fonte do EDITOR — adapta-se ao equipamento.
+   Em telemóveis (DPR alto, 1 CSS px ≈ 3 px físicos) 10px já é legível,
+   por isso o aumento é ligeiro; em computadores (DPR 1, 1 CSS px = 1 px
+   físico) a letra pequena é minúscula, por isso escala bem mais.
+   ====================================================================== */
+:root {
+  --ed-fs: 11.5px;    /* corpo dos flyouts / botões */
+  --ed-fs-sm: 10.5px; /* cabeçalhos de secção / notas */
+  --ed-fs-xs: 9.5px;  /* etiquetas dos botões da toolbar */
+  --ed-fs-lg: 12.5px; /* títulos / texto destacado */
+  --ed-fs-icon: 16px; /* ícones da toolbar */
+}
+
+/* ≥640px (tablet / portátil): base maior */
+@media (min-width: 640px) {
+  :root {
+    --ed-fs: 13px;
+    --ed-fs-sm: 11.5px;
+    --ed-fs-xs: 10.5px;
+    --ed-fs-lg: 14px;
+    --ed-fs-icon: 18px;
+  }
+}
+
+/* ≥640px com ecrã de alta densidade (retina): CSS px já são finos, fica um
+   pouco abaixo do desktop 1x mas acima do telemóvel */
+@media (min-width: 640px) and (min-resolution: 2dppx) {
+  :root {
+    --ed-fs: 12.5px;
+    --ed-fs-sm: 11px;
+    --ed-fs-xs: 10px;
+    --ed-fs-lg: 13.5px;
+    --ed-fs-icon: 17px;
+  }
+}
+
+/* ≥1024px desktop 1x: é aqui que a letra pequena dói — tamanho completo */
+@media (min-width: 1024px) and (max-resolution: 1.999dppx) {
+  :root {
+    --ed-fs: 14px;
+    --ed-fs-sm: 12.5px;
+    --ed-fs-xs: 11.5px;
+    --ed-fs-lg: 15px;
+    --ed-fs-icon: 20px;
+  }
+}
+
+.ed-fs    { font-size: var(--ed-fs);    line-height: 1.35; }
+.ed-fs-sm { font-size: var(--ed-fs-sm); line-height: 1.3; }
+.ed-fs-xs { font-size: var(--ed-fs-xs); line-height: 1.25; }
+.ed-fs-lg { font-size: var(--ed-fs-lg); line-height: 1.35; }
+.ed-icon  { width: var(--ed-fs-icon); height: var(--ed-fs-icon); }
+
+/* Toolbar/flyouts do editor: rolam (wheel / drag / touch) mas NUNCA mostram
+   barras de scroll — escondidas em todos os browsers. Sem a barra clássica
+   a "comer" largura no Windows, o conteúdo nunca transborda na horizontal. */
+.no-scrollbar {
+  scrollbar-width: none;      /* Firefox */
+  -ms-overflow-style: none;   /* IE/Edge legado */
+}
+.no-scrollbar::-webkit-scrollbar { display: none; width: 0; height: 0; }  /* Chromium/Safari */
+.no-scrollbar::-webkit-scrollbar-button { display: none; }
