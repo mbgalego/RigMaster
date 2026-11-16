@@ -57,6 +57,18 @@ export interface BridgeSample extends RoadSample {
   s: number;
 }
 
+export interface RoadSnapResult {
+  x: number;
+  y: number;
+  kind: 'endpoint' | 'point' | 'centerline' | 'align';
+  targetRoadId?: string;
+  targetPointIndex?: number;
+  width?: number;
+  tangentX?: number;
+  tangentY?: number;
+  guideFrom?: { x: number; y: number };
+}
+
 export interface BridgeBarrierSegment {
   kind: 'ramp_wall' | 'deck_rail';
   x: number;
@@ -265,27 +277,50 @@ export class RoadNetwork {
 
   /**
    * Inserts a control point on the road segment nearest to (x, y), at the
-   * closest point on that segment (width interpolated). Returns the inserted
-   * location so the editor can select it immediately.
+   * closest point on that segment (width interpolated). When `preferredRoadId`
+   * is passed, prefers that road (or restricts strictly to it when `strictPreferred`
+   * is true) so nearby roads aren't modified by mistake.
    */
-  public insertPoint(x: number, y: number): { road: RoadData; index: number } | null {
+  public insertPoint(
+    x: number,
+    y: number,
+    preferredRoadId?: string,
+    strictPreferred = false,
+  ): { road: RoadData; index: number } | null {
+    const search = (onlyRoadId?: string): { road: RoadData; segIndex: number; t: number; d: number } | null => {
+      let best: { road: RoadData; segIndex: number; t: number; d: number } | null = null;
+      for (const road of this.roads) {
+        if (onlyRoadId && road.id !== onlyRoadId) continue;
+        const pts = road.points;
+        const n = pts.length;
+        if (n < 2) continue;
+        const last = road.closed ? n : n - 1;
+        for (let i = 0; i < last; i++) {
+          const a = pts[i], b = pts[(i + 1) % n];
+          const abx = b.x - a.x, aby = b.y - a.y;
+          const len2 = abx * abx + aby * aby;
+          if (len2 < 1) continue;
+          const t = Phaser.Math.Clamp(((x - a.x) * abx + (y - a.y) * aby) / len2, 0, 1);
+          const px = a.x + abx * t, py = a.y + aby * t;
+          const d = Phaser.Math.Distance.Between(x, y, px, py);
+          if (!best || d < best.d) best = { road, segIndex: i, t, d };
+        }
+      }
+      return best;
+    };
+
     let best: { road: RoadData; segIndex: number; t: number; d: number } | null = null;
-    for (const road of this.roads) {
-      const pts = road.points;
-      const n = pts.length;
-      if (n < 2) continue;
-      const last = road.closed ? n : n - 1;
-      for (let i = 0; i < last; i++) {
-        const a = pts[i], b = pts[(i + 1) % n];
-        const abx = b.x - a.x, aby = b.y - a.y;
-        const len2 = abx * abx + aby * aby;
-        if (len2 < 1) continue;
-        const t = Phaser.Math.Clamp(((x - a.x) * abx + (y - a.y) * aby) / len2, 0, 1);
-        const px = a.x + abx * t, py = a.y + aby * t;
-        const d = Phaser.Math.Distance.Between(x, y, px, py);
-        if (!best || d < best.d) best = { road, segIndex: i, t, d };
+    if (preferredRoadId) {
+      const prefHit = search(preferredRoadId);
+      if (strictPreferred) {
+        best = prefHit;
+      } else if (prefHit) {
+        const w = prefHit.road.points[prefHit.segIndex].w +
+          (prefHit.road.points[(prefHit.segIndex + 1) % prefHit.road.points.length].w - prefHit.road.points[prefHit.segIndex].w) * prefHit.t;
+        if (prefHit.d <= w / 2 + 24) best = prefHit;
       }
     }
+    if (!best && !strictPreferred) best = search();
     if (!best) return null;
 
     const a = best.road.points[best.segIndex];
@@ -301,6 +336,373 @@ export class RoadNetwork {
     best.road.points.splice(best.segIndex + 1, 0, point);
     this.rebuildIndex();
     return { road: best.road, index: best.segIndex + 1 };
+  }
+
+  /**
+   * Finds the best magnetic snap target near (x, y):
+   * 1) Open endpoint of another compatible road
+   * 2) Interior control point of another compatible road
+   * 3) Spline centreline of another compatible road (clean T-junctions)
+   * 4) Straight-line continuation or H/V axis from `prevPoint`
+   */
+  public findRoadSnap(
+    x: number,
+    y: number,
+    options: {
+      snapDist?: number;
+      excludeRoadId?: string;
+      layer?: number;
+      prevPoint?: { x: number; y: number };
+      prevPrevPoint?: { x: number; y: number };
+    } = {},
+  ): RoadSnapResult | null {
+    const snapDist = options.snapDist ?? 26;
+    const srcLayer = options.layer ?? 0;
+
+    // 1. Endpoint-to-endpoint snap (highest priority)
+    let bestEnd: { d: number; res: RoadSnapResult } | null = null;
+    // 2. Interior control-point snap
+    let bestPt: { d: number; res: RoadSnapResult } | null = null;
+
+    for (const road of this.roads) {
+      if (options.excludeRoadId && road.id === options.excludeRoadId) continue;
+      const roadLayer = road.layer ?? 0;
+      const n = road.points.length;
+      if (n === 0) continue;
+
+      for (let i = 0; i < n; i++) {
+        const isEnd = !road.closed && (i === 0 || i === n - 1);
+        // Allow bridge ramp portals (endpoints of bridge/ground roads) to snap across layer 0 ↔ 1
+        const compatible = roadLayer === srcLayer || (isEnd && (srcLayer > 0 || roadLayer > 0));
+        if (!compatible) continue;
+
+        const p = road.points[i];
+        const d = Phaser.Math.Distance.Between(x, y, p.x, p.y);
+        if (isEnd && d <= snapDist && (!bestEnd || d < bestEnd.d)) {
+          const t = n >= 2 ? RoadNetwork.pointTangent(road, i) : { tx: 1, ty: 0 };
+          bestEnd = {
+            d,
+            res: {
+              x: p.x,
+              y: p.y,
+              kind: 'endpoint',
+              targetRoadId: road.id,
+              targetPointIndex: i,
+              width: p.w,
+              tangentX: t.tx,
+              tangentY: t.ty,
+            },
+          };
+        } else if (!isEnd && d <= snapDist * 0.8 && (!bestPt || d < bestPt.d)) {
+          bestPt = {
+            d,
+            res: {
+              x: p.x,
+              y: p.y,
+              kind: 'point',
+              targetRoadId: road.id,
+              targetPointIndex: i,
+              width: p.w,
+            },
+          };
+        }
+      }
+    }
+    if (bestEnd) return bestEnd.res;
+    if (bestPt) return bestPt.res;
+
+    // 3. Spline centreline snap (clean T-junctions without overshoot/gap)
+    let bestCenter: { d: number; res: RoadSnapResult } | null = null;
+    const centerDist = snapDist * 0.85;
+    for (const road of this.roads) {
+      if (options.excludeRoadId && road.id === options.excludeRoadId) continue;
+      const roadLayer = road.layer ?? 0;
+      // Bridges can connect their ground ramp portals onto ground roads; otherwise keep same layer
+      if (roadLayer !== srcLayer && !(srcLayer > 0 && roadLayer === 0)) continue;
+
+      const samples = RoadNetwork.sampleRoad(road, 24);
+      for (let i = 0; i < samples.length - 1; i++) {
+        const a = samples[i], b = samples[i + 1];
+        const abx = b.x - a.x, aby = b.y - a.y;
+        const len2 = abx * abx + aby * aby;
+        const t = len2 > 0 ? Phaser.Math.Clamp(((x - a.x) * abx + (y - a.y) * aby) / len2, 0, 1) : 0;
+        const px = a.x + abx * t;
+        const py = a.y + aby * t;
+        const d = Math.hypot(x - px, y - py);
+        if (d <= centerDist && (!bestCenter || d < bestCenter.d)) {
+          const w = Math.round(a.w + (b.w - a.w) * t);
+          let tx = a.tx + (b.tx - a.tx) * t;
+          let ty = a.ty + (b.ty - a.ty) * t;
+          const tLen = Math.hypot(tx, ty) || 1;
+          tx /= tLen; ty /= tLen;
+          bestCenter = {
+            d,
+            res: {
+              x: Math.round(px),
+              y: Math.round(py),
+              kind: 'centerline',
+              targetRoadId: road.id,
+              width: w,
+              tangentX: tx,
+              tangentY: ty,
+            },
+          };
+        }
+      }
+    }
+    if (bestCenter) return bestCenter.res;
+
+    // 4. Straight-line continuation or horizontal/vertical alignment from previous point
+    if (options.prevPoint) {
+      const prev = options.prevPoint;
+      const dx = x - prev.x;
+      const dy = y - prev.y;
+      const len = Math.hypot(dx, dy);
+      if (len >= 40) {
+        const axes: Array<{ ux: number; uy: number }> = [
+          { ux: 1, uy: 0 },
+          { ux: -1, uy: 0 },
+          { ux: 0, uy: 1 },
+          { ux: 0, uy: -1 },
+        ];
+        if (options.prevPrevPoint) {
+          const cx = prev.x - options.prevPrevPoint.x;
+          const cy = prev.y - options.prevPrevPoint.y;
+          const cLen = Math.hypot(cx, cy);
+          if (cLen > 1) axes.unshift({ ux: cx / cLen, uy: cy / cLen });
+        }
+        let bestAxis: { ux: number; uy: number; perp: number; proj: number } | null = null;
+        for (const ax of axes) {
+          const proj = dx * ax.ux + dy * ax.uy;
+          if (proj <= 0) continue;
+          const perp = Math.abs(dx * -ax.uy + dy * ax.ux);
+          // Within ~4.5 degrees of straight line
+          if (perp / len <= 0.08 && (!bestAxis || perp < bestAxis.perp)) {
+            bestAxis = { ux: ax.ux, uy: ax.uy, perp, proj };
+          }
+        }
+        if (bestAxis) {
+          return {
+            x: Math.round(prev.x + bestAxis.ux * bestAxis.proj),
+            y: Math.round(prev.y + bestAxis.uy * bestAxis.proj),
+            kind: 'align',
+            guideFrom: { x: prev.x, y: prev.y },
+          };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /** Checks whether an open road has nearby road ends/centerlines eligible for welding or merging. */
+  public canWeldRoadEnds(roadId: string, maxDist = 90): { hasWeldTarget: boolean; hasMergeTarget: boolean } {
+    const road = this.getRoad(roadId);
+    if (!road || road.closed || road.points.length < 2) {
+      return { hasWeldTarget: false, hasMergeTarget: false };
+    }
+
+    let hasWeldTarget = false;
+    const endIndices = [0, road.points.length - 1];
+    for (const idx of endIndices) {
+      const p = road.points[idx];
+      const snap = this.findRoadSnap(p.x, p.y, {
+        snapDist: maxDist,
+        excludeRoadId: road.id,
+        layer: road.layer ?? 0,
+      });
+      if (snap && snap.kind !== 'align') {
+        const dist = Phaser.Math.Distance.Between(p.x, p.y, snap.x, snap.y);
+        const widthDiff = snap.width !== undefined ? Math.abs(p.w - snap.width) : 0;
+        if (dist > 0.5 || widthDiff > 1 || snap.kind === 'endpoint') {
+          hasWeldTarget = true;
+          break;
+        }
+      }
+    }
+
+    const mergeCand = this.findMergeCandidate(road, Math.min(maxDist, 75));
+    return { hasWeldTarget, hasMergeTarget: !!mergeCand };
+  }
+
+  /** Snaps open endpoints of `roadId` onto adjacent road endpoints/centrelines, matching seam width & tangent. */
+  public weldRoadEndpoints(roadId: string, maxDist = 90): { snappedCount: number; widthMatched: boolean } {
+    const road = this.getRoad(roadId);
+    if (!road || road.closed || road.points.length < 2) {
+      return { snappedCount: 0, widthMatched: false };
+    }
+
+    let snappedCount = 0;
+    let widthMatched = false;
+    const endIndices = [0, road.points.length - 1];
+
+    for (const idx of endIndices) {
+      const p = road.points[idx];
+      const snap = this.findRoadSnap(p.x, p.y, {
+        snapDist: maxDist,
+        excludeRoadId: road.id,
+        layer: road.layer ?? 0,
+      });
+      if (!snap || snap.kind === 'align') continue;
+
+      const adj = road.points[idx === 0 ? 1 : road.points.length - 2];
+      // Prevent collapsing a point onto its own neighbour
+      if (adj && Phaser.Math.Distance.Between(snap.x, snap.y, adj.x, adj.y) < MIN_POINT_DIST) {
+        continue;
+      }
+
+      p.x = Math.round(snap.x);
+      p.y = Math.round(snap.y);
+      snappedCount++;
+
+      if (snap.width !== undefined && Math.abs(p.w - snap.width) >= 1) {
+        p.w = Phaser.Math.Clamp(Math.round(snap.width), MIN_ROAD_WIDTH, MAX_ROAD_WIDTH);
+        widthMatched = true;
+      }
+
+      // Smooth collinear twist alignment when meeting another endpoint head-to-tail (< 35 deg)
+      if (snap.kind === 'endpoint' && snap.targetRoadId && snap.targetPointIndex !== undefined) {
+        const other = this.getRoad(snap.targetRoadId);
+        if (other && !other.closed && other.points.length >= 2) {
+          const tIdx = snap.targetPointIndex;
+          const adjB = other.points[tIdx === 0 ? 1 : other.points.length - 2];
+          if (adj && adjB) {
+            let ax = p.x - adj.x, ay = p.y - adj.y;
+            const aLen = Math.hypot(ax, ay);
+            let bx = adjB.x - p.x, by = adjB.y - p.y;
+            const bLen = Math.hypot(bx, by);
+            if (aLen > 1 && bLen > 1) {
+              ax /= aLen; ay /= aLen;
+              bx /= bLen; by /= bLen;
+              if (ax * bx + ay * by > Math.cos(Phaser.Math.DegToRad(35))) {
+                const avgX = ax + bx;
+                const avgY = ay + by;
+                const avgAngle = Math.atan2(avgY, avgX);
+                const wrapAngle = (a: number) => {
+                  while (a > Math.PI) a -= Math.PI * 2;
+                  while (a < -Math.PI) a += Math.PI * 2;
+                  return a;
+                };
+                const twistA = wrapAngle(avgAngle - Math.atan2(ay, ax));
+                const twistB = wrapAngle(avgAngle - Math.atan2(by, bx));
+                p.twist = Phaser.Math.Clamp(twistA, -MAX_TWIST, MAX_TWIST);
+                if (Math.abs(p.twist) < 0.001) p.twist = undefined;
+                other.points[tIdx].twist = Phaser.Math.Clamp(twistB, -MAX_TWIST, MAX_TWIST);
+                if (Math.abs(other.points[tIdx].twist ?? 0) < 0.001) other.points[tIdx].twist = undefined;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (snappedCount > 0) this.rebuildIndex();
+    return { snappedCount, widthMatched };
+  }
+
+  private findMergeCandidate(
+    road: RoadData,
+    maxDist: number,
+  ): { other: RoadData; myEnd: 'start' | 'end'; otherEnd: 'start' | 'end'; dist: number } | null {
+    if (road.closed || road.points.length < 2) return null;
+    const myLayer = road.layer ?? 0;
+    let best: { other: RoadData; myEnd: 'start' | 'end'; otherEnd: 'start' | 'end'; dist: number } | null = null;
+
+    const myEnds: Array<{ end: 'start' | 'end'; pt: RoadPoint }> = [
+      { end: 'start', pt: road.points[0] },
+      { end: 'end', pt: road.points[road.points.length - 1] },
+    ];
+
+    for (const other of this.roads) {
+      if (other.id === road.id || other.closed || other.points.length < 2) continue;
+      if (other.surface !== road.surface) continue;
+      if (!!other.oneWay !== !!road.oneWay) continue;
+      if ((other.layer ?? 0) !== myLayer) continue;
+
+      const oEnds: Array<{ end: 'start' | 'end'; pt: RoadPoint }> = [
+        { end: 'start', pt: other.points[0] },
+        { end: 'end', pt: other.points[other.points.length - 1] },
+      ];
+
+      for (const me of myEnds) {
+        for (const oe of oEnds) {
+          // One-way roads can only merge head-to-tail in matching flow direction
+          if (road.oneWay && me.end === oe.end) continue;
+          const d = Phaser.Math.Distance.Between(me.pt.x, me.pt.y, oe.pt.x, oe.pt.y);
+          if (d > maxDist) continue;
+          // Do not swallow a 3-way junction where a third road also terminates at the same joint
+          const jx = (me.pt.x + oe.pt.x) * 0.5;
+          const jy = (me.pt.y + oe.pt.y) * 0.5;
+          const thirdRoadHere = this.roads.some((third) => {
+            if (third.id === road.id || third.id === other.id || third.closed || third.points.length < 2) return false;
+            if ((third.layer ?? 0) !== myLayer) return false;
+            const s0 = third.points[0];
+            const s1 = third.points[third.points.length - 1];
+            return (
+              Phaser.Math.Distance.Between(jx, jy, s0.x, s0.y) <= 36 ||
+              Phaser.Math.Distance.Between(jx, jy, s1.x, s1.y) <= 36
+            );
+          });
+          if (thirdRoadHere) continue;
+
+          if (!best || d < best.dist) {
+            best = { other, myEnd: me.end, otherEnd: oe.end, dist: d };
+          }
+        }
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Merges `roadId` with its closest compatible adjacent open road at the shared
+   * endpoint into a single seamless spline road (removing the alignment seam).
+   */
+  public mergeAdjacentRoads(roadId: string, maxDist = 75): RoadData | null {
+    const road = this.getRoad(roadId);
+    if (!road) return null;
+    const cand = this.findMergeCandidate(road, maxDist);
+    if (!cand) return null;
+
+    const { other, myEnd, otherEnd } = cand;
+    const clonePts = (pts: RoadPoint[]) => pts.map((p) => ({ ...p }));
+
+    let head: RoadPoint[];
+    let tail: RoadPoint[];
+    if (myEnd === 'end') {
+      head = clonePts(road.points);
+      tail = otherEnd === 'start' ? clonePts(other.points) : clonePts(other.points).reverse();
+    } else {
+      head = otherEnd === 'end' ? clonePts(other.points) : clonePts(other.points).reverse();
+      tail = clonePts(road.points);
+    }
+
+    const lastHead = head[head.length - 1];
+    const firstTail = tail[0];
+    const seam: RoadPoint = {
+      x: Math.round((lastHead.x + firstTail.x) * 0.5),
+      y: Math.round((lastHead.y + firstTail.y) * 0.5),
+      w: Math.round((lastHead.w + firstTail.w) * 0.5),
+    };
+
+    const headTrimmed = head.slice(0, -1);
+    const tailTrimmed = tail.slice(1);
+    const combined: RoadPoint[] = [...headTrimmed];
+
+    const prev = combined[combined.length - 1];
+    const next = tailTrimmed[0];
+    const farFromPrev = !prev || Phaser.Math.Distance.Between(prev.x, prev.y, seam.x, seam.y) >= MIN_POINT_DIST * 0.75;
+    const farFromNext = !next || Phaser.Math.Distance.Between(next.x, next.y, seam.x, seam.y) >= MIN_POINT_DIST * 0.75;
+    if (farFromPrev && farFromNext) {
+      combined.push(seam);
+    }
+    combined.push(...tailTrimmed);
+
+    if (combined.length < 2) return null;
+    road.points = combined;
+    this.roads = this.roads.filter((r) => r.id !== other.id);
+    this.rebuildIndex();
+    return road;
   }
 
   public nudgeRoadWidth(id: string, delta: number) {
@@ -763,19 +1165,62 @@ export class RoadNetwork {
     return { samples, totalLen, rampLen, tooShort };
   }
 
-  /** Road whose carriageway is under the point (body hit test — prefers elevated bridges on overlap) */
-  public hitTestRoad(x: number, y: number, slackPx = 8): RoadData | null {
-    const top = this.query(x, y, 256, 1);
-    if (top && (top.road.layer ?? 0) >= 1 && top.dist <= top.width / 2 + slackPx) return top.road;
-    const q = this.query(x, y, 256);
-    if (q && q.dist <= q.width / 2 + slackPx) return q.road;
-    return null;
+  /** All roads whose carriageway covers (x, y), sorted by layer desc then closeness. */
+  public hitTestRoadAll(x: number, y: number, slackPx = 8): RoadData[] {
+    const hits = new Map<RoadData, { dist: number; inside: boolean; layer: number }>();
+    for (const key of this.cellsAround(x, y, 256)) {
+      const list = this.grid.get(key);
+      if (!list) continue;
+      for (const seg of list) {
+        const abx = seg.bx - seg.ax, aby = seg.by - seg.ay;
+        const len2 = abx * abx + aby * aby;
+        const t = len2 > 0 ? Phaser.Math.Clamp(((x - seg.ax) * abx + (y - seg.ay) * aby) / len2, 0, 1) : 0;
+        const px = seg.ax + abx * t, py = seg.ay + aby * t;
+        const dist = Phaser.Math.Distance.Between(x, y, px, py);
+        const halfW = (seg.wa + (seg.wb - seg.wa) * t) * 0.5;
+        if (dist > halfW + slackPx) continue;
+        const prev = hits.get(seg.road);
+        if (!prev || dist < prev.dist) {
+          hits.set(seg.road, { dist, inside: dist <= halfW, layer: seg.road.layer ?? 0 });
+        }
+      }
+    }
+    return Array.from(hits.entries())
+      .sort((a, b) => {
+        if (a[1].layer !== b[1].layer) return b[1].layer - a[1].layer;
+        if (a[1].inside !== b[1].inside) return a[1].inside ? -1 : 1;
+        return a[1].dist - b[1].dist;
+      })
+      .map((e) => e[0]);
   }
 
-  /** Nearest control-point handle under the point */
-  public hitTestHandle(x: number, y: number, slackPx = 14): { road: RoadData; index: number } | null {
+  /** Road whose carriageway is under the point (prefers `preferredRoadId` when given; or strictly filters if `strictPreferred`). */
+  public hitTestRoad(
+    x: number,
+    y: number,
+    slackPx = 8,
+    preferredRoadId?: string,
+    strictPreferred = false,
+  ): RoadData | null {
+    const all = this.hitTestRoadAll(x, y, slackPx);
+    if (preferredRoadId) {
+      const pref = all.find((r) => r.id === preferredRoadId);
+      if (pref) return pref;
+      if (strictPreferred) return null;
+    }
+    return all[0] ?? null;
+  }
+
+  /** Nearest control-point handle under the point (optionally scoped to `filterRoadId`). */
+  public hitTestHandle(
+    x: number,
+    y: number,
+    slackPx = 14,
+    filterRoadId?: string,
+  ): { road: RoadData; index: number } | null {
     let best: { road: RoadData; index: number; d: number } | null = null;
     for (const road of this.roads) {
+      if (filterRoadId && road.id !== filterRoadId) continue;
       for (let i = 0; i < road.points.length; i++) {
         const p = road.points[i];
         const d = Phaser.Math.Distance.Between(x, y, p.x, p.y);

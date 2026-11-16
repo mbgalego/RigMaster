@@ -266,8 +266,38 @@ export default function App() {
   const [addCat, setAddCat] = useState<string>('barreiras');
 
   // Road tool live state (polled from EditorScene in the telemetry loop)
-  const [roadUI, setRoadUI] = useState<{ hasSelection: boolean; hasPoint: boolean; surface: RoadSurface; width: number; drawing: boolean; twistDeg: number; oneWay: boolean; layer: number; tooShort: boolean }>({
-    hasSelection: false, hasPoint: false, surface: 'asphalt', width: 128, drawing: false, twistDeg: 0, oneWay: false, layer: 0, tooShort: false,
+  const [roadUI, setRoadUI] = useState<{
+    hasSelection: boolean;
+    hasPoint: boolean;
+    surface: RoadSurface;
+    width: number;
+    drawing: boolean;
+    twistDeg: number;
+    oneWay: boolean;
+    layer: number;
+    tooShort: boolean;
+    snapToRoads: boolean;
+    isolateSelectedRoad: boolean;
+    overlapCount: number;
+    overlapIndex: number;
+    canWeld: boolean;
+    canMerge: boolean;
+  }>({
+    hasSelection: false,
+    hasPoint: false,
+    surface: 'asphalt',
+    width: 128,
+    drawing: false,
+    twistDeg: 0,
+    oneWay: false,
+    layer: 0,
+    tooShort: false,
+    snapToRoads: true,
+    isolateSelectedRoad: false,
+    overlapCount: 0,
+    overlapIndex: 0,
+    canWeld: false,
+    canMerge: false,
   });
   // Object tool live state (polled from EditorScene in the telemetry loop)
   const [objectUI, setObjectUI] = useState<{ hasSelection: boolean; id: string; type: string; angleDeg: number; resizable: boolean; trailer: string; canPaste: boolean; rotationSnap: boolean; canUndo: boolean; isCompound: boolean; compoundPartCount: number }>({
@@ -1391,8 +1421,78 @@ export default function App() {
                     <button onClick={() => { const ed = getEditorScene(); if (ed) ed.finishPendingRoad(); }} className="shrink-0 ed-fs font-bold bg-emerald-500 text-black border border-emerald-300 hover:bg-emerald-400 px-2 py-1 rounded">Terminar</button>
                   </>
                 )}
+                <button
+                  data-testid="btn-road-snap-toggle"
+                  onClick={() => { const ed = getEditorScene(); if (ed) ed.toggleRoadSnap(); }}
+                  className={`shrink-0 ed-fs font-bold px-2 py-1 rounded border transition text-left ${
+                    roadUI.snapToRoads
+                      ? 'bg-emerald-500 text-black border-emerald-300'
+                      : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+                  }`}
+                  title="Colar automaticamente pontas, eixos em T e alinhamentos retos ao desenhar/arrastar (Shift desativa temporariamente)"
+                >
+                  {roadUI.snapToRoads ? '🧲 Colar Auto: ON' : '🧲 Colar Auto: OFF'}
+                </button>
                 {roadUI.hasSelection && !roadUI.drawing && (
-                  <button onClick={() => { const ed = getEditorScene(); if (ed) ed.deleteSelectedRoad(); }} className="shrink-0 ed-fs font-bold bg-red-500 text-white border border-red-300 hover:bg-red-400 px-2 py-1 rounded text-left">Apagar Selecionada</button>
+                  <>
+                    <button
+                      data-testid="btn-road-isolate-toggle"
+                      onClick={() => { const ed = getEditorScene(); if (ed) ed.toggleIsolateRoad(); }}
+                      className={`shrink-0 ed-fs font-bold px-2 py-1 rounded border transition text-left ${
+                        roadUI.isolateSelectedRoad
+                          ? 'bg-amber-400 text-black border-amber-200 shadow-md shadow-amber-500/20'
+                          : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+                      }`}
+                      title="Bloqueia a edição apenas a esta estrada para evitar interferir com secções vizinhas"
+                    >
+                      {roadUI.isolateSelectedRoad ? '🔒 Edição Isolada' : '🔓 Isolar Estrada'}
+                    </button>
+                    {roadUI.overlapCount > 1 && (
+                      <button
+                        data-testid="btn-road-cycle-overlap"
+                        onClick={() => { const ed = getEditorScene(); if (ed) ed.cycleOverlappingRoad(); }}
+                        className="shrink-0 ed-fs font-bold bg-sky-950/80 text-sky-300 border border-sky-500/50 hover:bg-sky-900 px-2 py-1 rounded text-left"
+                        title="Alterna entre estradas sobrepostas ou muito próximas no ponto selecionado"
+                      >
+                        ⇄ Alternar ({roadUI.overlapIndex + 1}/{roadUI.overlapCount})
+                      </button>
+                    )}
+                    <button
+                      data-testid="btn-road-weld"
+                      disabled={!roadUI.canWeld}
+                      onClick={() => {
+                        const ed = getEditorScene();
+                        if (ed) {
+                          const r = ed.weldSelectedRoadEnds();
+                          if (r.snappedCount > 0) addToast('Pontas coladas e alinhadas', 'success', 2200);
+                        }
+                      }}
+                      className={`shrink-0 ed-fs font-bold px-2 py-1 rounded border transition text-left ${
+                        roadUI.canWeld
+                          ? 'bg-cyan-500 text-black border-cyan-300 hover:bg-cyan-400'
+                          : 'bg-slate-900/50 text-slate-600 border-slate-800/60 cursor-not-allowed'
+                      }`}
+                      title="Cola automaticamente as pontas abertas às estradas vizinhas (posição, largura e tangente)"
+                    >
+                      🧲 Colar Pontas
+                    </button>
+                    {roadUI.canMerge && (
+                      <button
+                        data-testid="btn-road-merge"
+                        onClick={() => {
+                          const ed = getEditorScene();
+                          if (ed && ed.mergeSelectedWithAdjacent()) {
+                            addToast('Secções fundidas numa única estrada', 'success', 2500);
+                          }
+                        }}
+                        className="shrink-0 ed-fs font-bold bg-violet-500 text-black border border-violet-300 hover:bg-violet-400 px-2 py-1 rounded text-left"
+                        title="Funde esta estrada com a secção adjacente compatível eliminando a emenda"
+                      >
+                        🔗 Fundir Secções
+                      </button>
+                    )}
+                    <button onClick={() => { const ed = getEditorScene(); if (ed) ed.deleteSelectedRoad(); }} className="shrink-0 ed-fs font-bold bg-red-500 text-white border border-red-300 hover:bg-red-400 px-2 py-1 rounded text-left">Apagar Selecionada</button>
+                  </>
                 )}
                 {roadUI.hasSelection === false && (
                   <>

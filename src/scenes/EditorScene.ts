@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { MainScene } from './MainScene';
 import { GarageSystem } from '../systems/GarageSystem';
-import { RoadNetwork, RoadData, RoadPoint, RoadSurface } from '../systems/RoadNetwork';
+import { RoadNetwork, RoadData, RoadPoint, RoadSurface, RoadSnapResult } from '../systems/RoadNetwork';
 import { IntersectionSystem, IntersectionNode, TrafficLightSpec } from '../systems/IntersectionSystem';
 import { WorldObject, WObjType, CompoundPart, compoundParts, isCompound, compoundBoundsFromParts } from '../world/WorldObjects';
 import { World } from '../world/World';
@@ -67,6 +67,11 @@ export class EditorScene extends Phaser.Scene {
   public newRoadOneWay: boolean = false;
   public newRoadLayer: number = 0;
   private roadDirtySinceRelease: boolean = false;
+  public snapToRoads: boolean = true;
+  public isolateSelectedRoad: boolean = false;
+  private lastSnapResult: RoadSnapResult | null = null;
+  private overlappingRoads: RoadData[] = [];
+  private keyShift: Phaser.Input.Keyboard.Key | null = null;
 
   // ---- Intersection tool state ----
   public selectedIntersectionNode: IntersectionNode | null = null;
@@ -129,6 +134,9 @@ export class EditorScene extends Phaser.Scene {
     this.selectedPointIndex = null;
     this.roadDrag = null;
     this.pendingRoad = null;
+    this.isolateSelectedRoad = false;
+    this.overlappingRoads = [];
+    this.lastSnapResult = null;
     // Recria as entidades vivas dos atrelados (editor-placed trailers)
     this.mainScene.rebuildTrailers();
   }
@@ -144,6 +152,9 @@ export class EditorScene extends Phaser.Scene {
     this.selectedPointIndex = null;
     this.roadDrag = null;
     this.pendingRoad = null;
+    this.isolateSelectedRoad = false;
+    this.overlappingRoads = [];
+    this.lastSnapResult = null;
     this.mainScene.rebuildTrailers();
     this.mainScene.world.version++;
   }
@@ -324,6 +335,7 @@ export class EditorScene extends Phaser.Scene {
         this.finishCompoundDrag();
       }
       this.cancelGesture();
+      this.lastSnapResult = null;
       this.isDraggingPan = false;
       this.prevPinchDist = 0;
       if (this.roadDirtySinceRelease) {
@@ -362,6 +374,7 @@ export class EditorScene extends Phaser.Scene {
     if (!this.input.keyboard) return;
 
     this.keySpace = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    this.keyShift = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
 
     // Instant Drive Test with Tab
     this.input.keyboard.on('keydown-TAB', (e: KeyboardEvent) => {
@@ -378,6 +391,9 @@ export class EditorScene extends Phaser.Scene {
         this.pendingRoad = null;
         this.selectedRoad = null;
         this.selectedPointIndex = null;
+        this.isolateSelectedRoad = false;
+        this.overlappingRoads = [];
+        this.lastSnapResult = null;
       } else if (this.editorTool === 'object') {
         this.selectedObject = null;
       } else if (this.editorTool === 'compound') {
@@ -458,6 +474,9 @@ export class EditorScene extends Phaser.Scene {
       this.roadDrag = null;
       this.selectedRoad = null;
       this.selectedPointIndex = null;
+      this.isolateSelectedRoad = false;
+      this.overlappingRoads = [];
+      this.lastSnapResult = null;
     }
     if (tool !== 'object') {
       this.selectedObject = null;
@@ -472,13 +491,39 @@ export class EditorScene extends Phaser.Scene {
   // ROAD TOOL (draw by taps, select, drag; extend + twist on selected road)
   // ======================================================================
 
+  /** Computes snapped coordinates when auto-snap is enabled (holding Shift bypasses temporarily). */
+  private resolveSnap(
+    x: number,
+    y: number,
+    layer: number,
+    excludeRoadId?: string,
+    prevPoint?: { x: number; y: number },
+    prevPrevPoint?: { x: number; y: number },
+  ): { x: number; y: number; snap: RoadSnapResult | null } {
+    if (!this.snapToRoads || this.keyShift?.isDown) {
+      return { x: Math.round(x), y: Math.round(y), snap: null };
+    }
+    const snapDist = Phaser.Math.Clamp(22 / this.cameras.main.zoom, 16, 40);
+    const snap = this.roadNetwork.findRoadSnap(x, y, {
+      snapDist,
+      excludeRoadId,
+      layer,
+      prevPoint,
+      prevPrevPoint,
+    });
+    if (snap) return { x: snap.x, y: snap.y, snap };
+    return { x: Math.round(x), y: Math.round(y), snap: null };
+  }
+
   /** Tap action of the road tool (called on gesture release without drag). */
   private roadTap(x: number, y: number) {
-    const tol = 16 / this.cameras.main.zoom;
+    const z = this.cameras.main.zoom;
+    const handleTol = Phaser.Math.Clamp(15 / z, 10, 44);
+    const bodySlack = Phaser.Math.Clamp(8 / z, 5, 22);
 
     // Double-click / double-tap while drawing finishes the road
     const now = this.time.now;
-    const isDouble = now - this.lastClickTime < 350 && Phaser.Math.Distance.Between(x, y, this.lastClickX, this.lastClickY) < tol * 2;
+    const isDouble = now - this.lastClickTime < 350 && Phaser.Math.Distance.Between(x, y, this.lastClickX, this.lastClickY) < handleTol * 2;
     this.lastClickTime = now;
     this.lastClickX = x;
     this.lastClickY = y;
@@ -488,68 +533,135 @@ export class EditorScene extends Phaser.Scene {
         this.finishPendingRoad();
         return;
       }
-      const last = this.pendingRoad.points[this.pendingRoad.points.length - 1];
-      if (!last || Phaser.Math.Distance.Between(x, y, last.x, last.y) > 24) {
-        this.pendingRoad.points.push({ x: Math.round(x), y: Math.round(y), w: this.newRoadWidth });
+      const pts = this.pendingRoad.points;
+      const prev = pts[pts.length - 1];
+      const prevPrev = pts.length >= 2 ? pts[pts.length - 2] : undefined;
+      const res = this.resolveSnap(x, y, this.pendingRoad.layer, undefined, prev, prevPrev);
+      if (!prev || Phaser.Math.Distance.Between(res.x, res.y, prev.x, prev.y) > 24) {
+        pts.push({ x: res.x, y: res.y, w: this.newRoadWidth });
       }
       return;
     }
 
-    // Intersection node → select the node (clears road selection)
-    const node = this.intersectionSystem.getNodeAt(x, y, 30 / this.cameras.main.zoom);
-    if (node) {
-      this.selectedIntersectionNode = node;
-      this.selectedRoad = null;
-      this.selectedPointIndex = null;
-      this.roadDrag = null;
-      this.drawIntersectionOverlay();
-      return;
+    // 1. Selected road handles ALWAYS take priority over neighbouring roads & intersection nodes
+    if (this.selectedRoad) {
+      const selHandle = this.roadNetwork.hitTestHandle(x, y, handleTol, this.selectedRoad.id);
+      if (selHandle) {
+        this.selectedPointIndex = selHandle.index;
+        return;
+      }
     }
 
-    // Road body → select; double-click inserts a control point right here
-    const body = this.roadNetwork.hitTestRoad(x, y, tol * 0.5);
-    if (body) {
-      if (isDouble) {
-        const inserted = this.roadNetwork.insertPoint(x, y);
+    // 2. When isolated, all taps only operate on the selected road (never switch or accidentally clear)
+    if (this.isolateSelectedRoad && this.selectedRoad) {
+      if (isDouble && this.roadNetwork.hitTestRoad(x, y, bodySlack, this.selectedRoad.id, true)) {
+        this.pushUndo();
+        const inserted = this.roadNetwork.insertPoint(x, y, this.selectedRoad.id, true);
         if (inserted) {
           this.selectedRoad = inserted.road;
           this.selectedPointIndex = inserted.index;
+          this.mainScene.world.version++;
+        }
+      } else if (this.roadNetwork.hitTestRoad(x, y, bodySlack, this.selectedRoad.id, true)) {
+        this.selectedPointIndex = null;
+      }
+      return;
+    }
+
+    // 3. Intersection node (only when NOT tapping any control-point handle)
+    const anyHandle = this.roadNetwork.hitTestHandle(x, y, handleTol);
+    if (!anyHandle) {
+      const nodeTol = Phaser.Math.Clamp(16 / z, 10, 28);
+      const node = this.intersectionSystem.getNodeAt(x, y, nodeTol);
+      if (node) {
+        this.selectedIntersectionNode = node;
+        this.selectedRoad = null;
+        this.selectedPointIndex = null;
+        this.overlappingRoads = [];
+        this.roadDrag = null;
+        this.drawIntersectionOverlay();
+        return;
+      }
+    }
+
+    // 4. Road body → select (stick to current selectedRoad if cursor is also on it;
+    //    double-click inserts a control point right onto the active road)
+    const candidates = this.roadNetwork.hitTestRoadAll(x, y, bodySlack);
+    if (candidates.length > 0) {
+      this.overlappingRoads = candidates;
+      this.selectedIntersectionNode = null;
+      this.drawIntersectionOverlay();
+
+      const activeCandidate = this.selectedRoad && candidates.some((r) => r.id === this.selectedRoad!.id)
+        ? this.selectedRoad
+        : candidates[0];
+
+      if (isDouble) {
+        this.pushUndo();
+        const inserted = this.roadNetwork.insertPoint(x, y, activeCandidate.id, true);
+        if (inserted) {
+          this.selectedRoad = inserted.road;
+          this.selectedPointIndex = inserted.index;
+          this.mainScene.world.version++;
         }
         this.roadDrag = null;
         return;
       }
-      this.selectedRoad = body;
-      this.selectedPointIndex = null;
+
+      if (this.selectedRoad !== activeCandidate) {
+        this.selectedRoad = activeCandidate;
+        this.selectedPointIndex = null;
+      } else if (anyHandle && anyHandle.road.id === activeCandidate.id) {
+        this.selectedPointIndex = anyHandle.index;
+      } else {
+        this.selectedPointIndex = null;
+      }
       return;
     }
 
-    // Empty ground → start a new road (first point)
+    // 5. Handle outside carriageway bounds → select that road & handle
+    if (anyHandle) {
+      this.selectedRoad = anyHandle.road;
+      this.selectedPointIndex = anyHandle.index;
+      this.overlappingRoads = [anyHandle.road];
+      return;
+    }
+
+    // 6. Empty ground → start a new road (snaps start cleanly if near another road end/axis)
     this.selectedRoad = null;
     this.selectedPointIndex = null;
-    this.pendingRoad = { surface: this.newRoadSurface, points: [{ x: Math.round(x), y: Math.round(y), w: this.newRoadWidth }], oneWay: this.newRoadOneWay, layer: this.newRoadLayer };
+    this.overlappingRoads = [];
+    this.isolateSelectedRoad = false;
+    const startSnap = this.resolveSnap(x, y, this.newRoadLayer);
+    this.pendingRoad = {
+      surface: this.newRoadSurface,
+      points: [{ x: startSnap.x, y: startSnap.y, w: this.newRoadWidth }],
+      oneWay: this.newRoadOneWay,
+      layer: this.newRoadLayer,
+    };
   }
 
   /** Begins a road drag when the press started on a handle or a road body. */
   private tryStartRoadDrag(x: number, y: number): boolean {
-    const tol = 16 / this.cameras.main.zoom;
+    const z = this.cameras.main.zoom;
+    const handleTol = Phaser.Math.Clamp(15 / z, 10, 44);
+    const bodySlack = Phaser.Math.Clamp(8 / z, 5, 22);
 
-    // Never start a road drag from an intersection node
-    if (this.intersectionSystem.getNodeAt(x, y, 30 / this.cameras.main.zoom)) return false;
-
-    // 1. Width handle of the selected road (edits this section's width exactly)
+    // 1. Selected road handles ALWAYS take priority over adjacent roads & intersections
     if (this.selectedRoad) {
-      const wi = this.roadNetwork.hitTestWidthHandle(this.selectedRoad, x, y, tol);
+      const wi = this.roadNetwork.hitTestWidthHandle(this.selectedRoad, x, y, handleTol);
       if (wi !== null) {
+        this.pushUndo();
         this.selectedPointIndex = wi;
         this.roadDrag = { road: this.selectedRoad, kind: 'width', index: wi, grabX: x, grabY: y };
         return true;
       }
 
-      // 2. Extend handles at the open ends of the selected road
       if (!this.selectedRoad.closed && this.selectedRoad.points.length >= 2) {
         for (const which of ['start', 'end'] as const) {
           const hp = RoadNetwork.extendHandlePos(this.selectedRoad, which);
-          if (Phaser.Math.Distance.Between(x, y, hp.x, hp.y) <= tol) {
+          if (Phaser.Math.Distance.Between(x, y, hp.x, hp.y) <= handleTol) {
+            this.pushUndo();
             const end = which === 'end'
               ? this.selectedRoad.points[this.selectedRoad.points.length - 1]
               : this.selectedRoad.points[0];
@@ -566,30 +678,55 @@ export class EditorScene extends Phaser.Scene {
         }
       }
 
-      // 3. Twist handle of the selected point (edge direction adjustment)
       if (this.selectedPointIndex !== null) {
         const tp = this.twistHandlePos(this.selectedRoad, this.selectedPointIndex);
-        if (tp && Phaser.Math.Distance.Between(x, y, tp.x, tp.y) <= tol) {
+        if (tp && Phaser.Math.Distance.Between(x, y, tp.x, tp.y) <= handleTol) {
+          this.pushUndo();
           this.roadDrag = { road: this.selectedRoad, kind: 'twist', index: this.selectedPointIndex, grabX: x, grabY: y };
           return true;
         }
       }
+
+      // Control-point handle on the selected road (strictly prioritised over neighbouring roads)
+      const selPt = this.roadNetwork.hitTestHandle(x, y, handleTol, this.selectedRoad.id);
+      if (selPt) {
+        this.pushUndo();
+        this.selectedPointIndex = selPt.index;
+        this.roadDrag = { road: this.selectedRoad, kind: 'point', index: selPt.index, grabX: x, grabY: y };
+        return true;
+      }
+
+      // Body of the selected road (protects against grabbing an overlapping road handle/body underneath)
+      const selBody = this.roadNetwork.hitTestRoad(x, y, bodySlack, this.selectedRoad.id, true);
+      if (selBody) {
+        this.pushUndo();
+        this.roadDrag = { road: selBody, kind: 'road', index: null, grabX: x, grabY: y };
+        return true;
+      }
+
+      // In isolated mode, never touch any other road
+      if (this.isolateSelectedRoad) return false;
     }
 
-    // 4. Position handle of any road (nearest within tolerance)
-    const handle = this.roadNetwork.hitTestHandle(x, y, tol);
+    // 2. Position handle of any road (nearest within tolerance)
+    const handle = this.roadNetwork.hitTestHandle(x, y, handleTol);
     if (handle) {
+      this.pushUndo();
       this.selectedRoad = handle.road;
       this.selectedPointIndex = handle.index;
+      this.overlappingRoads = [handle.road];
       this.roadDrag = { road: handle.road, kind: 'point', index: handle.index, grabX: x, grabY: y };
       return true;
     }
 
-    // 5. Road body → select + drag the whole road from this grab point
-    const body = this.roadNetwork.hitTestRoad(x, y, tol * 0.5);
+    // 3. Road body → select + drag the whole road from this grab point
+    const candidates = this.roadNetwork.hitTestRoadAll(x, y, bodySlack);
+    const body = candidates[0] ?? null;
     if (body) {
+      this.pushUndo();
       this.selectedRoad = body;
       this.selectedPointIndex = null;
+      this.overlappingRoads = candidates;
       this.roadDrag = { road: body, kind: 'road', index: null, grabX: x, grabY: y };
       return true;
     }
@@ -609,7 +746,23 @@ export class EditorScene extends Phaser.Scene {
         this.roadNetwork.setPointWidth(d.road.id, d.index, proj);
       }
     } else if (d.kind === 'point' && d.index !== null) {
-      this.roadNetwork.movePoint(d.road.id, d.index, Math.round(wp.x), Math.round(wp.y));
+      const pts = d.road.points;
+      const n = pts.length;
+      const idx = d.index;
+      let prevPt: { x: number; y: number } | undefined;
+      let prevPrevPt: { x: number; y: number } | undefined;
+      if (!d.road.closed && n >= 2) {
+        if (idx === n - 1) {
+          prevPt = pts[idx - 1];
+          if (n >= 3) prevPrevPt = pts[idx - 2];
+        } else if (idx === 0) {
+          prevPt = pts[1];
+          if (n >= 3) prevPrevPt = pts[2];
+        }
+      }
+      const res = this.resolveSnap(wp.x, wp.y, d.road.layer ?? 0, d.road.id, prevPt, prevPrevPt);
+      this.lastSnapResult = res.snap;
+      this.roadNetwork.movePoint(d.road.id, idx, res.x, res.y);
     } else if (d.kind === 'twist' && d.index !== null) {
       const p = d.road.points[d.index];
       if (p) {
@@ -634,11 +787,14 @@ export class EditorScene extends Phaser.Scene {
   public finishPendingRoad() {
     if (!this.pendingRoad) return;
     if (this.pendingRoad.points.length >= 2) {
+      this.pushUndo();
       const road = this.roadNetwork.addRoad(this.pendingRoad.surface, this.pendingRoad.points, false, this.pendingRoad.oneWay, this.pendingRoad.layer);
       this.selectedRoad = road;
+      this.overlappingRoads = [road];
     }
     this.pendingRoad = null;
     this.selectedPointIndex = null;
+    this.lastSnapResult = null;
     this.mainScene.world.version++;
   }
 
@@ -650,16 +806,20 @@ export class EditorScene extends Phaser.Scene {
 
   public deleteSelectedRoad() {
     if (!this.selectedRoad) return;
+    this.pushUndo();
     this.roadNetwork.removeRoad(this.selectedRoad.id);
     this.selectedRoad = null;
     this.selectedPointIndex = null;
     this.roadDrag = null;
+    this.isolateSelectedRoad = false;
+    this.overlappingRoads = [];
     this.mainScene.world.version++;
   }
 
   public setRoadSurface(surface: RoadSurface) {
     this.newRoadSurface = surface;
     if (this.selectedRoad) {
+      this.pushUndo();
       this.roadNetwork.setRoadSurface(this.selectedRoad.id, surface);
       this.mainScene.world.version++;
     }
@@ -669,10 +829,12 @@ export class EditorScene extends Phaser.Scene {
     if (this.selectedRoad && this.selectedPointIndex !== null) {
       const p = this.selectedRoad.points[this.selectedPointIndex];
       if (p) {
+        this.pushUndo();
         this.roadNetwork.setPointWidth(this.selectedRoad.id, this.selectedPointIndex, p.w + delta);
         this.mainScene.world.version++;
       }
     } else if (this.selectedRoad) {
+      this.pushUndo();
       this.roadNetwork.nudgeRoadWidth(this.selectedRoad.id, delta);
       this.mainScene.world.version++;
     } else {
@@ -693,6 +855,7 @@ export class EditorScene extends Phaser.Scene {
   public setRoadOneWay(oneWay: boolean) {
     this.newRoadOneWay = oneWay;
     if (this.selectedRoad) {
+      this.pushUndo();
       this.roadNetwork.setRoadOneWay(this.selectedRoad.id, oneWay);
       this.mainScene.world.version++;
     }
@@ -706,6 +869,7 @@ export class EditorScene extends Phaser.Scene {
       this.pendingRoad.layer = nextLayer;
     }
     if (this.selectedRoad) {
+      this.pushUndo();
       this.roadNetwork.setRoadLayer(this.selectedRoad.id, nextLayer);
       this.mainScene.world.version++;
     }
@@ -715,17 +879,81 @@ export class EditorScene extends Phaser.Scene {
     if (!this.selectedRoad || this.selectedPointIndex === null) return;
     const p = this.selectedRoad.points[this.selectedPointIndex];
     if (!p) return;
+    this.pushUndo();
     this.roadNetwork.setPointTwist(this.selectedRoad.id, this.selectedPointIndex, (p.twist ?? 0) + Phaser.Math.DegToRad(deltaDeg));
     this.mainScene.world.version++;
   }
 
   public resetTwist() {
     if (!this.selectedRoad || this.selectedPointIndex === null) return;
+    this.pushUndo();
     this.roadNetwork.setPointTwist(this.selectedRoad.id, this.selectedPointIndex, 0);
     this.mainScene.world.version++;
   }
 
-  public getRoadUIState(): { hasSelection: boolean; hasPoint: boolean; surface: RoadSurface; width: number; drawing: boolean; twistDeg: number; oneWay: boolean; layer: number; tooShort: boolean } {
+  public toggleRoadSnap() {
+    this.snapToRoads = !this.snapToRoads;
+    this.lastSnapResult = null;
+  }
+
+  public toggleIsolateRoad() {
+    if (!this.selectedRoad) {
+      this.isolateSelectedRoad = false;
+      return;
+    }
+    this.isolateSelectedRoad = !this.isolateSelectedRoad;
+  }
+
+  public cycleOverlappingRoad() {
+    if (this.overlappingRoads.length < 2) return;
+    const curIdx = this.selectedRoad ? this.overlappingRoads.findIndex((r) => r.id === this.selectedRoad!.id) : -1;
+    const next = this.overlappingRoads[(curIdx + 1) % this.overlappingRoads.length];
+    this.selectedRoad = next;
+    this.selectedPointIndex = null;
+    this.roadDrag = null;
+  }
+
+  public weldSelectedRoadEnds(): { snappedCount: number; widthMatched: boolean } {
+    if (!this.selectedRoad) return { snappedCount: 0, widthMatched: false };
+    const status = this.roadNetwork.canWeldRoadEnds(this.selectedRoad.id, 90);
+    if (!status.hasWeldTarget) return { snappedCount: 0, widthMatched: false };
+    this.pushUndo();
+    const res = this.roadNetwork.weldRoadEndpoints(this.selectedRoad.id, 90);
+    if (res.snappedCount > 0) this.mainScene.world.version++;
+    return res;
+  }
+
+  public mergeSelectedWithAdjacent(): boolean {
+    if (!this.selectedRoad) return false;
+    const status = this.roadNetwork.canWeldRoadEnds(this.selectedRoad.id, 75);
+    if (!status.hasMergeTarget) return false;
+    this.pushUndo();
+    const merged = this.roadNetwork.mergeAdjacentRoads(this.selectedRoad.id, 75);
+    if (!merged) return false;
+    this.selectedRoad = merged;
+    this.selectedPointIndex = null;
+    this.overlappingRoads = [merged];
+    this.mainScene.world.version++;
+    return true;
+  }
+
+  public getRoadUIState(): {
+    hasSelection: boolean;
+    hasPoint: boolean;
+    surface: RoadSurface;
+    width: number;
+    drawing: boolean;
+    twistDeg: number;
+    oneWay: boolean;
+    layer: number;
+    tooShort: boolean;
+    snapToRoads: boolean;
+    isolateSelectedRoad: boolean;
+    overlapCount: number;
+    overlapIndex: number;
+    canWeld: boolean;
+    canMerge: boolean;
+  } {
     const selPoint = this.selectedRoad && this.selectedPointIndex !== null ? this.selectedRoad.points[this.selectedPointIndex] : null;
     const layer = this.selectedRoad
       ? (this.selectedRoad.layer ?? 0)
@@ -748,6 +976,12 @@ export class EditorScene extends Phaser.Scene {
         tooShort = b.tooShort;
       }
     }
+    const weldState = this.selectedRoad
+      ? this.roadNetwork.canWeldRoadEnds(this.selectedRoad.id, 90)
+      : { hasWeldTarget: false, hasMergeTarget: false };
+    const overlapIndex = this.selectedRoad
+      ? Math.max(0, this.overlappingRoads.findIndex((r) => r.id === this.selectedRoad!.id))
+      : 0;
     return {
       hasSelection: !!this.selectedRoad,
       hasPoint: !!selPoint,
@@ -758,6 +992,12 @@ export class EditorScene extends Phaser.Scene {
       oneWay: this.selectedRoad ? !!this.selectedRoad.oneWay : this.newRoadOneWay,
       layer,
       tooShort,
+      snapToRoads: this.snapToRoads,
+      isolateSelectedRoad: this.isolateSelectedRoad,
+      overlapCount: this.overlappingRoads.length,
+      overlapIndex,
+      canWeld: weldState.hasWeldTarget,
+      canMerge: weldState.hasMergeTarget,
     };
   }
 
@@ -1498,15 +1738,62 @@ export class EditorScene extends Phaser.Scene {
     g.closePath();
   }
 
+  private drawSnapMarker(g: Phaser.GameObjects.Graphics, z: number, snap: RoadSnapResult | null) {
+    if (!snap) return;
+    const isAlign = snap.kind === 'align';
+    const col = snap.kind === 'endpoint' ? 0x34d058 : snap.kind === 'centerline' ? 0x22d3ee : 0xfacc15;
+    if (isAlign && snap.guideFrom) {
+      g.lineStyle(1.5 / z, col, 0.75);
+      g.beginPath();
+      g.moveTo(snap.guideFrom.x, snap.guideFrom.y);
+      g.lineTo(snap.x, snap.y);
+      g.strokePath();
+    }
+    const r = 10 / z;
+    g.lineStyle(2.5 / z, col, 0.95);
+    g.beginPath();
+    g.arc(snap.x, snap.y, r, 0, Math.PI * 2);
+    g.strokePath();
+    g.fillStyle(col, 0.3);
+    g.fillCircle(snap.x, snap.y, r * 0.65);
+  }
+
   private drawRoadSelection(g: Phaser.GameObjects.Graphics, z: number) {
+    // Draw subtle section seams & endpoints for non-selected roads in view so adjacent sections are clearly distinguishable
+    const view = this.cameras.main.worldView;
+    const m = 220;
+    const neighborAlpha = this.isolateSelectedRoad ? 0.16 : 0.42;
+    for (const r of this.roadNetwork.roads) {
+      if (r === this.selectedRoad || r.points.length < 2) continue;
+      const inBounds = r.points.some(
+        (p) => p.x >= view.x - m && p.x <= view.x + view.width + m && p.y >= view.y - m && p.y <= view.y + view.height + m,
+      );
+      if (!inBounds) continue;
+      const pts = r.points;
+      g.lineStyle(1.2 / z, 0x94a3b8, neighborAlpha * 0.6);
+      g.beginPath();
+      pts.forEach((pt, idx) => (idx === 0 ? g.moveTo(pt.x, pt.y) : g.lineTo(pt.x, pt.y)));
+      if (r.closed) g.closePath();
+      g.strokePath();
+      const dotR = 3.5 / z;
+      for (let i = 0; i < pts.length; i++) {
+        const isEnd = !r.closed && (i === 0 || i === pts.length - 1);
+        g.fillStyle(isEnd ? 0x38bdf8 : 0x94a3b8, neighborAlpha);
+        g.fillCircle(pts[i].x, pts[i].y, isEnd ? dotR * 1.25 : dotR * 0.85);
+      }
+    }
+
     const road = this.selectedRoad;
-    if (!road) return;
+    if (!road) {
+      this.drawSnapMarker(g, z, this.lastSnapResult);
+      return;
+    }
     const isBridge = (road.layer ?? 0) > 0;
     const bridgeSamples = isBridge ? RoadNetwork.sampleBridgeRoad(road, 26).samples : null;
     const samples = bridgeSamples ?? RoadNetwork.sampleRoad(road, 26);
     if (samples.length === 0) return;
 
-    // Outline along both ribbon edges (bridges highlight ramps in amber, deck in cyan)
+    // Outline along both ribbon edges (bridges highlight ramps in amber, deck in cyan; isolated gets outer gold halo)
     if (bridgeSamples && bridgeSamples.length >= 2) {
       for (const side of [-1, 1]) {
         for (let i = 0; i < bridgeSamples.length - 1; i++) {
@@ -1522,7 +1809,7 @@ export class EditorScene extends Phaser.Scene {
         }
       }
     } else {
-      g.lineStyle(2 / z, 0x00f0ff, 0.9);
+      g.lineStyle(this.isolateSelectedRoad ? 3 / z : 2 / z, this.isolateSelectedRoad ? 0xfacc15 : 0x00f0ff, 0.92);
       for (const side of [-1, 1]) {
         g.beginPath();
         samples.forEach((s, i) => {
@@ -1604,16 +1891,29 @@ export class EditorScene extends Phaser.Scene {
         g.strokePath();
       }
     }
+
+    this.drawSnapMarker(g, z, this.lastSnapResult);
   }
 
   private drawRoadPreview(g: Phaser.GameObjects.Graphics, z: number) {
     if (!this.pendingRoad) return;
+    const pts = this.pendingRoad.points;
+    const prev = pts[pts.length - 1];
+    const prevPrev = pts.length >= 2 ? pts[pts.length - 2] : undefined;
+    const snapped = this.resolveSnap(
+      this.pointerWorld.x,
+      this.pointerWorld.y,
+      this.pendingRoad.layer,
+      undefined,
+      prev,
+      prevPrev,
+    );
     const preview: RoadData = {
       id: '_preview',
       surface: this.pendingRoad.surface,
       closed: false,
       layer: this.pendingRoad.layer,
-      points: [...this.pendingRoad.points, { x: this.pointerWorld.x, y: this.pointerWorld.y, w: this.newRoadWidth }],
+      points: [...pts, { x: snapped.x, y: snapped.y, w: this.newRoadWidth }],
     };
     const isBridge = this.pendingRoad.layer > 0;
     const samples = isBridge ? RoadNetwork.sampleBridgeRoad(preview, 26).samples : RoadNetwork.sampleRoad(preview, 26);
@@ -1641,10 +1941,12 @@ export class EditorScene extends Phaser.Scene {
     }
 
     const hs = 7 / z;
-    for (const p of this.pendingRoad.points) {
+    for (const p of pts) {
       g.fillStyle(col, 1);
       g.fillRect(p.x - hs / 2, p.y - hs / 2, hs, hs);
     }
+
+    this.drawSnapMarker(g, z, snapped.snap);
 
     // Intersection overlay (nodes, arms, phases)
     this.drawIntersectionOverlay();
