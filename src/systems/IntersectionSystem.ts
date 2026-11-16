@@ -187,7 +187,23 @@ export class IntersectionSystem {
       for (let j = i + 1; j < roads.length; j++) {
         const roadB = roads[j];
         const layerB = roadB.layer ?? 0;
-        if (layerA !== layerB) continue; // different levels → no at-grade intersection
+        if (layerA !== layerB) {
+          // Different levels never intersect mid-span, EXCEPT ground ramp portals
+          // (first and last control points of an open bridge road, which sit at z = 0).
+          const groundRoad = layerA === 0 ? roadA : layerB === 0 ? roadB : null;
+          const bridgeRoad = layerA > 0 ? roadA : layerB > 0 ? roadB : null;
+          if (groundRoad && bridgeRoad && !bridgeRoad.closed && bridgeRoad.points.length >= 2) {
+            const portals = [bridgeRoad.points[0], bridgeRoad.points[bridgeRoad.points.length - 1]];
+            for (const p of portals) {
+              const nearest = pointToSegmentNearestOnRoad(groundRoad, p.x, p.y);
+              if (nearest && nearest.dist <= nearest.width / 2 + 8) {
+                rawPoints.push({ x: p.x, y: p.y, layer: 0, roadId: bridgeRoad.id, pointIndex: -1, exitAngle: 0 });
+                rawPoints.push({ x: nearest.x, y: nearest.y, layer: 0, roadId: groundRoad.id, pointIndex: -1, exitAngle: 0 });
+              }
+            }
+          }
+          continue;
+        }
 
         const samplesB = RoadNetwork.sampleRoad(roadB, 24);
 

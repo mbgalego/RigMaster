@@ -7,7 +7,6 @@ import {
   destroyGame,
 } from './main';
 import { MainScene } from './scenes/MainScene';
-import { World } from './world/World';
 import { LicenseSystem, LicenseInfo, ExamStatus, LicenseId } from './systems/LicenseSystem';
 import { GarageSystem, HubData, WeatherModifier } from './systems/GarageSystem';
 import { TimeOfDaySystem, TimePeriod } from './systems/TimeOfDaySystem';
@@ -145,9 +144,17 @@ const CREATE_CATALOG: Array<{
     label: 'Piso',
     icon: DoorOpen,
     items: [
+      { spec: { type: 'road_entry', w: 140, h: 160, params: { lanes: 1 }, label: 'Entrada Estrada (1 Faixa)' }, icon: DoorOpen },
+      { spec: { type: 'road_entry', w: 220, h: 180, params: { lanes: 2 }, label: 'Entrada Estrada (2 Faixas)' }, icon: Route },
+      { spec: { type: 'road_entry', w: 240, h: 190, params: { lanes: 2, island: true }, label: 'Entrada Estrada c/ Ilha' }, icon: Route },
+      { spec: { type: 'road_entry_y', w: 320, h: 240, params: { lanes: 1 }, label: 'Entrada Y (1 Faixa)' }, icon: Route },
+      { spec: { type: 'road_entry_y', w: 420, h: 280, params: { lanes: 2 }, label: 'Entrada Y (2 Faixas)' }, icon: Route },
+      { spec: { type: 'road_turnout', w: 440, h: 120, params: { layout: 'layby' }, label: 'Desvio Lateral (Baia)' }, icon: Route },
+      { spec: { type: 'road_turnout', w: 520, h: 110, params: { layout: 'parallel' }, label: 'Estac. Paralelo (Berma)' }, icon: CarFront },
+      { spec: { type: 'road_turnout', w: 480, h: 190, params: { layout: 'perpendicular' }, label: 'Estac. Perpendicular (90°)' }, icon: CarFront },
+      { spec: { type: 'road_turnout', w: 500, h: 170, params: { layout: 'diagonal' }, label: 'Estac. Diagonal (45°)' }, icon: CarFront },
+      { spec: { type: 'road_turnout', w: 620, h: 250, params: { layout: 'diagonal_truck' }, label: 'Estac. Diagonal Camiões' }, icon: Truck },
       { spec: { type: 'entrance', w: 140, h: 220, label: 'Entrada' }, icon: DoorOpen },
-      { spec: { type: 'entrance_y', w: 360, h: 420, params: { mark: 'green' }, label: 'Entrada em Y' }, icon: Route },
-      { spec: { type: 'entrance_y', w: 360, h: 420, params: { mark: 'red' }, label: 'Entrada em Y (Vermelha)' }, icon: Route },
       { spec: { type: 'entrance_gas', w: 220, h: 300, params: { pumps: 1 }, label: 'Entrada Posto' }, icon: Fuel },
       { spec: { type: 'entrance_gas', w: 320, h: 300, params: { pumps: 2 }, label: 'Entrada Posto 2 Bombas' }, icon: Fuel },
       { spec: { type: 'crosswalk', w: 36, h: 170, label: 'Passadeira' }, icon: Equal },
@@ -245,8 +252,6 @@ export default function App() {
   const [showLicenseModal, setShowLicenseModal] = useState<boolean>(false);
   const [showGarageModal, setShowGarageModal] = useState<boolean>(false);
   const [showJsonModal, setShowJsonModal] = useState<boolean>(false);
-  // Editor draft found in localStorage → offer to restore (never auto-applied)
-  const [pendingDraft, setPendingDraft] = useState<boolean>(() => World.hasDraft());
   const [jsonContent, setJsonContent] = useState<string>('');
   const [jsonError, setJsonError] = useState<string | null>(null);
 
@@ -261,8 +266,8 @@ export default function App() {
   const [addCat, setAddCat] = useState<string>('barreiras');
 
   // Road tool live state (polled from EditorScene in the telemetry loop)
-  const [roadUI, setRoadUI] = useState<{ hasSelection: boolean; hasPoint: boolean; surface: RoadSurface; width: number; drawing: boolean; twistDeg: number; oneWay: boolean }>({
-    hasSelection: false, hasPoint: false, surface: 'asphalt', width: 128, drawing: false, twistDeg: 0, oneWay: false,
+  const [roadUI, setRoadUI] = useState<{ hasSelection: boolean; hasPoint: boolean; surface: RoadSurface; width: number; drawing: boolean; twistDeg: number; oneWay: boolean; layer: number; tooShort: boolean }>({
+    hasSelection: false, hasPoint: false, surface: 'asphalt', width: 128, drawing: false, twistDeg: 0, oneWay: false, layer: 0, tooShort: false,
   });
   // Object tool live state (polled from EditorScene in the telemetry loop)
   const [objectUI, setObjectUI] = useState<{ hasSelection: boolean; id: string; type: string; angleDeg: number; resizable: boolean; trailer: string; canPaste: boolean; rotationSnap: boolean; canUndo: boolean; isCompound: boolean; compoundPartCount: number }>({
@@ -400,6 +405,10 @@ export default function App() {
       const scene = getMainScene();
       const edScene = getEditorScene();
       if (scene) {
+        if (scene.world?.restoredFromDraft) {
+          scene.world.restoredFromDraft = false;
+          addToast('Mapa restaurado a partir do browser storage', 'success', 4000);
+        }
         setTelemetry({ ...scene.telemetry });
         setIsEditorMode(scene.isEditorMode);
         setActiveExam(licSys.getActiveExam());
@@ -656,23 +665,6 @@ export default function App() {
       scene.reseedWorld();
       handleReset();
     }
-  };
-
-  // Editor draft (localStorage autosave) restore / discard
-  const handleRestoreDraft = () => {
-    const scene = getMainScene();
-    if (scene && scene.world.restoreDraft()) {
-      scene.rebuildTrailers();
-      setPendingDraft(false);
-    } else {
-      World.clearDraft();
-      setPendingDraft(false);
-    }
-  };
-
-  const handleDiscardDraft = () => {
-    World.clearDraft();
-    setPendingDraft(false);
   };
 
   // Relógio 24h no HUD superior segue o período atual do ciclo dia/noite
@@ -1362,6 +1354,23 @@ export default function App() {
                 >
                   {roadUI.oneWay ? '→ 1 Sentido' : '⇄ 2 Sentidos'}
                 </button>
+                <button
+                  data-testid="btn-road-layer-toggle"
+                  onClick={() => { const ed = getEditorScene(); if (ed) ed.setRoadLayer(roadUI.layer > 0 ? 0 : 1); }}
+                  className={`shrink-0 ed-fs font-bold px-2 py-1 rounded border transition text-left ${
+                    roadUI.layer > 0
+                      ? 'bg-amber-500 text-black border-amber-300 shadow-md shadow-amber-500/20'
+                      : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+                  }`}
+                  title="Alternar entre Estrada no Solo (Piso 0) e Ponte/Viaduto com rampas automáticas (Piso 1)"
+                >
+                  {roadUI.layer > 0 ? '🌉 Viaduto (Piso 1)' : '🛣️ Solo (Piso 0)'}
+                </button>
+                {roadUI.layer > 0 && roadUI.tooShort && (
+                  <div className="shrink-0 ed-fs-sm font-bold text-amber-300 bg-amber-950/60 border border-amber-500/40 rounded px-2 py-1">
+                    Ponte curta — rampas ajustadas automaticamente
+                  </div>
+                )}
                 <div className="shrink-0 flex items-center gap-1 bg-slate-900 border border-sky-800 rounded px-1 py-0.5 shrink-0">
                   <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeRoadWidth(-16); }} className="text-slate-300 hover:text-white px-1 font-black ed-fs-lg" title="Reduzir largura">−</button>
                   <span className="ed-fs font-bold text-slate-200 w-12 text-center">{roadUI.hasPoint ? 'Secção ' : ''}{Math.round(roadUI.width)}px</span>
@@ -1892,28 +1901,6 @@ export default function App() {
       )}
 
       {/* JSON EXPORT & IMPORT MODAL */}
-      {/* EDITOR DRAFT BANNER (autosave found in localStorage — restore is explicit) */}
-      {pendingDraft && !modalOpen && (
-        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-50 bg-slate-950/90 backdrop-blur-md border border-amber-500/50 rounded-lg shadow-lg shadow-black/50 px-3 py-2 flex items-center gap-3">
-          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-          <span className="text-[11px] text-slate-200 font-semibold whitespace-nowrap">
-            Rascunho do editor guardado encontrado
-          </span>
-          <button
-            onClick={handleRestoreDraft}
-            className="px-2.5 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/60 text-amber-300 text-[11px] font-bold flex items-center gap-1.5"
-          >
-            <RotateCcw className="w-3 h-3" /> Restaurar
-          </button>
-          <button
-            onClick={handleDiscardDraft}
-            className="px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 text-[11px] font-bold"
-          >
-            Descartar
-          </button>
-        </div>
-      )}
-
       {showJsonModal && (
         <div className="absolute inset-0 bg-black/75 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
           <div className="bg-slate-950 border border-slate-700 max-w-2xl w-full rounded-2xl shadow-2xl p-6 flex flex-col max-h-[90vh]">

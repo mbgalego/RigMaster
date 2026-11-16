@@ -46,6 +46,37 @@ export interface RoadSample {
   /** Unit tangent */
   tx: number;
   ty: number;
+  /** Vertical elevation along bridge/ramp: 0 = ground, 1 = elevated deck */
+  z?: number;
+  /** Cumulative arc length in px from start of road */
+  s?: number;
+}
+
+export interface BridgeSample extends RoadSample {
+  z: number;
+  s: number;
+}
+
+export interface BridgeBarrierSegment {
+  kind: 'ramp_wall' | 'deck_rail';
+  x: number;
+  y: number;
+  length: number;
+  thickness: number;
+  angle: number;
+  roadId: string;
+}
+
+export interface BridgeRoadCache {
+  road: RoadData;
+  samples: BridgeSample[];
+  totalLen: number;
+  rampLen: number;
+  tooShort: boolean;
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
 }
 
 interface RoadSegment {
@@ -93,14 +124,26 @@ export class RoadNetwork {
 
   private segments: RoadSegment[] = [];
   private grid: Map<string, RoadSegment[]> = new Map();
+  private bridgeCaches: BridgeRoadCache[] = [];
+  private bridgeBarriers: BridgeBarrierSegment[] = [];
   private nextId: number = 1;
+
+  public static readonly BRIDGE_DEFAULT_RAMP_LEN = 180;
+  public static readonly BRIDGE_MIN_RECOMMENDED_LEN = 260;
 
   // ======================================================================
   // DATA EDITING
   // ======================================================================
 
-  public addRoad(surface: RoadSurface, points: RoadPoint[], closed = false, oneWay = false): RoadData {
-    const road: RoadData = { id: `rd_${this.nextId++}`, surface, closed, ...(oneWay ? { oneWay: true } : {}), points };
+  public addRoad(surface: RoadSurface, points: RoadPoint[], closed = false, oneWay = false, layer = 0): RoadData {
+    const road: RoadData = {
+      id: `rd_${this.nextId++}`,
+      surface,
+      closed,
+      ...(oneWay ? { oneWay: true } : {}),
+      ...(layer ? { layer } : {}),
+      points,
+    };
     this.roads.push(road);
     this.rebuildIndex();
     return road;
@@ -164,6 +207,14 @@ export class RoadNetwork {
     if (!road) return;
     if (oneWay) road.oneWay = true;
     else delete road.oneWay;
+    this.rebuildIndex();
+  }
+
+  public setRoadLayer(id: string, layer: number) {
+    const road = this.getRoad(id);
+    if (!road) return;
+    if (layer > 0) road.layer = Math.round(layer);
+    else delete road.layer;
     this.rebuildIndex();
   }
 
@@ -299,15 +350,106 @@ export class RoadNetwork {
         }
       }
     }
+    // Build elevated bridge caches (used for rendering, vehicle elevation & intersections)
+    this.rebuildBridgeCaches();
     this.version++;
 
     // Recompute intersection nodes whenever the network topology changes
     IntersectionSystem.getInstance().rebuild(this);
+    // Build ramp walls & deck guardrails after intersections so ramp portals
+    // clear any perpendicular ground road carriageway they connect to
+    this.rebuildBridgeBarriers();
   }
 
   /** Manually trigger intersection-node recomputation (useful after batch edits). */
   public rebuildIntersections(): void {
     IntersectionSystem.getInstance().rebuild(this);
+    this.rebuildBridgeBarriers();
+  }
+
+  public getBridgeCaches(): readonly BridgeRoadCache[] {
+    return this.bridgeCaches;
+  }
+
+  public getBridgeBarriers(): readonly BridgeBarrierSegment[] {
+    return this.bridgeBarriers;
+  }
+
+  private rebuildBridgeCaches() {
+    this.bridgeCaches = [];
+    for (const road of this.roads) {
+      if ((road.layer ?? 0) <= 0) continue;
+      const { samples, totalLen, rampLen, tooShort } = RoadNetwork.sampleBridgeRoad(road, 26);
+      if (samples.length < 2) continue;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const s of samples) {
+        const hw = s.w / 2 + 24;
+        if (s.x - hw < minX) minX = s.x - hw;
+        if (s.y - hw < minY) minY = s.y - hw;
+        if (s.x + hw > maxX) maxX = s.x + hw;
+        if (s.y + hw > maxY) maxY = s.y + hw;
+      }
+      this.bridgeCaches.push({ road, samples, totalLen, rampLen, tooShort, minX, minY, maxX, maxY });
+    }
+  }
+
+  private rebuildBridgeBarriers() {
+    this.bridgeBarriers = [];
+    const nodes = IntersectionSystem.getInstance().nodes;
+
+    for (const cache of this.bridgeCaches) {
+      const { road, samples, totalLen } = cache;
+      if (samples.length < 2) continue;
+
+      // Ground portal clearance if a ramp end meets a ground intersection
+      let startClear = 12;
+      let endClear = 12;
+      if (!road.closed) {
+        const p0 = samples[0];
+        const pLast = samples[samples.length - 1];
+        for (const n of nodes) {
+          if (n.layer !== 0) continue;
+          const maxW = n.arms.reduce((m, a) => Math.max(m, a.width), 0);
+          if (Phaser.Math.Distance.Between(p0.x, p0.y, n.x, n.y) < maxW / 2 + 45) {
+            startClear = Math.max(startClear, maxW / 2 + 10);
+          }
+          if (Phaser.Math.Distance.Between(pLast.x, pLast.y, n.x, n.y) < maxW / 2 + 45) {
+            endClear = Math.max(endClear, maxW / 2 + 10);
+          }
+        }
+      }
+
+      for (let i = 0; i < samples.length - 1; i++) {
+        const a = samples[i], b = samples[i + 1];
+        if (a.tx * b.tx + a.ty * b.ty < 0.2) continue; // cusp guard
+        const sMid = (a.s + b.s) * 0.5;
+        const zMid = (a.z + b.z) * 0.5;
+        if (!road.closed && (sMid < startClear || sMid > totalLen - endClear)) continue;
+        if (zMid < 0.05) continue;
+
+        const kind: 'ramp_wall' | 'deck_rail' = zMid >= 0.94 ? 'deck_rail' : 'ramp_wall';
+        const offA = a.w / 2 + 5;
+        const offB = b.w / 2 + 5;
+
+        for (const side of [-1, 1]) {
+          const ax = a.x - a.ty * offA * side;
+          const ay = a.y + a.tx * offA * side;
+          const bx = b.x - b.ty * offB * side;
+          const by = b.y + b.tx * offB * side;
+          const len = Math.hypot(bx - ax, by - ay);
+          if (len < 2) continue;
+          this.bridgeBarriers.push({
+            kind,
+            x: (ax + bx) * 0.5,
+            y: (ay + by) * 0.5,
+            length: len + 4,
+            thickness: 8,
+            angle: Math.atan2(by - ay, bx - ax),
+            roadId: road.id,
+          });
+        }
+      }
+    }
   }
 
   /** Cells (cx,cy) around a point that can reach anything within `radius` */
@@ -324,9 +466,16 @@ export class RoadNetwork {
     return keys;
   }
 
-  /** Nearest road info at a world position (null when off-network) */
-  public query(x: number, y: number, maxRadius = 1024): { dist: number; width: number; surface: RoadSurface; road: RoadData; px: number; py: number; tx: number; ty: number } | null {
-    let best: { dist: number; width: number; surface: RoadSurface; road: RoadData; px: number; py: number; tx: number; ty: number } | null = null;
+  /** Nearest road info at a world position (null when off-network).
+   *  When `preferredLayer` is passed, roads on that layer take priority over overlapping roads on other layers. */
+  public query(
+    x: number,
+    y: number,
+    maxRadius = 1024,
+    preferredLayer?: number,
+  ): { dist: number; width: number; surface: RoadSurface; road: RoadData; px: number; py: number; tx: number; ty: number } | null {
+    let bestSame: { dist: number; width: number; surface: RoadSurface; road: RoadData; px: number; py: number; tx: number; ty: number } | null = null;
+    let bestAny: { dist: number; width: number; surface: RoadSurface; road: RoadData; px: number; py: number; tx: number; ty: number } | null = null;
     for (const key of this.cellsAround(x, y, maxRadius)) {
       const list = this.grid.get(key);
       if (!list) continue;
@@ -347,19 +496,135 @@ export class RoadNetwork {
         const width = seg.wa + (seg.wb - seg.wa) * t;
         const tx = abx / segLen;
         const ty = aby / segLen;
-        if (!best || dist < best.dist) {
-          best = { dist, width, surface: seg.road.surface, road: seg.road, px, py, tx, ty };
+        const cand = { dist, width, surface: seg.road.surface, road: seg.road, px, py, tx, ty };
+
+        if (preferredLayer !== undefined) {
+          const roadLayer = seg.road.layer ?? 0;
+          if (roadLayer === preferredLayer && (!bestSame || dist < bestSame.dist)) {
+            bestSame = cand;
+          }
+        }
+        if (!bestAny || dist < bestAny.dist) {
+          bestAny = cand;
+        }
+      }
+    }
+    if (bestSame && bestSame.dist <= bestSame.width / 2 + SHOULDER_PX) return bestSame;
+    return bestAny;
+  }
+
+  /** Grip factor at a world position (1.0 clean asphalt → 0.55 off-road), respecting layer */
+  public gripAt(x: number, y: number, layer?: number): number {
+    if (layer !== undefined && layer > 0) {
+      const b = this.sampleBridgeAt(x, y);
+      if (b && b.dist <= b.width / 2 + SHOULDER_PX) {
+        return SURFACE_GRIP[b.road.surface];
+      }
+    }
+    const q = this.query(x, y, 1024, layer);
+    if (!q || q.dist > q.width / 2 + SHOULDER_PX) return OFFROAD_GRIP;
+    return SURFACE_GRIP[q.surface];
+  }
+
+  /** Closest elevated bridge sample containing (or near) (x, y). */
+  public sampleBridgeAt(x: number, y: number): { z: number; dist: number; width: number; road: RoadData } | null {
+    let best: { z: number; dist: number; width: number; road: RoadData } | null = null;
+    for (const cache of this.bridgeCaches) {
+      if (x < cache.minX || x > cache.maxX || y < cache.minY || y > cache.maxY) continue;
+      const samples = cache.samples;
+      for (let i = 0; i < samples.length - 1; i++) {
+        const a = samples[i], b = samples[i + 1];
+        const abx = b.x - a.x, aby = b.y - a.y;
+        const len2 = abx * abx + aby * aby;
+        const t = len2 > 0 ? Phaser.Math.Clamp(((x - a.x) * abx + (y - a.y) * aby) / len2, 0, 1) : 0;
+        const px = a.x + abx * t;
+        const py = a.y + aby * t;
+        const dist = Math.hypot(x - px, y - py);
+        const width = a.w + (b.w - a.w) * t;
+        if (dist <= width / 2 + 10) {
+          const z = a.z + (b.z - a.z) * t;
+          if (!best || dist < best.dist) {
+            best = { z, dist, width, road: cache.road };
+          }
         }
       }
     }
     return best;
   }
 
-  /** Grip factor at a world position (1.0 clean asphalt → 0.5 off-road) */
-  public gripAt(x: number, y: number): number {
-    const q = this.query(x, y);
-    if (!q || q.dist > q.width / 2 + SHOULDER_PX) return OFFROAD_GRIP;
-    return SURFACE_GRIP[q.surface];
+  /** True when a ground-level vehicle at (x, y) is directly beneath an elevated deck (z > 0.35). */
+  public isUnderElevatedBridge(x: number, y: number): boolean {
+    for (const cache of this.bridgeCaches) {
+      if (x < cache.minX || x > cache.maxX || y < cache.minY || y > cache.maxY) continue;
+      const samples = cache.samples;
+      for (let i = 0; i < samples.length - 1; i++) {
+        const a = samples[i], b = samples[i + 1];
+        if (Math.max(a.z, b.z) <= 0.35) continue;
+        const abx = b.x - a.x, aby = b.y - a.y;
+        const len2 = abx * abx + aby * aby;
+        const t = len2 > 0 ? Phaser.Math.Clamp(((x - a.x) * abx + (y - a.y) * aby) / len2, 0, 1) : 0;
+        const z = a.z + (b.z - a.z) * t;
+        if (z <= 0.35) continue;
+        const px = a.x + abx * t, py = a.y + aby * t;
+        const width = a.w + (b.w - a.w) * t;
+        if (Math.hypot(x - px, y - py) <= width / 2 + 18) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Resolves a vehicle/trailer's vertical layer (0 | 1) and continuous elevation z (0..1)
+   * with portal hysteresis so ground traffic passing under a viaduct never jumps onto the deck,
+   * while traffic entering from a ramp mouth (z <= 0.28) climbs smoothly to layer 1.
+   * Passing `angle` and `halfLen` checks the front and rear bumpers too, preventing the
+   * cab nose from clipping under the ramp deck before the body center enters.
+   */
+  public resolveVehicleElevation(
+    x: number,
+    y: number,
+    prevLayer: 0 | 1,
+    prevZ: number,
+    angle: number = 0,
+    halfLen: number = 0,
+  ): { layer: 0 | 1; z: number } {
+    const centerHit = this.sampleBridgeAt(x, y);
+    let frontHit: { z: number; dist: number; width: number; road: RoadData } | null = null;
+    let rearHit: { z: number; dist: number; width: number; road: RoadData } | null = null;
+    if (halfLen > 0) {
+      const fx = Math.sin(angle) * halfLen;
+      const fy = -Math.cos(angle) * halfLen;
+      frontHit = this.sampleBridgeAt(x + fx, y + fy);
+      rearHit = this.sampleBridgeAt(x - fx, y - fy);
+    }
+
+    if (!centerHit && !frontHit && !rearHit) return { layer: 0, z: 0 };
+
+    const onBridge = prevLayer === 1 || prevZ > 0.06;
+    const portalHit =
+      (centerHit !== null && centerHit.z <= 0.28) ||
+      (frontHit !== null && frontHit.z <= 0.28) ||
+      (rearHit !== null && rearHit.z <= 0.28);
+
+    // Passing underneath an elevated deck/ramp on ground layer
+    if (!onBridge && !portalHit) {
+      return { layer: 0, z: 0 };
+    }
+
+    const maxZ = Math.max(centerHit?.z ?? 0, frontHit?.z ?? 0, rearHit?.z ?? 0);
+    const centerZ = centerHit ? centerHit.z : maxZ;
+    return { layer: centerZ >= 0.5 ? 1 : 0, z: maxZ };
+  }
+
+  /** Determines spawn layer for a parked trailer or world position (prefers 0 if a ground road exists). */
+  public initialLayerAt(x: number, y: number): { layer: 0 | 1; z: number } {
+    const b = this.sampleBridgeAt(x, y);
+    if (!b || b.z < 0.5) return { layer: 0, z: 0 };
+    const groundQ = this.query(x, y, 1024, 0);
+    if (groundQ && (groundQ.road.layer ?? 0) === 0 && groundQ.dist <= groundQ.width / 2 + SHOULDER_PX) {
+      return { layer: 0, z: 0 };
+    }
+    return { layer: 1, z: b.z };
   }
 
   // ======================================================================
@@ -448,8 +713,60 @@ export class RoadNetwork {
     return out;
   }
 
-  /** Road whose carriageway is under the point (body hit test) */
+  /** Samples a road with cumulative arc length `s` and bridge elevation `z` in [0, 1]. */
+  public static sampleBridgeRoad(
+    road: RoadData,
+    stepPx = 26,
+  ): { samples: BridgeSample[]; totalLen: number; rampLen: number; tooShort: boolean } {
+    const base = RoadNetwork.sampleRoad(road, stepPx);
+    if (base.length === 0) return { samples: [], totalLen: 0, rampLen: 0, tooShort: false };
+
+    let totalLen = 0;
+    const sVals: number[] = new Array(base.length);
+    sVals[0] = 0;
+    for (let i = 1; i < base.length; i++) {
+      totalLen += Math.hypot(base[i].x - base[i - 1].x, base[i].y - base[i - 1].y);
+      sVals[i] = totalLen;
+    }
+
+    const layer = road.layer ?? 0;
+    if (layer <= 0) {
+      return {
+        samples: base.map((p, i) => ({ ...p, s: sVals[i], z: 0 })),
+        totalLen,
+        rampLen: 0,
+        tooShort: false,
+      };
+    }
+
+    if (road.closed) {
+      return {
+        samples: base.map((p, i) => ({ ...p, s: sVals[i], z: 1 })),
+        totalLen,
+        rampLen: 0,
+        tooShort: false,
+      };
+    }
+
+    const rampLen = Math.min(RoadNetwork.BRIDGE_DEFAULT_RAMP_LEN, totalLen * 0.32);
+    const tooShort = totalLen < RoadNetwork.BRIDGE_MIN_RECOMMENDED_LEN;
+    const samples: BridgeSample[] = base.map((p, i) => {
+      const d = sVals[i];
+      let z = 1;
+      if (rampLen > 1) {
+        if (d < rampLen) z = d / rampLen;
+        else if (d > totalLen - rampLen) z = (totalLen - d) / rampLen;
+      }
+      return { ...p, s: d, z: Phaser.Math.Clamp(z, 0, 1) };
+    });
+
+    return { samples, totalLen, rampLen, tooShort };
+  }
+
+  /** Road whose carriageway is under the point (body hit test — prefers elevated bridges on overlap) */
   public hitTestRoad(x: number, y: number, slackPx = 8): RoadData | null {
+    const top = this.query(x, y, 256, 1);
+    if (top && (top.road.layer ?? 0) >= 1 && top.dist <= top.width / 2 + slackPx) return top.road;
     const q = this.query(x, y, 256);
     if (q && q.dist <= q.width / 2 + slackPx) return q.road;
     return null;

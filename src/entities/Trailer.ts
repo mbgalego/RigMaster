@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { COLLISION_CAT, COLLISION_MASK } from '../physics/CollisionLayers';
 
 export type TrailerType = 'standard' | 'long_cargo' | 'bitrem_lead' | 'bitrem_pup' | 'fragile_glass';
 
@@ -52,6 +53,10 @@ export class Trailer {
   public hasPrevHitch: boolean = false;
   /** WorldObject id when this loose trailer was placed by the editor (data-only 'trailer' object). */
   public wobjId?: string;
+  /** Vertical layer (0 = ground, 1 = elevated viaduct) and continuous ramp progress z in [0, 1]. */
+  public layer: 0 | 1 = 0;
+  public elevationZ: number = 0;
+  public isCoupled: boolean = false;
 
   constructor(scene: Phaser.Scene, config: TrailerConfig) {
     this.scene = scene;
@@ -110,12 +115,8 @@ export class Trailer {
       angle: spawnAngle,
       label: `trailer_${this.type}`,
       collisionFilter: {
-        category: 0x0004,
-        // Obstacles (0x0001) + the tractor's front-solid zone (0x0020). NOT the
-        // tractor main body: its rear fifth-wheel strip must slide under the
-        // nose plate. NOT other trailer bodies: nose zones stay open for
-        // trailer-to-trailer coupling (bitrem lead -> pup corridor).
-        mask: 0x0021,
+        category: COLLISION_CAT.TRAILER_L0,
+        mask: COLLISION_MASK.TRAILER_PARKED_L0,
         group: -1,
       },
       render: {
@@ -136,10 +137,8 @@ export class Trailer {
       isStatic: true,
       label: `trailer_blocker_${this.type}`,
       collisionFilter: {
-        category: 0x0008,
-        // Tractor main body (0x0002) + other trailer bodies (0x0004): the
-        // blocker is the solid face of a free trailer everywhere but the nose.
-        mask: 0x0006,
+        category: COLLISION_CAT.BLOCKER_L0,
+        mask: COLLISION_MASK.BLOCKER_L0,
         group: 0,
       },
       render: { visible: false },
@@ -215,8 +214,12 @@ export class Trailer {
       { x: cx + rx * (halfW - 3), y: cy + ry * (halfW - 3) },
       { x: cx - rx * (halfW - 3), y: cy - ry * (halfW - 3) },
     ]);
-    // Obstacles are static category 0x0001 — ignore our own proxy bodies
-    return hits.some((b) => b.isStatic && b.collisionFilter?.category === 0x0001);
+    // Match obstacles on the trailer's active layer (+ shared ramp side walls)
+    const activeObsBits =
+      this.layer === 1
+        ? COLLISION_CAT.BRIDGE_RAIL | COLLISION_CAT.RAMP_WALL
+        : COLLISION_CAT.GROUND_OBS | COLLISION_CAT.RAMP_WALL;
+    return hits.some((b) => b.isStatic && (((b.collisionFilter?.category ?? 0) & activeObsBits) !== 0));
   }
 
   public followHitch(
@@ -477,7 +480,45 @@ export class Trailer {
   /** Enables/disables the blocker's collisions (off while coupled). */
   public setBlockerActive(active: boolean) {
     if (!this.blockerBody) return;
-    this.blockerBody.collisionFilter.mask = active ? 0x0006 : 0;
+    if (!active) {
+      this.blockerBody.collisionFilter.mask = 0;
+      return;
+    }
+    this.blockerBody.collisionFilter.category = this.layer === 1 ? COLLISION_CAT.BLOCKER_L1 : COLLISION_CAT.BLOCKER_L0;
+    this.blockerBody.collisionFilter.mask = this.layer === 1 ? COLLISION_MASK.BLOCKER_L1 : COLLISION_MASK.BLOCKER_L0;
+  }
+
+  public setCoupledState(coupled: boolean) {
+    this.isCoupled = coupled;
+    this.syncCollisionFilter();
+  }
+
+  public setElevation(layer: 0 | 1, z: number, forceElevatedVisual: boolean = false) {
+    this.elevationZ = Phaser.Math.Clamp(z, 0, 1);
+    const elevatedVisual = forceElevatedVisual || layer === 1 || this.elevationZ >= 0.06;
+    const baseDepth = elevatedVisual ? 21 : 11;
+    const targetDepth = this.type === 'bitrem_pup' ? baseDepth + 1 : baseDepth;
+    if (this.container.depth !== targetDepth) {
+      this.container.setDepth(targetDepth);
+    }
+    if (this.layer === layer) return;
+    this.layer = layer;
+    this.syncCollisionFilter();
+  }
+
+  public syncCollisionFilter() {
+    if (!this.body) return;
+    const isL1 = this.layer === 1;
+    this.body.collisionFilter.category = isL1 ? COLLISION_CAT.TRAILER_L1 : COLLISION_CAT.TRAILER_L0;
+    if (this.isCoupled) {
+      this.body.collisionFilter.group = -1;
+      this.body.collisionFilter.mask = isL1 ? COLLISION_MASK.TRAILER_COUPLED_L1 : COLLISION_MASK.TRAILER_COUPLED_L0;
+      this.setBlockerActive(false);
+    } else {
+      this.body.collisionFilter.group = 0;
+      this.body.collisionFilter.mask = isL1 ? COLLISION_MASK.TRAILER_PARKED_L1 : COLLISION_MASK.TRAILER_PARKED_L0;
+      this.setBlockerActive(true);
+    }
   }
 
   public destroy() {

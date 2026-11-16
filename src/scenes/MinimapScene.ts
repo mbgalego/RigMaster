@@ -113,18 +113,30 @@ export class MinimapScene extends Phaser.Scene {
     }
 
     const roadColors: Record<string, string> = { asphalt: '#5a6478', cobble: '#707788', dirt: '#8a6438' };
-    for (const road of mainScene.roadNetwork.roads) {
-      ctx.strokeStyle = roadColors[road.surface] || roadColors.asphalt;
-      ctx.lineWidth = Math.max(1, road.points.reduce((m, p) => Math.max(m, p.w), 0) * scale);
+    const sortedRoads = [...mainScene.roadNetwork.roads].sort((a, b) => (a.layer ?? 0) - (b.layer ?? 0));
+    for (const road of sortedRoads) {
+      const roadW = Math.max(1, road.points.reduce((m, p) => Math.max(m, p.w), 0) * scale);
+      const isBridge = (road.layer ?? 0) > 0;
+      const tracePath = () => {
+        ctx.beginPath();
+        road.points.forEach((p, i) => {
+          const mx = p.x * scale;
+          const my = p.y * scale;
+          if (i === 0) ctx.moveTo(mx, my); else ctx.lineTo(mx, my);
+        });
+        if (road.closed) ctx.closePath();
+      };
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
-      ctx.beginPath();
-      road.points.forEach((p, i) => {
-        const mx = p.x * scale;
-        const my = p.y * scale;
-        if (i === 0) ctx.moveTo(mx, my); else ctx.lineTo(mx, my);
-      });
-      if (road.closed) ctx.closePath();
+      if (isBridge) {
+        ctx.strokeStyle = '#0f172a';
+        ctx.lineWidth = roadW + 2;
+        tracePath();
+        ctx.stroke();
+      }
+      ctx.strokeStyle = roadColors[road.surface] || roadColors.asphalt;
+      ctx.lineWidth = roadW;
+      tracePath();
       ctx.stroke();
     }
 

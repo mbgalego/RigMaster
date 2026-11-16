@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { COLLISION_CAT, COLLISION_MASK } from '../physics/CollisionLayers';
 
 export type HeadlightMode = 'off' | 'low' | 'high';
 
@@ -41,6 +42,9 @@ export class Truck {
   public maxSteerAngle: number = 0.56;  // ~32 degrees
   public currentSteerAngle: number = 0;
   public surfaceGrip: number = 1.0;
+  /** Vertical layer (0 = ground, 1 = elevated viaduct) and continuous ramp progress z in [0, 1]. */
+  public layer: 0 | 1 = 0;
+  public elevationZ: number = 0;
   public vLong: number = 0;             // Longitudinal forward speed (px/s)
   public vLat: number = 0;              // Lateral slip speed (px/s)
   public currentSpeed: number = 0;      // In px/s
@@ -159,8 +163,8 @@ export class Truck {
       // trailers' bodies exclude the tractor bit (kingpin corridor), so the
       // blocker proxy bodies are what physically block the tractor.
       collisionFilter: {
-        category: 0x0002,
-        mask: 0x0009,
+        category: COLLISION_CAT.TRUCK_L0,
+        mask: COLLISION_MASK.TRUCK_L0,
         group: -1,
       },
       render: {
@@ -183,7 +187,7 @@ export class Truck {
       restitution: 0,
       angle: spawnAngle,
       label: 'truck_front_zone',
-      collisionFilter: { category: 0x0020, mask: 0x0004, group: 0 },
+      collisionFilter: { category: COLLISION_CAT.FRONT_L0, mask: COLLISION_MASK.FRONT_L0, group: 0 },
       render: { visible: false },
     }) as unknown as MatterJS.BodyType;
 
@@ -255,6 +259,31 @@ export class Truck {
 
   public setRoadGrip(grip: number) {
     this.roadGrip = Phaser.Math.Clamp(grip, 0.25, 1.0);
+  }
+
+  /** Updates vertical layer & continuous ramp elevation (updates depth and Matter collision masks). */
+  public setElevation(layer: 0 | 1, z: number, forceElevatedVisual: boolean = false) {
+    this.elevationZ = Phaser.Math.Clamp(z, 0, 1);
+    // Render above ramp/bridge graphics (depth 16) as soon as climbing a ramp (z >= 0.06) or on layer 1
+    const elevatedVisual = forceElevatedVisual || layer === 1 || this.elevationZ >= 0.06;
+    const targetDepth = elevatedVisual ? 20 : 10;
+    if (this.container.depth !== targetDepth) {
+      this.container.setDepth(targetDepth);
+    }
+
+    if (this.layer === layer) return;
+    this.layer = layer;
+    if (layer === 1) {
+      this.body.collisionFilter.category = COLLISION_CAT.TRUCK_L1;
+      this.body.collisionFilter.mask = COLLISION_MASK.TRUCK_L1;
+      this.frontBody.collisionFilter.category = COLLISION_CAT.FRONT_L1;
+      this.frontBody.collisionFilter.mask = COLLISION_MASK.FRONT_L1;
+    } else {
+      this.body.collisionFilter.category = COLLISION_CAT.TRUCK_L0;
+      this.body.collisionFilter.mask = COLLISION_MASK.TRUCK_L0;
+      this.frontBody.collisionFilter.category = COLLISION_CAT.FRONT_L0;
+      this.frontBody.collisionFilter.mask = COLLISION_MASK.FRONT_L0;
+    }
   }
 
   public setTouchSteer(steer: number) {
@@ -387,6 +416,15 @@ export class Truck {
     const isBrakeActive = keyDown || this.touchInput.brake > 0.05;
     const isHandbrake = keyHandbrake || this.touchInput.handbrake;
 
+    // Surface rolling resistance & longitudinal traction:
+    // Asphalt roads and paved asphalt pads share roadGrip = 1.0 (zero extra resistance).
+    // Cobble (0.88), dirt (0.68), and off-road grass (0.55) add rolling drag and trim top speed.
+    const surfaceLoss = Math.max(0, 1 - this.roadGrip);
+    const rollingMult = 1 + surfaceLoss * 2.2;
+    const effectiveMaxFwd = this.maxForwardSpeed * (1 - surfaceLoss * 0.5);
+    const surfaceAccelScale = 1 - surfaceLoss * 0.35;
+    const coastDecel = 18 * rollingMult * dt;
+
     this.isBraking = false;
     this.isAccelerating = false;
 
@@ -407,11 +445,14 @@ export class Truck {
           // Rolling backward: apply service brake to bring to standstill first
           this.vLong += this.brakeForce * dt;
           this.isBraking = true;
+        } else if (this.vLong > effectiveMaxFwd) {
+          // Entered a higher-resistance surface above its cruising speed: bleed excess smoothly
+          this.vLong = Math.max(effectiveMaxFwd, this.vLong - coastDecel * 1.5);
         } else {
-          const speedRatio = Math.min(Math.max(0, this.vLong) / this.maxForwardSpeed, 1.0);
+          const speedRatio = Math.min(Math.max(0, this.vLong) / effectiveMaxFwd, 1.0);
           const torqueFactor = Math.max(0.35, 1.0 - speedRatio * 0.65);
-          const fwdAccel = this.engineAccel * torqueFactor * throttleMult;
-          this.vLong = Math.min(this.maxForwardSpeed, this.vLong + fwdAccel * dt);
+          const fwdAccel = this.engineAccel * torqueFactor * throttleMult * surfaceAccelScale;
+          this.vLong = Math.min(effectiveMaxFwd, this.vLong + fwdAccel * dt);
         }
       } else {
         // Reverse drive in R gear
@@ -421,7 +462,7 @@ export class Truck {
         } else {
           const revRatio = Math.min(Math.max(0, -this.vLong) / this.maxReverseSpeed, 1.0);
           const revTorqueFactor = Math.max(0.4, 1.0 - revRatio * 0.5);
-          const revAccel = this.engineAccel * 0.65 * revTorqueFactor * throttleMult;
+          const revAccel = this.engineAccel * 0.65 * revTorqueFactor * throttleMult * (1 - surfaceLoss * 0.25);
           this.vLong = Math.max(-this.maxReverseSpeed, this.vLong - revAccel * dt);
         }
       }
@@ -447,14 +488,13 @@ export class Truck {
           // Slow reverse on S key
           const revRatio = Math.min(Math.max(0, -this.vLong) / this.maxReverseSpeed, 1.0);
           const revTorqueFactor = Math.max(0.4, 1.0 - revRatio * 0.5);
-          const revAccel = this.engineAccel * 0.6 * revTorqueFactor * brakeMult;
+          const revAccel = this.engineAccel * 0.6 * revTorqueFactor * brakeMult * (1 - surfaceLoss * 0.25);
           this.vLong = Math.max(-this.maxReverseSpeed, this.vLong - revAccel * dt);
           this.isReversing = true;
         }
       }
     } else {
-      // Natural rolling resistance and diesel engine compression coasting
-      const coastDecel = 18 * dt;
+      // Natural rolling resistance (scaled by surface) and diesel engine compression coasting
       if (this.vLong > coastDecel) {
         this.vLong -= coastDecel;
       } else if (this.vLong < -coastDecel) {

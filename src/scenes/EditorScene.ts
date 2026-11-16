@@ -57,7 +57,7 @@ export class EditorScene extends Phaser.Scene {
   public selectedRoad: RoadData | null = null;
   public selectedPointIndex: number | null = null;
   private roadDrag: { road: RoadData; kind: 'point' | 'width' | 'twist' | 'road'; index: number | null; grabX: number; grabY: number } | null = null;
-  private pendingRoad: { surface: RoadSurface; points: RoadPoint[]; oneWay: boolean } | null = null;
+  private pendingRoad: { surface: RoadSurface; points: RoadPoint[]; oneWay: boolean; layer: number } | null = null;
   private pointerWorld: { x: number; y: number } = { x: 0, y: 0 };
   private lastClickTime: number = 0;
   private lastClickX: number = 0;
@@ -65,6 +65,7 @@ export class EditorScene extends Phaser.Scene {
   public newRoadSurface: RoadSurface = 'asphalt';
   public newRoadWidth: number = 128;
   public newRoadOneWay: boolean = false;
+  public newRoadLayer: number = 0;
   private roadDirtySinceRelease: boolean = false;
 
   // ---- Intersection tool state ----
@@ -525,7 +526,7 @@ export class EditorScene extends Phaser.Scene {
     // Empty ground → start a new road (first point)
     this.selectedRoad = null;
     this.selectedPointIndex = null;
-    this.pendingRoad = { surface: this.newRoadSurface, points: [{ x: Math.round(x), y: Math.round(y), w: this.newRoadWidth }], oneWay: this.newRoadOneWay };
+    this.pendingRoad = { surface: this.newRoadSurface, points: [{ x: Math.round(x), y: Math.round(y), w: this.newRoadWidth }], oneWay: this.newRoadOneWay, layer: this.newRoadLayer };
   }
 
   /** Begins a road drag when the press started on a handle or a road body. */
@@ -633,7 +634,7 @@ export class EditorScene extends Phaser.Scene {
   public finishPendingRoad() {
     if (!this.pendingRoad) return;
     if (this.pendingRoad.points.length >= 2) {
-      const road = this.roadNetwork.addRoad(this.pendingRoad.surface, this.pendingRoad.points, false, this.pendingRoad.oneWay);
+      const road = this.roadNetwork.addRoad(this.pendingRoad.surface, this.pendingRoad.points, false, this.pendingRoad.oneWay, this.pendingRoad.layer);
       this.selectedRoad = road;
     }
     this.pendingRoad = null;
@@ -697,6 +698,19 @@ export class EditorScene extends Phaser.Scene {
     }
   }
 
+  /** Toggle ground (0) vs bridge/viaduct (1) — acts on pending/selected road or default for new roads */
+  public setRoadLayer(layer: number) {
+    const nextLayer = layer > 0 ? 1 : 0;
+    this.newRoadLayer = nextLayer;
+    if (this.pendingRoad) {
+      this.pendingRoad.layer = nextLayer;
+    }
+    if (this.selectedRoad) {
+      this.roadNetwork.setRoadLayer(this.selectedRoad.id, nextLayer);
+      this.mainScene.world.version++;
+    }
+  }
+
   public nudgeTwist(deltaDeg: number) {
     if (!this.selectedRoad || this.selectedPointIndex === null) return;
     const p = this.selectedRoad.points[this.selectedPointIndex];
@@ -711,8 +725,29 @@ export class EditorScene extends Phaser.Scene {
     this.mainScene.world.version++;
   }
 
-  public getRoadUIState(): { hasSelection: boolean; hasPoint: boolean; surface: RoadSurface; width: number; drawing: boolean; twistDeg: number; oneWay: boolean } {
+  public getRoadUIState(): { hasSelection: boolean; hasPoint: boolean; surface: RoadSurface; width: number; drawing: boolean; twistDeg: number; oneWay: boolean; layer: number; tooShort: boolean } {
     const selPoint = this.selectedRoad && this.selectedPointIndex !== null ? this.selectedRoad.points[this.selectedPointIndex] : null;
+    const layer = this.selectedRoad
+      ? (this.selectedRoad.layer ?? 0)
+      : this.pendingRoad
+        ? this.pendingRoad.layer
+        : this.newRoadLayer;
+    let tooShort = false;
+    if (layer > 0) {
+      if (this.selectedRoad) {
+        const cache = this.roadNetwork.getBridgeCaches().find((c) => c.road.id === this.selectedRoad!.id);
+        tooShort = cache?.tooShort ?? false;
+      } else if (this.pendingRoad && this.pendingRoad.points.length >= 2) {
+        const b = RoadNetwork.sampleBridgeRoad({
+          id: '_pending',
+          surface: this.pendingRoad.surface,
+          closed: false,
+          layer,
+          points: this.pendingRoad.points,
+        }, 26);
+        tooShort = b.tooShort;
+      }
+    }
     return {
       hasSelection: !!this.selectedRoad,
       hasPoint: !!selPoint,
@@ -721,6 +756,8 @@ export class EditorScene extends Phaser.Scene {
       drawing: !!this.pendingRoad,
       twistDeg: selPoint ? Math.round(Phaser.Math.RadToDeg(selPoint.twist ?? 0)) : 0,
       oneWay: this.selectedRoad ? !!this.selectedRoad.oneWay : this.newRoadOneWay,
+      layer,
+      tooShort,
     };
   }
 
@@ -802,9 +839,9 @@ export class EditorScene extends Phaser.Scene {
 
   /** Types whose width/height can be dragged from the corner handles */
   private static readonly RESIZABLE_TYPES = new Set<string>([
-    'wall', 'entrance', 'entrance_y', 'entrance_gas', 'parking_lot', 'building',
-    'jersey_barrier', 'container_stack', 'dock', 'gas_canopy', 'silo', 'crane',
-    'roundabout', 'crosswalk', 'pad_asphalt', 'pad_dirt', 'dock_wall',
+    'wall', 'entrance', 'entrance_y', 'entrance_gas', 'road_entry', 'road_entry_y', 'road_turnout',
+    'parking_lot', 'building', 'jersey_barrier', 'container_stack', 'dock', 'gas_canopy', 'silo',
+    'crane', 'roundabout', 'crosswalk', 'pad_asphalt', 'pad_dirt', 'dock_wall',
   ]);
 
   private isResizable(o: WorldObject): boolean {
@@ -1464,20 +1501,38 @@ export class EditorScene extends Phaser.Scene {
   private drawRoadSelection(g: Phaser.GameObjects.Graphics, z: number) {
     const road = this.selectedRoad;
     if (!road) return;
-    const samples = RoadNetwork.sampleRoad(road, 26);
+    const isBridge = (road.layer ?? 0) > 0;
+    const bridgeSamples = isBridge ? RoadNetwork.sampleBridgeRoad(road, 26).samples : null;
+    const samples = bridgeSamples ?? RoadNetwork.sampleRoad(road, 26);
     if (samples.length === 0) return;
 
-    // Cyan outline along both ribbon edges
-    g.lineStyle(2 / z, 0x00f0ff, 0.9);
-    for (const side of [-1, 1]) {
-      g.beginPath();
-      samples.forEach((s, i) => {
-        const off = s.w / 2 + 3 / z;
-        const px = s.x - s.ty * off * side;
-        const py = s.y + s.tx * off * side;
-        if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
-      });
-      g.strokePath();
+    // Outline along both ribbon edges (bridges highlight ramps in amber, deck in cyan)
+    if (bridgeSamples && bridgeSamples.length >= 2) {
+      for (const side of [-1, 1]) {
+        for (let i = 0; i < bridgeSamples.length - 1; i++) {
+          const a = bridgeSamples[i], b = bridgeSamples[i + 1];
+          const zMid = (a.z + b.z) * 0.5;
+          g.lineStyle(2.5 / z, zMid >= 0.94 ? 0x38bdf8 : 0xf59e0b, 0.95);
+          const offA = a.w / 2 + 4 / z;
+          const offB = b.w / 2 + 4 / z;
+          g.beginPath();
+          g.moveTo(a.x - a.ty * offA * side, a.y + a.tx * offA * side);
+          g.lineTo(b.x - b.ty * offB * side, b.y + b.tx * offB * side);
+          g.strokePath();
+        }
+      }
+    } else {
+      g.lineStyle(2 / z, 0x00f0ff, 0.9);
+      for (const side of [-1, 1]) {
+        g.beginPath();
+        samples.forEach((s, i) => {
+          const off = s.w / 2 + 3 / z;
+          const px = s.x - s.ty * off * side;
+          const py = s.y + s.tx * off * side;
+          if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+        });
+        g.strokePath();
+      }
     }
 
     // Control-point handles + width handles
@@ -1557,17 +1612,20 @@ export class EditorScene extends Phaser.Scene {
       id: '_preview',
       surface: this.pendingRoad.surface,
       closed: false,
+      layer: this.pendingRoad.layer,
       points: [...this.pendingRoad.points, { x: this.pointerWorld.x, y: this.pointerWorld.y, w: this.newRoadWidth }],
     };
-    const samples = RoadNetwork.sampleRoad(preview, 26);
-    const col = this.pendingRoad.surface === 'dirt' ? 0x9a7040 : this.pendingRoad.surface === 'cobble' ? 0x8a93a8 : 0x38bdf8;
+    const isBridge = this.pendingRoad.layer > 0;
+    const samples = isBridge ? RoadNetwork.sampleBridgeRoad(preview, 26).samples : RoadNetwork.sampleRoad(preview, 26);
+    const col = isBridge ? 0xf59e0b : (this.pendingRoad.surface === 'dirt' ? 0x9a7040 : this.pendingRoad.surface === 'cobble' ? 0x8a93a8 : 0x38bdf8);
 
     if (samples.length >= 2) {
       for (let i = 0; i < samples.length - 1; i++) {
         const a = samples[i], b = samples[i + 1];
         const anx = -a.ty * (a.w / 2), any = a.tx * (a.w / 2);
         const bnx = -b.ty * (b.w / 2), bny = b.tx * (b.w / 2);
-        g.fillStyle(col, 0.32);
+        const zMid = isBridge ? (((a as any).z ?? 0) + ((b as any).z ?? 0)) * 0.5 : 0;
+        g.fillStyle(isBridge && zMid >= 0.94 ? 0x38bdf8 : col, 0.32);
         g.beginPath();
         g.moveTo(a.x + anx, a.y + any);
         g.lineTo(b.x + bnx, b.y + bny);

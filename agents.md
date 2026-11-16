@@ -54,7 +54,32 @@ Simulador de condução pesada em **2D Top-Down** (Phaser 4 + Matter.js + React 
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.8.8** (Versão Atual — branch main)
+### **v2.9.0** (Versão Atual — branch main)
+- **Sistema de Pontes & Viadutos / Desníveis (`CollisionLayers.ts`, `RoadNetwork.ts`, `IntersectionSystem.ts`, `Truck.ts`, `Trailer.ts`, `TrailerManager.ts`, `MainScene.ts`, `MinimapScene.ts`, `EditorScene.ts`, `App.tsx`)**:
+  - **Camada vertical por estrada (`layer: 0` Solo vs `layer: 1` Viaduto)**: estradas elevadas cruzam sobre vias e objectos no solo sem gerar nós de intersecção a meio do vão (`IntersectionSystem`), enquanto as extremidades das rampas ligam normalmente à malha de piso `0`.
+  - **Rampas automáticas e histerese de portal**: `RoadNetwork.sampleBridgeRoad()` cria automaticamente rampas de entrada/saída nos dois extremos (`rampLen = min(180px, 32% * totalLen)`, aviso de ponte curta `< 260px`) e `resolveVehicleElevation()` verifica o centro e os extremos dianteiro/traseiro do veículo garantindo que camiões/atrelados que passam por baixo nunca saltam para o tabuleiro, entrando suavemente assim que o pára-choques entra no portal (`z <= 0.28`).
+  - **Camadas visuais (`depth`) & transparência de passagem inferior**: a base das rampas junto ao solo (`z < 0.28`) renderiza em `rampBaseGraphics` (`depth: 2.6`, abaixo dos veículos do piso 0) enquanto o tabuleiro e sombras elevadas (`z >= 0.28`) renderizam em `bridgeShadowGraphics` (`depth: 15`) e `bridgeRoadGraphics` (`depth: 16`) acima dos veículos e candeeiros do solo (`depth: 10..14.5`). Todo o conjunto acoplado (camião + atrelados) sobe em bloco para `depth: 20..22` assim que qualquer unidade inicia a subida, eliminando qualquer corte visual na entrada da rampa. Quando o camião circula no piso `0` por baixo de um viaduto, o tabuleiro fica suavemente translúcido (`alpha ~ 0.42`) para manter o conjunto visível.
+  - **Física e barreiras isoladas por camada (`CollisionLayers.ts`)**: máscaras de bits Matter.js separam colisões do Piso 0 (`GROUND_OBS`, `TRUCK_L0`, `TRAILER_L0`) e do Piso 1 (`BRIDGE_RAIL`, `TRUCK_L1`, `TRAILER_L1`). Paredes laterais das rampas (`RAMP_WALL`) contêm ambos os pisos e guardas metálicas do tabuleiro (`BRIDGE_RAIL`) retêm apenas o Piso 1, deixando o vão livre por baixo (sem interferir com sensores de marcha-atrás `tailBlocked` no solo).
+  - **Atrelados & Acoplamento por camada**: atrelados soltos e acoplados acompanham a própria camada vertical (`layer`, `elevationZ`), e o acoplamento quinta-roda (`TrailerManager.findCouplable`) só permite engate no mesmo piso.
+  - **Editor & Minimapa**: botão **Solo (Piso 0) ↔ Viaduto (Piso 1)** na ferramenta Estrada com pré-visualização diferenciada de rampas/tabuleiro e contorno de viadutos no minimapa (`MinimapScene`).
+
+### **v2.8.9** (branch main)
+- **Interceções, entradas e desvios com cor da estrada na categoria Piso (`WorldObjects.ts`, `MainScene.ts`, `EditorScene.ts`, `App.tsx`)**:
+  - Novos prefabs pavimentados com a cor exata do asfalto da estrada (`0x1e2634`), bermas (`0x3a4457`), tracejado amarelo (`0xfacc15`) e marcações brancas (`0xe2e8f0`):
+    - **Entradas retas (`road_entry`)**: `Entrada Estrada (1 Faixa)`, `Entrada Estrada (2 Faixas)` e `Entrada Estrada c/ Ilha` (separador central).
+    - **Entradas em Y (`road_entry_y`)**: `Entrada Y (1 Faixa)` e `Entrada Y (2 Faixas)` com ilha separadora triangular e dois ramos afunilados.
+    - **Desvios / Estacionamentos laterais (`road_turnout`)**: `Desvio Lateral (Baia)`, `Estac. Paralelo (Berma)`, `Estac. Perpendicular (90°)`, `Estac. Diagonal (45°)` e `Estac. Diagonal Camiões`.
+  - **Camada `roadFlatsGraphics` (`depth: 2.4`)**: renderizados logo acima das estradas (`depth: 2`) e abaixo de passadeiras/sólidos (`depth: 3`) e veículos (`depth: 10+`), cobrindo de forma limpa a linha lateral da estrada onde encostam, mantendo redimensionamento livre (`RESIZABLE_TYPES`), suporte em compostos (`compound`) e aderência de asfalto (`pavedGripAt`).
+  - Removidas do catálogo **Piso** as antigas entradas em Y (`Entrada em Y` verde e vermelha), mantendo compatibilidade de leitura caso existam em rascunhos gravados.
+- **Restauro automático do rascunho em browser storage (`World.ts`, `App.tsx`)**:
+  - Ao arrancar, o `World` verifica automaticamente `localStorage` (`rigmaster_world_draft`) e restaura o mapa guardado sem pedir confirmação prévia (removido o banner `Restaurar`/`Descartar`).
+  - Quando o mapa é restaurado a partir do browser storage, o HUD exibe um toaster temporário (`~4s`) a informar o jogador (`"Mapa restaurado a partir do browser storage"`).
+- **Atrito e resistência de rolamento por piso (`WorldObjects.ts`, `Truck.ts`)**:
+  - A base de **Alcatrão (`pad_asphalt`)**, passadeiras (`crosswalk`), docas de exame (`exam_dock`), rotundas e restantes prefabs pavimentados partilham exatamente a mesma aderência e resistência de rolamento (`1.0`) que uma estrada de asfalto; `pad_dirt` corresponde a estrada de terra (`0.68`).
+  - Indexação espacial multi-célula em `WorldObjects.rebuildIndex()` garante que bases de alcatrão redimensionadas (`> 2048px`) ou agrupadas em `compound` mantêm aderência `1.0` em toda a sua área.
+  - Em `Truck.ts`, pisos menos aderentes (`cobble`, `dirt`, fora de estrada) aplicam maior resistência de rolamento e menor velocidade de ponta, mantendo o alcatrão (`1.0`) idêntico à estrada.
+
+### **v2.8.8** (branch main)
 - **Objectos compostos por marquee (`compound`) — redesign completo**:
   - **Nova ferramenta "Composto" na toolbar** (roxa): arrasta um rectângulo à volta dos objectos colocados no mapa e **tudo o que ficar dentro (centro dentro do rectângulo) torna-se UM único objecto composto** — os originais são absorvidos. Overlay mostra a marquee e destaca em violeta os objectos que vão ser capturados.
   - **Renderização por decomposição (`WorldObjects.ts`)**: o composto já não desenha rectângulos genéricos — cada parte é renderizada com o seu visual real (`drawSolid`/`drawFlat`) na camada certa, com culling por parte, mantendo a ordenação z dos flats. Mover/rodar o composto transforma as partes em bloco.

@@ -65,10 +65,13 @@ export class TrailerManager {
    */
   public spawnAt(x: number, y: number, type: TrailerType, angle: number = Math.PI, withPup: boolean = true): Trailer {
     const noseAngle = angle;
+    const rn = (this.scene as any).roadNetwork;
+    const elevLead = rn?.initialLayerAt ? rn.initialLayerAt(x, y) : { layer: 0 as 0 | 1, z: 0 };
 
     const lead = new Trailer(this.scene, { x, y, angle: noseAngle, type });
     // Sync the drawn container with the body angle (constructor only sets the body)
     lead.setPosition(x, y, noseAngle);
+    lead.setElevation(elevLead.layer, elevLead.z);
     this.applyParkedFilter(lead);
     this.loose.push(lead);
 
@@ -77,8 +80,10 @@ export class TrailerManager {
       const D = lead.length / 2 + 155 / 2 + 12;
       const px = x - Math.sin(noseAngle) * D;
       const py = y + Math.cos(noseAngle) * D;
+      const elevPup = rn?.initialLayerAt ? rn.initialLayerAt(px, py) : elevLead;
       const pup = new Trailer(this.scene, { x: px, y: py, angle: noseAngle, type: 'bitrem_pup' });
       pup.setPosition(px, py, noseAngle);
+      pup.setElevation(elevPup.layer, elevPup.z);
       this.applyParkedFilter(pup);
       this.loose.push(pup);
     }
@@ -100,6 +105,11 @@ export class TrailerManager {
     const t = this.loose.find((tr) => tr.wobjId === o.id);
     if (!t) return;
     t.setPosition(o.x, o.y, o.angle);
+    const rn = (this.scene as any).roadNetwork;
+    if (rn?.initialLayerAt) {
+      const elev = rn.initialLayerAt(o.x, o.y);
+      t.setElevation(elev.layer, elev.z);
+    }
     t.syncBlocker();
   }
 
@@ -120,11 +130,13 @@ export class TrailerManager {
    */
   public findCouplable(
     hitchX: number, hitchY: number, truckAngle: number,
-    radius: number = 70, angleTolDeg: number = 28, excludeTypes: TrailerType[] = []
+    radius: number = 70, angleTolDeg: number = 28, excludeTypes: TrailerType[] = [],
+    truckLayer: 0 | 1 = 0,
   ): CouplingCandidate | null {
     let best: CouplingCandidate | null = null;
 
     for (const t of this.loose) {
+      if (t.layer !== truckLayer) continue;
       if (excludeTypes.includes(t.type)) continue;
       // Trailer kingpin point: front center along its local forward axis (-y)
       const a = t.body.angle;
@@ -153,6 +165,7 @@ export class TrailerManager {
 
     let best: CouplingCandidate | null = null;
     for (const t of this.loose) {
+      if (t.layer !== lead.layer) continue;
       if (t.type !== 'bitrem_pup') continue;
       const pa = t.body.angle;
       const kx = t.body.position.x + Math.sin(pa) * t.kingpinDist;
@@ -177,11 +190,7 @@ export class TrailerManager {
 
   /** Returns a trailer to the loose pool, frozen in place as a static body. */
   public release(trailer: Trailer) {
-    trailer.body.collisionFilter.group = 0;
-    // Obstacles + the tractor's front-solid zone, NOT the tractor's rear strip
-    // (kingpin corridor) and NOT other trailer bodies (lead -> pup corridor).
-    trailer.body.collisionFilter.mask = 0x0021;
-    trailer.setBlockerActive(true);
+    trailer.setCoupledState(false);
     trailer.syncBlocker();
     this.scene.matter.body.setStatic(trailer.body, true);
     if (!this.loose.includes(trailer)) this.loose.push(trailer);
@@ -190,18 +199,11 @@ export class TrailerManager {
   /** Transitions a trailer from parked-static to coupled-dynamic. */
   public prepareForCoupling(trailer: Trailer) {
     this.scene.matter.body.setStatic(trailer.body, false);
-    trailer.body.collisionFilter.group = -1;
-    // mask 0x0005 = obstacles (0x0001) + other trailers (0x0004). The truck
-    // (cat 0x0002) never collides with its own coupled trailer.
-    trailer.body.collisionFilter.mask = 0x0005;
-    trailer.setBlockerActive(false);
+    trailer.setCoupledState(true);
   }
 
   private applyParkedFilter(t: Trailer) {
-    t.body.collisionFilter.group = 0;
-    // Obstacles + the tractor's front-solid zone, NOT the tractor's rear strip
-    // (kingpin corridor) and NOT other trailer bodies (lead -> pup corridor).
-    t.body.collisionFilter.mask = 0x0021;
+    t.setCoupledState(false);
     this.scene.matter.body.setStatic(t.body, true);
   }
 

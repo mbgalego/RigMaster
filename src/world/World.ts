@@ -33,6 +33,8 @@ export class World {
 
   /** Snapshot do mundo no início da sessão de editor (para o botão Cancelar). */
   private sessionSnapshot: string | null = null;
+  /** True quando o mundo foi restaurado automaticamente do draft em localStorage. */
+  public restoredFromDraft: boolean = false;
 
   constructor(private scene: Phaser.Scene) {
     this.terrain = new WorldTerrain(scene);
@@ -45,9 +47,14 @@ export class World {
     ]);
     this.objects = new WorldObjects(scene);
     this.roads = RoadNetwork.getInstance();
-    // The fixed world comes from data; seed() is the dev fallback (also the
-    // "Reseed" button) when the data file is missing or fails validation.
-    if (!this.loadData(worldData)) this.seed();
+    // Se houver rascunho guardado em browser storage, restaura-o automaticamente;
+    // caso contrário carrega ilha_atlantica.json (ou seed() como fallback).
+    if (this.restoreDraft()) {
+      this.restoredFromDraft = true;
+    } else {
+      if (World.hasDraft()) World.clearDraft();
+      if (!this.loadData(worldData)) this.seed();
+    }
     this.lastSavedVersion = this.version; // baseline: don't autosave the loaded state
   }
 

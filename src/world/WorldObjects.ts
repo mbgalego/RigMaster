@@ -1,7 +1,8 @@
 import Phaser from 'phaser';
-import { RoadNetwork } from '../systems/RoadNetwork';
+import { RoadNetwork, SURFACE_GRIP } from '../systems/RoadNetwork';
 import type { TrailerType } from '../entities/Trailer';
 import { WorldTerrain } from './WorldTerrain';
+import { COLLISION_CAT, COLLISION_MASK } from '../physics/CollisionLayers';
 
 /**
  * Vector prefab layer — every man-made thing in the world is an object here:
@@ -21,6 +22,9 @@ export type WObjType =
   | 'entrance'        // flat concrete apron in front of a building/garage
   | 'entrance_y'      // Y-fork driveway: two lanes converging into one, chevron-marked
   | 'entrance_gas'    // fuel-station entrance lane with pump island(s) + arrows
+  | 'road_entry'      // road-coloured straight entrance tying cleanly into road edge (1 or 2 lanes)
+  | 'road_entry_y'    // road-coloured Y-fork entrance tying cleanly into road edge (1 or 2 lanes)
+  | 'road_turnout'    // road-coloured roadside bay (layby, parallel, perpendicular, diagonal, diagonal_truck)
   | 'roundabout'      // circular island with circulating lane (solid centre island)
   | 'crosswalk'       // flat zebra crossing (stripes along w, spans h)
   | 'wall'            // solid masonry wall (rotatable, any length)
@@ -136,10 +140,27 @@ const SOLID_TYPES = new Set<WObjType>([
 const FLAT_TYPES = new Set<WObjType>([
   'gas_canopy', 'parking_pad', 'parking_lot', 'entrance', 'exam_dock',
   'entrance_y', 'entrance_gas',
+  'road_entry', 'road_entry_y', 'road_turnout',
   'dock', 'pad_asphalt', 'pad_dirt',
 ]);
 
+/** Tipos de piso com cor de estrada — renderizados logo ACIMA das estradas (depth 2.4)
+ *  para cobrir limpos os rebordos da via ao ligar à berma, mantendo-se abaixo de
+ *  passadeiras, edifícios (depth 3) e veículos (depth 10+). */
+const ROAD_OVERLAY_TYPES = new Set<WObjType>([
+  'road_entry', 'road_entry_y', 'road_turnout',
+]);
+
+/** Superfícies pavimentadas que oferecem aderência de asfalto fora da estrada principal. */
+const PAVED_SURFACE_TYPES = new Set<WObjType>([
+  'road_entry', 'road_entry_y', 'road_turnout',
+  'pad_asphalt', 'parking_pad', 'parking_lot',
+  'entrance', 'entrance_y', 'entrance_gas',
+  'dock', 'exam_dock', 'crosswalk',
+]);
+
 function isFlatType(t: WObjType): boolean { return FLAT_TYPES.has(t); }
+function isRoadOverlayType(t: WObjType): boolean { return ROAD_OVERLAY_TYPES.has(t); }
 
 /** Marking colours for the driveway entrances (`params.mark`). */
 const ENTRANCE_MARKS: Record<string, number> = {
@@ -277,10 +298,33 @@ export class WorldObjects {
   public rebuildIndex() {
     this.grid.clear();
     for (const o of this.objects) {
-      const key = `${Math.floor(o.x / OBJ_CELL)}_${Math.floor(o.y / OBJ_CELL)}`;
-      let list = this.grid.get(key);
-      if (!list) { list = []; this.grid.set(key, list); }
-      list.push(o);
+      const c = Math.abs(Math.cos(o.angle)), s = Math.abs(Math.sin(o.angle));
+      let minX = o.x - (c * o.w + s * o.h) / 2;
+      let maxX = o.x + (c * o.w + s * o.h) / 2;
+      let minY = o.y - (s * o.w + c * o.h) / 2;
+      let maxY = o.y + (s * o.w + c * o.h) / 2;
+      if (o.type === 'compound') {
+        const parts = compoundParts(o);
+        for (let i = 0; i < parts.length; i++) {
+          const p = compoundPartWorldObject(o, i);
+          if (!p) continue;
+          const pc = Math.abs(Math.cos(p.angle)), ps = Math.abs(Math.sin(p.angle));
+          const phx = (pc * p.w + ps * p.h) / 2;
+          const phy = (ps * p.w + pc * p.h) / 2;
+          minX = Math.min(minX, p.x - phx); maxX = Math.max(maxX, p.x + phx);
+          minY = Math.min(minY, p.y - phy); maxY = Math.max(maxY, p.y + phy);
+        }
+      }
+      const x0 = Math.floor(minX / OBJ_CELL), x1 = Math.floor(maxX / OBJ_CELL);
+      const y0 = Math.floor(minY / OBJ_CELL), y1 = Math.floor(maxY / OBJ_CELL);
+      for (let cy = y0; cy <= y1; cy++) {
+        for (let cx = x0; cx <= x1; cx++) {
+          const key = `${cx}_${cy}`;
+          let list = this.grid.get(key);
+          if (!list) { list = []; this.grid.set(key, list); }
+          list.push(o);
+        }
+      }
     }
     this.version++;
   }
@@ -337,6 +381,47 @@ export class WorldObjects {
         const area = o.w * o.h;
         if (area < bestArea) { best = o; bestArea = area; }
       }
+    }
+    return best;
+  }
+
+  /** Returns surface grip at (x,y) for yard pads & road prefabs (1.0 asphalt, 0.68 dirt, 0 none). */
+  public pavedGripAt(x: number, y: number): number {
+    const cx = Math.floor(x / OBJ_CELL);
+    const cy = Math.floor(y / OBJ_CELL);
+    const list = this.grid.get(`${cx}_${cy}`);
+    if (!list) return 0;
+
+    const testRect = (o: WorldObject): boolean => {
+      const dx = x - o.x, dy = y - o.y;
+      const cos = Math.cos(-o.angle), sin = Math.sin(-o.angle);
+      const lx = dx * cos - dy * sin;
+      const ly = dx * sin + dy * cos;
+      return Math.abs(lx) <= o.w / 2 && Math.abs(ly) <= o.h / 2;
+    };
+
+    const gripOf = (o: WorldObject): number => {
+      if (PAVED_SURFACE_TYPES.has(o.type) && testRect(o)) return SURFACE_GRIP.asphalt;
+      if (o.type === 'roundabout') {
+        const d = Math.hypot(x - o.x, y - o.y);
+        if (d <= o.w / 2 && d >= o.w * 0.18) return SURFACE_GRIP.asphalt;
+      }
+      if (o.type === 'pad_dirt' && testRect(o)) return SURFACE_GRIP.dirt;
+      return 0;
+    };
+
+    let best = 0;
+    for (const o of list) {
+      if (o.type === 'compound') {
+        const parts = compoundParts(o);
+        for (let i = 0; i < parts.length; i++) {
+          const p = compoundPartWorldObject(o, i);
+          if (p) best = Math.max(best, gripOf(p));
+        }
+      } else {
+        best = Math.max(best, gripOf(o));
+      }
+      if (best >= SURFACE_GRIP.asphalt) return SURFACE_GRIP.asphalt;
     }
     return best;
   }
@@ -410,7 +495,7 @@ export class WorldObjects {
         const c = Math.cos(o.angle), s = Math.sin(o.angle);
         const staticOpts = {
           isStatic: true, friction: 0.8, restitution: 0.1,
-          label: `obstacle_${o.type}`, collisionFilter: { category: 0x0001, mask: 0xffff },
+          label: `obstacle_${o.type}`, collisionFilter: { category: COLLISION_CAT.GROUND_OBS, mask: COLLISION_MASK.GROUND_OBS },
         };
         for (const part of compoundParts(o)) {
           if (part.type === 'compound' || !SOLID_TYPES.has(part.type)) continue;
@@ -435,7 +520,7 @@ export class WorldObjects {
           friction: 0.8,
           restitution: 0.1,
           label: `obstacle_${o.type}`,
-          collisionFilter: { category: 0x0001, mask: 0xffff },
+          collisionFilter: { category: COLLISION_CAT.GROUND_OBS, mask: COLLISION_MASK.GROUND_OBS },
         }) as unknown as MatterJS.BodyType;
       } else if (o.type === 'dock_wall') {
         // Multi-body: solid piers between the dock bays + a stop bumper inside
@@ -444,7 +529,7 @@ export class WorldObjects {
         if (centres.length === 0) {
           body = this.scene.matter.add.rectangle(o.x, o.y, o.w, o.h, {
             angle: o.angle, isStatic: true, friction: 0.8, restitution: 0.1,
-            label: `obstacle_${o.type}`, collisionFilter: { category: 0x0001, mask: 0xffff },
+            label: `obstacle_${o.type}`, collisionFilter: { category: COLLISION_CAT.GROUND_OBS, mask: COLLISION_MASK.GROUND_OBS },
           }) as unknown as MatterJS.BodyType;
         } else {
           const n = centres.length;
@@ -452,7 +537,7 @@ export class WorldObjects {
           const c = Math.cos(o.angle), s = Math.sin(o.angle);
           const staticOpts = {
             isStatic: true, friction: 0.8, restitution: 0.1,
-            label: `obstacle_${o.type}`, collisionFilter: { category: 0x0001, mask: 0xffff },
+            label: `obstacle_${o.type}`, collisionFilter: { category: COLLISION_CAT.GROUND_OBS, mask: COLLISION_MASK.GROUND_OBS },
           };
           for (let i = 0; i <= n; i++) {
             const lx = -o.w / 2 + pier / 2 + i * (pier + gap);
@@ -474,7 +559,7 @@ export class WorldObjects {
           friction: 0.8,
           restitution: 0.1,
           label: `obstacle_${o.type}`,
-          collisionFilter: { category: 0x0001, mask: 0xffff },
+          collisionFilter: { category: COLLISION_CAT.GROUND_OBS, mask: COLLISION_MASK.GROUND_OBS },
         }) as unknown as MatterJS.BodyType;
       }
       if (body) bodies.push(body);
@@ -806,12 +891,14 @@ export class WorldObjects {
     solids: Phaser.GameObjects.Graphics,
     view: Phaser.Geom.Rectangle,
     overhead?: Phaser.GameObjects.Graphics,
+    roadFlats?: Phaser.GameObjects.Graphics,
   ) {
     const M = 120;
     const x0 = Math.floor((view.x - M) / OBJ_CELL), x1 = Math.floor((view.x + view.width + M) / OBJ_CELL);
     const y0 = Math.floor((view.y - M) / OBJ_CELL), y1 = Math.floor((view.y + view.height + M) / OBJ_CELL);
     const drawn = new Set<string>();
     const flatObjs: WorldObject[] = [];
+    const roadFlatObjs: WorldObject[] = [];
     for (let cy = y0; cy <= y1; cy++) {
       for (let cx = x0; cx <= x1; cx++) {
         const list = this.grid.get(`${cx}_${cy}`);
@@ -833,7 +920,9 @@ export class WorldObjects {
               // Culling por parte (compostos podem ser muito extensos)
               if (p.x + p.w / 2 < view.x - M || p.x - p.w / 2 > view.x + view.width + M) continue;
               if (p.y + p.h / 2 < view.y - M || p.y - p.h / 2 > view.y + view.height + M) continue;
-              if (isFlatType(p.type)) {
+              if (isRoadOverlayType(p.type) && roadFlats) {
+                roadFlatObjs.push(p);
+              } else if (isFlatType(p.type)) {
                 flatObjs.push(p);
               } else {
                 this.drawSolid(solids, p);
@@ -846,7 +935,9 @@ export class WorldObjects {
           // NOTE: roundabout renders in the SOLIDS layer (depth 3) so the
           // island sits above the road ribbons at a junction.
           // Crosswalks too — road paint belongs above the asphalt (see drawSolid).
-          if (isFlatType(o.type)) {
+          if (isRoadOverlayType(o.type) && roadFlats) {
+            roadFlatObjs.push(o);
+          } else if (isFlatType(o.type)) {
             // Flats are collected and drawn in z order below so a base pad
             // painted after (or in a later grid cell than) a decorated floor
             // can never cover it — parking lots always sit on top of pads.
@@ -864,6 +955,10 @@ export class WorldObjects {
     // objects with the same z keep their original insertion order).
     flatObjs.sort((a, b) => this.flatZ(a) - this.flatZ(b));
     for (const o of flatObjs) this.drawFlat(flats, o);
+    if (roadFlats && roadFlatObjs.length > 0) {
+      roadFlatObjs.sort((a, b) => this.flatZ(a) - this.flatZ(b));
+      for (const o of roadFlatObjs) this.drawFlat(roadFlats, o);
+    }
   }
 
   /** Paint order within the FLATS layer — lower = drawn first (underneath). */
@@ -875,6 +970,9 @@ export class WorldObjects {
       case 'exam_dock': return 2;
       case 'parking_lot': return 3;
       case 'parking_pad': return 4;
+      case 'road_turnout':
+      case 'road_entry':
+      case 'road_entry_y':
       case 'entrance':
       case 'entrance_y':
       case 'entrance_gas': return 5;
@@ -1275,6 +1373,306 @@ export class WorldObjects {
             g.lineTo(acx, ay + s);
             g.closePath();
             g.fillPath();
+          }
+          break;
+        }
+        case 'road_entry': {
+          // Road-coloured entrance apron with flared mouth (local +y meets the road,
+          // local -y meets building/yard). Matches asphalt 0x1e2634 & edge 0x3a4457.
+          const lanes = Number(o.params?.lanes ?? 1) === 2 ? 2 : 1;
+          const island = !!o.params?.island;
+          const flare = Math.min(o.w * 0.22, lanes === 2 ? 44 : 34);
+          const flareH = Math.min(o.h * 0.42, 68);
+          const sx0 = x0 + flare;
+          const sx1 = x0 + o.w - flare;
+          const jy = y0 + o.h - flareH;
+
+          // Asphalt polygon (covers road border cleanly at local +y)
+          g.fillStyle(0x1e2634, 1);
+          g.beginPath();
+          g.moveTo(sx0, y0);
+          g.lineTo(sx1, y0);
+          g.lineTo(sx1, jy);
+          g.lineTo(x0 + o.w, y0 + o.h);
+          g.lineTo(x0, y0 + o.h);
+          g.lineTo(sx0, jy);
+          g.closePath();
+          g.fillPath();
+
+          // Side edge curbs (left & right only — both ends stay open)
+          g.lineStyle(3, 0x3a4457, 0.9);
+          g.beginPath();
+          g.moveTo(sx0 + 4, y0);
+          g.lineTo(sx0 + 4, jy);
+          g.lineTo(x0 + 5, y0 + o.h - 2);
+          g.strokePath();
+          g.beginPath();
+          g.moveTo(sx1 - 4, y0);
+          g.lineTo(sx1 - 4, jy);
+          g.lineTo(x0 + o.w - 5, y0 + o.h - 2);
+          g.strokePath();
+
+          const drawArrow = (ax: number, ay: number, dirY: number) => {
+            const s = 7;
+            g.lineStyle(2.5, 0xe2e8f0, 0.55);
+            g.lineBetween(ax, ay - dirY * s * 1.2, ax, ay + dirY * s * 1.2);
+            g.beginPath();
+            g.moveTo(ax - s, ay + dirY * 2);
+            g.lineTo(ax, ay + dirY * s * 1.2);
+            g.lineTo(ax + s, ay + dirY * 2);
+            g.strokePath();
+          };
+
+          if (lanes === 1) {
+            // Threshold yield dashes near road mouth + subtle entry arrow
+            const ty = y0 + o.h - 18;
+            g.lineStyle(3, 0xe2e8f0, 0.72);
+            for (let lx = sx0 + 10; lx < sx1 - 12; lx += 18) {
+              g.lineBetween(lx, ty, Math.min(lx + 10, sx1 - 10), ty);
+            }
+            drawArrow(o.x, y0 + o.h * 0.45, -1);
+          } else {
+            const stemW = sx1 - sx0;
+            if (island) {
+              // Central painted/curbed refuge island dividing entry & exit lanes
+              const iw = Math.min(22, Math.max(12, stemW * 0.14));
+              const iy0 = y0 + 16;
+              const ih = Math.max(24, o.h - 46);
+              g.fillStyle(0x283140, 1);
+              g.fillRoundedRect(o.x - iw / 2, iy0, iw, ih, iw / 2);
+              g.lineStyle(2, 0x3a4457, 0.95);
+              g.strokeRoundedRect(o.x - iw / 2, iy0, iw, ih, iw / 2);
+              g.lineStyle(1.5, 0xfacc15, 0.65);
+              for (let hy = iy0 + 10; hy < iy0 + ih - 8; hy += 12) {
+                g.lineBetween(o.x - iw * 0.28, hy, o.x + iw * 0.28, hy - 4);
+              }
+            } else {
+              // Yellow dashed centreline matching arterial roads
+              g.lineStyle(4, 0xfacc15, 0.88);
+              for (let yy = y0 + 10; yy < y0 + o.h - 28; yy += 32) {
+                g.lineBetween(o.x, yy, o.x, Math.min(yy + 18, y0 + o.h - 26));
+              }
+            }
+            // Right-hand outgoing stop line (left side when heading +y toward main road)
+            const stopY = y0 + o.h - 18;
+            g.lineStyle(4, 0xe2e8f0, 0.85);
+            g.lineBetween(sx0 + 10, stopY, o.x - (island ? 14 : 6), stopY);
+            // Directional arrows (exit +y on left half, entry -y on right half)
+            const laneOffset = stemW * 0.27;
+            drawArrow(o.x - laneOffset, y0 + o.h * 0.46, 1);
+            drawArrow(o.x + laneOffset, y0 + o.h * 0.46, -1);
+          }
+          break;
+        }
+        case 'road_entry_y': {
+          // Road-coloured Y-fork junction: two slip lanes at local +y merge into a
+          // single 1- or 2-lane stem at local -y.
+          const lanes = Number(o.params?.lanes ?? 1) === 2 ? 2 : 1;
+          const stemHalf = lanes === 2
+            ? Math.max(48, Math.min(o.w * 0.2, 82))
+            : Math.max(28, Math.min(o.w * 0.13, 48));
+          const armW = lanes === 2 ? stemHalf * 1.65 : stemHalf * 1.85;
+          const yj = y0 + o.h * 0.44;
+          const splitX = Math.max(stemHalf * 0.72, o.w * 0.14);
+          const botY = y0 + o.h;
+
+          // Outer Y asphalt fill
+          g.fillStyle(0x1e2634, 1);
+          g.beginPath();
+          g.moveTo(o.x - stemHalf, y0);
+          g.lineTo(o.x + stemHalf, y0);
+          g.lineTo(o.x + stemHalf, yj);
+          g.lineTo(x0 + o.w, botY);
+          g.lineTo(x0, botY);
+          g.lineTo(o.x - stemHalf, yj);
+          g.closePath();
+          g.fillPath();
+
+          // Central triangular curbed splitter island between the two branches
+          const islandTopY = yj + 14;
+          const islandBotY = botY;
+          const islandHalf = Math.max(18, o.w / 2 - armW);
+          if (islandHalf > 12) {
+            g.fillStyle(0x283140, 1);
+            g.beginPath();
+            g.moveTo(o.x, islandTopY);
+            g.lineTo(o.x + islandHalf, islandBotY);
+            g.lineTo(o.x - islandHalf, islandBotY);
+            g.closePath();
+            g.fillPath();
+            g.lineStyle(3, 0x3a4457, 0.95);
+            g.strokePath();
+            // Subtle yellow chevron stripes inside island nose
+            g.lineStyle(2, 0xfacc15, 0.55);
+            for (let k = 1; k <= 3; k++) {
+              const t = k / 4;
+              const cy = islandTopY + (islandBotY - islandTopY) * t;
+              const hw = islandHalf * t * 0.72;
+              g.lineBetween(o.x - hw, cy, o.x + hw, cy);
+            }
+          } else if (splitX > 0) {
+            g.lineStyle(2, 0xfacc15, 0.7);
+            g.lineBetween(o.x, islandTopY, o.x, botY - 8);
+          }
+
+          // Outer side kerbs (left & right)
+          g.lineStyle(3, 0x3a4457, 0.9);
+          g.beginPath();
+          g.moveTo(o.x - stemHalf + 4, y0);
+          g.lineTo(o.x - stemHalf + 4, yj);
+          g.lineTo(x0 + 5, botY - 2);
+          g.strokePath();
+          g.beginPath();
+          g.moveTo(o.x + stemHalf - 4, y0);
+          g.lineTo(o.x + stemHalf - 4, yj);
+          g.lineTo(x0 + o.w - 5, botY - 2);
+          g.strokePath();
+
+          if (lanes === 2) {
+            // Yellow dashed centrelines along stem and both Y branches
+            g.lineStyle(4, 0xfacc15, 0.85);
+            for (let yy = y0 + 10; yy < yj - 6; yy += 30) {
+              g.lineBetween(o.x, yy, o.x, Math.min(yy + 16, yj - 4));
+            }
+            const lStartX = o.x, lStartY = yj + 4;
+            const lEndX = x0 + armW * 0.5, lEndY = botY - 18;
+            const rEndX = x0 + o.w - armW * 0.5, rEndY = botY - 18;
+            for (const [ex, ey] of [[lEndX, lEndY], [rEndX, rEndY]]) {
+              const dist = Math.hypot(ex - lStartX, ey - lStartY);
+              for (let s = 8; s < dist - 14; s += 30) {
+                const t0 = s / dist, t1 = Math.min((s + 16) / dist, 1);
+                g.lineBetween(
+                  Phaser.Math.Linear(lStartX, ex, t0), Phaser.Math.Linear(lStartY, ey, t0),
+                  Phaser.Math.Linear(lStartX, ex, t1), Phaser.Math.Linear(lStartY, ey, t1),
+                );
+              }
+            }
+          }
+
+          // Yield/stop threshold dashes across left and right road mouths
+          const mouthY = botY - 16;
+          g.lineStyle(3, 0xe2e8f0, 0.78);
+          const drawMouthDash = (mx0: number, mx1: number) => {
+            for (let lx = mx0; lx < mx1 - 10; lx += 18) {
+              g.lineBetween(lx, mouthY, Math.min(lx + 10, mx1), mouthY);
+            }
+          };
+          drawMouthDash(x0 + 14, o.x - islandHalf - 8);
+          drawMouthDash(o.x + islandHalf + 8, x0 + o.w - 14);
+          break;
+        }
+        case 'road_turnout': {
+          // Road-coloured roadside turnout / parking bay (local +y is the open edge
+          // abutting the main road, with diagonal tapers on both ends).
+          const layout = String(o.params?.layout || 'layby');
+          const taper = Math.min(o.w * 0.16, layout === 'layby' || layout === 'parallel' ? 76 : 64);
+
+          // Trapezoidal asphalt apron (matching road colour 0x1e2634)
+          g.fillStyle(0x1e2634, 1);
+          g.beginPath();
+          g.moveTo(x0 + taper, y0);
+          g.lineTo(x0 + o.w - taper, y0);
+          g.lineTo(x0 + o.w, y0 + o.h);
+          g.lineTo(x0, y0 + o.h);
+          g.closePath();
+          g.fillPath();
+
+          // Outer edge kerb along left taper, back edge, and right taper (road edge stays open)
+          g.lineStyle(3, 0x3a4457, 0.92);
+          g.beginPath();
+          g.moveTo(x0 + 4, y0 + o.h - 2);
+          g.lineTo(x0 + taper + 2, y0 + 4);
+          g.lineTo(x0 + o.w - taper - 2, y0 + 4);
+          g.lineTo(x0 + o.w - 4, y0 + o.h - 2);
+          g.strokePath();
+
+          // Dashed shoulder separator along the road mouth (local +y)
+          const sepY = y0 + o.h - 10;
+          g.lineStyle(2.5, 0xe2e8f0, 0.6);
+          for (let lx = x0 + 18; lx < x0 + o.w - 22; lx += 28) {
+            g.lineBetween(lx, sepY, Math.min(lx + 15, x0 + o.w - 18), sepY);
+          }
+
+          const innerX0 = x0 + taper + 10;
+          const innerX1 = x0 + o.w - taper - 10;
+          const innerW = Math.max(40, innerX1 - innerX0);
+
+          if (layout === 'layby') {
+            // Parallel hatched yellow safety chevrons tucked inside the taper triangles
+            g.lineStyle(2, 0xfacc15, 0.45);
+            for (let k = 1; k <= 3; k++) {
+              const frac = k / 4;
+              const bx = x0 + taper * frac;
+              const by = y0 + o.h - 14;
+              const tx = x0 + taper + 6;
+              const ty = y0 + 12 + (o.h - 26) * (1 - frac);
+              g.lineBetween(bx + 8, by, tx, ty);
+              g.lineBetween(x0 + o.w - (bx - x0) - 8, by, x0 + o.w - taper - 6, ty);
+            }
+            g.lineStyle(2.5, 0xfacc15, 0.65);
+            g.lineBetween(innerX0, y0 + 14, innerX0 + 24, y0 + 14);
+            g.lineBetween(innerX1 - 24, y0 + 14, innerX1, y0 + 14);
+          } else if (layout === 'parallel') {
+            // Parallel parking stalls along the back kerb
+            const bayLen = innerW >= 290 ? 150 : Math.max(95, innerW / 2);
+            const count = Math.max(1, Math.floor(innerW / bayLen));
+            const actualLen = innerW / count;
+            const bayDepth = Math.min(o.h - 22, 62);
+            g.lineStyle(2.5, 0xe2e8f0, 0.78);
+            for (let i = 0; i <= count; i++) {
+              const bx = innerX0 + i * actualLen;
+              g.lineBetween(bx, y0 + 8, bx, y0 + 8 + bayDepth);
+              // T-tick at road side of stall line
+              const tx0 = Math.max(innerX0, bx - 10);
+              const tx1 = Math.min(innerX1, bx + 10);
+              g.lineBetween(tx0, y0 + 8 + bayDepth, tx1, y0 + 8 + bayDepth);
+            }
+          } else if (layout === 'perpendicular') {
+            // 90-degree perpendicular parking bays anchored at back kerb (y0)
+            const stallW = 58;
+            const count = Math.max(2, Math.floor(innerW / stallW));
+            const usedW = count * stallW;
+            const startX = o.x - usedW / 2;
+            const stallD = Math.min(o.h * 0.56, 108);
+            g.lineStyle(2.5, 0xe2e8f0, 0.8);
+            for (let i = 0; i <= count; i++) {
+              const bx = startX + i * stallW;
+              g.lineBetween(bx, y0 + 8, bx, y0 + 8 + stallD);
+            }
+            // Wheel stops inside each stall
+            g.fillStyle(0x64748b, 0.9);
+            for (let i = 0; i < count; i++) {
+              const bx = startX + i * stallW + 10;
+              g.fillRoundedRect(bx, y0 + 15, stallW - 20, 6, 2);
+            }
+          } else {
+            // 45-degree diagonal parking bays ('diagonal' for cars, 'diagonal_truck' for trucks)
+            const isTruck = layout === 'diagonal_truck';
+            const pitch = isTruck ? 112 : 66;
+            const stallD = Math.min(o.h * (isTruck ? 0.62 : 0.56), isTruck ? 168 : 98);
+            const skewX = stallD * 0.82; // ~40–45° pull-in angle
+            // Ensure top ends (innerX0..innerX1) AND bottom-left edge stay cleanly inside the trapezoid
+            const botLeftMin = x0 + taper * (1 - (8 + stallD) / o.h) + 12;
+            const minStart = Math.max(botLeftMin, innerX0 - skewX);
+            const maxEnd = innerX1 - skewX;
+            const usable = Math.max(pitch, maxEnd - minStart);
+            const count = Math.max(2, Math.floor(usable / pitch));
+            const totalSpan = count * pitch;
+            const startX = (minStart + maxEnd - totalSpan) / 2;
+
+            g.lineStyle(isTruck ? 3 : 2.5, isTruck ? 0xfacc15 : 0xe2e8f0, 0.82);
+            for (let i = 0; i <= count; i++) {
+              const bx = startX + i * pitch;
+              g.lineBetween(bx + skewX, y0 + 8, bx, y0 + 8 + stallD);
+            }
+            // Angled wheel stops near the back of each bay
+            g.lineStyle(isTruck ? 5 : 4, 0x64748b, 0.92);
+            for (let i = 0; i < count; i++) {
+              const cx = startX + (i + 0.5) * pitch + skewX * 0.78;
+              const cy = y0 + 18;
+              const stopHalf = isTruck ? 24 : 13;
+              g.lineBetween(cx - stopHalf, cy, cx + stopHalf, cy);
+            }
           }
           break;
         }

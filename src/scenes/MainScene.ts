@@ -8,7 +8,9 @@ import { LicenseSystem, LicenseExam, LicenseId } from '../systems/LicenseSystem'
 import { GarageSystem, WeatherModifier } from '../systems/GarageSystem';
 import { TimeOfDaySystem, TimePeriod, TimeOfDaySnapshot } from '../systems/TimeOfDaySystem';
 import { TrailerManager, TRAILER_TYPE_TO_LICENSE, CouplingCandidate } from '../systems/TrailerManager';
-import { RoadNetwork, RoadData, RoadSample } from '../systems/RoadNetwork';
+import { RoadNetwork, RoadData, RoadSample, BridgeRoadCache } from '../systems/RoadNetwork';
+import { IntersectionSystem } from '../systems/IntersectionSystem';
+import { COLLISION_CAT, COLLISION_MASK } from '../physics/CollisionLayers';
 
 export class MainScene extends Phaser.Scene {
   public truck!: Truck;
@@ -34,6 +36,7 @@ export class MainScene extends Phaser.Scene {
   // The single procedural island world (no tiles)
   public world!: World;
   private flatsGraphics: Phaser.GameObjects.Graphics | null = null;
+  private roadFlatsGraphics: Phaser.GameObjects.Graphics | null = null;
   private solidsGraphics: Phaser.GameObjects.Graphics | null = null;
   private lightsGraphics: Phaser.GameObjects.Graphics | null = null;
   private overheadGraphics: Phaser.GameObjects.Graphics | null = null;
@@ -41,9 +44,15 @@ export class MainScene extends Phaser.Scene {
   // Static object layers are redrawn only when the camera or the world changed
   private lastObjRender = { x: NaN, y: NaN, zoom: NaN, version: -1 };
 
-  // Vector road network (Phase 1: spline roads over the tile ground)
+  // Vector road network (Phase 1: spline roads over the tile ground + Layer 1 bridges/viaducts)
   public roadNetwork!: RoadNetwork;
   private roadGraphics: Phaser.GameObjects.Graphics | null = null;
+  private rampBaseGraphics: Phaser.GameObjects.Graphics | null = null;
+  private bridgeShadowGraphics: Phaser.GameObjects.Graphics | null = null;
+  private bridgeRoadGraphics: Phaser.GameObjects.Graphics | null = null;
+  private bridgeBarrierBodies: MatterJS.BodyType[] = [];
+  private bridgeBarrierVersion: number = -1;
+  private bridgeUnderpassAlpha: number = 1;
   private pumpGraphics: Phaser.GameObjects.Graphics | null = null;
   private roadRenderVersion: number = -1;
   private roadCamX: number = Number.NaN;
@@ -205,8 +214,9 @@ export class MainScene extends Phaser.Scene {
     this.world = new World(this);
     this.roadNetwork = RoadNetwork.getInstance();
 
-    // Ground layers: flats (docks/pads) under the roads, solids above them
+    // Ground layers: flats (docks/pads) under the roads, road-coloured junctions just above roads (2.4), solids above
     this.flatsGraphics = this.add.graphics().setDepth(1).setLighting(false);
+    this.roadFlatsGraphics = this.add.graphics().setDepth(2.4).setLighting(false);
     this.solidsGraphics = this.add.graphics().setDepth(3).setLighting(false);
     // Traffic light LEDs stay emissive (unlit) at depth 4
     this.lightsGraphics = this.add.graphics().setDepth(4).setLighting(false);
@@ -216,6 +226,12 @@ export class MainScene extends Phaser.Scene {
 
     // Vector road ribbon renderer (above flats, below solids/vehicles)
     this.roadGraphics = this.add.graphics().setDepth(2).setLighting(false);
+    // Low ramp apron (z < 0.28) stays below ground vehicles (depth 10..12) so cabs entering a ramp never clip underneath
+    this.rampBaseGraphics = this.add.graphics().setDepth(2.6).setLighting(false);
+    // Elevated viaduct shadow (above ground lamps/vehicles) & bridge deck/rails (below layer-1 vehicles at depth 20..22)
+    this.bridgeShadowGraphics = this.add.graphics().setDepth(15).setLighting(false);
+    this.bridgeRoadGraphics = this.add.graphics().setDepth(16).setLighting(false);
+    this.syncBridgeBarriers();
     // Gas pump highlight layer (above vehicles, depth 10)
     this.pumpGraphics = this.add.graphics().setDepth(11).setLighting(false);
 
@@ -535,6 +551,29 @@ export class MainScene extends Phaser.Scene {
       });
     }
 
+    this.trailer?.setCoupledState(true);
+    this.pupTrailer?.setCoupledState(true);
+
+    const truckElev = this.roadNetwork.initialLayerAt(this.truck.body.position.x, this.truck.body.position.y);
+    const leadElev = this.trailer
+      ? this.roadNetwork.initialLayerAt(this.trailer.body.position.x, this.trailer.body.position.y)
+      : null;
+    const pupElev = this.pupTrailer
+      ? this.roadNetwork.initialLayerAt(this.pupTrailer.body.position.x, this.pupTrailer.body.position.y)
+      : null;
+    const rigElevatedVisual =
+      truckElev.layer === 1 || truckElev.z >= 0.06 ||
+      (leadElev !== null && (leadElev.layer === 1 || leadElev.z >= 0.06)) ||
+      (pupElev !== null && (pupElev.layer === 1 || pupElev.z >= 0.06));
+    this.truck.setElevation(truckElev.layer, truckElev.z, rigElevatedVisual);
+    if (this.trailer && leadElev) {
+      this.trailer.setElevation(leadElev.layer, leadElev.z, rigElevatedVisual);
+    }
+    if (this.pupTrailer && pupElev) {
+      this.pupTrailer.setElevation(pupElev.layer, pupElev.z, rigElevatedVisual);
+    }
+    this.bridgeUnderpassAlpha = 1;
+
     this.truck?.setLightingEnabled(this.webglLightingActive);
     this.trailer?.setLightingEnabled(this.webglLightingActive);
     this.pupTrailer?.setLightingEnabled(this.webglLightingActive);
@@ -548,6 +587,9 @@ export class MainScene extends Phaser.Scene {
 
     this.truck.setPosition(spawn.x, spawn.y, spawnAngleRad);
     this.truck.refuelToFull();
+    const truckElev = this.roadNetwork.initialLayerAt(spawn.x, spawn.y);
+    let leadElev: { layer: 0 | 1; z: number } | null = null;
+    let pupElev: { layer: 0 | 1; z: number } | null = null;
 
     if (this.trailer) {
       let offset = 115;
@@ -557,14 +599,29 @@ export class MainScene extends Phaser.Scene {
       const tx = spawn.x + backwardX * offset;
       const ty = spawn.y + backwardY * offset;
       this.trailer.setPosition(tx, ty, spawnAngleRad);
+      leadElev = this.roadNetwork.initialLayerAt(tx, ty);
 
       if (this.pupTrailer) {
         const px = tx + backwardX * 112;
         const py = ty + backwardY * 112;
         this.pupTrailer.setPosition(px, py, spawnAngleRad);
+        pupElev = this.roadNetwork.initialLayerAt(px, py);
       }
     }
 
+    const rigElevatedVisual =
+      truckElev.layer === 1 || truckElev.z >= 0.06 ||
+      (leadElev !== null && (leadElev.layer === 1 || leadElev.z >= 0.06)) ||
+      (pupElev !== null && (pupElev.layer === 1 || pupElev.z >= 0.06));
+    this.truck.setElevation(truckElev.layer, truckElev.z, rigElevatedVisual);
+    if (this.trailer && leadElev) {
+      this.trailer.setElevation(leadElev.layer, leadElev.z, rigElevatedVisual);
+    }
+    if (this.pupTrailer && pupElev) {
+      this.pupTrailer.setElevation(pupElev.layer, pupElev.z, rigElevatedVisual);
+    }
+
+    this.bridgeUnderpassAlpha = 1;
     this.playAirBrakeHiss();
   }
 
@@ -788,9 +845,9 @@ export class MainScene extends Phaser.Scene {
       return;
     }
 
-    // Solo tractor: auto-couple the nearest aligned trailer in the kingpin zone
+    // Solo tractor: auto-couple the nearest aligned trailer in the kingpin zone (same layer)
     const hitch = this.getTruckHitch();
-    const cand = mgr.findCouplable(hitch.x, hitch.y, this.truck.body.angle, 30, 28, ['bitrem_pup']);
+    const cand = mgr.findCouplable(hitch.x, hitch.y, this.truck.body.angle, 30, 28, ['bitrem_pup'], this.truck.layer);
     if (!cand) { reset(); return; }
     if (!this.decoupleLockoutArmed(cand.trailer)) { reset(); return; }
 
@@ -1098,10 +1155,10 @@ export class MainScene extends Phaser.Scene {
       };
     }
 
-    // Solo: amber indicator while sitting in a locked trailer's kingpin zone
+    // Solo: amber indicator while sitting in a locked trailer's kingpin zone (same layer)
     const mgr = TrailerManager.getInstance(this);
     const hitch = this.getTruckHitch();
-    const cand = mgr.findCouplable(hitch.x, hitch.y, this.truck.body.angle, 30, 28, ['bitrem_pup']);
+    const cand = mgr.findCouplable(hitch.x, hitch.y, this.truck.body.angle, 30, 28, ['bitrem_pup'], this.truck.layer);
     if (cand) {
       const lic = TRAILER_TYPE_TO_LICENSE[cand.trailer.type];
       if (!this.licenseSystem.isUnlocked(lic)) {
@@ -1182,6 +1239,9 @@ export class MainScene extends Phaser.Scene {
     // Neon hub signs for dominated regional hubs
     this.drawHubSigns(time);
 
+    // Keep Matter bridge ramp walls / deck guardrails synced with roadNetwork edits
+    this.syncBridgeBarriers();
+
     // Vector road ribbons (also visible in editor mode)
     this.renderRoads();
     // Gas pump highlight (nearby / refuelling)
@@ -1209,6 +1269,7 @@ export class MainScene extends Phaser.Scene {
         this.world.objects.version !== last.version;
       if (needsFull) {
         this.flatsGraphics.clear();
+        this.roadFlatsGraphics?.clear();
         this.solidsGraphics.clear();
         this.overheadGraphics?.clear();
         this.world.objects.render(
@@ -1216,11 +1277,13 @@ export class MainScene extends Phaser.Scene {
           this.solidsGraphics,
           liveView,
           this.overheadGraphics ?? undefined,
+          this.roadFlatsGraphics ?? undefined,
         );
         this.lastObjRender = { x: cam.midPoint.x, y: cam.midPoint.y, zoom: cam.zoom, version: this.world.objects.version };
       }
     } else if (this.flatsGraphics && this.solidsGraphics && this.lightsGraphics) {
       this.flatsGraphics.clear();
+      this.roadFlatsGraphics?.clear();
       this.solidsGraphics.clear();
       this.lightsGraphics.clear();
       this.overheadGraphics?.clear();
@@ -1230,8 +1293,66 @@ export class MainScene extends Phaser.Scene {
     // Stream physics + terrain chunks around the player; cycle the traffic lights
     if (this.truck) {
       this.world.updateActiveChunks(this.truck.body.position.x, this.truck.body.position.y, this.getCameraView(this.cameras.main));
-      // Surface grip from the road network (asphalt/cobble/dirt vs off-road)
-      this.truck.setRoadGrip(this.roadNetwork.gripAt(this.truck.body.position.x, this.truck.body.position.y));
+      const tx = this.truck.body.position.x;
+      const ty = this.truck.body.position.y;
+
+      // Resolve vertical layer & continuous bridge ramp elevation for truck + coupled trailers
+      const tElev = this.roadNetwork.resolveVehicleElevation(
+        tx,
+        ty,
+        this.truck.layer,
+        this.truck.elevationZ,
+        this.truck.body.angle,
+        this.truck.length * 0.5,
+      );
+      const lElev = this.trailer
+        ? this.roadNetwork.resolveVehicleElevation(
+            this.trailer.body.position.x,
+            this.trailer.body.position.y,
+            this.trailer.layer,
+            this.trailer.elevationZ,
+            this.trailer.body.angle,
+            this.trailer.length * 0.5,
+          )
+        : null;
+      const pElev = this.pupTrailer
+        ? this.roadNetwork.resolveVehicleElevation(
+            this.pupTrailer.body.position.x,
+            this.pupTrailer.body.position.y,
+            this.pupTrailer.layer,
+            this.pupTrailer.elevationZ,
+            this.pupTrailer.body.angle,
+            this.pupTrailer.length * 0.5,
+          )
+        : null;
+      const rigElevatedVisual =
+        tElev.layer === 1 || tElev.z >= 0.06 ||
+        (lElev !== null && (lElev.layer === 1 || lElev.z >= 0.06)) ||
+        (pElev !== null && (pElev.layer === 1 || pElev.z >= 0.06));
+
+      this.truck.setElevation(tElev.layer, tElev.z, rigElevatedVisual);
+      if (this.trailer && lElev) {
+        this.trailer.setElevation(lElev.layer, lElev.z, rigElevatedVisual);
+      }
+      if (this.pupTrailer && pElev) {
+        this.pupTrailer.setElevation(pElev.layer, pElev.z, rigElevatedVisual);
+      }
+
+      // Surface grip from road network (layer-aware) + ground paved floor prefabs
+      const roadGrip = this.roadNetwork.gripAt(tx, ty, this.truck.layer);
+      const padGrip = this.truck.layer === 0 ? this.world.objects.pavedGripAt(tx, ty) : 0;
+      this.truck.setRoadGrip(Math.max(roadGrip, padGrip));
+
+      // Fade overhead viaduct deck while driving underneath on ground layer
+      const underBridge =
+        !this.isEditorMode &&
+        this.truck.layer === 0 &&
+        this.truck.elevationZ < 0.08 &&
+        this.roadNetwork.isUnderElevatedBridge(tx, ty);
+      const targetAlpha = underBridge ? 0.42 : 1.0;
+      this.bridgeUnderpassAlpha += (targetAlpha - this.bridgeUnderpassAlpha) * Math.min(1, dt * 8);
+      this.bridgeRoadGraphics?.setAlpha(this.bridgeUnderpassAlpha);
+      this.bridgeShadowGraphics?.setAlpha(0.18 + 0.82 * ((this.bridgeUnderpassAlpha - 0.42) / 0.58));
     }
 
     // When not in editor mode, update vehicle driving physics
@@ -1547,6 +1668,9 @@ export class MainScene extends Phaser.Scene {
 
     const g = this.roadGraphics;
     g.clear();
+    this.rampBaseGraphics?.clear();
+    this.bridgeShadowGraphics?.clear();
+    this.bridgeRoadGraphics?.clear();
 
     // `cam.worldView` is stale until the first preRender — use the live view
     const view = this.getCameraView(cam);
@@ -1554,6 +1678,7 @@ export class MainScene extends Phaser.Scene {
     const vx0 = view.x - M, vy0 = view.y - M, vx1 = view.x + view.width + M, vy1 = view.y + view.height + M;
 
     for (const road of this.roadNetwork.roads) {
+      if ((road.layer ?? 0) > 0) continue; // elevated bridges render above ground vehicles
       // Cheap per-road bounds reject
       let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
       let maxHalf = 0;
@@ -1639,6 +1764,258 @@ export class MainScene extends Phaser.Scene {
         }
       }
     }
+
+    // Elevated viaducts & ramps (rendered above ground vehicles/objects)
+    for (const cache of this.roadNetwork.getBridgeCaches()) {
+      if (cache.maxX + 80 < vx0 || cache.minX - 80 > vx1 || cache.maxY + 80 < vy0 || cache.minY - 80 > vy1) continue;
+      this.renderBridgeCache(cache, vx0, vy0, vx1, vy1);
+    }
+  }
+
+  /** Syncs static Matter rectangles for ramp retaining walls & elevated deck guardrails. */
+  private syncBridgeBarriers() {
+    if (this.bridgeBarrierVersion === this.roadNetwork.version) return;
+    this.bridgeBarrierVersion = this.roadNetwork.version;
+
+    for (const b of this.bridgeBarrierBodies) {
+      this.matter.world.remove(b);
+    }
+    this.bridgeBarrierBodies = [];
+
+    for (const seg of this.roadNetwork.getBridgeBarriers()) {
+      const isRamp = seg.kind === 'ramp_wall';
+      const body = this.matter.add.rectangle(seg.x, seg.y, seg.length, seg.thickness, {
+        isStatic: true,
+        angle: seg.angle,
+        label: isRamp ? 'bridge_ramp_wall' : 'bridge_deck_rail',
+        friction: 0.25,
+        restitution: 0.05,
+        collisionFilter: {
+          category: isRamp ? COLLISION_CAT.RAMP_WALL : COLLISION_CAT.BRIDGE_RAIL,
+          mask: isRamp ? COLLISION_MASK.RAMP_WALL : COLLISION_MASK.BRIDGE_RAIL,
+        },
+      });
+      this.bridgeBarrierBodies.push(body);
+    }
+  }
+
+  /** Draws one elevated viaduct (drop shadow + carriageway + markings + ramp walls + deck guardrails). */
+  private renderBridgeCache(
+    cache: BridgeRoadCache,
+    vx0: number, vy0: number, vx1: number, vy1: number,
+  ) {
+    const sg = this.bridgeShadowGraphics;
+    const bg = this.bridgeRoadGraphics;
+    if (!bg) return;
+    const rg = this.rampBaseGraphics ?? bg;
+    const RAMP_PORTAL_Z = 0.28;
+
+    const { road, samples, totalLen } = cache;
+    if (samples.length < 2) return;
+    const style = MainScene.ROAD_STYLE[road.surface] || MainScene.ROAD_STYLE.asphalt;
+    const inView = (s: RoadSample) => s.x >= vx0 - 200 && s.x <= vx1 + 200 && s.y >= vy0 - 200 && s.y <= vy1 + 200;
+
+    // 1. Drop shadow under elevated spans (z >= 0.28 so ramp portal aprons don't cast overhead shadows)
+    if (sg) {
+      for (let i = 0; i < samples.length - 1; i++) {
+        const a = samples[i], b = samples[i + 1];
+        if (a.tx * b.tx + a.ty * b.ty < 0.2) continue;
+        const zAvg = (a.z + b.z) * 0.5;
+        if (zAvg < RAMP_PORTAL_Z) continue;
+        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        if (mx < vx0 || mx > vx1 || my < vy0 || my > vy1) continue;
+        const oxA = 14 * a.z, oyA = 18 * a.z;
+        const oxB = 14 * b.z, oyB = 18 * b.z;
+        const anx = -a.ty * (a.w / 2 + 6), any = a.tx * (a.w / 2 + 6);
+        const bnx = -b.ty * (b.w / 2 + 6), bny = b.tx * (b.w / 2 + 6);
+        sg.fillStyle(0x04070d, 0.42 * zAvg);
+        sg.beginPath();
+        sg.moveTo(a.x + oxA + anx, a.y + oyA + any);
+        sg.lineTo(b.x + oxB + bnx, b.y + oyB + bny);
+        sg.lineTo(b.x + oxB - bnx, b.y + oyB - bny);
+        sg.lineTo(a.x + oxA - anx, a.y + oyA - any);
+        sg.closePath();
+        sg.fillPath();
+      }
+    }
+
+    // 2. Carriageway ribbon (low ramp portal apron z < 0.28 at depth 2.6, elevated span z >= 0.28 at depth 16)
+    let altIdx = 0;
+    for (let i = 0; i < samples.length - 1; i++) {
+      const a = samples[i], b = samples[i + 1];
+      if (a.tx * b.tx + a.ty * b.ty < 0.2) { altIdx++; continue; }
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      if (mx < vx0 || mx > vx1 || my < vy0 || my > vy1) { altIdx++; continue; }
+      const fill = road.surface === 'asphalt' ? style.fill : (altIdx % 6 < 3 ? style.fill : style.fillAlt);
+      const zAvg = (a.z + b.z) * 0.5;
+      this.fillRibbonQuad(zAvg < RAMP_PORTAL_Z ? rg : bg, a, b, fill);
+      altIdx++;
+    }
+
+    // 3. Road edge lines (split cleanly at z = 0.28)
+    if (road.surface !== 'dirt') {
+      const edgeTargets = rg === bg ? [bg] : [rg, bg];
+      for (const target of edgeTargets) {
+        const isLow = rg !== bg && target === rg;
+        target.lineStyle(3, style.edge, 0.85);
+        for (const side of [-1, 1]) {
+          let drawing = false;
+          for (let i = 0; i < samples.length - 1; i++) {
+            const a = samples[i], b = samples[i + 1];
+            if (a.tx * b.tx + a.ty * b.ty < 0.2) {
+              if (drawing) { target.strokePath(); drawing = false; }
+              continue;
+            }
+            const zMid = (a.z + b.z) * 0.5;
+            const match = rg === bg ? true : (isLow ? zMid < RAMP_PORTAL_Z : zMid >= RAMP_PORTAL_Z);
+            if (!match || (!inView(a) && !inView(b))) {
+              if (drawing) { target.strokePath(); drawing = false; }
+              continue;
+            }
+            const offA = a.w / 2 - 5;
+            const offB = b.w / 2 - 5;
+            const ax = a.x - a.ty * offA * side, ay = a.y + a.tx * offA * side;
+            const bx = b.x - b.ty * offB * side, by = b.y + b.tx * offB * side;
+            if (!drawing) {
+              target.beginPath();
+              target.moveTo(ax, ay);
+              drawing = true;
+            }
+            target.lineTo(bx, by);
+          }
+          if (drawing) target.strokePath();
+        }
+      }
+    }
+
+    // 4. Centreline dashes or one-way chevrons
+    if (road.oneWay) {
+      this.drawDirectionChevrons(bg, samples, vx0, vy0, vx1, vy1, rg !== bg ? rg : undefined, RAMP_PORTAL_Z);
+    } else if (style.dash !== null) {
+      const ON = MainScene.ROAD_DASH_LEN, OFF = MainScene.ROAD_DASH_GAP, PERIOD = ON + OFF;
+      bg.lineStyle(5, style.dash, 0.9);
+      if (rg !== bg) rg.lineStyle(5, style.dash, 0.9);
+      let s = 0;
+      for (let i = 0; i < samples.length - 1; i++) {
+        const a = samples[i], b = samples[i + 1];
+        const len = Math.hypot(b.x - a.x, b.y - a.y);
+        if (len < 0.001) continue;
+        if (a.tx * b.tx + a.ty * b.ty < 0.2) { s += len; continue; }
+        let t = 0;
+        while (t < len) {
+          const phase = s % PERIOD;
+          if (phase < ON) {
+            const run = Math.min(len - t, ON - phase);
+            const t1 = t + run;
+            const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+            if (mx >= vx0 && mx <= vx1 && my >= vy0 && my <= vy1) {
+              const zMid = Phaser.Math.Linear(a.z, b.z, (t + t1) / (2 * len));
+              const target = zMid < RAMP_PORTAL_Z ? rg : bg;
+              target.beginPath();
+              target.moveTo(Phaser.Math.Linear(a.x, b.x, t / len), Phaser.Math.Linear(a.y, b.y, t / len));
+              target.lineTo(Phaser.Math.Linear(a.x, b.x, t1 / len), Phaser.Math.Linear(a.y, b.y, t1 / len));
+              target.strokePath();
+            }
+            s += run; t = t1;
+          } else {
+            const run = Math.min(len - t, PERIOD - phase);
+            s += run; t += run;
+          }
+        }
+      }
+    }
+
+    // 5. Ramp uphill slope chevrons (subtle shoulder markers showing incline)
+    if (!road.closed) {
+      bg.lineStyle(2.5, 0x94a3b8, 0.35);
+      if (rg !== bg) rg.lineStyle(2.5, 0x94a3b8, 0.35);
+      for (let i = 1; i < samples.length - 1; i += 3) {
+        const s = samples[i];
+        if (s.z < 0.08 || s.z >= 0.92 || !inView(s)) continue;
+        const target = s.z < RAMP_PORTAL_Z ? rg : bg;
+        const dirSign = s.s < totalLen * 0.5 ? 1 : -1; // point uphill toward deck
+        const ux = s.tx * dirSign, uy = s.ty * dirSign;
+        const nx = -uy, ny = ux;
+        for (const side of [-1, 1]) {
+          const off = Math.max(10, s.w / 2 - 14);
+          const cx = s.x - s.ty * off * side;
+          const cy = s.y + s.tx * off * side;
+          target.beginPath();
+          target.moveTo(cx - ux * 5 + nx * 6, cy - uy * 5 + ny * 6);
+          target.lineTo(cx + ux * 5, cy + uy * 5);
+          target.lineTo(cx - ux * 5 - nx * 6, cy - uy * 5 - ny * 6);
+          target.strokePath();
+        }
+      }
+    }
+
+    // 6. Ramp retaining walls & deck guardrails (matching physical portal clearances)
+    let startClear = 12;
+    let endClear = 12;
+    if (!road.closed) {
+      const p0 = samples[0], pLast = samples[samples.length - 1];
+      for (const n of IntersectionSystem.getInstance().nodes) {
+        if (n.layer !== 0) continue;
+        const maxW = n.arms.reduce((m, arm) => Math.max(m, arm.width), 0);
+        if (Phaser.Math.Distance.Between(p0.x, p0.y, n.x, n.y) < maxW / 2 + 45) {
+          startClear = Math.max(startClear, maxW / 2 + 10);
+        }
+        if (Phaser.Math.Distance.Between(pLast.x, pLast.y, n.x, n.y) < maxW / 2 + 45) {
+          endClear = Math.max(endClear, maxW / 2 + 10);
+        }
+      }
+    }
+
+    const strokeSideBarriers = (kind: 'ramp_wall' | 'deck_rail', lineW: number, color: number, alpha: number) => {
+      const targets = kind === 'ramp_wall' && rg !== bg ? [rg, bg] : [bg];
+      for (const target of targets) {
+        const isLow = rg !== bg && target === rg;
+        target.lineStyle(lineW, color, alpha);
+        for (const side of [-1, 1]) {
+          let drawing = false;
+          for (let i = 0; i < samples.length - 1; i++) {
+            const a = samples[i], b = samples[i + 1];
+            if (a.tx * b.tx + a.ty * b.ty < 0.2) {
+              if (drawing) { target.strokePath(); drawing = false; }
+              continue;
+            }
+            const sMid = (a.s + b.s) * 0.5;
+            const zMid = (a.z + b.z) * 0.5;
+            const heightMatch = kind === 'deck_rail'
+              ? zMid >= 0.94
+              : (rg === bg ? zMid < 0.94 : (isLow ? zMid < RAMP_PORTAL_Z : zMid >= RAMP_PORTAL_Z && zMid < 0.94));
+            const active =
+              zMid >= 0.05 &&
+              (road.closed || (sMid >= startClear && sMid <= totalLen - endClear)) &&
+              heightMatch &&
+              (inView(a) || inView(b));
+
+            if (!active) {
+              if (drawing) { target.strokePath(); drawing = false; }
+              continue;
+            }
+            const offA = a.w / 2 + 5;
+            const offB = b.w / 2 + 5;
+            const ax = a.x - a.ty * offA * side, ay = a.y + a.tx * offA * side;
+            const bx = b.x - b.ty * offB * side, by = b.y + b.tx * offB * side;
+            if (!drawing) {
+              target.beginPath();
+              target.moveTo(ax, ay);
+              drawing = true;
+            }
+            target.lineTo(bx, by);
+          }
+          if (drawing) target.strokePath();
+        }
+      }
+    };
+
+    // Concrete ramp retaining walls + coping
+    strokeSideBarriers('ramp_wall', 8, 0x334155, 0.95);
+    strokeSideBarriers('ramp_wall', 3, 0x64748b, 0.95);
+    // Elevated deck outer kerb + bright metallic guardrail
+    strokeSideBarriers('deck_rail', 9, 0x1e293b, 0.96);
+    strokeSideBarriers('deck_rail', 4, 0x94a3b8, 0.98);
   }
 
   /** Draws a highlight ring around the gas pump when the truck is within refuel range,
@@ -1712,11 +2089,14 @@ export class MainScene extends Phaser.Scene {
     g: Phaser.GameObjects.Graphics,
     samples: RoadSample[],
     vx0: number, vy0: number, vx1: number, vy1: number,
+    lowG?: Phaser.GameObjects.Graphics,
+    lowZThreshold = 0,
   ) {
     const STEP = 420;
     let s = 0;
     let next = STEP / 2;
     g.lineStyle(4, 0xfacc15, 0.45);
+    if (lowG) lowG.lineStyle(4, 0xfacc15, 0.45);
     for (let i = 0; i < samples.length - 1; i++) {
       const a = samples[i], b = samples[i + 1];
       const len = Math.hypot(b.x - a.x, b.y - a.y);
@@ -1731,11 +2111,13 @@ export class MainScene extends Phaser.Scene {
           const ty = Phaser.Math.Linear(a.ty, b.ty, t);
           const bx = -ty, by = tx; // normal
           const r = 14;
-          g.beginPath();
-          g.moveTo(px - tx * r + bx * r * 0.8, py - ty * r + by * r * 0.8);
-          g.lineTo(px + tx * r * 0.6, py + ty * r * 0.6);
-          g.lineTo(px - tx * r - bx * r * 0.8, py - ty * r - by * r * 0.8);
-          g.strokePath();
+          const z = lowG ? Phaser.Math.Linear((a as any).z ?? 0, (b as any).z ?? 0, t) : 1;
+          const target = lowG && z < lowZThreshold ? lowG : g;
+          target.beginPath();
+          target.moveTo(px - tx * r + bx * r * 0.8, py - ty * r + by * r * 0.8);
+          target.lineTo(px + tx * r * 0.6, py + ty * r * 0.6);
+          target.lineTo(px - tx * r - bx * r * 0.8, py - ty * r - by * r * 0.8);
+          target.strokePath();
         }
         next += STEP;
       }
@@ -1837,6 +2219,9 @@ export class MainScene extends Phaser.Scene {
     this.world?.terrain?.setLightingEnabled(enabled);
     this.flatsGraphics?.setLighting(enabled);
     this.roadGraphics?.setLighting(enabled);
+    this.rampBaseGraphics?.setLighting(enabled);
+    this.bridgeRoadGraphics?.setLighting(enabled);
+    this.roadFlatsGraphics?.setLighting(enabled);
     this.solidsGraphics?.setLighting(enabled);
     this.overheadGraphics?.setLighting(enabled);
     this.truck?.setLightingEnabled(enabled);
