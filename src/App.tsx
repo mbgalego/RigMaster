@@ -146,6 +146,10 @@ const CREATE_CATALOG: Array<{
     icon: DoorOpen,
     items: [
       { spec: { type: 'entrance', w: 140, h: 220, label: 'Entrada' }, icon: DoorOpen },
+      { spec: { type: 'entrance_y', w: 360, h: 420, params: { mark: 'green' }, label: 'Entrada em Y' }, icon: Route },
+      { spec: { type: 'entrance_y', w: 360, h: 420, params: { mark: 'red' }, label: 'Entrada em Y (Vermelha)' }, icon: Route },
+      { spec: { type: 'entrance_gas', w: 220, h: 300, params: { pumps: 1 }, label: 'Entrada Posto' }, icon: Fuel },
+      { spec: { type: 'entrance_gas', w: 320, h: 300, params: { pumps: 2 }, label: 'Entrada Posto 2 Bombas' }, icon: Fuel },
       { spec: { type: 'crosswalk', w: 36, h: 170, label: 'Passadeira' }, icon: Equal },
     ],
   },

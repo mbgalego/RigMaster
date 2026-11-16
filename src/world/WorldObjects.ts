@@ -19,6 +19,8 @@ export type WObjType =
   | 'dock_wall'       // solid wall with loading-dock bays (params.docks)
   | 'parking_lot'     // flat car/truck parking area with painted slots + parked cars
   | 'entrance'        // flat concrete apron in front of a building/garage
+  | 'entrance_y'      // Y-fork driveway: two lanes converging into one, chevron-marked
+  | 'entrance_gas'    // fuel-station entrance lane with pump island(s) + arrows
   | 'roundabout'      // circular island with circulating lane (solid centre island)
   | 'crosswalk'       // flat zebra crossing (stripes along w, spans h)
   | 'wall'            // solid masonry wall (rotatable, any length)
@@ -133,10 +135,16 @@ const SOLID_TYPES = new Set<WObjType>([
 /** Tipos desenhados na camada FLATS (sob os sólidos) — ver render(). */
 const FLAT_TYPES = new Set<WObjType>([
   'gas_canopy', 'parking_pad', 'parking_lot', 'entrance', 'exam_dock',
+  'entrance_y', 'entrance_gas',
   'dock', 'pad_asphalt', 'pad_dirt',
 ]);
 
 function isFlatType(t: WObjType): boolean { return FLAT_TYPES.has(t); }
+
+/** Marking colours for the driveway entrances (`params.mark`). */
+const ENTRANCE_MARKS: Record<string, number> = {
+  green: 0x4ade80, blue: 0x60a5fa, red: 0xf87171, yellow: 0xfacc15,
+};
 
 // Traffic light cycle (ms) — coordinated 2-axis cycle with 1s ALL-RED safety buffer
 const TL_GREEN = 6500;
@@ -867,7 +875,9 @@ export class WorldObjects {
       case 'exam_dock': return 2;
       case 'parking_lot': return 3;
       case 'parking_pad': return 4;
-      case 'entrance': return 5;
+      case 'entrance':
+      case 'entrance_y':
+      case 'entrance_gas': return 5;
       case 'gas_canopy': return 6;
       default: return 3;
     }
@@ -1160,6 +1170,111 @@ export class WorldObjects {
           g.lineStyle(2, 0xe2e8f0, 0.3);
           for (let yy = y0 + 24; yy < y0 + o.h - 20; yy += 34) {
             g.lineBetween(o.x - 5, yy, o.x + 5, yy + 16);
+          }
+          break;
+        }
+        case 'entrance_y': {
+          // Y-fork driveway — two lanes open onto the yard (local +y mouth)
+          // and converge into a single stem leading to the building door
+          // (local -y). Green fork pad + chevrons, like a haulier entrance.
+          const mark = ENTRANCE_MARKS[String(o.params?.mark || 'green')] || ENTRANCE_MARKS.green;
+          const half = Math.max(26, o.w * 0.16); // stem half-width
+          const yj = y0 + o.h * 0.46;            // fork junction
+          // Y-shaped apron (mouth spans the full bottom edge)
+          g.fillStyle(0x2e333d, 1);
+          g.beginPath();
+          g.moveTo(x0, y0 + o.h);
+          g.lineTo(o.x - half, yj);
+          g.lineTo(o.x - half, y0);
+          g.lineTo(o.x + half, y0);
+          g.lineTo(o.x + half, yj);
+          g.lineTo(x0 + o.w, y0 + o.h);
+          g.closePath();
+          g.fillPath();
+          g.lineStyle(2, 0xe2e8f0, 0.45);
+          g.strokePath();
+          // Stop bar + door sill at the stem top (building side)
+          g.fillStyle(0xe2e8f0, 0.5);
+          g.fillRect(o.x - half, y0 + 8, half * 2, 5);
+          // Fork pad — hatched triangle filling the junction
+          const tipY = yj - (yj - y0) * 0.62;
+          g.fillStyle(mark, 0.5);
+          g.beginPath();
+          g.moveTo(o.x - half, yj);
+          g.lineTo(o.x + half, yj);
+          g.lineTo(o.x, tipY);
+          g.closePath();
+          g.fillPath();
+          g.lineStyle(1.5, mark, 0.8);
+          g.strokePath();
+          g.lineStyle(2, mark, 0.45);
+          for (let i = 1; i <= 3; i++) {
+            const t = i / 4;
+            const ly = yj + (tipY - yj) * t;
+            const lw = half * (1 - t);
+            g.lineBetween(o.x - lw, ly, o.x + lw, ly);
+          }
+          // Chevrons on each branch pointing into the fork
+          const chev = (px: number, py: number) => {
+            const s = 9;
+            g.beginPath();
+            g.moveTo(px - s, py + s);
+            g.lineTo(px, py);
+            g.lineTo(px + s, py + s);
+            g.strokePath();
+          };
+          g.lineStyle(2.5, mark, 0.75);
+          for (const side of [-1, 1]) {
+            const bx = o.x + side * o.w * 0.28;
+            chev(bx, yj + o.h * 0.26);
+            chev(o.x + side * o.w * 0.13, yj + o.h * 0.4);
+          }
+          break;
+        }
+        case 'entrance_gas': {
+          // Fuel-station entrance lane — flat apron with pump island(s) on
+          // the sides and red direction chevrons on the drive lane, like a
+          // service-station forecourt entry.
+          const pumps = Math.max(1, Math.min(2, Number(o.params?.pumps ?? 1) || 1));
+          g.fillStyle(0x2e333d, 1);
+          g.fillRect(x0, y0, o.w, o.h);
+          g.lineStyle(2, 0xe2e8f0, 0.45);
+          g.strokeRect(x0 + 3, y0 + 3, o.w - 6, o.h - 6);
+          // Door sill stripes on the forecourt edge (+y)
+          g.fillStyle(0xe2e8f0, 0.5);
+          g.fillRect(x0 + 10, y0 + o.h - 10, o.w - 20, 5);
+          // Pump islands — concrete kerb + pump body + glowing screen
+          const iw = Math.max(22, o.w * 0.18);           // island width
+          const iy0 = y0 + o.h * 0.2, ih = o.h * 0.55;   // island vertical span
+          const cxL = x0 + iw * 0.7, cxR = x0 + o.w - iw * 0.7;
+          for (const cx of pumps === 2 ? [cxL, cxR] : [cxL]) {
+            g.fillStyle(0x2e333e, 1);
+            g.fillRect(cx - iw / 2, iy0, iw, ih);
+            g.lineStyle(2, 0x4a505c, 0.6);
+            g.strokeRect(cx - iw / 2, iy0, iw, ih);
+            const pw = iw * 0.62;
+            g.fillStyle(0x3a4150, 1);
+            g.fillRect(cx - pw / 2, iy0 + 8, pw, ih - 16);
+            g.lineStyle(1, 0x5b6370, 0.5);
+            g.strokeRect(cx - pw / 2, iy0 + 8, pw, ih - 16);
+            g.fillStyle(0x0b1016, 1);
+            g.fillRect(cx - pw / 2 + 4, iy0 + 13, pw - 8, 20);
+            g.fillStyle(0x22c55e, 0.9);
+            g.fillRect(cx - pw / 2 + 7, iy0 + 18, pw - 14, 4);
+            g.fillRect(cx - pw / 2 + 7, iy0 + 26, pw - 22, 3);
+          }
+          // Red direction chevrons on the drive lane pointing to the forecourt
+          const acx = pumps === 2 ? o.x : x0 + o.w * 0.62;
+          for (let k = 0; k < 2; k++) {
+            const ay = y0 + o.h * (0.62 + k * 0.2);
+            const s = 9;
+            g.fillStyle(0xf87171, 0.85);
+            g.beginPath();
+            g.moveTo(acx - s, ay - s);
+            g.lineTo(acx + s, ay - s);
+            g.lineTo(acx, ay + s);
+            g.closePath();
+            g.fillPath();
           }
           break;
         }

@@ -802,8 +802,8 @@ export class EditorScene extends Phaser.Scene {
 
   /** Types whose width/height can be dragged from the corner handles */
   private static readonly RESIZABLE_TYPES = new Set<string>([
-    'wall', 'entrance', 'parking_lot', 'building', 'jersey_barrier',
-    'container_stack', 'dock', 'gas_canopy', 'silo', 'crane',
+    'wall', 'entrance', 'entrance_y', 'entrance_gas', 'parking_lot', 'building',
+    'jersey_barrier', 'container_stack', 'dock', 'gas_canopy', 'silo', 'crane',
     'roundabout', 'crosswalk', 'pad_asphalt', 'pad_dirt', 'dock_wall',
   ]);
 
