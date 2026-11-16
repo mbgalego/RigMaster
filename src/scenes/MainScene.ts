@@ -1125,7 +1125,7 @@ export class MainScene extends Phaser.Scene {
     };
   }
 
-  public toggleEditorMode() {
+  public toggleEditorMode(commit: boolean = true) {
     this.isEditorMode = !this.isEditorMode;
     if (this.isEditorMode) {
       // Detach follow AND drop the camera bounds: while editing, the MainScene camera is
@@ -1139,6 +1139,9 @@ export class MainScene extends Phaser.Scene {
       this.scene.bringToTop('EditorScene');
       this.scene.bringToTop('MinimapScene');
     } else {
+      // Qualquer saída do editor grava as alterações (auto-save no fim da sessão),
+      // a menos que o utilizador tenha cancelado (commit=false → restaura snapshot).
+      this.world.endEditorSession(commit);
       this.scene.stop('EditorScene');
       this.cameras.main.setBounds(0, 0, World.WORLD_W, World.WORLD_H);
       this.cameras.main.setZoom(this.preEditorZoom);

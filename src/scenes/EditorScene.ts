@@ -3,7 +3,7 @@ import { MainScene } from './MainScene';
 import { GarageSystem } from '../systems/GarageSystem';
 import { RoadNetwork, RoadData, RoadPoint, RoadSurface } from '../systems/RoadNetwork';
 import { IntersectionSystem, IntersectionNode, TrafficLightSpec } from '../systems/IntersectionSystem';
-import { WorldObject, WObjType } from '../world/WorldObjects';
+import { WorldObject, WObjType, CompoundPart, compoundParts, isCompound, compoundBoundsFromParts } from '../world/WorldObjects';
 import { World } from '../world/World';
 import { TrailerManager } from '../systems/TrailerManager';
 
@@ -27,7 +27,7 @@ export class EditorScene extends Phaser.Scene {
   public mainScene!: MainScene;
   public garageSystem!: GarageSystem;
 
-  public editorTool: 'pan' | 'road' | 'object' | 'spawn' | 'add' = 'pan';
+  public editorTool: 'pan' | 'road' | 'object' | 'spawn' | 'add' | 'compound' = 'pan';
 
   private isDraggingPan: boolean = false;
   private lastDragX: number = 0;
@@ -88,6 +88,65 @@ export class EditorScene extends Phaser.Scene {
   // ---- Add tool (place new objects from the catalog) ----
   public addType: AddObjectSpec = { type: 'wall', w: 220, h: 26, label: 'Muro' };
 
+  /** Rotação com snap para ângulos múltiplos de 45° (ativo por padrão). */
+  public rotationSnap: boolean = true;
+
+  /** Limiar (graus) dentro do qual o ângulo salta para o múltiplo mais próximo do passo. */
+  public static readonly ROTATION_SNAP_STEP_DEG = 45;
+  public static readonly ROTATION_SNAP_THRESHOLD_DEG = 12;
+
+  // ======================================================================
+  // UNDO STACK — snapshots do estado completo do mundo antes de cada mutação
+  // (sessão de editor: desfaz uma operação de cada vez)
+  // ======================================================================
+
+  private undoStack: Array<{ json: string; version: number }> = [];
+  private readonly undoLimit = 60;
+
+  /** Guarda um snapshot do mundo atual (chamar antes de mutar). */
+  private pushUndo() {
+    if (this.undoStack.length >= this.undoLimit) this.undoStack.shift();
+    this.undoStack.push({
+      json: this.mainScene.world.exportJSON(),
+      version: this.mainScene.world.version,
+    });
+  }
+
+  public canUndo(): boolean {
+    return this.undoStack.length > 0;
+  }
+
+  /** Restaura o último snapshot, desfazendo a última operação da sessão. */
+  public undo() {
+    if (this.undoStack.length === 0) return;
+    const snap = this.undoStack.pop()!;
+    this.mainScene.world.importJSON(snap.json);
+    this.mainScene.world.version = snap.version + 1;
+    this.selectedObject = null;
+    this.objectDrag = null;
+    this.selectedRoad = null;
+    this.selectedPointIndex = null;
+    this.roadDrag = null;
+    this.pendingRoad = null;
+    // Recria as entidades vivas dos atrelados (editor-placed trailers)
+    this.mainScene.rebuildTrailers();
+  }
+
+  /** Cancela toda a sessão: restaura o mundo ao estado de entrada no editor. */
+  public cancelSession() {
+    this.mainScene.world.endEditorSession(false);
+    this.undoStack = [];
+    this.selectedObject = null;
+    this.objectDrag = null;
+    this.compoundDrag = null;
+    this.selectedRoad = null;
+    this.selectedPointIndex = null;
+    this.roadDrag = null;
+    this.pendingRoad = null;
+    this.mainScene.rebuildTrailers();
+    this.mainScene.world.version++;
+  }
+
   public static readonly MIN_ZOOM = 0.04;
   public static readonly MAX_ZOOM = 1.8;
 
@@ -99,6 +158,9 @@ export class EditorScene extends Phaser.Scene {
     this.mainScene = this.scene.get('MainScene') as MainScene;
     this.garageSystem = GarageSystem.getInstance();
     this.roadNetwork = RoadNetwork.getInstance();
+
+    // Marca o ponto de partida da sessão de editor (para o botão Cancelar).
+    this.mainScene.world.beginEditorSession();
 
     // Enable multi-touch pointers for touch pan & pinch-to-zoom
     this.input.addPointer(2);
@@ -254,6 +316,11 @@ export class EditorScene extends Phaser.Scene {
         else if (this.editorTool === 'object') this.objectTap(gs.worldX, gs.worldY);
         else if (this.editorTool === 'spawn') this.spawnTap(gs.worldX, gs.worldY);
         else if (this.editorTool === 'add') this.addTap(gs.worldX, gs.worldY);
+        else if (this.editorTool === 'compound') this.compoundTap(gs.worldX, gs.worldY);
+      }
+      // Fim de um marquee da ferramenta Composto → consolidar
+      if (this.gesture && this.gesture.toolDrag && this.editorTool === 'compound') {
+        this.finishCompoundDrag();
       }
       this.cancelGesture();
       this.isDraggingPan = false;
@@ -273,18 +340,21 @@ export class EditorScene extends Phaser.Scene {
     this.gesture = null;
     this.roadDrag = null;
     this.objectDrag = null;
+    this.compoundDrag = null;
   }
 
   /** On first significant move of a gesture: begin a tool drag when the press started on something editable. */
   private tryStartToolDrag(x: number, y: number): boolean {
     if (this.editorTool === 'road') return this.tryStartRoadDrag(x, y);
     if (this.editorTool === 'object') return this.tryStartObjectDrag(x, y);
+    if (this.editorTool === 'compound') return this.tryStartCompoundDrag(x, y);
     return false; // pan / spawn / add gestures become a pan
   }
 
   private applyToolDrag(wp: { x: number; y: number }) {
     if (this.roadDrag) this.applyRoadDrag(wp);
     else if (this.objectDrag) this.applyObjectDrag(wp);
+    else if (this.compoundDrag) this.applyCompoundDrag(wp);
   }
 
   private setupKeyboardPan() {
@@ -309,6 +379,8 @@ export class EditorScene extends Phaser.Scene {
         this.selectedPointIndex = null;
       } else if (this.editorTool === 'object') {
         this.selectedObject = null;
+      } else if (this.editorTool === 'compound') {
+        this.selectedObject = null;
       }
     });
     this.input.keyboard.on('keydown-BACKSPACE', () => {
@@ -320,6 +392,7 @@ export class EditorScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-DELETE', () => {
       if (this.editorTool === 'road') this.deleteSelectedRoad();
       else if (this.editorTool === 'object') this.deleteSelectedObject();
+      else if (this.editorTool === 'compound' && this.selectedObject) this.deleteSelectedObject();
     });
     // Rotate the selected object with R (+15°) / Shift+R (−15°)
     this.input.keyboard.on('keydown-R', (e: KeyboardEvent) => {
@@ -327,13 +400,57 @@ export class EditorScene extends Phaser.Scene {
         this.rotateSelectedObject(e.shiftKey ? -15 : 15);
       }
     });
+
+    // Toggle rotation snap to 45° multiples with Shift+S
+    this.input.keyboard.on('keydown-S', (e: KeyboardEvent) => {
+      if (e.shiftKey && this.editorTool === 'object') {
+        this.toggleRotationSnap();
+      }
+    });
+
+    // Undo last object operation with Ctrl+Z
+    this.input.keyboard.on('keydown-Z', (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.repeat && this.canUndo()) {
+        e.preventDefault();
+        const now = performance.now();
+        if (now - this.lastUndoKeyAt < 150) return;
+        this.lastUndoKeyAt = now;
+        this.undo();
+      }
+    });
+
+    // Duplicate / copy / paste the selected object (Ctrl+D / Ctrl+C / Ctrl+V)
+    // Guards: ignore auto-repeat and debounce — Phaser 4 can deliver the same
+    // keydown twice, which would duplicate/paste multiple objects at once.
+    this.input.keyboard.on('keydown-D', (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.repeat || this.editorTool !== 'object') return;
+      e.preventDefault();
+      const now = performance.now();
+      if (now - this.lastDupKeyAt < 150) return;
+      this.lastDupKeyAt = now;
+      this.duplicateSelectedObject();
+    });
+    this.input.keyboard.on('keydown-C', (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.repeat && this.editorTool === 'object' && this.selectedObject) {
+        e.preventDefault();
+        this.copySelectedObject();
+      }
+    });
+    this.input.keyboard.on('keydown-V', (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.repeat || !this.clipboard) return;
+      e.preventDefault();
+      const now = performance.now();
+      if (now - this.lastPasteKeyAt < 150) return;
+      this.lastPasteKeyAt = now;
+      this.pasteClipboard();
+    });
   }
 
   // ======================================================================
   // TOOL SWITCHING
   // ======================================================================
 
-  public setTool(tool: 'pan' | 'road' | 'object' | 'spawn' | 'add') {
+  public setTool(tool: 'pan' | 'road' | 'object' | 'spawn' | 'add' | 'compound') {
     this.editorTool = tool;
     if (tool !== 'road') {
       this.pendingRoad = null;
@@ -345,6 +462,7 @@ export class EditorScene extends Phaser.Scene {
       this.selectedObject = null;
       this.objectDrag = null;
     }
+    if (tool !== 'compound') this.compoundDrag = null;
     // Intersection selection persists across tools so the user can toggle
     // signals from any tool; cleared explicitly via clearIntersectionSelection.
   }
@@ -721,6 +839,7 @@ export class EditorScene extends Phaser.Scene {
 
   /** Begins an object drag: rotation knob → resize corners → move the body. */
   private tryStartObjectDrag(x: number, y: number): boolean {
+    this.pushUndo();
     const tol = 12 / this.cameras.main.zoom;
     const sel = this.selectedObject;
 
@@ -764,7 +883,18 @@ export class EditorScene extends Phaser.Scene {
 
     if (d.mode === 'rotate') {
       const delta = Math.atan2(wp.y - o.y, wp.x - o.x) - (d.startPointerAngle ?? 0);
-      this.mainScene.world.objects.setObjectAngle(o.id, (d.startAngle ?? o.angle) + delta);
+      let targetAngle = (d.startAngle ?? o.angle) + delta;
+      // Snap da rotação para ângulos múltiplos de 45° quando o ponteiro está
+      // perto deles — útil para alinhar objectos com a malha viária.
+      if (this.rotationSnap) {
+        const step = Phaser.Math.DegToRad(EditorScene.ROTATION_SNAP_STEP_DEG);
+        const threshold = Phaser.Math.DegToRad(EditorScene.ROTATION_SNAP_THRESHOLD_DEG);
+        const snapped = Math.round(targetAngle / step) * step;
+        if (Math.abs(targetAngle - snapped) < threshold) {
+          targetAngle = snapped;
+        }
+      }
+      this.mainScene.world.objects.setObjectAngle(o.id, targetAngle);
       o.angle = this.mainScene.world.objects.get(o.id)!.angle; // follow the knob visually
       if (o.type === 'trailer') TrailerManager.getInstance(this.mainScene).syncForObject(o);
       this.roadDirtySinceRelease = true;
@@ -807,6 +937,7 @@ export class EditorScene extends Phaser.Scene {
   }
 
   public rotateSelectedObject(deltaDeg: number) {
+    this.pushUndo();
     if (!this.selectedObject) return;
     this.mainScene.world.objects.rotateObject(this.selectedObject.id, Phaser.Math.DegToRad(deltaDeg));
     if (this.selectedObject.type === 'trailer') {
@@ -815,7 +946,14 @@ export class EditorScene extends Phaser.Scene {
     this.mainScene.world.version++;
   }
 
+  /** Alterna o snap de rotação para ângulos múltiplos de 45°. */
+  public toggleRotationSnap() {
+    this.rotationSnap = !this.rotationSnap;
+    this.mainScene.world.version++;
+  }
+
   public deleteSelectedObject() {
+    this.pushUndo();
     if (!this.selectedObject) return;
     // Editor-placed trailer: kill the live entity backing the data object
     if (this.selectedObject.type === 'trailer') {
@@ -827,7 +965,253 @@ export class EditorScene extends Phaser.Scene {
     this.mainScene.world.version++;
   }
 
-  public getObjectUIState(): { hasSelection: boolean; id: string; type: string; angleDeg: number; resizable: boolean; trailer: string } {
+  // ======================================================================
+  // DUPLICATE / COPY / PASTE (editor clipboard for world objects)
+  // ======================================================================
+
+  private clipboard: {
+    type: WObjType; w: number; h: number; angle: number;
+    variant?: string; params?: Record<string, any>;
+    cx: number; cy: number; // original position (fallback paste point)
+  } | null = null;
+
+  /** Debounce timestamps for the Ctrl+D / Ctrl+V shortcuts (double keydown guard). */
+  private lastDupKeyAt = 0;
+  private lastPasteKeyAt = 0;
+  private lastUndoKeyAt = 0;
+
+  public hasClipboard(): boolean {
+    return !!this.clipboard;
+  }
+
+  /** Clone the selected object right next to it and select the clone. */
+  public duplicateSelectedObject() {
+    this.pushUndo();
+    const src = this.selectedObject;
+    if (!src) return;
+    const o = this.mainScene.world.objects.add(
+      src.type,
+      src.x + 40,
+      src.y + Math.max(40, src.h / 2 + 24),
+      src.w, src.h,
+      { angle: src.angle, variant: src.variant, params: src.params ? { ...src.params } : undefined },
+    );
+    if (o.type === 'trailer') TrailerManager.getInstance(this.mainScene).spawnObjectTrailer(o);
+    this.mainScene.world.version++;
+    this.selectedObject = o;
+    this.objectDrag = null;
+  }
+
+  /** Store the selected object in the editor clipboard (Ctrl+C). */
+  public copySelectedObject() {
+    const o = this.selectedObject;
+    if (!o) return;
+    this.clipboard = {
+      type: o.type, w: o.w, h: o.h, angle: o.angle,
+      variant: o.variant, params: o.params ? { ...o.params } : undefined,
+      cx: o.x, cy: o.y,
+    };
+  }
+
+  /** Paste the clipboard object under the current pointer (Ctrl+V); falls back
+   *  to a spot next to the copied object when the pointer hasn't moved yet. */
+  public pasteClipboard() {
+    this.pushUndo();
+    if (!this.clipboard) return;
+    const cb = this.clipboard;
+    const at = (this.pointerWorld.x || this.pointerWorld.y)
+      ? { x: this.pointerWorld.x, y: this.pointerWorld.y }
+      : { x: cb.cx + 40, y: cb.cy + 40 };
+    const o = this.mainScene.world.objects.add(
+      cb.type, Math.round(at.x), Math.round(at.y), cb.w, cb.h,
+      { angle: cb.angle, variant: cb.variant, params: cb.params ? { ...cb.params } : undefined },
+    );
+    if (o.type === 'trailer') TrailerManager.getInstance(this.mainScene).spawnObjectTrailer(o);
+    this.mainScene.world.version++;
+    this.selectedObject = o;
+    this.objectDrag = null;
+    if (this.editorTool !== 'object') this.setTool('object');
+  }
+
+  // ======================================================================
+  // COMPOUND OBJECTS (marquee: arrasta um rectângulo à volta dos objectos
+  // do mapa → tudo o que ficar dentro torna-se um novo objecto composto)
+  // ======================================================================
+
+  /** Marquee em curso (coordenadas de mundo). null = sem drag activo. */
+  private compoundDrag: { x0: number; y0: number; x1: number; y1: number } | null = null;
+
+  /** Tipos que NUNCA podem ser capturados como partes de um composto. */
+  private canCapture(o: WorldObject): boolean {
+    if (o.temp) return false;
+    if (o.type === 'compound' || o.type === 'trailer' || o.type === 'exam_dock') return false;
+    return true;
+  }
+
+  /** Tap com a ferramenta Composto: seleciona um composto (ou desselecciona). */
+  private compoundTap(x: number, y: number) {
+    const tol = 10 / this.cameras.main.zoom;
+    const hit = this.mainScene.world.objects.hitTest(x, y, tol);
+    this.selectedObject = hit && hit.type === 'compound' ? hit : null;
+    this.compoundDrag = null;
+  }
+
+  /** Primeiro movimento significativo com a ferramenta Composto → marquee. */
+  private tryStartCompoundDrag(x: number, y: number): boolean {
+    this.compoundDrag = { x0: x, y0: y, x1: x, y1: y };
+    return true;
+  }
+
+  private applyCompoundDrag(wp: { x: number; y: number }) {
+    if (this.compoundDrag) {
+      this.compoundDrag.x1 = wp.x;
+      this.compoundDrag.y1 = wp.y;
+    }
+  }
+
+  /** Fim do marquee: cria um composto novo OU acrescenta partes ao composto selecionado. */
+  private finishCompoundDrag() {
+    const d = this.compoundDrag;
+    if (!d) return;
+    this.compoundDrag = null;
+
+    const x0 = Math.min(d.x0, d.x1), x1 = Math.max(d.x0, d.x1);
+    const y0 = Math.min(d.y0, d.y1), y1 = Math.max(d.y0, d.y1);
+    if (x1 - x0 < 8 && y1 - y0 < 8) return; // rectângulo demasiado pequeno
+
+    // Captura: objectos cujo CENTRO está dentro do rectângulo
+    const captured = this.mainScene.world.objects.objects.filter((o) =>
+      this.canCapture(o) && o.x >= x0 && o.x <= x1 && o.y >= y0 && o.y <= y1);
+    if (captured.length === 0) return;
+
+    const sel = this.selectedObject;
+    if (sel && sel.type === 'compound') this.addPartsToCompound(sel, captured);
+    else this.createCompoundFromObjects(captured);
+  }
+
+  /**
+   * Cria um novo composto a partir dos objectos capturados pelo marquee.
+   * Centro = centro da caixa delimitadora; as partes ficam com coordenadas
+   * relativas a esse centro (ângulo do composto = 0 na criação).
+   */
+  private createCompoundFromObjects(captured: WorldObject[]) {
+    this.pushUndo();
+    // Caixa delimitadora ABSOLUTA dos objectos capturados
+    let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+    for (const o of captured) {
+      bx0 = Math.min(bx0, o.x - o.w / 2); bx1 = Math.max(bx1, o.x + o.w / 2);
+      by0 = Math.min(by0, o.y - o.h / 2); by1 = Math.max(by1, o.y + o.h / 2);
+    }
+    const cx = Math.round((bx0 + bx1) / 2);
+    const cy = Math.round((by0 + by1) / 2);
+
+    const parts: CompoundPart[] = captured.map((o) => ({
+      type: o.type,
+      x: o.x - cx, y: o.y - cy,      // relativo ao centro do composto
+      angle: o.angle,                 // relativo ao ângulo do composto (0)
+      w: o.w, h: o.h,
+      variant: o.variant,
+      params: o.params ? JSON.parse(JSON.stringify(o.params)) : undefined,
+    }));
+
+    const w = Math.max(20, Math.ceil(bx1 - bx0));
+    const h = Math.max(20, Math.ceil(by1 - by0));
+
+    // Remove os originais ANTES de criar (para libertar os colliders)
+    for (const o of captured) this.mainScene.world.objects.remove(o.id);
+    const compound = this.mainScene.world.objects.add('compound', cx, cy, w, h, { params: { parts } });
+    this.mainScene.world.version++;
+
+    this.selectedObject = compound;
+    this.objectDrag = null;
+    this.roadDirtySinceRelease = true;
+  }
+
+  /** Acrescenta os objectos capturados como novas partes do composto selecionado. */
+  private addPartsToCompound(compound: WorldObject, captured: WorldObject[]) {
+    this.pushUndo();
+    const c = Math.cos(compound.angle), s = Math.sin(compound.angle);
+    const existing = compoundParts(compound);
+    const added: CompoundPart[] = captured.map((o) => {
+      const dx = o.x - compound.x, dy = o.y - compound.y;
+      return {
+        type: o.type,
+        x: dx * c + dy * s,          // mundo → local do composto
+        y: -dx * s + dy * c,
+        angle: o.angle - compound.angle,
+        w: o.w, h: o.h,
+        variant: o.variant,
+        params: o.params ? JSON.parse(JSON.stringify(o.params)) : undefined,
+      };
+    });
+    const parts = [...existing, ...added];
+    for (const o of captured) this.mainScene.world.objects.remove(o.id);
+    this.mainScene.world.objects.setCompoundParts(compound.id, parts, compoundBoundsFromParts(parts));
+    this.mainScene.world.version++;
+    this.roadDirtySinceRelease = true;
+  }
+
+  /** Extrai uma parte do composto de volta ao mapa como objecto solto. */
+  public extractCompoundPart(index: number) {
+    const compound = this.selectedObject;
+    if (!compound || compound.type !== 'compound') return;
+    const parts = compoundParts(compound);
+    const part = parts[index];
+    if (!part) return;
+    this.pushUndo();
+    const c = Math.cos(compound.angle), s = Math.sin(compound.angle);
+    const wx = compound.x + c * part.x - s * part.y;
+    const wy = compound.y + s * part.x + c * part.y;
+    this.mainScene.world.objects.add(
+      part.type, Math.round(wx), Math.round(wy), part.w, part.h,
+      { angle: compound.angle + part.angle, variant: part.variant, params: part.params ? { ...part.params } : undefined },
+    );
+    this.mainScene.world.objects.setCompoundParts(
+      compound.id, parts.filter((_, i) => i !== index), undefined);
+    this.mainScene.world.version++;
+    this.roadDirtySinceRelease = true;
+  }
+
+  /** Desagrupa o composto: remove-o e recria as partes como objectos soltos nas posições absolutas. */
+  public ungroupCompound() {
+    const compound = this.selectedObject;
+    if (!compound || compound.type !== 'compound') return;
+    this.pushUndo();
+    const c = Math.cos(compound.angle), s = Math.sin(compound.angle);
+    for (const part of compoundParts(compound)) {
+      const wx = compound.x + c * part.x - s * part.y;
+      const wy = compound.y + s * part.x + c * part.y;
+      this.mainScene.world.objects.add(
+        part.type, Math.round(wx), Math.round(wy), part.w, part.h,
+        { angle: compound.angle + part.angle, variant: part.variant, params: part.params ? { ...part.params } : undefined },
+      );
+    }
+    this.mainScene.world.objects.remove(compound.id);
+    this.mainScene.world.version++;
+    this.selectedObject = null;
+    this.objectDrag = null;
+    this.roadDirtySinceRelease = true;
+  }
+
+  /** Clona o composto selecionado como uma nova variação (não altera o original). */
+  public duplicateCompoundAsVariation() {
+    const src = this.selectedObject;
+    if (!src || src.type !== 'compound') return;
+    this.pushUndo();
+    const parts: CompoundPart[] = compoundParts(src).map((p) => ({
+      ...p, params: p.params ? JSON.parse(JSON.stringify(p.params)) : undefined,
+    }));
+    const o = this.mainScene.world.objects.add(
+      'compound', src.x + 60, src.y + 60, src.w, src.h,
+      { angle: src.angle, variant: src.variant, params: { parts } },
+    );
+    this.mainScene.world.version++;
+    this.selectedObject = o;
+    this.objectDrag = null;
+    this.roadDirtySinceRelease = true;
+  }
+
+  public getObjectUIState(): { hasSelection: boolean; id: string; type: string; angleDeg: number; resizable: boolean; trailer: string; canPaste: boolean; rotationSnap: boolean; canUndo: boolean; isCompound: boolean; compoundPartCount: number } {
     const o = this.selectedObject;
     return {
       hasSelection: !!o,
@@ -836,6 +1220,11 @@ export class EditorScene extends Phaser.Scene {
       angleDeg: o ? Math.round(Phaser.Math.RadToDeg(o.angle)) : 0,
       resizable: o ? this.isResizable(o) : false,
       trailer: o && (o.type === 'parking_pad' || o.type === 'trailer') ? String(o.params?.trailer || 'standard') : '',
+      canPaste: !!this.clipboard,
+      rotationSnap: this.rotationSnap,
+      canUndo: this.canUndo(),
+      isCompound: o ? isCompound(o) : false,
+      compoundPartCount: o && isCompound(o) ? compoundParts(o).length : 0,
     };
   }
 
@@ -898,6 +1287,7 @@ export class EditorScene extends Phaser.Scene {
   /** Switches the trailer type of a parking pad — or respawns an editor-placed
    *  trailer object with a new type (re-renders via version bump). */
   public setTrailerPadType(id: string, trailer: string) {
+    this.pushUndo();
     const o = this.mainScene.world.objects.get(id);
     if (!o) return;
     if (o.type === 'parking_pad') {
@@ -931,6 +1321,7 @@ export class EditorScene extends Phaser.Scene {
   /** Tap action of the 'add' tool: place a new object and jump straight into
    *  the Objectos tool so it can be moved/rotated/resized immediately. */
   private addTap(x: number, y: number) {
+    this.pushUndo();
     const spec = this.addType;
     if (spec.type === 'trailer') {
       // Editor-placed loose trailer: data-only world object + live entity
@@ -1016,6 +1407,43 @@ export class EditorScene extends Phaser.Scene {
     if (this.editorTool === 'road') {
       this.drawRoadSelection(g, z);
       this.drawRoadPreview(g, z);
+    }
+
+    // Compound tool: marquee rect + captured-object highlight + selected compound outline
+    if (this.editorTool === 'compound') {
+      const sel = this.selectedObject;
+      if (sel && sel.type === 'compound') {
+        this.rotatedRectPath(g, sel, 3 / z);
+        g.lineStyle(2.5 / z, 0xa78bfa, 0.95);
+        g.strokePath();
+      }
+      if (this.compoundDrag) {
+        const d = this.compoundDrag;
+        const x0 = Math.min(d.x0, d.x1), x1 = Math.max(d.x0, d.x1);
+        const y0 = Math.min(d.y0, d.y1), y1 = Math.max(d.y0, d.y1);
+        // Highlight captured objects (centre inside the marquee)
+        g.lineStyle(1.5 / z, 0xa78bfa, 0.85);
+        for (const o of this.mainScene.world.objects.objects) {
+          if (!this.canCapture(o)) continue;
+          if (o.x < x0 || o.x > x1 || o.y < y0 || o.y > y1) continue;
+          this.rotatedRectPath(g, o, 2 / z);
+          g.strokePath();
+        }
+        // Marquee rectangle (dashed look via two strokes)
+        g.lineStyle(2.5 / z, 0xa78bfa, 0.9);
+        g.strokeRect(x0, y0, x1 - x0, y1 - y0);
+        g.lineStyle(1 / z, 0x0b1220, 0.6);
+        g.strokeRect(x0 + 2.5 / z, y0 + 2.5 / z, Math.max(0, x1 - x0 - 5 / z), Math.max(0, y1 - y0 - 5 / z));
+      } else if (!sel) {
+        // Hint dot at pointer: this tool drags a selection rectangle
+        const wp = this.pointerWorld;
+        if (wp) {
+          g.lineStyle(1.5 / z, 0xa78bfa, 0.55);
+          g.strokeRect(wp.x - 14 / z, wp.y - 14 / z, 28 / z, 28 / z);
+          g.lineBetween(wp.x - 20 / z, wp.y, wp.x + 20 / z, wp.y);
+          g.lineBetween(wp.x, wp.y - 20 / z, wp.x, wp.y + 20 / z);
+        }
+      }
     }
   }
 

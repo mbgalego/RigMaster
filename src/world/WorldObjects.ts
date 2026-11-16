@@ -31,9 +31,10 @@ export type WObjType =
   | 'gas_canopy'      // translucent station roof (flat)
   | 'price_sign'      // fuel price totem (solid)
   | 'lamp'            // street lamp (solid small)
-  | 'sign'            // traffic sign (variant: 'stop'|'yield'|'speed') (solid small)
+  | 'sign'            // traffic sign (variant: 'stop'|'yield'|'speed'|'no_parking'|'pedestrian') (solid small)
   | 'traffic_light'   // signal head (params: dir 'n'|'s'|'e'|'w', group 0|1)
-  | 'exam_dock';      // TEMP exam target platform (never serialized)
+  | 'exam_dock'       // TEMP exam target platform (never serialized)
+  | 'compound';       // composto: agrupa vários sub-objetos com posições relativas (params.parts)
 
 export interface WorldObject {
   id: string;
@@ -48,6 +49,76 @@ export interface WorldObject {
   temp?: boolean;
 }
 
+/** Um sub-objeto dentro de um composto, com posição/ângulo relativos à âncora do composto. */
+export interface CompoundPart {
+  type: WObjType;
+  x: number; // relativo ao âncora do composto
+  y: number;
+  angle: number; // radians
+  w: number;
+  h: number;
+  variant?: string;
+  params?: Record<string, any>;
+}
+
+/**
+ * Um objeto composto agrupa vários sub-objetos num único prefab reutilizável.
+ * As partes têm posição/ângulo RELATIVOS ao centro do composto, no referencial
+ * local (não rodado) — rodar/mover o composto transforma as partes em bloco.
+ */
+export interface CompoundObject extends WorldObject {
+  type: 'compound';
+  parts: CompoundPart[];
+}
+
+/** Devolve as partes de um objeto composto, ou [] se não for composto ou não tiver partes. */
+export function compoundParts(o: WorldObject): CompoundPart[] {
+  if (o.type !== 'compound') return [];
+  return Array.isArray(o.params?.parts) ? o.params.parts : [];
+}
+
+/** Verifica se um objeto é um composto válido com pelo menos uma parte. */
+export function isCompound(o: WorldObject): boolean {
+  return o.type === 'compound' && compoundParts(o).length > 0;
+}
+
+/**
+ * Caixa delimitadora (referencial local do composto) de um conjunto de partes.
+ * Cada parte contribui com os seus cantos rodados pelo próprio ângulo relativo.
+ */
+export function compoundBoundsFromParts(parts: CompoundPart[]): { w: number; h: number } {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of parts) {
+    const c = Math.abs(Math.cos(p.angle)), s = Math.abs(Math.sin(p.angle));
+    const ex = c * p.w / 2 + s * p.h / 2;
+    const ey = s * p.w / 2 + c * p.h / 2;
+    minX = Math.min(minX, p.x - ex); maxX = Math.max(maxX, p.x + ex);
+    minY = Math.min(minY, p.y - ey); maxY = Math.max(maxY, p.y + ey);
+  }
+  if (!isFinite(minX)) return { w: 20, h: 20 };
+  return { w: Math.max(20, Math.ceil(maxX - minX)), h: Math.max(20, Math.ceil(maxY - minY)) };
+}
+
+/**
+ * Converte uma parte num WorldObject sintético com posição/ângulo ABSOLUTOS no
+ * mundo — pronto para desenhar (drawSolid/drawFlat) e para criar colliders.
+ */
+export function compoundPartWorldObject(compound: WorldObject, index: number): WorldObject | null {
+  const part = compoundParts(compound)[index];
+  if (!part) return null;
+  const c = Math.cos(compound.angle), s = Math.sin(compound.angle);
+  return {
+    id: `${compound.id}#p${index}`,
+    type: part.type,
+    x: Math.round(compound.x + c * part.x - s * part.y),
+    y: Math.round(compound.y + s * part.x + c * part.y),
+    angle: compound.angle + part.angle,
+    w: part.w, h: part.h,
+    variant: part.variant,
+    params: part.params ? { ...part.params } : undefined,
+  };
+}
+
 interface DockZone { x: number; y: number; width: number; height: number; requiredAngle: number; id: string; }
 
 const OBJ_CELL = 1024;
@@ -56,8 +127,16 @@ const CHUNK_PX = 2048;
 const SOLID_TYPES = new Set<WObjType>([
   'wall', 'jersey_barrier', 'building', 'container_stack', 'silo',
   'gas_pump', 'price_sign', 'lamp', 'sign', 'traffic_light', 'roundabout',
-  'dock_wall',
+  'dock_wall', 'compound',
 ]);
+
+/** Tipos desenhados na camada FLATS (sob os sólidos) — ver render(). */
+const FLAT_TYPES = new Set<WObjType>([
+  'gas_canopy', 'parking_pad', 'parking_lot', 'entrance', 'exam_dock',
+  'dock', 'pad_asphalt', 'pad_dirt',
+]);
+
+function isFlatType(t: WObjType): boolean { return FLAT_TYPES.has(t); }
 
 // Traffic light cycle (ms) — coordinated 2-axis cycle with 1s ALL-RED safety buffer
 const TL_GREEN = 6500;
@@ -170,6 +249,16 @@ export class WorldObjects {
     this.refreshSolidBodiesAround(o.x, o.y, o);
   }
 
+  /** Substitui as partes de um composto existente (e opcionalmente o tamanho da caixa). */
+  public setCompoundParts(id: string, parts: CompoundPart[], size?: { w: number; h: number }) {
+    const o = this.get(id);
+    if (!o || o.type !== 'compound') return;
+    o.params = { ...(o.params || {}), parts };
+    if (size) { o.w = size.w; o.h = size.h; }
+    this.rebuildIndex();
+    this.refreshSolidBodiesAround(o.x, o.y, o);
+  }
+
   public clear() {
     this.objects = [];
     this.nextId = 1;
@@ -193,9 +282,32 @@ export class WorldObjects {
   // ======================================================================
 
   public get dockZones(): DockZone[] {
-    return this.objects
+    const zones: DockZone[] = this.objects
       .filter((o) => o.type === 'dock' || o.type === 'exam_dock')
       .map((o) => ({ x: o.x, y: o.y, width: o.w, height: o.h, requiredAngle: 0, id: o.id }));
+    // Buildings with functional dock doors ('warehouse_docks'): one virtual dock
+    // zone in front of each door (local +y / south wall). These behave exactly
+    // like plain docks — capture triggers for coupling / exam logic later.
+    for (const o of this.objects) {
+      if (o.type !== 'building' || o.variant !== 'warehouse_docks') continue;
+      const nd = Math.max(1, Math.floor(Number(o.params?.docks) || 5));
+      const spacing = o.w / nd;
+      const c = Math.cos(o.angle), s = Math.sin(o.angle);
+      const depth = 100;
+      for (let i = 0; i < nd; i++) {
+        const lx = -o.w / 2 + (i + 0.5) * spacing;
+        const ly = o.h / 2 + depth / 2;
+        zones.push({
+          x: Math.round(o.x + c * lx - s * ly),
+          y: Math.round(o.y + s * lx + c * ly),
+          width: Math.min(spacing - 16, 120),
+          height: depth,
+          requiredAngle: 0,
+          id: `${o.id}_dock${i}`,
+        });
+      }
+    }
+    return zones;
   }
 
   public get parkingPads(): Array<{ x: number; y: number; angle: number; type: TrailerType }> {
@@ -283,7 +395,32 @@ export class WorldObjects {
       const r = Math.max(o.w, o.h) / 2 + 8;
       if (o.x + r < x0 || o.x - r > x1 || o.y + r < y0 || o.y - r > y1) continue;
       let body: MatterJS.BodyType | undefined;
-      if (o.type === 'roundabout') {
+      if (o.type === 'compound') {
+        // Um collider por parte SÓLIDA do composto (flats como pads/docas não
+        // colidem). As posições/ângulos das partes seguem a transformação do
+        // composto — mover/rodar o composto move todos os colliders.
+        const c = Math.cos(o.angle), s = Math.sin(o.angle);
+        const staticOpts = {
+          isStatic: true, friction: 0.8, restitution: 0.1,
+          label: `obstacle_${o.type}`, collisionFilter: { category: 0x0001, mask: 0xffff },
+        };
+        for (const part of compoundParts(o)) {
+          if (part.type === 'compound' || !SOLID_TYPES.has(part.type)) continue;
+          const px = o.x + c * part.x - s * part.y;
+          const py = o.y + s * part.x + c * part.y;
+          const pa = o.angle + part.angle;
+          if (part.type === 'roundabout') {
+            // Só a ilha central é sólida (igual a uma rotunda solta)
+            bodies.push(this.scene.matter.add.circle(px, py, Math.min(part.w, part.h) * 0.225, {
+              ...staticOpts, angle: pa,
+            }) as unknown as MatterJS.BodyType);
+          } else {
+            bodies.push(this.scene.matter.add.rectangle(px, py, part.w, part.h, {
+              ...staticOpts, angle: pa,
+            }) as unknown as MatterJS.BodyType);
+          }
+        }
+      } else if (o.type === 'roundabout') {
         // Only the central island is solid — the circulating lane stays drivable
         body = this.scene.matter.add.circle(o.x, o.y, Math.min(o.w, o.h) * 0.225, {
           isStatic: true,
@@ -675,10 +812,33 @@ export class WorldObjects {
           if (drawn.has(o.id)) continue;
           drawn.add(o.id);
           if (o.type === 'traffic_light') continue; // animated: rendered every frame by renderLights
+
+          // COMPOUND: desenhado por decomposição — cada parte é renderizada
+          // como um objecto normal (flats ordenados por z, sólidos por cima).
+          // O composto em si não desenha nada (a caixa w/h é só para hit-test
+          // e contorno de seleção no editor).
+          if (o.type === 'compound') {
+            const parts = compoundParts(o);
+            for (let i = 0; i < parts.length; i++) {
+              const p = compoundPartWorldObject(o, i);
+              if (!p) continue;
+              // Culling por parte (compostos podem ser muito extensos)
+              if (p.x + p.w / 2 < view.x - M || p.x - p.w / 2 > view.x + view.width + M) continue;
+              if (p.y + p.h / 2 < view.y - M || p.y - p.h / 2 > view.y + view.height + M) continue;
+              if (isFlatType(p.type)) {
+                flatObjs.push(p);
+              } else {
+                this.drawSolid(solids, p);
+                if (p.type === 'lamp' && overhead) this.drawOverhead(overhead, p);
+              }
+            }
+            continue;
+          }
+
           // NOTE: roundabout renders in the SOLIDS layer (depth 3) so the
           // island sits above the road ribbons at a junction.
           // Crosswalks too — road paint belongs above the asphalt (see drawSolid).
-          if (o.type === 'gas_canopy' || o.type === 'parking_pad' || o.type === 'parking_lot' || o.type === 'entrance' || o.type === 'exam_dock' || o.type === 'dock' || o.type === 'pad_asphalt' || o.type === 'pad_dirt') {
+          if (isFlatType(o.type)) {
             // Flats are collected and drawn in z order below so a base pad
             // painted after (or in a later grid cell than) a decorated floor
             // can never cover it — parking lots always sit on top of pads.
@@ -1023,6 +1183,12 @@ export class WorldObjects {
     this.rotated(g, o, () => {
       const x0 = o.x - o.w / 2, y0 = o.y - o.h / 2;
       switch (o.type) {
+        case 'compound': {
+          // O composto NÃO desenha aqui: render() decompõe-no em partes e
+          // desenha cada uma com o seu visual real (drawSolid/drawFlat).
+          // A caixa o.w × o.h serve apenas para hit-test e seleção no editor.
+          break;
+        }
         case 'crosswalk': {
           // NOTE: crosswalks render in the SOLIDS layer (depth 3) so the paint
           // sits ABOVE the road ribbons (depth 2) — placing one over a road
@@ -1269,7 +1435,12 @@ export class WorldObjects {
           break;
         }
         case 'container_stack': {
-          const col = o.variant === 'blue' ? 0x2b5f8f : o.variant === 'red' ? 0xa33b3b : o.variant === 'green' ? 0x2f7d4f : 0x8a5a2b;
+          // Container colour palette (variant) — rust/brown is the legacy default
+          const CONTAINER_COLORS: Record<string, number> = {
+            blue: 0x2b5f8f, red: 0xa33b3b, green: 0x2f7d4f, rust: 0x8a5a2b,
+            orange: 0xc2652a, yellow: 0xd7b23b, white: 0xd8dde3, teal: 0x2f7d78,
+          };
+          const col = CONTAINER_COLORS[o.variant ?? 'rust'] ?? 0x8a5a2b;
           g.fillStyle(0x000000, 0.25);
           g.fillRect(x0 + 5, y0 + 6, o.w, o.h);
           const rows = Math.max(1, Math.round(o.h / 34));
@@ -1394,12 +1565,46 @@ export class WorldObjects {
           break;
         }
         case 'sign': {
-          if (o.variant === 'stop') {
+          // Traffic-sign variants — compact 2D discs/plates at ground level
+          if (o.variant === 'yield') {
+            // Cedência: white downward triangle with a thick red border
+            g.fillStyle(0xdc2626, 1);
+            g.fillTriangle(o.x - 10, o.y - 8, o.x + 10, o.y - 8, o.x, o.y + 9);
+            g.fillStyle(0xffffff, 1);
+            g.fillTriangle(o.x - 6.5, o.y - 4.5, o.x + 6.5, o.y - 4.5, o.x, o.y + 4.5);
+          } else if (o.variant === 'speed') {
+            // Limite de velocidade: white disc, red ring, dark digits hint
+            g.fillStyle(0xffffff, 1);
+            g.beginPath(); g.arc(o.x, o.y, 10, 0, Math.PI * 2); g.fillPath();
+            g.lineStyle(3.5, 0xdc2626, 1);
+            g.beginPath(); g.arc(o.x, o.y, 8.2, 0, Math.PI * 2); g.strokePath();
+            g.fillStyle(0x11151b, 1);
+            g.fillRect(o.x - 5.5, o.y - 4, 3, 8);
+            g.fillRect(o.x + 1, o.y - 4, 3.5, 8);
+            g.fillRect(o.x - 5.5, o.y - 1, 10, 2);
+          } else if (o.variant === 'no_parking') {
+            // Proibido estacionar: blue disc, red ring + diagonal slash
+            g.fillStyle(0x2563eb, 1);
+            g.beginPath(); g.arc(o.x, o.y, 10, 0, Math.PI * 2); g.fillPath();
+            g.lineStyle(2.5, 0xdc2626, 1);
+            g.beginPath(); g.arc(o.x, o.y, 8.7, 0, Math.PI * 2); g.strokePath();
+            g.lineBetween(o.x - 6, o.y + 6, o.x + 6, o.y - 6);
+          } else if (o.variant === 'pedestrian') {
+            // Passagem de peões: blue square + white pictogram
+            g.fillStyle(0x2563eb, 1);
+            g.fillRect(o.x - 9, o.y - 9, 18, 18);
+            g.fillStyle(0xffffff, 1);
+            g.fillCircle(o.x, o.y - 4.5, 2.2);       // head
+            g.fillRect(o.x - 1.5, o.y - 2.5, 3, 5);  // torso
+            g.fillRect(o.x - 1.5, o.y + 2.5, 2, 5);  // legs
+            g.fillRect(o.x + 0.5, o.y + 2.5, 2, 5);
+          } else if (o.variant === 'stop') {
             g.fillStyle(0xdc2626, 1);
             g.beginPath(); g.arc(o.x, o.y, 10, 0, Math.PI * 2); g.fillPath();
             g.fillStyle(0xffffff, 1);
             g.fillRect(o.x - 5, o.y - 1.5, 10, 3);
           } else {
+            // Generic warning plate (fallback)
             g.fillStyle(0xef4444, 1);
             g.fillRect(o.x - 9, o.y - 9, 18, 18);
           }

@@ -13,6 +13,7 @@ import { GarageSystem, HubData, WeatherModifier } from './systems/GarageSystem';
 import { TimeOfDaySystem, TimePeriod } from './systems/TimeOfDaySystem';
 import type { RoadSurface } from './systems/RoadNetwork';
 import type { AddObjectSpec } from './scenes/EditorScene';
+import { compoundParts } from './world/WorldObjects';
 import { TouchControls } from './components/TouchControls';
 import {
   RotateCcw,
@@ -61,36 +62,54 @@ import {
   Moon,
   Clock,
   Watch,
+  Container,
+  Signpost,
+  Fuel,
+  Cog,
+  Copy,
+  CopyPlus,
+  ClipboardPaste,
+  Undo,
 } from 'lucide-react';
 
-/** Catálogo do Criar organizado por categorias (régua de 2 linhas do editor). */
+/** Catálogo do Criar, organizado por categorias — cada categoria tem o seu
+ *  próprio botão na toolbar lateral, que abre um submenu a rolar para a direita. */
 const CREATE_CATALOG: Array<{
   id: string;
   label: string;
+  icon: React.ComponentType<{ className?: string }>;
   items: Array<{ spec: AddObjectSpec; icon: React.ComponentType<{ className?: string }> }>;
 }> = [
   {
     id: 'edif',
     label: 'Edifícios',
+    icon: Building2,
     items: [
       { spec: { type: 'building', w: 900, h: 420, variant: 'warehouse_big', label: 'Armazém' }, icon: Building2 },
       { spec: { type: 'building', w: 420, h: 360, variant: 'shed', label: 'Nave' }, icon: Factory },
       { spec: { type: 'building', w: 320, h: 220, variant: 'garage', label: 'Garagem' }, icon: Warehouse },
       { spec: { type: 'building', w: 300, h: 200, variant: 'warehouse', label: 'Edifício' }, icon: Warehouse },
-      { spec: { type: 'building', w: 900, h: 420, variant: 'warehouse_docks', params: { docks: 5 }, label: 'Armazém Docas' }, icon: Building2 },
+      { spec: { type: 'building', w: 300, h: 200, variant: 'gabled', label: 'Telhado 2 Águas' }, icon: Building2 },
+      { spec: { type: 'building', w: 220, h: 170, variant: 'church', label: 'Igreja' }, icon: Building2 },
+      { spec: { type: 'building', w: 260, h: 160, variant: 'archway', label: 'Arco' }, icon: Building2 },
+      { spec: { type: 'building', w: 900, h: 420, variant: 'warehouse_docks', params: { docks: 5 }, label: 'Armazém c/ Docas' }, icon: Building2 },
+      { spec: { type: 'building', w: 600, h: 300, variant: 'warehouse_docks', params: { docks: 3 }, label: 'Armazém 3 Docas' }, icon: Building2 },
     ],
   },
   {
     id: 'docas',
     label: 'Docas',
+    icon: Warehouse,
     items: [
       { spec: { type: 'dock', w: 128, h: 128, label: 'Doca' }, icon: Warehouse },
       { spec: { type: 'dock_wall', w: 420, h: 56, params: { docks: 3 }, label: 'Muro Docas' }, icon: BrickWall },
+      { spec: { type: 'dock_wall', w: 700, h: 56, params: { docks: 6 }, label: 'Muro Docas ×6' }, icon: BrickWall },
     ],
   },
   {
     id: 'tr',
     label: 'Atrelados',
+    icon: Truck,
     items: [
       { spec: { type: 'trailer', w: 46, h: 220, params: { trailer: 'standard' }, label: 'Atrelado' }, icon: Truck },
       { spec: { type: 'trailer', w: 46, h: 220, params: { trailer: 'fragile_glass' }, label: 'Vidro' }, icon: Truck },
@@ -102,16 +121,19 @@ const CREATE_CATALOG: Array<{
   {
     id: 'pads',
     label: 'Pads',
+    icon: CarFront,
     items: [
       { spec: { type: 'parking_pad', w: 130, h: 420, params: { trailer: 'standard' }, label: 'Pad C' }, icon: Truck },
       { spec: { type: 'parking_pad', w: 170, h: 640, params: { trailer: 'long_cargo' }, label: 'Pad CE' }, icon: Truck },
       { spec: { type: 'parking_pad', w: 140, h: 560, params: { trailer: 'bitrem_lead' }, label: 'Pad H' }, icon: Truck },
+      { spec: { type: 'parking_pad', w: 140, h: 300, params: { trailer: 'bitrem_pup' }, label: 'Pad HP' }, icon: Truck },
       { spec: { type: 'parking_pad', w: 140, h: 420, params: { trailer: 'fragile_glass' }, label: 'Pad X' }, icon: Truck },
     ],
   },
   {
     id: 'bases',
     label: 'Bases',
+    icon: Mountain,
     items: [
       { spec: { type: 'pad_asphalt', w: 700, h: 420, label: 'Alcatrão' }, icon: Layers },
       { spec: { type: 'pad_dirt', w: 700, h: 420, label: 'Terra' }, icon: Mountain },
@@ -121,6 +143,7 @@ const CREATE_CATALOG: Array<{
   {
     id: 'piso',
     label: 'Piso',
+    icon: DoorOpen,
     items: [
       { spec: { type: 'entrance', w: 140, h: 220, label: 'Entrada' }, icon: DoorOpen },
       { spec: { type: 'crosswalk', w: 36, h: 170, label: 'Passadeira' }, icon: Equal },
@@ -129,11 +152,61 @@ const CREATE_CATALOG: Array<{
   {
     id: 'barreiras',
     label: 'Barreiras',
+    icon: BrickWall,
     items: [
       { spec: { type: 'wall', w: 220, h: 26, label: 'Muro' }, icon: BrickWall },
       { spec: { type: 'jersey_barrier', w: 140, h: 26, label: 'Barreira' }, icon: BrickWall },
-      { spec: { type: 'container_stack', w: 180, h: 140, label: 'Contentores' }, icon: Box },
       { spec: { type: 'roundabout', w: 420, h: 420, label: 'Rotunda' }, icon: Circle },
+    ],
+  },
+  {
+    id: 'contentores',
+    label: 'Contentores',
+    icon: Container,
+    items: [
+      { spec: { type: 'container_stack', w: 110, h: 44, variant: 'blue', label: 'Azul' }, icon: Container },
+      { spec: { type: 'container_stack', w: 110, h: 44, variant: 'red', label: 'Vermelho' }, icon: Container },
+      { spec: { type: 'container_stack', w: 110, h: 44, variant: 'green', label: 'Verde' }, icon: Container },
+      { spec: { type: 'container_stack', w: 110, h: 44, variant: 'rust', label: 'Ferrugem' }, icon: Container },
+      { spec: { type: 'container_stack', w: 110, h: 44, variant: 'orange', label: 'Laranja' }, icon: Container },
+      { spec: { type: 'container_stack', w: 110, h: 44, variant: 'yellow', label: 'Amarelo' }, icon: Container },
+      { spec: { type: 'container_stack', w: 110, h: 44, variant: 'white', label: 'Branco' }, icon: Container },
+      { spec: { type: 'container_stack', w: 180, h: 150, variant: 'blue', label: 'Pilha Azul' }, icon: Box },
+      { spec: { type: 'container_stack', w: 180, h: 150, variant: 'red', label: 'Pilha Vermelha' }, icon: Box },
+      { spec: { type: 'container_stack', w: 180, h: 150, variant: 'rust', label: 'Pilha Ferrugem' }, icon: Box },
+    ],
+  },
+  {
+    id: 'transito',
+    label: 'Trânsito',
+    icon: Signpost,
+    items: [
+      { spec: { type: 'sign', w: 18, h: 18, variant: 'stop', label: 'STOP' }, icon: Signpost },
+      { spec: { type: 'sign', w: 18, h: 18, variant: 'yield', label: 'Cedência' }, icon: Signpost },
+      { spec: { type: 'sign', w: 18, h: 18, variant: 'speed', label: 'Limite 50' }, icon: Signpost },
+      { spec: { type: 'sign', w: 18, h: 18, variant: 'no_parking', label: 'Proibido Estacionar' }, icon: Signpost },
+      { spec: { type: 'sign', w: 18, h: 18, variant: 'pedestrian', label: 'Peões' }, icon: Signpost },
+      { spec: { type: 'traffic_light', w: 22, h: 22, params: { dir: 'n', group: 0 }, label: 'Semáforo' }, icon: Lamp },
+      { spec: { type: 'lamp', w: 14, h: 14, label: 'Candeeiro' }, icon: Lamp },
+    ],
+  },
+  {
+    id: 'industrial',
+    label: 'Industrial',
+    icon: Cog,
+    items: [
+      { spec: { type: 'crane', w: 110, h: 280, label: 'Guindaste' }, icon: Cog },
+      { spec: { type: 'silo', w: 128, h: 128, label: 'Silo' }, icon: Cog },
+    ],
+  },
+  {
+    id: 'servicos',
+    label: 'Serviços',
+    icon: Fuel,
+    items: [
+      { spec: { type: 'gas_pump', w: 48, h: 110, label: 'Bomba Combustível' }, icon: Fuel },
+      { spec: { type: 'gas_canopy', w: 420, h: 300, label: 'Cobertura Posto' }, icon: Fuel },
+      { spec: { type: 'price_sign', w: 50, h: 96, label: 'Totem Preços' }, icon: Fuel },
     ],
   },
 ];
@@ -177,8 +250,8 @@ export default function App() {
   const [licenses, setLicenses] = useState<LicenseInfo[]>([]);
   const [hubs, setHubs] = useState<HubData[]>([]);
   const [activeWeather, setActiveWeather] = useState<WeatherModifier>('clear');
-  const [editorTool, setEditorTool] = useState<'pan' | 'road' | 'object' | 'spawn' | 'add'>('pan');
-  const editorToolRef = useRef<'pan' | 'road' | 'object' | 'spawn' | 'add'>('pan');
+  const [editorTool, setEditorTool] = useState<'pan' | 'road' | 'object' | 'spawn' | 'add' | 'compound'>('pan');
+  const editorToolRef = useRef<'pan' | 'road' | 'object' | 'spawn' | 'add' | 'compound'>('pan');
   // Catalog selection for the 'add' (Criar) tool
   const [addType, setAddType] = useState<AddObjectSpec>({ type: 'wall', w: 220, h: 26, label: 'Muro' });
   const [addCat, setAddCat] = useState<string>('barreiras');
@@ -188,8 +261,8 @@ export default function App() {
     hasSelection: false, hasPoint: false, surface: 'asphalt', width: 128, drawing: false, twistDeg: 0, oneWay: false,
   });
   // Object tool live state (polled from EditorScene in the telemetry loop)
-  const [objectUI, setObjectUI] = useState<{ hasSelection: boolean; id: string; type: string; angleDeg: number; resizable: boolean; trailer: string }>({
-    hasSelection: false, id: '', type: '', angleDeg: 0, resizable: false, trailer: '',
+  const [objectUI, setObjectUI] = useState<{ hasSelection: boolean; id: string; type: string; angleDeg: number; resizable: boolean; trailer: string; canPaste: boolean; rotationSnap: boolean; canUndo: boolean; isCompound: boolean; compoundPartCount: number }>({
+    hasSelection: false, id: '', type: '', angleDeg: 0, resizable: false, trailer: '', canPaste: false, rotationSnap: true, canUndo: false, isCompound: false, compoundPartCount: 0,
   });
 
   // Real-time Telemetry
@@ -468,7 +541,7 @@ export default function App() {
     }
   };
 
-  const handleSetEditorTool = (tool: 'pan' | 'road' | 'object' | 'spawn' | 'add') => {
+  const handleSetEditorTool = (tool: 'pan' | 'road' | 'object' | 'spawn' | 'add' | 'compound') => {
     setEditorTool(tool);
     editorToolRef.current = tool;
     const edScene = getEditorScene();
@@ -1021,216 +1094,266 @@ export default function App() {
       {/* EDITOR MODE: SLEEK LEFT DOCK & SLIDE-OUT FLYOUT CATALOG */}
       {isEditorMode && (
         <>
-          {/* 1. SLIM LEFT VERTICAL DOCK / SIDEBAR */}
-          <aside className="absolute left-0 top-12 bottom-0 w-13 sm:w-15 z-30 bg-slate-950/95 backdrop-blur-md border-r border-amber-500/40 flex flex-col items-center py-2.5 px-1 gap-2 shadow-2xl select-none">
-            {/* Tool: Mover (Pan / travel the map) */}
-            <button
-              onClick={() => handleSetEditorTool('pan')}
-              className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border ${
-                editorTool === 'pan'
-                  ? 'bg-cyan-500 text-black border-cyan-300 shadow-md shadow-cyan-500/40 animate-pulse'
-                  : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
-              }`}
-              title="Mover (Pan) — Arrasta no ecrã para viajar livremente pelo mapa"
+          {/* 1. SLIM LEFT VERTICAL DOCK / SIDEBAR — scrollable (up & down) */}
+          <aside className="absolute left-0 top-12 bottom-0 w-13 sm:w-15 z-30 bg-slate-950/95 backdrop-blur-md border-r border-amber-500/40 flex flex-col items-center py-2.5 px-1 shadow-2xl select-none">
+            {/* Scroll container: tools + ALL object categories */}
+            <div
+              className="w-full flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y flex flex-col items-center gap-2 pb-1"
+              style={{ scrollbarWidth: 'thin' }}
             >
-              <Hand className="w-4 h-4" />
-              <span className="text-[8px] font-bold mt-0.5">Mover</span>
-            </button>
+              {/* Tool: Mover (Pan / travel the map) */}
+              <button
+                onClick={() => handleSetEditorTool('pan')}
+                className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border shrink-0 ${
+                  editorTool === 'pan'
+                    ? 'bg-cyan-500 text-black border-cyan-300 shadow-md shadow-cyan-500/40 animate-pulse'
+                    : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+                }`}
+                title="Mover (Pan) — Arrasta no ecrã para viajar livremente pelo mapa"
+              >
+                <Hand className="w-4 h-4" />
+                <span className="text-[8px] font-bold mt-0.5">Mover</span>
+              </button>
 
-            {/* Tool: Estrada (vector roads: draw, select, drag handles, delete) */}
-            <button
-              onClick={() => handleSetEditorTool('road')}
-              className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border ${
-                editorTool === 'road'
-                  ? 'bg-sky-500 text-black border-sky-300 shadow-md shadow-sky-500/40 animate-pulse'
-                  : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
-              }`}
-              title="Estradas Livres — Desenha estradas por splines, edita pontos, muda piso/largura"
-            >
-              <Route className="w-4 h-4" />
-              <span className="text-[8px] font-bold mt-0.5">Estrada</span>
-            </button>
+              {/* Tool: Undo (desfaz a última operação da sessão de editor) */}
+              <button
+                onClick={() => { const ed = getEditorScene(); if (ed) ed.undo(); }}
+                className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border shrink-0 ${
+                  'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+                }`}
+                disabled={!objectUI.canUndo}
+                title="Desfazer última operação da sessão (Ctrl+Z)"
+              >
+                <Undo className="w-4 h-4" />
+                <span className="text-[8px] font-bold mt-0.5">Desfazer</span>
+              </button>
 
-            {/* Tool: Objectos (select / move / rotate / delete any prefab) */}
-            <button
-              onClick={() => handleSetEditorTool('object')}
-              className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border ${
-                editorTool === 'object'
-                  ? 'bg-amber-500 text-black border-amber-300 shadow-md shadow-amber-500/40 animate-pulse'
-                  : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
-              }`}
-              title="Objectos — Seleciona, move, roda (R) e apaga (Del) edifícios, docas, barreiras, semáforos…"
-            >
-              <Box className="w-4 h-4" />
-              <span className="text-[8px] font-bold mt-0.5">Objectos</span>
-            </button>
+              {/* Tool: Estrada (vector roads: draw, select, drag handles, delete) */}
+              <button
+                onClick={() => handleSetEditorTool('road')}
+                className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border shrink-0 ${
+                  editorTool === 'road'
+                    ? 'bg-sky-500 text-black border-sky-300 shadow-md shadow-sky-500/40 animate-pulse'
+                    : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+                }`}
+                title="Estradas Livres — Desenha estradas por splines, edita pontos, muda piso/largura"
+              >
+                <Route className="w-4 h-4" />
+                <span className="text-[8px] font-bold mt-0.5">Estrada</span>
+              </button>
 
-            {/* Tool: Criar (place new objects from the catalog) */}
-            <button
-              onClick={() => handleSetEditorTool('add')}
-              className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border ${
-                editorTool === 'add'
-                  ? 'bg-violet-500 text-black border-violet-300 shadow-md shadow-violet-500/40 animate-pulse'
-                  : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
-              }`}
-              title="Criar — Coloca muros, entradas, parques, garagens, edifícios… no mapa"
-            >
-              <Plus className="w-4 h-4" />
-              <span className="text-[8px] font-bold mt-0.5">Criar</span>
-            </button>
+              {/* Tool: Objectos (select / move / rotate / delete / duplicate any prefab) */}
+              <button
+                onClick={() => handleSetEditorTool('object')}
+                className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border shrink-0 ${
+                  editorTool === 'object'
+                    ? 'bg-amber-500 text-black border-amber-300 shadow-md shadow-amber-500/40 animate-pulse'
+                    : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+                }`}
+                title="Objectos — Seleciona, move, roda (R), duplica (Ctrl+D) e apaga (Del) edifícios, docas, barreiras, semáforos…"
+              >
+                <Box className="w-4 h-4" />
+                <span className="text-[8px] font-bold mt-0.5">Objectos</span>
+              </button>
 
-            {/* Tool: Spawn Point */}
-            <button
-              onClick={() => handleSetEditorTool('spawn')}
-              className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border ${
-                editorTool === 'spawn'
-                  ? 'bg-emerald-500 text-black border-emerald-300 shadow-md shadow-emerald-500/40 animate-pulse'
-                  : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
-              }`}
-              title="Definir Ponto de Spawn do Camião (clica no mapa)"
-            >
-              <Compass className="w-4 h-4" />
-              <span className="text-[8px] font-bold mt-0.5">Spawn</span>
-            </button>
+              {/* Tool: Composto (marquee selection → novo objecto composto) */}
+              <button
+                onClick={() => handleSetEditorTool('compound')}
+                className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border shrink-0 ${
+                  editorTool === 'compound'
+                    ? 'bg-violet-500 text-black border-violet-300 shadow-md shadow-violet-500/40 animate-pulse'
+                    : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+                }`}
+                title="Composto — Arrasta um rectângulo à volta dos objectos para agrupar tudo num único objecto composto"
+              >
+                <CopyPlus className="w-4 h-4" />
+                <span className="text-[8px] font-bold mt-0.5">Composto</span>
+              </button>
 
-            {/* Subtle Divider */}
-            <div className="w-8 h-px bg-slate-800 my-1" />
+              {/* Tool: Spawn Point */}
+              <button
+                onClick={() => handleSetEditorTool('spawn')}
+                className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border shrink-0 ${
+                  editorTool === 'spawn'
+                    ? 'bg-emerald-500 text-black border-emerald-300 shadow-md shadow-emerald-500/40 animate-pulse'
+                    : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+                }`}
+                title="Definir Ponto de Spawn do Camião (clica no mapa)"
+              >
+                <Compass className="w-4 h-4" />
+                <span className="text-[8px] font-bold mt-0.5">Spawn</span>
+              </button>
 
-            {/* Navigation: Fit Entire Map (Ver o mapa todo) */}
-            <button
-              onClick={handleResetView}
-              className="w-11 h-11 rounded-lg bg-slate-900/90 text-amber-400 border border-slate-800 hover:bg-slate-800 hover:text-amber-300 flex flex-col items-center justify-center transition"
-              title="Ver Mapa Todo (Ajustar Zoom ao Ecrã)"
-            >
-              <Maximize2 className="w-4 h-4" />
-              <span className="text-[8px] font-bold mt-0.5">Ver Tudo</span>
-            </button>
+              {/* Subtle Divider */}
+              <div className="w-8 h-px bg-slate-800 my-0.5 shrink-0" />
 
-            {/* Navigation: Zoom In (+) */}
-            <button
-              onClick={handleZoomIn}
-              className="w-11 h-8 rounded-lg bg-slate-900/80 text-slate-300 border border-slate-800 hover:bg-slate-800 hover:text-white flex items-center justify-center transition"
-              title="Aumentar Zoom (+)"
-            >
-              <ZoomIn className="w-3.5 h-3.5" />
-            </button>
+              {/* CATEGORY BUTTONS — each opens its object submenu to the right */}
+              {CREATE_CATALOG.map((cat) => {
+                const CatIcon = cat.icon;
+                const catActive = editorTool === 'add' && addCat === cat.id;
+                return (
+                  <button
+                    key={cat.id}
+                    data-cat={cat.id}
+                    onClick={() => { handleSetEditorTool('add'); handleSetAddCategory(cat.id); }}
+                    className={`w-11 h-11 rounded-lg flex flex-col items-center justify-center transition border shrink-0 ${
+                      catActive
+                        ? 'bg-violet-500 text-black border-violet-300 shadow-md shadow-violet-500/40 animate-pulse'
+                        : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+                    }`}
+                    title={`Criar — ${cat.label}: abre as subopções a rolar para a direita`}
+                  >
+                    <CatIcon className="w-4 h-4" />
+                    <span className="text-[8px] font-bold mt-0.5 leading-tight text-center">{cat.label}</span>
+                  </button>
+                );
+              })}
 
-            {/* Navigation: Zoom Out (-) */}
-            <button
-              onClick={handleZoomOut}
-              className="w-11 h-8 rounded-lg bg-slate-900/80 text-slate-300 border border-slate-800 hover:bg-slate-800 hover:text-white flex items-center justify-center transition"
-              title="Reduzir Zoom (-)"
-            >
-              <ZoomOut className="w-3.5 h-3.5" />
-            </button>
+              {/* Subtle Divider */}
+              <div className="w-8 h-px bg-slate-800 my-0.5 shrink-0" />
 
-            {/* Spacer */}
-            <div className="flex-1" />
+              {/* Navigation: Fit Entire Map (Ver o mapa todo) */}
+              <button
+                onClick={handleResetView}
+                className="w-11 h-11 rounded-lg bg-slate-900/90 text-amber-400 border border-slate-800 hover:bg-slate-800 hover:text-amber-300 flex flex-col items-center justify-center transition shrink-0"
+                title="Ver Mapa Todo (Ajustar Zoom ao Ecrã)"
+              >
+                <Maximize2 className="w-4 h-4" />
+                <span className="text-[8px] font-bold mt-0.5">Ver Tudo</span>
+              </button>
 
-            {/* Quick Drive Test Button (Tab) */}
+              {/* Navigation: Zoom In (+) */}
+              <button
+                onClick={handleZoomIn}
+                className="w-11 h-8 rounded-lg bg-slate-900/80 text-slate-300 border border-slate-800 hover:bg-slate-800 hover:text-white flex items-center justify-center transition shrink-0"
+                title="Aumentar Zoom (+)"
+              >
+                <ZoomIn className="w-3.5 h-3.5" />
+              </button>
+
+              {/* Navigation: Zoom Out (-) */}
+              <button
+                onClick={handleZoomOut}
+                className="w-11 h-8 rounded-lg bg-slate-900/80 text-slate-300 border border-slate-800 hover:bg-slate-800 hover:text-white flex items-center justify-center transition shrink-0"
+                title="Reduzir Zoom (-)"
+              >
+                <ZoomOut className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Divider + Drive button (pinned to the bottom, outside the scroll) */}
+            <div className="w-8 h-px bg-slate-800 my-1 shrink-0" />
             <button
               onClick={handleToggleMode}
-              className="w-11 h-12 rounded-lg bg-amber-500 hover:bg-amber-400 text-black border border-amber-300 flex flex-col items-center justify-center transition shadow-lg shadow-amber-500/30"
+              className="w-11 h-12 rounded-lg bg-amber-500 hover:bg-amber-400 text-black border border-amber-300 flex flex-col items-center justify-center transition shadow-lg shadow-amber-500/30 shrink-0"
               title="Testar Condução Imediata (Tecla Tab)"
             >
               <Play className="w-4 h-4 fill-black" />
               <span className="text-[8px] font-black uppercase mt-0.5">Drive</span>
             </button>
-          </aside>
 
-          {/* 2. RÉGUA — subopções da ferramenta, a sair da barra esquerda.
-              Uma linha scrollable; o Criar tem 2 linhas (categorias + objectos). */}
-          <div className="absolute top-14 left-[60px] sm:left-[68px] right-2 z-20">
-            <div
-              className={`bg-slate-950/95 border rounded-xl shadow-2xl backdrop-blur-md px-2 py-2 flex flex-col gap-1.5 max-w-full ${
-                editorTool === 'pan' ? 'border-cyan-400/60' :
-                editorTool === 'road' ? 'border-sky-400/60' :
-                editorTool === 'object' ? 'border-amber-400/60' :
-                editorTool === 'add' ? 'border-violet-400/60' : 'border-emerald-400/60'
-              }`}
+            {/* Botão Cancelar — desfaz TODAS as alterações da sessão de editor */}
+            <button
+              onClick={() => {
+                const ed = getEditorScene();
+                if (ed) ed.cancelSession();
+                handleToggleMode();
+              }}
+              className="w-11 h-12 rounded-lg bg-red-950/90 text-red-300 border border-red-700 hover:bg-red-900 hover:text-red-200 flex flex-col items-center justify-center transition shadow-lg shadow-red-900/30 shrink-0"
+              title="Cancelar sessão — descarta todas as alterações do editor"
             >
-              {/* ROW 1 — estado + opções rápidas (scrollable) */}
-              <div className="flex items-center gap-1.5 overflow-x-auto" style={{ scrollbarWidth: 'thin' }}>
-                {editorTool === 'pan' && (
+              <AlertTriangle className="w-4 h-4" />
+              <span className="text-[8px] font-bold mt-0.5">Cancelar</span>
+            </button>
+
+            {/* FLYOUT — submenu da categoria ativa, sempre no topo da toolbar,
+                a rolar para a direita (posição fixa: não segue o botão quando a barra rola) */}
+            {editorTool === 'add' && (
+              <div
+                className="absolute top-2 left-[54px] sm:left-[62px] z-40 w-44 max-w-[calc(100vw-4rem)] max-h-[calc(100dvh-9rem)] overflow-y-auto overscroll-contain touch-pan-y bg-slate-950/95 border border-violet-400/60 rounded-xl shadow-2xl backdrop-blur-md py-1.5 px-1.5 flex flex-col gap-1"
+                style={{ scrollbarWidth: 'thin' }}
+              >
+                <div className="text-[9px] font-mono uppercase tracking-wider text-violet-300 px-1 pb-0.5 font-bold shrink-0">
+                  {(() => { const c = CREATE_CATALOG.find((x) => x.id === addCat) ?? CREATE_CATALOG[0]; return c.label; })()}
+                </div>
+                {(CREATE_CATALOG.find((c) => c.id === addCat) ?? CREATE_CATALOG[0]).items.map(({ spec, icon: Icon }) => (
+                  <button
+                    key={spec.label}
+                    onClick={() => handleSetAddType(spec)}
+                    className={`shrink-0 flex items-center gap-1.5 text-[10px] font-bold px-2 py-1.5 rounded border transition text-left ${
+                      addType.label === spec.label
+                        ? 'bg-violet-500 text-black border-violet-300'
+                        : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">{spec.label}</span>
+                  </button>
+                ))}
+                <div className="text-[9px] text-slate-500 px-1 pt-0.5 shrink-0">clica no mapa para colocar</div>
+              </div>
+            )}
+            {/* FLYOUT — submenu da ferramenta Estrada (superfície, sentido, largura, tangente) */}
+            {editorTool === 'road' && (
+              <div
+                className="absolute top-2 left-[54px] sm:left-[62px] z-40 w-44 max-w-[calc(100vw-4rem)] max-h-[calc(100dvh-9rem)] overflow-y-auto overscroll-contain touch-pan-y bg-slate-950/95 border border-sky-400/60 rounded-xl shadow-2xl backdrop-blur-md py-1.5 px-1.5 flex flex-col gap-1"
+                style={{ scrollbarWidth: 'thin' }}
+              >
+                <div className="text-[9px] font-mono uppercase tracking-wider text-sky-300 px-1 pb-0.5 font-bold shrink-0">ESTRADA</div>
+                {([['asphalt', 'Asfalto'], ['dirt', 'Terra'], ['cobble', 'Calçada']] as Array<[RoadSurface, string]>).map(([id, label]) => (
+                  <button
+                    key={id}
+                    onClick={() => { const ed = getEditorScene(); if (ed) ed.setRoadSurface(id); }}
+                    className={`shrink-0 text-[10px] font-bold px-2 py-1 rounded border transition text-left ${
+                      roadUI.surface === id
+                        ? 'bg-sky-500 text-black border-sky-300'
+                        : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <button
+                  onClick={() => { const ed = getEditorScene(); if (ed) ed.setRoadOneWay(!roadUI.oneWay); }}
+                  className={`shrink-0 text-[10px] font-bold px-2 py-1 rounded border transition text-left ${
+                    roadUI.oneWay
+                      ? 'bg-amber-400 text-black border-amber-200'
+                      : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+                  }`}
+                >
+                  {roadUI.oneWay ? '→ 1 Sentido' : '⇄ 2 Sentidos'}
+                </button>
+                <div className="shrink-0 flex items-center gap-1 bg-slate-900 border border-sky-800 rounded px-1 py-0.5 shrink-0">
+                  <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeRoadWidth(-16); }} className="text-slate-300 hover:text-white px-1 font-black text-xs" title="Reduzir largura">−</button>
+                  <span className="text-[10px] font-bold text-slate-200 w-12 text-center">{roadUI.hasPoint ? 'Secção ' : ''}{Math.round(roadUI.width)}px</span>
+                  <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeRoadWidth(16); }} className="text-slate-300 hover:text-white px-1 font-black text-xs" title="Aumentar largura">+</button>
+                </div>
+                {roadUI.hasPoint && (
+                  <div className="shrink-0 flex items-center gap-1 bg-slate-900 border border-violet-500/60 rounded px-1 py-0.5 shrink-0">
+                    <span className="text-[9px] font-bold text-violet-300 px-0.5">Tangente</span>
+                    <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeTwist(-5); }} className="text-slate-300 hover:text-white px-1 font-black text-xs">−</button>
+                    <span className="text-[10px] font-bold text-slate-200 w-8 text-center">{roadUI.twistDeg}°</span>
+                    <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeTwist(5); }} className="text-slate-300 hover:text-white px-1 font-black text-xs">+</button>
+                    <button onClick={() => { const ed = getEditorScene(); if (ed) ed.resetTwist(); }} className="text-[9px] font-bold text-violet-300 hover:text-white px-1">Reta</button>
+                  </div>
+                )}
+                {roadUI.drawing && (
                   <>
-                    <Hand className="w-4 h-4 text-cyan-400 shrink-0 animate-bounce" />
-                    <span className="text-xs font-bold text-cyan-300 whitespace-nowrap shrink-0">MOVER: Arrasta (rato/botão do meio/2 dedos) — funciona sempre, em qualquer ferramenta</span>
+                    <button onClick={() => { const ed = getEditorScene(); if (ed) ed.removeLastPendingPoint(); }} className="shrink-0 text-[10px] font-bold bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800 px-2 py-1 rounded">Retroceder Ponto</button>
+                    <button onClick={() => { const ed = getEditorScene(); if (ed) ed.finishPendingRoad(); }} className="shrink-0 text-[10px] font-bold bg-emerald-500 text-black border border-emerald-300 hover:bg-emerald-400 px-2 py-1 rounded">Terminar</button>
                   </>
                 )}
-                {editorTool === 'road' && (
+                {roadUI.hasSelection && !roadUI.drawing && (
+                  <button onClick={() => { const ed = getEditorScene(); if (ed) ed.deleteSelectedRoad(); }} className="shrink-0 text-[10px] font-bold bg-red-500 text-white border border-red-300 hover:bg-red-400 px-2 py-1 rounded text-left">Apagar Selecionada</button>
+                )}
+                {roadUI.hasSelection === false && (
                   <>
-                    <Route className="w-4 h-4 text-sky-400 shrink-0" />
-                    <span className="text-xs font-bold text-sky-300 whitespace-nowrap shrink-0">
-                      ESTRADA: {roadUI.drawing ? 'a desenhar — clica para adicionar pontos' : roadUI.hasSelection ? (roadUI.hasPoint ? 'ponto selecionado' : 'estrada selecionada — duplo clique adiciona ponto') : 'clica para começar'}
-                    </span>
-                    {([['asphalt', 'Asfalto'], ['dirt', 'Terra'], ['cobble', 'Calçada']] as Array<[RoadSurface, string]>).map(([id, label]) => (
-                      <button
-                        key={id}
-                        onClick={() => { const ed = getEditorScene(); if (ed) ed.setRoadSurface(id); }}
-                        className={`shrink-0 text-[10px] font-bold px-2 py-1 rounded transition border ${
-                          roadUI.surface === id
-                            ? 'bg-sky-500 text-black border-sky-300'
-                            : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                    <button
-                      onClick={() => { const ed = getEditorScene(); if (ed) ed.setRoadOneWay(!roadUI.oneWay); }}
-                      className={`shrink-0 text-[10px] font-bold px-2 py-1 rounded transition border ${
-                        roadUI.oneWay
-                          ? 'bg-amber-400 text-black border-amber-200'
-                          : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
-                      }`}
-                      title="Sem tracejado central — um só sentido (setas amarelas)"
-                    >
-                      {roadUI.oneWay ? '→ 1 Sentido' : '⇄ 2 Sentidos'}
-                    </button>
-                    <div className="shrink-0 flex items-center gap-1 bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5">
-                      <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeRoadWidth(-16); }} className="text-slate-300 hover:text-white px-1 font-black text-xs" title="Reduzir largura">−</button>
-                      <span className="text-[10px] font-bold text-slate-200 w-14 text-center">{roadUI.hasPoint ? 'Secção ' : ''}{Math.round(roadUI.width)}px</span>
-                      <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeRoadWidth(16); }} className="text-slate-300 hover:text-white px-1 font-black text-xs" title="Aumentar largura">+</button>
-                    </div>
-                    {roadUI.hasPoint && (
-                      <div className="shrink-0 flex items-center gap-1 bg-slate-900 border border-violet-500/60 rounded px-1.5 py-0.5">
-                        <span className="text-[9px] font-bold text-violet-300 px-0.5">Tangente</span>
-                        <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeTwist(-5); }} className="text-slate-300 hover:text-white px-1 font-black text-xs">−</button>
-                        <span className="text-[10px] font-bold text-slate-200 w-10 text-center">{roadUI.twistDeg}°</span>
-                        <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeTwist(5); }} className="text-slate-300 hover:text-white px-1 font-black text-xs">+</button>
-                        <button onClick={() => { const ed = getEditorScene(); if (ed) ed.resetTwist(); }} className="text-[9px] font-bold text-violet-300 hover:text-white px-1">Reta</button>
-                      </div>
-                    )}
-                    {roadUI.drawing && (
-                      <>
-                        <button onClick={() => { const ed = getEditorScene(); if (ed) ed.removeLastPendingPoint(); }} className="shrink-0 text-[10px] font-bold bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800 px-2 py-1 rounded">Retroceder Ponto</button>
-                        <button onClick={() => { const ed = getEditorScene(); if (ed) ed.finishPendingRoad(); }} className="shrink-0 text-[10px] font-bold bg-emerald-500 text-black border border-emerald-300 hover:bg-emerald-400 px-2 py-1 rounded">Terminar</button>
-                      </>
-                    )}
-                    {roadUI.hasSelection && !roadUI.drawing && (
-                      <button onClick={() => { const ed = getEditorScene(); if (ed) ed.deleteSelectedRoad(); }} className="shrink-0 text-[10px] font-bold bg-red-500 text-white border border-red-300 hover:bg-red-400 px-2 py-1 rounded">Apagar Selecionada</button>
-                    )}
-                    <span className="text-[10px] text-slate-400 whitespace-nowrap shrink-0 hidden lg:inline">Enter/duplo clique: terminar · Del: apagar · Esc: cancelar</span>
-                    {roadUI.hasSelection === false && (
-                      <>
-                        <div className="shrink-0 h-px bg-slate-800 mx-1" />
-                        <Lamp className="w-4 h-4 text-slate-400 shrink-0" />
-                        <span className="text-xs font-bold text-slate-400 whitespace-nowrap shrink-0">
-                          INTERSEÇÕES: clica num cruzamento para selecionar
-                        </span>
-                      </>
-                    )}
+                    <div className="shrink-0 h-px bg-slate-800 mx-1" />
+                    <Lamp className="w-4 h-4 text-slate-400 shrink-0" />
+                    <span className="text-xs font-bold text-slate-400 whitespace-nowrap shrink-0">cruzamentos detectados automaticamente</span>
                   </>
                 )}
-                {editorTool === 'road' && roadUI.hasSelection === false && (
-                  <>
-                    <div className="shrink-0 flex items-center gap-1 bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5">
-                      <Lamp className="w-4 h-4 text-slate-400 shrink-0" />
-                      <span className="text-[10px] text-slate-400 whitespace-nowrap shrink-0 hidden lg:inline">cruzamentos detectados automaticamente</span>
-                    </div>
-                  </>
-                )}
-                {editorTool === 'road' && (
+                {roadUI.hasSelection === false && (
                   <>
                     {(() => {
                       const ed = getEditorScene();
@@ -1252,7 +1375,7 @@ export default function App() {
                           >
                             {intUI.signalized ? 'Semáforos: ON' : 'Semáforos: OFF'}
                           </button>
-                          <span className="text-[10px] text-slate-500 whitespace-nowrap shrink-0 hidden lg:inline">
+                          <span className="text-[10px] text-slate-500 whitespace-nowrap shrink-0">
                             {intUI.signalized ? 'semáforos automáticos nos braços' : 'stop / cedência / sem sinal'}
                           </span>
                         </>
@@ -1260,93 +1383,221 @@ export default function App() {
                     })()}
                   </>
                 )}
-                {editorTool === 'object' && (
+                <div className="text-[9px] text-slate-500 px-1 pt-0.5 shrink-0">clica no mapa para desenhar</div>
+              </div>
+            )}
+            {/* FLYOUT — submenu da ferramenta Objectos (duplicar/copiar/colar/apagar + tipo de atrelado do pad selecionado) */}
+            {editorTool === 'object' && (
+              <div
+                className="absolute top-2 left-[54px] sm:left-[62px] z-40 w-44 max-w-[calc(100vw-4rem)] max-h-[calc(100dvh-9rem)] overflow-y-auto overscroll-contain touch-pan-y bg-slate-950/95 border border-amber-400/60 rounded-xl shadow-2xl backdrop-blur-md py-1.5 px-1.5 flex flex-col gap-1"
+                style={{ scrollbarWidth: 'thin' }}
+              >
+                <div className="text-[9px] font-mono uppercase tracking-wider text-amber-300 px-1 pb-0.5 font-bold shrink-0">OBJECTOS</div>
+                <button
+                  onClick={() => { const ed = getEditorScene(); if (ed) ed.toggleRotationSnap(); }}
+                  className={`shrink-0 text-[10px] font-bold px-2 py-1 rounded border transition text-left ${
+                    objectUI.rotationSnap
+                      ? 'bg-amber-400 text-black border-amber-200 shadow-md shadow-amber-500/30'
+                      : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
+                  }`}
+                  title="Snap da rotação a múltiplos de 45° (Shift+S)"
+                >
+                  <RotateCcw className="w-3 h-3" /> Snap {objectUI.rotationSnap ? 'ON' : 'OFF'}
+                </button>
+                {objectUI.hasSelection ? (
                   <>
-                    <Box className="w-4 h-4 text-amber-400 shrink-0" />
-                    {objectUI.hasSelection ? (
+                    <span className="text-xs font-bold text-amber-300 whitespace-nowrap shrink-0">
+                      OBJECTO: {objectUI.type} · {objectUI.angleDeg}°
+                    </span>
+                    <button
+                      onClick={() => { const ed = getEditorScene(); if (ed) ed.duplicateSelectedObject(); }}
+                      className="shrink-0 text-[10px] font-bold bg-violet-500 text-black border border-violet-300 hover:bg-violet-400 px-2 py-1 rounded flex items-center gap-1 text-left"
+                      title="Duplicar o objecto selecionado ao lado (Ctrl+D)"
+                    >
+                      <CopyPlus className="w-3 h-3" /> Duplicar
+                    </button>
+                    <button
+                      onClick={() => { const ed = getEditorScene(); if (ed) ed.copySelectedObject(); }}
+                      className="shrink-0 text-[10px] font-bold bg-slate-900 text-slate-200 border border-slate-700 hover:bg-slate-800 px-2 py-1 rounded flex items-center gap-1 text-left"
+                      title="Copiar o objecto selecionado para a prancheta do editor (Ctrl+C)"
+                    >
+                      <Copy className="w-3 h-3" /> Copiar
+                    </button>
+                    <button
+                      onClick={() => { const ed = getEditorScene(); if (ed) ed.pasteClipboard(); }}
+                      disabled={!objectUI.canPaste}
+                      className={`shrink-0 text-[10px] font-bold px-2 py-1 rounded border flex items-center gap-1 text-left ${
+                        objectUI.canPaste
+                          ? 'bg-slate-900 text-slate-200 border-slate-700 hover:bg-slate-800'
+                          : 'bg-slate-900/50 text-slate-600 border-slate-800 cursor-not-allowed'
+                      }`}
+                      title={objectUI.canPaste ? 'Colar o objecto copiado na posição do rato (Ctrl+V)' : 'Copia primeiro um objecto (Ctrl+C)'}
+                    >
+                      <ClipboardPaste className="w-3 h-3" /> Colar
+                    </button>
+                    <button
+                      onClick={() => { const ed = getEditorScene(); if (ed) ed.undo(); }}
+                      disabled={!objectUI.canUndo}
+                      className={`shrink-0 text-[10px] font-bold px-2 py-1 rounded border flex items-center gap-1 text-left ${
+                        objectUI.canUndo
+                          ? 'bg-slate-900 text-slate-200 border-slate-700 hover:bg-slate-800'
+                          : 'bg-slate-900/50 text-slate-600 border-slate-800 cursor-not-allowed'
+                      }`}
+                      title={objectUI.canUndo ? 'Desfazer a última operação sobre objectos (Ctrl+Z)' : 'Não há nada para desfazer'}
+                    >
+                      <Undo className="w-3 h-3" /> Desfazer
+                    </button>
+                    <button
+                      onClick={() => { const ed = getEditorScene(); if (ed) ed.deleteSelectedObject(); }}
+                      className="shrink-0 text-[10px] font-bold bg-red-500 text-white border border-red-300 hover:bg-red-400 px-2 py-1 rounded text-left"
+                    >
+                      Apagar
+                    </button>
+                    {objectUI.isCompound ? (
                       <>
-                        <span className="text-xs font-bold text-amber-300 whitespace-nowrap shrink-0">
-                          OBJECTO: {objectUI.type} · {objectUI.angleDeg}°
-                        </span>
+                        <div className="text-[9px] font-bold text-slate-500 px-1 pt-0.5 shrink-0">COMPOSTO ({objectUI.compoundPartCount} partes)</div>
                         <button
-                          onClick={() => { const ed = getEditorScene(); if (ed) ed.deleteSelectedObject(); }}
-                          className="shrink-0 text-[10px] font-bold bg-red-500 text-white border border-red-300 hover:bg-red-400 px-2 py-1 rounded"
+                          onClick={() => { const ed = getEditorScene(); if (ed) ed.duplicateCompoundAsVariation(); }}
+                          className="shrink-0 text-[10px] font-bold bg-violet-500 text-black border border-violet-300 hover:bg-violet-400 px-2 py-1 rounded flex items-center gap-1 text-left"
+                          title="Criar uma variação deste composto (não altera o original)"
                         >
-                          Apagar
+                          <CopyPlus className="w-3 h-3" /> Variação
                         </button>
-                        {objectUI.type === 'parking_pad' || objectUI.type === 'trailer' ? (
-                          ([['C', 'standard'], ['CE', 'long_cargo'], ['H', 'bitrem_lead'], ['P', 'bitrem_pup'], ['X', 'fragile_glass']] as Array<[string, string]>).map(([lbl, val]) => (
-                            <button
-                              key={val}
-                              onClick={() => { const ed = getEditorScene(); if (ed) ed.setTrailerPadType(objectUI.id, val); }}
-                              className={`shrink-0 text-[10px] font-bold px-2 py-1 rounded border ${
-                                objectUI.trailer === val
-                                  ? 'bg-amber-400 text-slate-900 border-amber-200'
-                                  : 'bg-slate-800 text-amber-300 border-slate-600 hover:bg-slate-700'
-                              }`}
-                            >
-                              {lbl}
-                            </button>
-                          ))
-                        ) : null}
-                        <span className="text-[10px] text-slate-400 whitespace-nowrap shrink-0 hidden lg:inline">
-                          arrasta = mover · pega rosa = rodar livre{objectUI.resizable ? ' · quadrados brancos = redimensionar' : ''}
+                        <button
+                          onClick={() => { const ed = getEditorScene(); if (ed) { ed.ungroupCompound(); } }}
+                          className="shrink-0 text-[10px] font-bold bg-slate-900 text-slate-200 border border-slate-700 hover:bg-slate-800 px-2 py-1 rounded text-left"
+                          title="Desagrupar (remove o composto, devolve as partes ao mapa como objectos soltos)"
+                        >
+                          Desagrupar
+                        </button>
+                        <span className="text-[10px] text-slate-400 whitespace-nowrap shrink-0">
+                          para juntar mais objectos ou extrair partes usa a ferramenta Composto
                         </span>
                       </>
-                    ) : (
-                      <span className="text-xs font-bold text-amber-300 whitespace-nowrap shrink-0">OBJECTOS: Clica num objecto — arrasta para mover, Del apaga</span>
-                    )}
+                    ) : null}
+                    {objectUI.type === 'parking_pad' || objectUI.type === 'trailer' ? (
+                      <>
+                        <div className="text-[9px] font-bold text-slate-500 px-1 pt-0.5 shrink-0">tipo de atrelado</div>
+                        {([['C', 'standard'], ['CE', 'long_cargo'], ['H', 'bitrem_lead'], ['P', 'bitrem_pup'], ['X', 'fragile_glass']] as Array<[string, string]>).map(([lbl, val]) => (
+                          <button
+                            key={val}
+                            onClick={() => { const ed = getEditorScene(); if (ed) ed.setTrailerPadType(objectUI.id, val); }}
+                            className={`shrink-0 text-[10px] font-bold px-2 py-1 rounded border text-left ${
+                              objectUI.trailer === val
+                                ? 'bg-amber-400 text-slate-900 border-amber-200'
+                                : 'bg-slate-800 text-amber-300 border-slate-600 hover:bg-slate-700'
+                            }`}
+                          >
+                            {lbl}
+                          </button>
+                        ))}
+                      </>
+                    ) : null}
+                    <span className="text-[10px] text-slate-400 whitespace-nowrap shrink-0 hidden lg:inline">
+                      arrasta = mover · pega rosa = rodar livre{objectUI.resizable ? ' · quadrados brancos = redimensionar' : ''} · Ctrl+D duplica · Ctrl+C/V copia e cola
+                    </span>
                   </>
-                )}
-                {editorTool === 'spawn' && (
+                ) : (
                   <>
-                    <Compass className="w-4 h-4 text-emerald-400 shrink-0 animate-spin" />
-                    <span className="text-xs font-bold text-emerald-300 whitespace-nowrap shrink-0">SPAWN: Clica no mapa para definir o ponto de partida do camião</span>
+                    <span className="text-xs font-bold text-amber-300 whitespace-nowrap shrink-0">OBJECTOS</span>
+                    <span className="text-[10px] text-slate-400 whitespace-nowrap shrink-0 hidden lg:inline">clica num objecto para selecionar</span>
                   </>
                 )}
-                {editorTool === 'add' && (
-                  <>
-                    <Plus className="w-4 h-4 text-violet-400 shrink-0" />
-                    <span className="text-xs font-bold text-violet-300 whitespace-nowrap shrink-0">CRIAR:</span>
-                    {CREATE_CATALOG.map((cat) => (
-                      <button
-                        key={cat.id}
-                        onClick={() => handleSetAddCategory(cat.id)}
-                        className={`shrink-0 text-[10px] font-black px-2.5 py-1 rounded border transition ${
-                          addCat === cat.id
-                            ? 'bg-violet-500 text-black border-violet-300'
-                            : 'bg-slate-900 text-violet-300 border-slate-800 hover:bg-slate-800'
-                        }`}
-                      >
-                        {cat.label}
-                      </button>
-                    ))}
-                    <span className="text-[10px] text-slate-400 whitespace-nowrap shrink-0 hidden lg:inline">clica no mapa para colocar</span>
-                  </>
-                )}
+                <div className="text-[9px] text-slate-500 px-1 pt-0.5 shrink-0">Del apaga · Ctrl+D duplica · Ctrl+C/V copia e cola · Shift+S snap rotação 45°</div>
               </div>
-
-              {/* ROW 2 (só Criar) — objectos da categoria ativa (scrollable) */}
-              {editorTool === 'add' && (
-                <div className="flex items-center gap-1.5 overflow-x-auto pt-1.5 border-t border-slate-800" style={{ scrollbarWidth: 'thin' }}>
-                  {(CREATE_CATALOG.find((c) => c.id === addCat) ?? CREATE_CATALOG[0]).items.map(({ spec, icon: Icon }) => (
-                    <button
-                      key={spec.label}
-                      onClick={() => handleSetAddType(spec)}
-                      className={`shrink-0 flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded border transition ${
-                        addType.label === spec.label
-                          ? 'bg-violet-500 text-black border-violet-300'
-                          : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
-                      }`}
-                    >
-                      <Icon className="w-3 h-3" />
-                      {spec.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
+            )}
+            {/* FLYOUT — ferramenta Composto (marquee) */}
+            {editorTool === 'compound' && (
+              <div
+                className="absolute top-2 left-[54px] sm:left-[62px] z-40 w-44 max-w-[calc(100vw-4rem)] max-h-[calc(100dvh-9rem)] overflow-y-auto overscroll-contain touch-pan-y bg-slate-950/95 border border-violet-400/60 rounded-xl shadow-2xl backdrop-blur-md py-1.5 px-1.5 flex flex-col gap-1"
+                style={{ scrollbarWidth: 'thin' }}
+              >
+                <div className="text-[9px] font-mono uppercase tracking-wider text-violet-300 px-1 pb-0.5 font-bold shrink-0">COMPOSTO</div>
+                {(() => {
+                  const ed = getEditorScene();
+                  const sel = ed?.selectedObject ?? null;
+                  const parts = sel && sel.type === 'compound' ? compoundParts(sel) : [];
+                  if (sel && sel.type === 'compound') {
+                    return (
+                      <>
+                        <span className="text-xs font-bold text-violet-300 whitespace-nowrap shrink-0">
+                          COMPOSTO · {parts.length} partes
+                        </span>
+                        <span className="text-[10px] text-slate-400 shrink-0">
+                          arrasta outro rectângulo à volta de objectos no mapa para ACRESCENTÁ-LOS a este composto
+                        </span>
+                        <button
+                          onClick={() => { if (ed) ed.duplicateCompoundAsVariation(); }}
+                          className="shrink-0 text-[10px] font-bold bg-violet-500 text-black border border-violet-300 hover:bg-violet-400 px-2 py-1 rounded flex items-center gap-1 text-left"
+                          title="Criar uma variação deste composto (não altera o original)"
+                        >
+                          <CopyPlus className="w-3 h-3" /> Variação
+                        </button>
+                        <button
+                          onClick={() => { if (ed) { ed.ungroupCompound(); } }}
+                          className="shrink-0 text-[10px] font-bold bg-slate-900 text-slate-200 border border-slate-700 hover:bg-slate-800 px-2 py-1 rounded text-left"
+                          title="Desagrupar: devolve todas as partes ao mapa como objectos soltos"
+                        >
+                          Desagrupar
+                        </button>
+                        <div className="text-[9px] font-bold text-slate-500 px-1 pt-0.5 shrink-0">PARTES — × devolve ao mapa</div>
+                        {parts.map((part, i) => (
+                          <button
+                            key={i}
+                            onClick={() => { if (ed) ed.extractCompoundPart(i); }}
+                            className="shrink-0 text-[10px] font-bold bg-red-500/20 text-red-300 border border-red-500/40 hover:bg-red-500/30 px-2 py-1 rounded text-left"
+                            title="Extrair esta parte do composto e devolvê-la ao mapa como objecto solto"
+                          >
+                            ⨯ {i + 1}: {part.type} ({Math.round(part.w)}×{Math.round(part.h)})
+                          </button>
+                        ))}
+                      </>
+                    );
+                  }
+                  return (
+                    <>
+                      <span className="text-[10px] text-slate-300 shrink-0">
+                        1. coloca no mapa os objectos que queres agrupar
+                      </span>
+                      <span className="text-[10px] text-slate-300 shrink-0">
+                        2. arrasta um rectângulo à volta deles — tudo o que ficar dentro torna-se UM objecto composto
+                      </span>
+                      <span className="text-[10px] text-slate-400 shrink-0">
+                        clica num composto para o selecionar · atrelados e compostos existentes nunca são capturados
+                      </span>
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+            {/* FLYOUT — submenu da ferramenta Mover (Pan) */}
+            {editorTool === 'pan' && (
+              <div
+                className="absolute top-2 left-[54px] sm:left-[62px] z-40 w-44 max-w-[calc(100vw-4rem)] max-h-[calc(100dvh-9rem)] overflow-y-auto overscroll-contain touch-pan-y bg-slate-950/95 border border-cyan-400/60 rounded-xl shadow-2xl backdrop-blur-md py-1.5 px-1.5 flex flex-col gap-1"
+                style={{ scrollbarWidth: 'thin' }}
+              >
+                <div className="text-[9px] font-mono uppercase tracking-wider text-cyan-300 px-1 pb-0.5 font-bold shrink-0">MOVER</div>
+                <Hand className="w-4 h-4 text-cyan-400 shrink-0 animate-bounce" />
+                <span className="text-xs font-bold text-cyan-300 whitespace-nowrap shrink-0">
+                  Arrasta (rato/botão do meio/2 dedos) — funciona sempre, em qualquer ferramenta
+                </span>
+                <div className="text-[9px] text-slate-500 px-1 pt-0.5 shrink-0">zoom com a roda do rato · dois dedos para panoramizar</div>
+              </div>
+            )}
+            {/* FLYOUT — submenu da ferramenta Spawn Point */}
+            {editorTool === 'spawn' && (
+              <div
+                className="absolute top-2 left-[54px] sm:left-[62px] z-40 w-44 max-w-[calc(100vw-4rem)] max-h-[calc(100dvh-9rem)] overflow-y-auto overscroll-contain touch-pan-y bg-slate-950/95 border border-emerald-400/60 rounded-xl shadow-2xl backdrop-blur-md py-1.5 px-1.5 flex flex-col gap-1"
+                style={{ scrollbarWidth: 'thin' }}
+              >
+                <div className="text-[9px] font-mono uppercase tracking-wider text-emerald-300 px-1 pb-0.5 font-bold shrink-0">SPAWN</div>
+                <Compass className="w-4 h-4 text-emerald-400 shrink-0 animate-spin" />
+                <span className="text-xs font-bold text-emerald-300 whitespace-nowrap shrink-0">
+                  Clica no mapa para definir o ponto de partida do camião
+                </span>
+              </div>
+            )}
+          </aside>
         </>
       )}
 

@@ -54,7 +54,32 @@ Simulador de condução pesada em **2D Top-Down** (Phaser 4 + Matter.js + React 
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.8.5** (Versão Atual — branch main)
+### **v2.8.8** (Versão Atual — branch main)
+- **Objectos compostos por marquee (`compound`) — redesign completo**:
+  - **Nova ferramenta "Composto" na toolbar** (roxa): arrasta um rectângulo à volta dos objectos colocados no mapa e **tudo o que ficar dentro (centro dentro do rectângulo) torna-se UM único objecto composto** — os originais são absorvidos. Overlay mostra a marquee e destaca em violeta os objectos que vão ser capturados.
+  - **Renderização por decomposição (`WorldObjects.ts`)**: o composto já não desenha rectângulos genéricos — cada parte é renderizada com o seu visual real (`drawSolid`/`drawFlat`) na camada certa, com culling por parte, mantendo a ordenação z dos flats. Mover/rodar o composto transforma as partes em bloco.
+  - **Física por parte**: os colliders estáticos passam a ser um corpo por parte sólida (flats como pads/docas não colidem; rotundas mantêm só a ilha sólida) — bater contra um composto corresponde ao que se vê.
+  - **Editar partes**: com um composto selecionado, arrastar um novo rectângulo **acrescenta** os objectos capturados como partes; na lista do flyout, `×` **extrai** a parte de volta ao mapa como objecto solto.
+  - **Variação**: duplica o composto como um novo objecto independente (o original fica intacto).
+  - **Desagrupar**: devolve todas as partes ao mapa como objectos soltos nas posições absolutas.
+  - Modelo de dados simplificado: partes com posição/ângulo relativos ao **centro** do composto (`params.parts`, serializado em JSON); caixa `w/h` = bbox das partes (hit-test/seleção). Atrelados, semáforos e compostos existentes nunca são capturados.
+  - Integração com o undo por sessão e com o Cancelar (restaura tudo); removida a categoria "Compostos" do catálogo (compostos vazios já não fazem sentido).
+
+### **v2.8.6** (branch main)
+- **Editor: toolbar por categorias, duplicar/copiar/colar e catálogo completo**:
+  - **Toolbar lateral (`App.tsx`)**: as categorias do Criar (Edifícios, Docas, Atrelados, Pads, Bases, Piso, Barreiras, Contentores, Trânsito, Industrial, Serviços) passaram a ter o seu próprio botão na barra lateral, que roda verticalmente (scroll cima/baixo com `overflow-y-auto`); ao clicar numa categoria, o submenu rola para a direita numa posição **fixa no topo** da toolbar (não segue o botão quando a barra rola) mostrando as subopções; a régua passa a mostrar o estado (`CRIAR · <categoria>: <objecto>`).
+  - **Duplicar / Copiar / Colar (`EditorScene.ts`)**: `duplicateSelectedObject()` (clone adjacente, entidade de atrelado respawnda), `copySelectedObject()` / `pasteClipboard()` (cola na posição do rato) com botões na régua dos Objectos e atalhos `Ctrl+D` / `Ctrl+C` / `Ctrl+V` (com guarda `e.repeat` + debounce de 150ms contra o duplo evento de teclado do Phaser 4).
+  - **Catálogo completo**: todos os tipos do motor agora criáveis — `crane`, `silo`, `gas_pump`, `gas_canopy`, `price_sign`, `lamp`, `sign`, `traffic_light`, variantes de edifício (`gabled`, `church`, `archway`) e pads `bitrem_pup`.
+  - **Sinais de trânsito (`WorldObjects.ts`)**: novas variantes do tipo `sign` desenhadas — `yield` (triângulo invertido), `speed` (disc limite 50), `no_parking` (disc azul com barra) e `pedestrian` (placa azul de peões) — para além do `stop`.
+  - **Contentores**: paleta de variantes `container_stack` expandida (blue, red, green, rust, orange, yellow, white, teal) e catálogo com contentores individuais + pilhas grandes.
+  - **Edifícios com docas funcionais**: `building` variante `warehouse_docks` passa a gerar uma zona de doca virtual em frente a cada porta (rotacionada com o edifício) no getter `dockZones` — os triggers de acoplamento/exame já os reconhecem como docas normais.
+- **Undo (Ctrl+Z / botão Desfazer)**: `EditorScene` mantém um stack de snapshots (`toJSON`) antes de cada mutação de objetos (colocar, apagar, duplicar, colar, rotacionar, mover/redimensionar via drag, tipo de atrelado de pad). `undo()` restaura o snapshot, recria as entidades vivas dos atrelados e incrementa a versão. Botão no flyout vertical de Objectos (desactivado quando o stack está vazio) e atalho `Ctrl+Z`.
+- **Snap de rotação (Shift+S / botão Snap ON/OFF)**: ao rodar um objecto com o knob rosa, o ângulo salta para múltiplos de 45° quando o ponteiro fica dentro de 12° deles (activo por padrão). Útil para alinhar objectos com a malha viária.
+- **Undo por sessão (botão Desfazer abaixo do PAN / Ctrl+Z)**: `EditorScene` guarda um snapshot do mundo completo antes de cada mutação (colocar, apagar, duplicar, colar, rotacionar, mover/redimensionar via drag, tipo de atrelado de pad). O botão Desfazer (na toolbar, abaixo do PAN) desfaz uma operação de cada vez; desactiva-se quando o stack está vazio.
+- **Cancelar sessão (botão no final da toolbar)**: descarta TODAS as alterações feitas na sessão de editor e restaura o mundo ao estado de entrada (não grava).
+- **Auto-save só no fim da sessão**: removido o autosave de 2s do `World.update()`. Ao sair do editor (qualquer forma), as alterações são gravadas automaticamente para `localStorage` (draft), a menos que o utilizador use o botão Cancelar (que restaura e não grava).
+
+### **v2.8.5** (branch main)
 - **Candeeiros de rua visíveis de dia & Semáforos com fases opostas (Passo 1)**:
   - **Candeeiros (`WorldObjects.ts` / `MainScene.ts`)**: redesenhados com base metálica, sombra projetada, braço saliente orientado para a faixa (`angle`) e luminária clara com difusor visível durante o dia; lâmpada noturna emissiva e ponto de luz WebGL alinhados na ponta da luminária (`WorldObjects.getLampBulbPos()`), evitando cruzamentos transversais. Braço, luminária (`overheadGraphics`, `depth: 14`) e brilho noturno (`overheadLightsGraphics`, `depth: 14.5`) renderizados acima do camião e dos atrelados para que o conjunto passe por baixo da luminária mantendo a base e a hitbox no solo.
   - **Semáforos (`WorldObjects.ts`)**: corrigido o bug em `seedWorld` que atribuía o mesmo `group` a todos os semáforos do cruzamento; eixos Norte-Sul (`group 0`) e Este-Oeste (`group 1`) passam a alternar em fases opostas com `1.0s` de intervalo de segurança todo-vermelho (`TL_ALL_RED = 1000ms`), colocados seletivamente apenas nos `7` cruzamentos arteriais principais e rodados conforme a direção da via.

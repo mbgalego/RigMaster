@@ -25,11 +25,14 @@ export class World {
   public version: number = 0; // bumped on any edit → minimap refresh
   public spawnPoint: { x: number; y: number; angle: number } = { x: 5760, y: 4700, angle: 0 };
 
-  // --- Draft autosave (localStorage) — protects in-editor edits from loss ---
+  // --- Draft autosave (localStorage) — protege as edições do editor ---
   private static readonly DRAFT_KEY = 'rigmaster_world_draft';
   private static readonly DRAFT_DEBOUNCE_MS = 2000;
   private draftTimer = 0;
   private lastSavedVersion = -1;
+
+  /** Snapshot do mundo no início da sessão de editor (para o botão Cancelar). */
+  private sessionSnapshot: string | null = null;
 
   constructor(private scene: Phaser.Scene) {
     this.terrain = new WorldTerrain(scene);
@@ -99,43 +102,69 @@ export class World {
 
   public update(delta: number) {
     this.objects.update(delta);
-    this.autosaveDraft(delta);
+    // Nota: o draft só é gravado no final da sessão de editor (veja
+    // World.endEditorSession), nunca aqui a cada 2s.
   }
 
   // ======================================================================
-  // DRAFT AUTOSAVE (localStorage) — ~2s after the last edit, the current
-  // world is written to a draft slot. The UI offers to restore it on the
-  // next launch; it never silently overrides the loaded world file.
+  // EDITOR SESSION (undo / cancel / auto-save on exit)
   // ======================================================================
 
-  private autosaveDraft(delta: number) {
-    if (this.version === this.lastSavedVersion) return;
-    this.draftTimer += delta;
-    if (this.draftTimer < World.DRAFT_DEBOUNCE_MS) return;
-    this.draftTimer = 0;
+  /** Grava um snapshot do mundo atual como ponto de partida da sessão de editor. */
+  public beginEditorSession(): void {
+    this.sessionSnapshot = this.exportJSON();
+    // A versão de referência para o save final passa a ser a de entrada,
+    // para sabermos se houve alterações na sessão.
     this.lastSavedVersion = this.version;
+  }
+
+  /**
+   * Termina a sessão de editor.
+   * @param commit — true: grava as alterações (auto-save ao sair);
+   *                 false: cancela tudo e restaura o snapshot de entrada.
+   */
+  public endEditorSession(commit: boolean): void {
+    if (commit) {
+      this.saveDraft();
+    } else if (this.sessionSnapshot) {
+      this.importJSON(this.sessionSnapshot);
+      this.sessionSnapshot = null;
+      return;
+    }
+    this.sessionSnapshot = null;
+  }
+
+  /** Grava imediatamente o estado atual para o slot de draft (localStorage). */
+  public saveDraft(): void {
     try {
       localStorage.setItem(World.DRAFT_KEY, this.exportJSON());
+      this.lastSavedVersion = this.version;
     } catch { /* storage unavailable/full — best-effort only */ }
   }
 
-  /** True when an editor draft is waiting in localStorage. */
+  /** True quando há um draft de editor à espera em localStorage. */
   public static hasDraft(): boolean {
     try { return !!localStorage.getItem(World.DRAFT_KEY); } catch { return false; }
   }
 
-  /** Removes the draft slot without touching the running world. */
+  /** Remove o draft slot sem tocar no mundo em execução. */
   public static clearDraft() {
     try { localStorage.removeItem(World.DRAFT_KEY); } catch { /* noop */ }
   }
 
-  /** Loads the draft into the running world (IDs preserved). */
+  /** Carrega o draft para o mundo em execução (IDs preservados). */
   public restoreDraft(): boolean {
     try {
       const raw = localStorage.getItem(World.DRAFT_KEY);
       if (!raw) return false;
       return this.importJSON(raw);
     } catch { return false; }
+  }
+
+  // O autosave periódico a cada 2s foi removido: o draft só é gravado no fim
+  // da sessão de editor (ou explicitamente via saveDraft).
+  private autosaveDraft(_delta: number) {
+    // Mantido apenas por compatibilidade; não é mais chamado do update().
   }
 
   public updateActiveChunks(centerX: number, centerY: number, view?: Phaser.Geom.Rectangle) {
