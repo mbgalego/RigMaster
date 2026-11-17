@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { Trailer, TrailerType } from '../entities/Trailer';
 import type { LicenseId } from './LicenseSystem';
 import type { WorldObject } from '../world/WorldObjects';
+import type { MainScene } from '../scenes/MainScene';
 
 /** Trailer type -> license required to couple it */
 export const TRAILER_TYPE_TO_LICENSE: Record<TrailerType, LicenseId> = {
@@ -27,18 +28,18 @@ export interface CouplingCandidate {
 export class TrailerManager {
   private static instance: TrailerManager | null = null;
 
-  public static getInstance(scene?: Phaser.Scene): TrailerManager {
+  public static getInstance(scene?: MainScene): TrailerManager {
     if (!TrailerManager.instance && scene) {
       TrailerManager.instance = new TrailerManager(scene);
     }
     return TrailerManager.instance!;
   }
 
-  public scene: Phaser.Scene;
+  public scene: MainScene;
   /** All uncoupled trailers on the map (parked or dropped anywhere) */
   public loose: Trailer[] = [];
 
-  constructor(scene: Phaser.Scene) {
+  constructor(scene: MainScene) {
     this.scene = scene;
   }
 
@@ -51,8 +52,7 @@ export class TrailerManager {
     this.destroyAll();
     for (const pad of pads) this.spawnAt(pad.x, pad.y, pad.type, pad.angle);
     // Editor-placed trailers live as data-only 'trailer' world objects — respawn them
-    const world = (this.scene as any).world;
-    for (const o of (world?.objects?.objects ?? []) as WorldObject[]) {
+    for (const o of (this.scene.world.objects.objects as WorldObject[])) {
       if (o.type === 'trailer' && !o.temp) this.spawnObjectTrailer(o);
     }
   }
@@ -65,8 +65,8 @@ export class TrailerManager {
    */
   public spawnAt(x: number, y: number, type: TrailerType, angle: number = Math.PI, withPup: boolean = true): Trailer {
     const noseAngle = angle;
-    const rn = (this.scene as any).roadNetwork;
-    const elevLead = rn?.initialLayerAt ? rn.initialLayerAt(x, y) : { layer: 0 as 0 | 1, z: 0 };
+    const rn = this.scene.roadNetwork;
+    const elevLead = rn.initialLayerAt(x, y);
 
     const lead = new Trailer(this.scene, { x, y, angle: noseAngle, type });
     // Sync the drawn container with the body angle (constructor only sets the body)
@@ -80,7 +80,7 @@ export class TrailerManager {
       const D = lead.length / 2 + 155 / 2 + 12;
       const px = x - Math.sin(noseAngle) * D;
       const py = y + Math.cos(noseAngle) * D;
-      const elevPup = rn?.initialLayerAt ? rn.initialLayerAt(px, py) : elevLead;
+      const elevPup = rn.initialLayerAt(px, py);
       const pup = new Trailer(this.scene, { x: px, y: py, angle: noseAngle, type: 'bitrem_pup' });
       pup.setPosition(px, py, noseAngle);
       pup.setElevation(elevPup.layer, elevPup.z);
@@ -105,11 +105,8 @@ export class TrailerManager {
     const t = this.loose.find((tr) => tr.wobjId === o.id);
     if (!t) return;
     t.setPosition(o.x, o.y, o.angle);
-    const rn = (this.scene as any).roadNetwork;
-    if (rn?.initialLayerAt) {
-      const elev = rn.initialLayerAt(o.x, o.y);
-      t.setElevation(elev.layer, elev.z);
-    }
+    const elev = this.scene.roadNetwork.initialLayerAt(o.x, o.y);
+    t.setElevation(elev.layer, elev.z);
     t.syncBlocker();
   }
 

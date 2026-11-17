@@ -463,7 +463,7 @@ export default function App() {
           setCameraZoom(roundedZoom);
         }
       }
-      if (edScene) {
+      if (edScene && scene?.isEditorMode) {
         setRoadUI(edScene.getRoadUIState());
         setObjectUI(edScene.getObjectUIState());
         // The scene can switch tools by itself (e.g. Criar → Objectos after placing)

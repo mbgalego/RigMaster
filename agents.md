@@ -20,7 +20,7 @@ Simulador de condução pesada em **2D Top-Down** (Phaser 4 + Matter.js + React 
 - **Interface & Controlos (`App.tsx`, `components/TouchControls.tsx`)**:
   - HUD minimalista com velocímetro/marcha, notificações toast (incluindo reserva `≤20%` persistente), volante/pedais touch semi-transparentes, botões de **Médios/Máximos** e switch `D/R`.
 - **Testes Automáticos (`scripts/`)**:
-  - `smoke-test.mjs` (estradas, atrelado, respawn) e `smoke-fuel.mjs` (consumo, aviso 20%, minimapa, deslize sem combustível, abastecimento, respawn).
+  - `smoke-test.mjs` (estradas, atrelado, respawn), `smoke-fuel.mjs` (consumo, aviso 20%, minimapa, deslize sem combustível, abastecimento, respawn) e `smoke-bridge.mjs` (viadutos semente, passagem inferior, grip off-road sob tabuleiro, promoção antecipada em rampa curta, contenção de guardas L1 e normalização `layer` em JSON).
 
 ### 1.3 Plano Geral & Roadmap (Prioridade Sugerida)
 > *Nota: as funcionalidades abaixo refletem os objetivos globais definidos para o projeto, organizados em fases lógicas de dependência técnica.*
@@ -48,7 +48,7 @@ Simulador de condução pesada em **2D Top-Down** (Phaser 4 + Matter.js + React 
 
 ### 1.4 Regras de Manutenção
 - Manter sempre o **`agents.md`** e o **`package.json`** atualizados a cada versão.
-- Validar alterações com `npm run lint`, `npm run build` e os testes `smoke-test.mjs` / `smoke-fuel.mjs`.
+- Validar alterações com `npm run lint`, `npm run build` e os testes `smoke-test.mjs` / `smoke-fuel.mjs` / `smoke-bridge.mjs`.
 
 ---
 
@@ -61,7 +61,8 @@ Simulador de condução pesada em **2D Top-Down** (Phaser 4 + Matter.js + React 
   - **Camadas visuais (`depth`) & transparência de passagem inferior**: a base das rampas junto ao solo (`z < 0.28`) renderiza em `rampBaseGraphics` (`depth: 2.6`, abaixo dos veículos do piso 0) enquanto o tabuleiro e sombras elevadas (`z >= 0.28`) renderizam em `bridgeShadowGraphics` (`depth: 15`) e `bridgeRoadGraphics` (`depth: 16`) acima dos veículos e candeeiros do solo (`depth: 10..14.5`). Todo o conjunto acoplado (camião + atrelados) sobe em bloco para `depth: 20..22` assim que qualquer unidade inicia a subida, eliminando qualquer corte visual na entrada da rampa. Quando o camião circula no piso `0` por baixo de um viaduto, o tabuleiro fica suavemente translúcido (`alpha ~ 0.42`) para manter o conjunto visível.
   - **Física e barreiras isoladas por camada (`CollisionLayers.ts`)**: máscaras de bits Matter.js separam colisões do Piso 0 (`GROUND_OBS`, `TRUCK_L0`, `TRAILER_L0`) e do Piso 1 (`BRIDGE_RAIL`, `TRUCK_L1`, `TRAILER_L1`). Paredes laterais das rampas (`RAMP_WALL`) contêm ambos os pisos e guardas metálicas do tabuleiro (`BRIDGE_RAIL`) retêm apenas o Piso 1, deixando o vão livre por baixo (sem interferir com sensores de marcha-atrás `tailBlocked` no solo).
   - **Atrelados & Acoplamento por camada**: atrelados soltos e acoplados acompanham a própria camada vertical (`layer`, `elevationZ`), e o acoplamento quinta-roda (`TrailerManager.findCouplable`) só permite engate no mesmo piso.
-  - **Editor & Minimapa**: botão **Solo (Piso 0) ↔ Viaduto (Piso 1)** na ferramenta Estrada com pré-visualização diferenciada de rampas/tabuleiro e contorno de viadutos no minimapa (`MinimapScene`).
+  - **Editor & Minimapa**: botão **Solo (Piso 0) ↔ Viaduto (Piso 1)** na ferramenta Estrada com pré-visualização diferenciada de rampas/tabuleiro e contorno de viadutos no minimapa (`MinimapScene`); adicionados 2 viadutos semente (`rd_21` Norte E–O e `rd_22` Sul E–O) em `ilha_atlantica.json` / `World.ts`.
+  - **Estabilidade, Tipagem & Higiene (v2.9.0)**: promoção antecipada para camada 1 em rampas curtas (`maxZ >= 0.94`), retorno de `OFFROAD_GRIP` na camada 0 sob vãos elevados, normalização de `layer` (`0 | 1`) em `fromJSON`/`addRoad`, `TrailerManager` tipado com `MainScene`, `group: 0` inicial em atrelados estacionados, `pushUndo` adiado para mutações reais, cache de `canWeldRoadEnds` por `(version, roadId)` e remoção de casts `as any` e dependências não usadas; adicionados `README.md`, `LICENSE` (MIT) e `scripts/smoke-bridge.mjs`.
 - **Criação Intuitiva de Estradas em Touch e Rato (`EditorScene.ts`, `App.tsx`)**:
   - **Desenho contínuo por pontos com arrasto de ajuste**: tocar/clicar coloca vértices, e arrastar qualquer vértice da estrada pendente (`roadDrag.kind = 'pendingPoint'`) ajusta-o em tempo real com encaixe magnético (`Colar Auto`) e tolerância ampliada em ecrãs táteis.
   - **Navegação sem interromper o desenho**: arrastar fora dos pontos pendentes (1 dedo/botão esquerdo) ou usar pinça/arrasto com 2 dedos desloca a câmara preservando `pendingRoad` intacta; em touch, o segmento fantasma de *hover* estático é suprimido para evitar linhas erráticas.

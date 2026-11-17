@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { MainScene } from './MainScene';
 import { GarageSystem } from '../systems/GarageSystem';
-import { RoadNetwork, RoadData, RoadPoint, RoadSurface, RoadSnapResult } from '../systems/RoadNetwork';
+import { RoadNetwork, RoadData, RoadPoint, RoadSurface, RoadSnapResult, RoadSample, BridgeSample } from '../systems/RoadNetwork';
 import { IntersectionSystem, IntersectionNode, TrafficLightSpec } from '../systems/IntersectionSystem';
 import { WorldObject, WObjType, CompoundPart, compoundParts, isCompound, compoundBoundsFromParts } from '../world/WorldObjects';
 import { World } from '../world/World';
@@ -62,6 +62,7 @@ export class EditorScene extends Phaser.Scene {
     index: number | null;
     grabX: number;
     grabY: number;
+    pendingUndo?: { json: string; version: number } | null;
   } | null = null;
   private pendingRoad: { surface: RoadSurface; points: RoadPoint[]; oneWay: boolean; layer: number } | null = null;
   private pointerWorld: { x: number; y: number } = { x: 0, y: 0 };
@@ -79,6 +80,7 @@ export class EditorScene extends Phaser.Scene {
   public isolateSelectedRoad: boolean = false;
   private lastSnapResult: RoadSnapResult | null = null;
   private overlappingRoads: RoadData[] = [];
+  private weldCache: { version: number; roadId: string; result: { hasWeldTarget: boolean; hasMergeTarget: boolean } } | null = null;
   private keyShift: Phaser.Input.Keyboard.Key | null = null;
 
   // ---- Intersection tool state ----
@@ -117,13 +119,23 @@ export class EditorScene extends Phaser.Scene {
   private undoStack: Array<{ json: string; version: number }> = [];
   private readonly undoLimit = 60;
 
-  /** Guarda um snapshot do mundo atual (chamar antes de mutar). */
-  private pushUndo() {
-    if (this.undoStack.length >= this.undoLimit) this.undoStack.shift();
-    this.undoStack.push({
+  /** Captura um snapshot do mundo atual sem empilhar na stack de undo. */
+  private captureUndoSnapshot(): { json: string; version: number } {
+    return {
       json: this.mainScene.world.exportJSON(),
       version: this.mainScene.world.version,
-    });
+    };
+  }
+
+  /** Empilha um snapshot previamente capturado na stack de undo. */
+  private commitUndoSnapshot(snap: { json: string; version: number }) {
+    if (this.undoStack.length >= this.undoLimit) this.undoStack.shift();
+    this.undoStack.push(snap);
+  }
+
+  /** Guarda um snapshot do mundo atual (chamar imediatamente antes de mutar). */
+  private pushUndo() {
+    this.commitUndoSnapshot(this.captureUndoSnapshot());
   }
 
   public canUndo(): boolean {
@@ -146,6 +158,7 @@ export class EditorScene extends Phaser.Scene {
     this.isolateSelectedRoad = false;
     this.overlappingRoads = [];
     this.lastSnapResult = null;
+    this.weldCache = null;
     // Recria as entidades vivas dos atrelados (editor-placed trailers)
     this.mainScene.rebuildTrailers();
   }
@@ -165,6 +178,7 @@ export class EditorScene extends Phaser.Scene {
     this.isolateSelectedRoad = false;
     this.overlappingRoads = [];
     this.lastSnapResult = null;
+    this.weldCache = null;
     this.mainScene.rebuildTrailers();
     this.mainScene.world.version++;
   }
@@ -206,11 +220,11 @@ export class EditorScene extends Phaser.Scene {
   }
 
   private updatePointerKind(pointer: Phaser.Input.Pointer) {
-    const pType = (pointer as any).pointerType || (pointer.event as PointerEvent | undefined)?.pointerType;
-    if (pType) {
-      this.lastPointerIsTouch = pType === 'touch';
-    } else if (typeof (pointer as any).wasTouch === 'boolean') {
-      this.lastPointerIsTouch = (pointer as any).wasTouch;
+    const ev = pointer.event;
+    if (ev && 'pointerType' in ev && typeof ev.pointerType === 'string') {
+      this.lastPointerIsTouch = ev.pointerType === 'touch';
+    } else {
+      this.lastPointerIsTouch = pointer.wasTouch;
     }
   }
 
@@ -640,9 +654,10 @@ export class EditorScene extends Phaser.Scene {
     // 2. When isolated, all taps only operate on the selected road (never switch or accidentally clear)
     if (this.isolateSelectedRoad && this.selectedRoad) {
       if (isDouble && this.roadNetwork.hitTestRoad(x, y, bodySlack, this.selectedRoad.id, true)) {
-        this.pushUndo();
+        const snap = this.captureUndoSnapshot();
         const inserted = this.roadNetwork.insertPoint(x, y, this.selectedRoad.id, true);
         if (inserted) {
+          this.commitUndoSnapshot(snap);
           this.selectedRoad = inserted.road;
           this.selectedPointIndex = inserted.index;
           this.mainScene.world.version++;
@@ -682,9 +697,10 @@ export class EditorScene extends Phaser.Scene {
         : candidates[0];
 
       if (isDouble) {
-        this.pushUndo();
+        const snap = this.captureUndoSnapshot();
         const inserted = this.roadNetwork.insertPoint(x, y, activeCandidate.id, true);
         if (inserted) {
+          this.commitUndoSnapshot(snap);
           this.selectedRoad = inserted.road;
           this.selectedPointIndex = inserted.index;
           this.mainScene.world.version++;
@@ -750,9 +766,11 @@ export class EditorScene extends Phaser.Scene {
     if (this.selectedRoad) {
       const wi = this.roadNetwork.hitTestWidthHandle(this.selectedRoad, x, y, handleTol);
       if (wi !== null) {
-        this.pushUndo();
         this.selectedPointIndex = wi;
-        this.roadDrag = { road: this.selectedRoad, kind: 'width', index: wi, grabX: x, grabY: y };
+        this.roadDrag = {
+          road: this.selectedRoad, kind: 'width', index: wi, grabX: x, grabY: y,
+          pendingUndo: this.captureUndoSnapshot(),
+        };
         return true;
       }
 
@@ -780,8 +798,10 @@ export class EditorScene extends Phaser.Scene {
       if (this.selectedPointIndex !== null) {
         const tp = this.twistHandlePos(this.selectedRoad, this.selectedPointIndex);
         if (tp && Phaser.Math.Distance.Between(x, y, tp.x, tp.y) <= handleTol) {
-          this.pushUndo();
-          this.roadDrag = { road: this.selectedRoad, kind: 'twist', index: this.selectedPointIndex, grabX: x, grabY: y };
+          this.roadDrag = {
+            road: this.selectedRoad, kind: 'twist', index: this.selectedPointIndex, grabX: x, grabY: y,
+            pendingUndo: this.captureUndoSnapshot(),
+          };
           return true;
         }
       }
@@ -789,17 +809,21 @@ export class EditorScene extends Phaser.Scene {
       // Control-point handle on the selected road (strictly prioritised over neighbouring roads)
       const selPt = this.roadNetwork.hitTestHandle(x, y, handleTol, this.selectedRoad.id);
       if (selPt) {
-        this.pushUndo();
         this.selectedPointIndex = selPt.index;
-        this.roadDrag = { road: this.selectedRoad, kind: 'point', index: selPt.index, grabX: x, grabY: y };
+        this.roadDrag = {
+          road: this.selectedRoad, kind: 'point', index: selPt.index, grabX: x, grabY: y,
+          pendingUndo: this.captureUndoSnapshot(),
+        };
         return true;
       }
 
       // Body of the selected road (protects against grabbing an overlapping road handle/body underneath)
       const selBody = this.roadNetwork.hitTestRoad(x, y, bodySlack, this.selectedRoad.id, true);
       if (selBody) {
-        this.pushUndo();
-        this.roadDrag = { road: selBody, kind: 'road', index: null, grabX: x, grabY: y };
+        this.roadDrag = {
+          road: selBody, kind: 'road', index: null, grabX: x, grabY: y,
+          pendingUndo: this.captureUndoSnapshot(),
+        };
         return true;
       }
 
@@ -810,11 +834,13 @@ export class EditorScene extends Phaser.Scene {
     // 2. Position handle of any road (nearest within tolerance)
     const handle = this.roadNetwork.hitTestHandle(x, y, handleTol);
     if (handle) {
-      this.pushUndo();
       this.selectedRoad = handle.road;
       this.selectedPointIndex = handle.index;
       this.overlappingRoads = [handle.road];
-      this.roadDrag = { road: handle.road, kind: 'point', index: handle.index, grabX: x, grabY: y };
+      this.roadDrag = {
+        road: handle.road, kind: 'point', index: handle.index, grabX: x, grabY: y,
+        pendingUndo: this.captureUndoSnapshot(),
+      };
       return true;
     }
 
@@ -822,11 +848,13 @@ export class EditorScene extends Phaser.Scene {
     const candidates = this.roadNetwork.hitTestRoadAll(x, y, bodySlack);
     const body = candidates[0] ?? null;
     if (body) {
-      this.pushUndo();
       this.selectedRoad = body;
       this.selectedPointIndex = null;
       this.overlappingRoads = candidates;
-      this.roadDrag = { road: body, kind: 'road', index: null, grabX: x, grabY: y };
+      this.roadDrag = {
+        road: body, kind: 'road', index: null, grabX: x, grabY: y,
+        pendingUndo: this.captureUndoSnapshot(),
+      };
       return true;
     }
 
@@ -861,17 +889,31 @@ export class EditorScene extends Phaser.Scene {
 
     if (!d.road) return;
 
+    const flushUndo = () => {
+      if (d.pendingUndo) {
+        this.commitUndoSnapshot(d.pendingUndo);
+        d.pendingUndo = null;
+      }
+    };
+
     if (d.kind === 'width' && d.index !== null) {
       const p = d.road.points[d.index];
       if (p) {
         const nrm = RoadNetwork.pointNormal(d.road, d.index);
         const proj = Math.abs((wp.x - p.x) * nrm.nx + (wp.y - p.y) * nrm.ny) * 2;
-        this.roadNetwork.setPointWidth(d.road.id, d.index, proj);
+        const clampedW = Phaser.Math.Clamp(Math.round(proj), 44, 420);
+        if (clampedW !== Math.round(p.w)) {
+          flushUndo();
+          this.roadNetwork.setPointWidth(d.road.id, d.index, clampedW);
+          this.roadDirtySinceRelease = true;
+        }
       }
     } else if (d.kind === 'point' && d.index !== null) {
       const pts = d.road.points;
       const n = pts.length;
       const idx = d.index;
+      const p = pts[idx];
+      if (!p) return;
       let prevPt: { x: number; y: number } | undefined;
       let prevPrevPt: { x: number; y: number } | undefined;
       if (!d.road.closed && n >= 2) {
@@ -885,7 +927,13 @@ export class EditorScene extends Phaser.Scene {
       }
       const res = this.resolveSnap(wp.x, wp.y, d.road.layer ?? 0, d.road.id, prevPt, prevPrevPt);
       this.lastSnapResult = res.snap;
+      const prevX = p.x;
+      const prevY = p.y;
       this.roadNetwork.movePoint(d.road.id, idx, res.x, res.y);
+      if (p.x !== prevX || p.y !== prevY) {
+        flushUndo();
+        this.roadDirtySinceRelease = true;
+      }
     } else if (d.kind === 'twist' && d.index !== null) {
       const p = d.road.points[d.index];
       if (p) {
@@ -893,18 +941,24 @@ export class EditorScene extends Phaser.Scene {
         let delta = Math.atan2(wp.y - p.y, wp.x - p.x) - base;
         while (delta > Math.PI) delta -= Math.PI * 2;
         while (delta < -Math.PI) delta += Math.PI * 2;
-        this.roadNetwork.setPointTwist(d.road.id, d.index, delta);
+        const clamped = Phaser.Math.Clamp(delta, -Math.PI / 3, Math.PI / 3);
+        if (Math.abs(clamped - (p.twist ?? 0)) > 0.001) {
+          flushUndo();
+          this.roadNetwork.setPointTwist(d.road.id, d.index, clamped);
+          this.roadDirtySinceRelease = true;
+        }
       }
     } else {
       const dx = Math.round(wp.x - d.grabX);
       const dy = Math.round(wp.y - d.grabY);
       if (dx !== 0 || dy !== 0) {
+        flushUndo();
         this.roadNetwork.translateRoad(d.road.id, dx, dy);
         d.grabX += dx;
         d.grabY += dy;
+        this.roadDirtySinceRelease = true;
       }
     }
-    this.roadDirtySinceRelease = true;
   }
 
   public finishPendingRoad() {
@@ -1103,9 +1157,19 @@ export class EditorScene extends Phaser.Scene {
         tooShort = b.tooShort;
       }
     }
-    const weldState = this.selectedRoad
-      ? this.roadNetwork.canWeldRoadEnds(this.selectedRoad.id, 90)
-      : { hasWeldTarget: false, hasMergeTarget: false };
+    let weldState = { hasWeldTarget: false, hasMergeTarget: false };
+    if (this.mainScene?.isEditorMode && this.editorTool === 'road' && this.selectedRoad) {
+      const ver = this.roadNetwork.version;
+      const rid = this.selectedRoad.id;
+      if (!this.weldCache || this.weldCache.version !== ver || this.weldCache.roadId !== rid) {
+        this.weldCache = {
+          version: ver,
+          roadId: rid,
+          result: this.roadNetwork.canWeldRoadEnds(rid, 90),
+        };
+      }
+      weldState = this.weldCache.result;
+    }
     const overlapIndex = this.selectedRoad
       ? Math.max(0, this.overlappingRoads.findIndex((r) => r.id === this.selectedRoad!.id))
       : 0;
@@ -1243,7 +1307,6 @@ export class EditorScene extends Phaser.Scene {
 
   /** Begins an object drag: rotation knob → resize corners → move the body. */
   private tryStartObjectDrag(x: number, y: number): boolean {
-    this.pushUndo();
     const tol = 12 / this.cameras.main.zoom;
     const sel = this.selectedObject;
 
@@ -1251,6 +1314,7 @@ export class EditorScene extends Phaser.Scene {
     if (sel) {
       const rp = this.rotationHandlePos(sel);
       if (Phaser.Math.Distance.Between(x, y, rp.x, rp.y) <= tol) {
+        this.pushUndo();
         this.objectDrag = {
           obj: sel, grabX: x, grabY: y, mode: 'rotate',
           startAngle: sel.angle,
@@ -1264,6 +1328,7 @@ export class EditorScene extends Phaser.Scene {
         for (let corner = 0; corner < 4; corner++) {
           const cp = this.resizeCornerPos(sel, corner);
           if (Phaser.Math.Distance.Between(x, y, cp.x, cp.y) <= tol) {
+            this.pushUndo();
             const pin = this.resizeCornerPos(sel, corner, true); // opposite corner stays put
             this.objectDrag = { obj: sel, grabX: x, grabY: y, mode: 'resize', corner, startW: sel.w, startH: sel.h, pinX: pin.x, pinY: pin.y };
             return true;
@@ -1275,6 +1340,7 @@ export class EditorScene extends Phaser.Scene {
     // 3. Body hit → select + move
     const hit = this.mainScene.world.objects.hitTest(x, y, 10 / this.cameras.main.zoom);
     if (!hit) return false;
+    this.pushUndo();
     this.selectedObject = hit;
     this.objectDrag = { obj: hit, grabX: x, grabY: y, mode: 'move' };
     return true;
@@ -1341,8 +1407,8 @@ export class EditorScene extends Phaser.Scene {
   }
 
   public rotateSelectedObject(deltaDeg: number) {
-    this.pushUndo();
     if (!this.selectedObject) return;
+    this.pushUndo();
     this.mainScene.world.objects.rotateObject(this.selectedObject.id, Phaser.Math.DegToRad(deltaDeg));
     if (this.selectedObject.type === 'trailer') {
       TrailerManager.getInstance(this.mainScene).syncForObject(this.selectedObject);
@@ -1357,8 +1423,8 @@ export class EditorScene extends Phaser.Scene {
   }
 
   public deleteSelectedObject() {
-    this.pushUndo();
     if (!this.selectedObject) return;
+    this.pushUndo();
     // Editor-placed trailer: kill the live entity backing the data object
     if (this.selectedObject.type === 'trailer') {
       TrailerManager.getInstance(this.mainScene).removeForObject(this.selectedObject.id);
@@ -1390,9 +1456,9 @@ export class EditorScene extends Phaser.Scene {
 
   /** Clone the selected object right next to it and select the clone. */
   public duplicateSelectedObject() {
-    this.pushUndo();
     const src = this.selectedObject;
     if (!src) return;
+    this.pushUndo();
     const o = this.mainScene.world.objects.add(
       src.type,
       src.x + 40,
@@ -1420,8 +1486,8 @@ export class EditorScene extends Phaser.Scene {
   /** Paste the clipboard object under the current pointer (Ctrl+V); falls back
    *  to a spot next to the copied object when the pointer hasn't moved yet. */
   public pasteClipboard() {
-    this.pushUndo();
     if (!this.clipboard) return;
+    this.pushUndo();
     const cb = this.clipboard;
     const at = (this.pointerWorld.x || this.pointerWorld.y)
       ? { x: this.pointerWorld.x, y: this.pointerWorld.y }
@@ -2053,13 +2119,15 @@ export class EditorScene extends Phaser.Scene {
     const col = isBridge ? 0xf59e0b : (this.pendingRoad.surface === 'dirt' ? 0x9a7040 : this.pendingRoad.surface === 'cobble' ? 0x8a93a8 : 0x38bdf8);
 
     if (previewPts.length >= 2) {
-      const samples = isBridge ? RoadNetwork.sampleBridgeRoad(preview, 26).samples : RoadNetwork.sampleRoad(preview, 26);
+      const samples: BridgeSample[] | RoadSample[] = isBridge
+        ? RoadNetwork.sampleBridgeRoad(preview, 26).samples
+        : RoadNetwork.sampleRoad(preview, 26);
       if (samples.length >= 2) {
         for (let i = 0; i < samples.length - 1; i++) {
           const a = samples[i], b = samples[i + 1];
           const anx = -a.ty * (a.w / 2), any = a.tx * (a.w / 2);
           const bnx = -b.ty * (b.w / 2), bny = b.tx * (b.w / 2);
-          const zMid = isBridge ? (((a as any).z ?? 0) + ((b as any).z ?? 0)) * 0.5 : 0;
+          const zMid = isBridge ? ((a.z ?? 0) + (b.z ?? 0)) * 0.5 : 0;
           g.fillStyle(isBridge && zMid >= 0.94 ? 0x38bdf8 : col, 0.32);
           g.beginPath();
           g.moveTo(a.x + anx, a.y + any);

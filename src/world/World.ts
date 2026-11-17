@@ -102,6 +102,14 @@ export class World {
       { x: 4940, y: 7600, w: 92 }, { x: 5420, y: 8120, w: 84 }, { x: 5820, y: 8520, w: 72 },
       { x: 6330, y: 8680, w: 64 }, { x: 6840, y: 9010, w: 56 },
     ]);
+
+    // Viadutos (Piso 1) sobre vias arteriais
+    rn.addRoad('asphalt', [
+      { x: 5760, y: 2048, w: 128 }, { x: 8064, y: 2048, w: 128 }, { x: 10368, y: 2048, w: 128 },
+    ], false, false, 1);
+    rn.addRoad('asphalt', [
+      { x: 8064, y: 8220, w: 128 }, { x: 10368, y: 8220, w: 128 }, { x: 12672, y: 8220, w: 128 },
+    ], false, false, 1);
   }
 
   public get dockZones() { return this.objects.dockZones; }

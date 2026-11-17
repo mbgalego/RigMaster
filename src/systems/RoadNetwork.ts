@@ -148,12 +148,13 @@ export class RoadNetwork {
   // ======================================================================
 
   public addRoad(surface: RoadSurface, points: RoadPoint[], closed = false, oneWay = false, layer = 0): RoadData {
+    const normLayer = layer > 0 ? 1 : 0;
     const road: RoadData = {
       id: `rd_${this.nextId++}`,
       surface,
       closed,
       ...(oneWay ? { oneWay: true } : {}),
-      ...(layer ? { layer } : {}),
+      ...(normLayer > 0 ? { layer: normLayer } : {}),
       points,
     };
     this.roads.push(road);
@@ -925,6 +926,7 @@ export class RoadNetwork {
     }
     const q = this.query(x, y, 1024, layer);
     if (!q || q.dist > q.width / 2 + SHOULDER_PX) return OFFROAD_GRIP;
+    if (layer === 0 && (q.road.layer ?? 0) > 0) return OFFROAD_GRIP;
     return SURFACE_GRIP[q.surface];
   }
 
@@ -1015,7 +1017,7 @@ export class RoadNetwork {
 
     const maxZ = Math.max(centerHit?.z ?? 0, frontHit?.z ?? 0, rearHit?.z ?? 0);
     const centerZ = centerHit ? centerHit.z : maxZ;
-    return { layer: centerZ >= 0.5 ? 1 : 0, z: maxZ };
+    return { layer: centerZ >= 0.5 || maxZ >= 0.94 ? 1 : 0, z: maxZ };
   }
 
   /** Determines spawn layer for a parked trailer or world position (prefers 0 if a ground road exists). */
@@ -1342,12 +1344,13 @@ export class RoadNetwork {
             ...(Number.isFinite(p.twist) ? { twist: Phaser.Math.Clamp(Phaser.Math.DegToRad(Number(p.twist)), -MAX_TWIST, MAX_TWIST) } : {}),
           }));
         if (points.length < 2) continue;
+        const layer = Number(raw.layer) > 0 ? 1 : 0;
         const road: RoadData = {
           id: typeof raw.id === 'string' ? raw.id : `rd_${this.nextId++}`,
           surface,
           closed: !!raw.closed,
           ...(raw.oneWay ? { oneWay: true } : {}),
-          ...(Number.isFinite(raw.layer) ? { layer: Number(raw.layer) } : {}),
+          ...(layer > 0 ? { layer } : {}),
           points,
         };
         // Keep nextId ahead of imported ids

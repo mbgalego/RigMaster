@@ -117,7 +117,7 @@ export class Trailer {
       collisionFilter: {
         category: COLLISION_CAT.TRAILER_L0,
         mask: COLLISION_MASK.TRAILER_PARKED_L0,
-        group: -1,
+        group: 0,
       },
       render: {
         visible: false,

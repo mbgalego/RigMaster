@@ -2111,7 +2111,7 @@ export class MainScene extends Phaser.Scene {
           const ty = Phaser.Math.Linear(a.ty, b.ty, t);
           const bx = -ty, by = tx; // normal
           const r = 14;
-          const z = lowG ? Phaser.Math.Linear((a as any).z ?? 0, (b as any).z ?? 0, t) : 1;
+          const z = lowG ? Phaser.Math.Linear(a.z ?? 0, b.z ?? 0, t) : 1;
           const target = lowG && z < lowZThreshold ? lowG : g;
           target.beginPath();
           target.moveTo(px - tx * r + bx * r * 0.8, py - ty * r + by * r * 0.8);
