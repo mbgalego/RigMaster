@@ -1419,6 +1419,9 @@ export default function App() {
                   <>
                     <button onClick={() => { const ed = getEditorScene(); if (ed) ed.removeLastPendingPoint(); }} className="shrink-0 ed-fs font-bold bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800 px-2 py-1 rounded">Retroceder Ponto</button>
                     <button onClick={() => { const ed = getEditorScene(); if (ed) ed.finishPendingRoad(); }} className="shrink-0 ed-fs font-bold bg-emerald-500 text-black border border-emerald-300 hover:bg-emerald-400 px-2 py-1 rounded">Terminar</button>
+                    <div className="shrink-0 ed-fs-sm text-emerald-300/90 px-1 leading-tight">
+                      Toca no último ponto (✓) ou botão direito p/ terminar · Arrasta pontos p/ ajustar
+                    </div>
                   </>
                 )}
                 <button

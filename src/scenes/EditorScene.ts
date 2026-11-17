@@ -56,9 +56,17 @@ export class EditorScene extends Phaser.Scene {
   private roadNetwork!: RoadNetwork;
   public selectedRoad: RoadData | null = null;
   public selectedPointIndex: number | null = null;
-  private roadDrag: { road: RoadData; kind: 'point' | 'width' | 'twist' | 'road'; index: number | null; grabX: number; grabY: number } | null = null;
+  private roadDrag: {
+    road: RoadData | null;
+    kind: 'point' | 'pendingPoint' | 'width' | 'twist' | 'road';
+    index: number | null;
+    grabX: number;
+    grabY: number;
+  } | null = null;
   private pendingRoad: { surface: RoadSurface; points: RoadPoint[]; oneWay: boolean; layer: number } | null = null;
   private pointerWorld: { x: number; y: number } = { x: 0, y: 0 };
+  private lastPointerIsTouch: boolean = false;
+  private rightClickPending: { screenX: number; screenY: number } | null = null;
   private lastClickTime: number = 0;
   private lastClickX: number = 0;
   private lastClickY: number = 0;
@@ -134,6 +142,7 @@ export class EditorScene extends Phaser.Scene {
     this.selectedPointIndex = null;
     this.roadDrag = null;
     this.pendingRoad = null;
+    this.rightClickPending = null;
     this.isolateSelectedRoad = false;
     this.overlappingRoads = [];
     this.lastSnapResult = null;
@@ -152,6 +161,7 @@ export class EditorScene extends Phaser.Scene {
     this.selectedPointIndex = null;
     this.roadDrag = null;
     this.pendingRoad = null;
+    this.rightClickPending = null;
     this.isolateSelectedRoad = false;
     this.overlappingRoads = [];
     this.lastSnapResult = null;
@@ -189,9 +199,19 @@ export class EditorScene extends Phaser.Scene {
     this.intersectionOverlay.setDepth(103);
 
     this.intersectionSystem = IntersectionSystem.getInstance();
+    this.input.mouse?.disableContextMenu();
 
     this.setupPointerInteractions();
     this.setupKeyboardPan();
+  }
+
+  private updatePointerKind(pointer: Phaser.Input.Pointer) {
+    const pType = (pointer as any).pointerType || (pointer.event as PointerEvent | undefined)?.pointerType;
+    if (pType) {
+      this.lastPointerIsTouch = pType === 'touch';
+    } else if (typeof (pointer as any).wasTouch === 'boolean') {
+      this.lastPointerIsTouch = (pointer as any).wasTouch;
+    }
   }
 
   private setupPointerInteractions() {
@@ -209,15 +229,17 @@ export class EditorScene extends Phaser.Scene {
       this.cameras.main.scrollY += worldBefore.y - worldAfter.y;
     });
 
-    // Pointer Down (Pan buttons / two-finger / pending gesture)
+    // Pointer Down (Pan buttons / two-finger / right-click vs right-drag / pending gesture)
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      this.updatePointerKind(pointer);
       const p1 = this.input.pointer1;
       const p2 = this.input.pointer2;
 
       // Two-Finger Pinch / Pan ALWAYS wins — no matter the active tool, it
-      // cancels any pending gesture or in-progress tool drag.
+      // cancels any pending gesture or in-progress tool drag (while keeping pendingRoad intact).
       if (p1.isDown && p2.isDown) {
         this.cancelGesture();
+        this.rightClickPending = null;
         this.prevPinchDist = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
         this.lastDragX = (p1.x + p2.x) / 2;
         this.lastDragY = (p1.y + p2.y) / 2;
@@ -225,10 +247,19 @@ export class EditorScene extends Phaser.Scene {
       }
 
       const isSpaceHeld = this.keySpace && this.keySpace.isDown;
+      if (pointer.rightButtonDown() && this.editorTool !== 'pan' && !isSpaceHeld) {
+        this.cancelGesture();
+        this.rightClickPending = { screenX: pointer.x, screenY: pointer.y };
+        this.lastDragX = pointer.x;
+        this.lastDragY = pointer.y;
+        return;
+      }
+
       const shouldPan = this.editorTool === 'pan' || pointer.middleButtonDown() || pointer.rightButtonDown() || isSpaceHeld;
 
       if (shouldPan) {
         this.cancelGesture();
+        this.rightClickPending = null;
         this.isDraggingPan = true;
         this.lastDragX = pointer.x;
         this.lastDragY = pointer.y;
@@ -249,6 +280,7 @@ export class EditorScene extends Phaser.Scene {
     });
 
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      this.updatePointerKind(pointer);
       const p1 = this.input.pointer1;
       const p2 = this.input.pointer2;
 
@@ -272,6 +304,22 @@ export class EditorScene extends Phaser.Scene {
         this.lastDragX = midX;
         this.lastDragY = midY;
         return;
+      }
+
+      // Promote pending right-click to camera pan if dragged beyond 8px
+      if (this.rightClickPending) {
+        const dist = Phaser.Math.Distance.Between(
+          pointer.x,
+          pointer.y,
+          this.rightClickPending.screenX,
+          this.rightClickPending.screenY,
+        );
+        if (dist > 8) {
+          this.rightClickPending = null;
+          this.isDraggingPan = true;
+        } else {
+          return;
+        }
       }
 
       // Single-Pointer Pan Dragging (with Pan tool, right-drag, middle-drag, or Space+drag)
@@ -320,6 +368,23 @@ export class EditorScene extends Phaser.Scene {
       const p1 = this.input.pointer1;
       const p2 = this.input.pointer2;
       if (p1.isDown || p2.isDown) return; // another finger/button still active
+
+      // Short right-click (no drag): finish or cancel active pending road right on the canvas
+      if (this.rightClickPending) {
+        this.rightClickPending = null;
+        if (this.editorTool === 'road' && this.pendingRoad) {
+          if (this.pendingRoad.points.length >= 2) {
+            this.finishPendingRoad();
+          } else {
+            this.removeLastPendingPoint();
+          }
+        }
+        this.cancelGesture();
+        this.lastSnapResult = null;
+        this.isDraggingPan = false;
+        this.prevPinchDist = 0;
+        return;
+      }
 
       // A gesture that never became a drag is a TAP → run the tool's click action
       if (this.gesture && !this.gesture.isPan && !this.gesture.toolDrag) {
@@ -389,6 +454,7 @@ export class EditorScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-ESC', () => {
       if (this.editorTool === 'road') {
         this.pendingRoad = null;
+        this.rightClickPending = null;
         this.selectedRoad = null;
         this.selectedPointIndex = null;
         this.isolateSelectedRoad = false;
@@ -472,6 +538,7 @@ export class EditorScene extends Phaser.Scene {
     if (tool !== 'road') {
       this.pendingRoad = null;
       this.roadDrag = null;
+      this.rightClickPending = null;
       this.selectedRoad = null;
       this.selectedPointIndex = null;
       this.isolateSelectedRoad = false;
@@ -518,10 +585,10 @@ export class EditorScene extends Phaser.Scene {
   /** Tap action of the road tool (called on gesture release without drag). */
   private roadTap(x: number, y: number) {
     const z = this.cameras.main.zoom;
-    const handleTol = Phaser.Math.Clamp(15 / z, 10, 44);
+    const handleTol = Phaser.Math.Clamp((this.lastPointerIsTouch ? 20 : 15) / z, this.lastPointerIsTouch ? 14 : 10, 48);
+    const pendingTol = Phaser.Math.Clamp((this.lastPointerIsTouch ? 24 : 16) / z, this.lastPointerIsTouch ? 18 : 12, 56);
     const bodySlack = Phaser.Math.Clamp(8 / z, 5, 22);
 
-    // Double-click / double-tap while drawing finishes the road
     const now = this.time.now;
     const isDouble = now - this.lastClickTime < 350 && Phaser.Math.Distance.Between(x, y, this.lastClickX, this.lastClickY) < handleTol * 2;
     this.lastClickTime = now;
@@ -529,16 +596,34 @@ export class EditorScene extends Phaser.Scene {
     this.lastClickY = y;
 
     if (this.pendingRoad) {
-      if (isDouble) {
-        this.finishPendingRoad();
+      const pts = this.pendingRoad.points;
+      const lastIdx = pts.length - 1;
+      const lastPt = pts[lastIdx];
+
+      // Tapping / clicking again on the last placed point immediately finishes (≥2 pts) or cancels (1 pt).
+      // Desktop double-click in place also lands here on the 2nd click without adding an extra point.
+      if (lastPt && Phaser.Math.Distance.Between(x, y, lastPt.x, lastPt.y) <= pendingTol) {
+        if (pts.length >= 2) {
+          this.finishPendingRoad();
+        } else {
+          this.removeLastPendingPoint();
+        }
         return;
       }
-      const pts = this.pendingRoad.points;
-      const prev = pts[pts.length - 1];
-      const prevPrev = pts.length >= 2 ? pts[pts.length - 2] : undefined;
+
+      // Avoid piling a redundant point directly on top of an earlier pending vertex
+      for (let i = 0; i < lastIdx; i++) {
+        if (Phaser.Math.Distance.Between(x, y, pts[i].x, pts[i].y) <= pendingTol) {
+          return;
+        }
+      }
+
+      const prev = lastPt;
+      const prevPrev = pts.length >= 2 ? pts[lastIdx - 1] : undefined;
       const res = this.resolveSnap(x, y, this.pendingRoad.layer, undefined, prev, prevPrev);
       if (!prev || Phaser.Math.Distance.Between(res.x, res.y, prev.x, prev.y) > 24) {
         pts.push({ x: res.x, y: res.y, w: this.newRoadWidth });
+        this.lastSnapResult = null;
       }
       return;
     }
@@ -644,8 +729,22 @@ export class EditorScene extends Phaser.Scene {
   /** Begins a road drag when the press started on a handle or a road body. */
   private tryStartRoadDrag(x: number, y: number): boolean {
     const z = this.cameras.main.zoom;
-    const handleTol = Phaser.Math.Clamp(15 / z, 10, 44);
+    const handleTol = Phaser.Math.Clamp((this.lastPointerIsTouch ? 20 : 15) / z, this.lastPointerIsTouch ? 14 : 10, 48);
+    const pendingTol = Phaser.Math.Clamp((this.lastPointerIsTouch ? 24 : 16) / z, this.lastPointerIsTouch ? 18 : 12, 56);
     const bodySlack = Phaser.Math.Clamp(8 / z, 5, 22);
+
+    // 0. While drawing a road, dragging any placed pending point adjusts it smoothly;
+    //    dragging outside pending points returns false so empty-ground drag / 1-finger pan works uninterrupted!
+    if (this.pendingRoad) {
+      const pts = this.pendingRoad.points;
+      for (let i = pts.length - 1; i >= 0; i--) {
+        if (Phaser.Math.Distance.Between(x, y, pts[i].x, pts[i].y) <= pendingTol) {
+          this.roadDrag = { road: null, kind: 'pendingPoint', index: i, grabX: x, grabY: y };
+          return true;
+        }
+      }
+      return false;
+    }
 
     // 1. Selected road handles ALWAYS take priority over adjacent roads & intersections
     if (this.selectedRoad) {
@@ -738,6 +837,30 @@ export class EditorScene extends Phaser.Scene {
     if (!this.roadDrag) return;
     const d = this.roadDrag;
 
+    if (d.kind === 'pendingPoint' && d.index !== null) {
+      if (!this.pendingRoad) return;
+      const pts = this.pendingRoad.points;
+      const idx = d.index;
+      if (!pts[idx]) return;
+      let prevPt: { x: number; y: number } | undefined;
+      let prevPrevPt: { x: number; y: number } | undefined;
+      if (idx > 0) {
+        prevPt = pts[idx - 1];
+        if (idx >= 2) prevPrevPt = pts[idx - 2];
+      } else if (pts.length >= 2) {
+        prevPt = pts[1];
+        if (pts.length >= 3) prevPrevPt = pts[2];
+      }
+      const res = this.resolveSnap(wp.x, wp.y, this.pendingRoad.layer, undefined, prevPt, prevPrevPt);
+      this.lastSnapResult = res.snap;
+      pts[idx].x = res.x;
+      pts[idx].y = res.y;
+      this.pointerWorld = { x: res.x, y: res.y };
+      return;
+    }
+
+    if (!d.road) return;
+
     if (d.kind === 'width' && d.index !== null) {
       const p = d.road.points[d.index];
       if (p) {
@@ -793,6 +916,7 @@ export class EditorScene extends Phaser.Scene {
       this.overlappingRoads = [road];
     }
     this.pendingRoad = null;
+    this.rightClickPending = null;
     this.selectedPointIndex = null;
     this.lastSnapResult = null;
     this.mainScene.world.version++;
@@ -801,7 +925,10 @@ export class EditorScene extends Phaser.Scene {
   public removeLastPendingPoint() {
     if (!this.pendingRoad) return;
     this.pendingRoad.points.pop();
-    if (this.pendingRoad.points.length === 0) this.pendingRoad = null;
+    if (this.pendingRoad.points.length === 0) {
+      this.pendingRoad = null;
+      this.lastSnapResult = null;
+    }
   }
 
   public deleteSelectedRoad() {
@@ -1785,7 +1912,7 @@ export class EditorScene extends Phaser.Scene {
 
     const road = this.selectedRoad;
     if (!road) {
-      this.drawSnapMarker(g, z, this.lastSnapResult);
+      if (!this.pendingRoad) this.drawSnapMarker(g, z, this.lastSnapResult);
       return;
     }
     const isBridge = (road.layer ?? 0) > 0;
@@ -1898,55 +2025,91 @@ export class EditorScene extends Phaser.Scene {
   private drawRoadPreview(g: Phaser.GameObjects.Graphics, z: number) {
     if (!this.pendingRoad) return;
     const pts = this.pendingRoad.points;
+    const isDraggingPending = this.roadDrag?.kind === 'pendingPoint';
+    const showHoverSegment = !this.lastPointerIsTouch && !isDraggingPending;
+
     const prev = pts[pts.length - 1];
     const prevPrev = pts.length >= 2 ? pts[pts.length - 2] : undefined;
-    const snapped = this.resolveSnap(
-      this.pointerWorld.x,
-      this.pointerWorld.y,
-      this.pendingRoad.layer,
-      undefined,
-      prev,
-      prevPrev,
-    );
+    const snapped = showHoverSegment
+      ? this.resolveSnap(
+          this.pointerWorld.x,
+          this.pointerWorld.y,
+          this.pendingRoad.layer,
+          undefined,
+          prev,
+          prevPrev,
+        )
+      : null;
+
+    const previewPts = snapped ? [...pts, { x: snapped.x, y: snapped.y, w: this.newRoadWidth }] : pts;
     const preview: RoadData = {
       id: '_preview',
       surface: this.pendingRoad.surface,
       closed: false,
       layer: this.pendingRoad.layer,
-      points: [...pts, { x: snapped.x, y: snapped.y, w: this.newRoadWidth }],
+      points: previewPts,
     };
     const isBridge = this.pendingRoad.layer > 0;
-    const samples = isBridge ? RoadNetwork.sampleBridgeRoad(preview, 26).samples : RoadNetwork.sampleRoad(preview, 26);
     const col = isBridge ? 0xf59e0b : (this.pendingRoad.surface === 'dirt' ? 0x9a7040 : this.pendingRoad.surface === 'cobble' ? 0x8a93a8 : 0x38bdf8);
 
-    if (samples.length >= 2) {
-      for (let i = 0; i < samples.length - 1; i++) {
-        const a = samples[i], b = samples[i + 1];
-        const anx = -a.ty * (a.w / 2), any = a.tx * (a.w / 2);
-        const bnx = -b.ty * (b.w / 2), bny = b.tx * (b.w / 2);
-        const zMid = isBridge ? (((a as any).z ?? 0) + ((b as any).z ?? 0)) * 0.5 : 0;
-        g.fillStyle(isBridge && zMid >= 0.94 ? 0x38bdf8 : col, 0.32);
+    if (previewPts.length >= 2) {
+      const samples = isBridge ? RoadNetwork.sampleBridgeRoad(preview, 26).samples : RoadNetwork.sampleRoad(preview, 26);
+      if (samples.length >= 2) {
+        for (let i = 0; i < samples.length - 1; i++) {
+          const a = samples[i], b = samples[i + 1];
+          const anx = -a.ty * (a.w / 2), any = a.tx * (a.w / 2);
+          const bnx = -b.ty * (b.w / 2), bny = b.tx * (b.w / 2);
+          const zMid = isBridge ? (((a as any).z ?? 0) + ((b as any).z ?? 0)) * 0.5 : 0;
+          g.fillStyle(isBridge && zMid >= 0.94 ? 0x38bdf8 : col, 0.32);
+          g.beginPath();
+          g.moveTo(a.x + anx, a.y + any);
+          g.lineTo(b.x + bnx, b.y + bny);
+          g.lineTo(b.x - bnx, b.y - bny);
+          g.lineTo(a.x - anx, a.y - any);
+          g.closePath();
+          g.fillPath();
+        }
+        g.lineStyle(2 / z, col, 0.9);
         g.beginPath();
-        g.moveTo(a.x + anx, a.y + any);
-        g.lineTo(b.x + bnx, b.y + bny);
-        g.lineTo(b.x - bnx, b.y - bny);
-        g.lineTo(a.x - anx, a.y - any);
-        g.closePath();
-        g.fillPath();
+        samples.forEach((s, i) => (i === 0 ? g.moveTo(s.x, s.y) : g.lineTo(s.x, s.y)));
+        g.strokePath();
       }
-      g.lineStyle(2 / z, col, 0.9);
-      g.beginPath();
-      samples.forEach((s, i) => (i === 0 ? g.moveTo(s.x, s.y) : g.lineTo(s.x, s.y)));
-      g.strokePath();
     }
 
-    const hs = 7 / z;
-    for (const p of pts) {
-      g.fillStyle(col, 1);
-      g.fillRect(p.x - hs / 2, p.y - hs / 2, hs, hs);
+    const hs = (this.lastPointerIsTouch ? 9.5 : 7.5) / z;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      const isActive = isDraggingPending && this.roadDrag?.index === i;
+      const isLastFinishable = pts.length >= 2 && i === pts.length - 1;
+
+      if (isLastFinishable) {
+        const haloR = (this.lastPointerIsTouch ? 16 : 12.5) / z;
+        g.fillStyle(0x34d058, isActive ? 0.35 : 0.22);
+        g.fillCircle(p.x, p.y, haloR);
+        g.lineStyle(2.2 / z, isActive ? 0xfacc15 : 0x34d058, 0.95);
+        g.strokeCircle(p.x, p.y, haloR);
+        // Subtle checkmark inside the final vertex indicating tap/click-to-finish
+        g.lineStyle(2.2 / z, 0xffffff, 0.95);
+        g.beginPath();
+        g.moveTo(p.x - haloR * 0.36, p.y + haloR * 0.04);
+        g.lineTo(p.x - haloR * 0.08, p.y + haloR * 0.32);
+        g.lineTo(p.x + haloR * 0.4, p.y - haloR * 0.28);
+        g.strokePath();
+      } else {
+        const size = isActive ? hs * 1.35 : hs;
+        g.fillStyle(isActive ? 0xfacc15 : col, 0.98);
+        g.fillRect(p.x - size / 2, p.y - size / 2, size, size);
+        g.lineStyle(1.5 / z, 0x0b1220, 1);
+        g.strokeRect(p.x - size / 2, p.y - size / 2, size, size);
+        if (pts.length === 1) {
+          g.lineStyle(1.5 / z, col, 0.7);
+          g.strokeCircle(p.x, p.y, size * 1.35);
+        }
+      }
     }
 
-    this.drawSnapMarker(g, z, snapped.snap);
+    const activeSnap = isDraggingPending ? this.lastSnapResult : snapped?.snap ?? null;
+    this.drawSnapMarker(g, z, activeSnap);
 
     // Intersection overlay (nodes, arms, phases)
     this.drawIntersectionOverlay();
