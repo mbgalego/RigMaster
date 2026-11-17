@@ -77,6 +77,8 @@ import {
   Home,
   Landmark,
   Wrench,
+  Store,
+  Wind,
 } from 'lucide-react';
 
 /** Catálogo do Criar, organizado por categorias — cada categoria tem o seu
@@ -99,6 +101,7 @@ const CREATE_CATALOG: Array<{
       { spec: { type: 'building', w: 300, h: 200, variant: 'gabled', label: 'Telhado 2 Águas' }, icon: Home },
       { spec: { type: 'building', w: 220, h: 170, variant: 'church', label: 'Igreja' }, icon: Church },
       { spec: { type: 'building', w: 260, h: 160, variant: 'archway', label: 'Arco' }, icon: Landmark },
+      { spec: { type: 'building', w: 240, h: 136, variant: 'convenience_store', label: 'Loja Conveniência' }, icon: Store },
       { spec: { type: 'building', w: 900, h: 420, variant: 'warehouse_docks', params: { docks: 5 }, label: 'Armazém c/ Docas' }, icon: Warehouse },
       { spec: { type: 'building', w: 600, h: 300, variant: 'warehouse_docks', params: { docks: 3 }, label: 'Armazém 3 Docas' }, icon: Warehouse },
     ],
@@ -224,8 +227,10 @@ const CREATE_CATALOG: Array<{
     icon: Fuel,
     items: [
       { spec: { type: 'gas_pump', w: 48, h: 110, label: 'Bomba Combustível' }, icon: Fuel },
-      { spec: { type: 'gas_canopy', w: 420, h: 300, label: 'Cobertura Posto' }, icon: Fuel },
-      { spec: { type: 'price_sign', w: 50, h: 96, label: 'Totem Preços' }, icon: Fuel },
+      { spec: { type: 'gas_canopy', w: 420, h: 340, label: 'Pista Posto (Alcatrão)' }, icon: Layers },
+      { spec: { type: 'building', w: 240, h: 136, variant: 'convenience_store', label: 'Loja Conveniência' }, icon: Store },
+      { spec: { type: 'air_water', w: 64, h: 36, label: 'Ar / Água / Aspirador' }, icon: Wind },
+      { spec: { type: 'price_sign', w: 50, h: 96, label: 'Totem Preços' }, icon: Gauge },
     ],
   },
 ];

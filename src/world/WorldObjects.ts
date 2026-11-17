@@ -29,12 +29,13 @@ export type WObjType =
   | 'crosswalk'       // flat zebra crossing (stripes along w, spans h)
   | 'wall'            // solid masonry wall (rotatable, any length)
   | 'jersey_barrier'  // solid concrete barrier (rotatable)
-  | 'building'        // solid box with roof detail (variant: 'warehouse'|'garage'|'archway'|'church')
+  | 'building'        // solid box with roof detail (variant: 'warehouse'|'warehouse_big'|'warehouse_docks'|'shed'|'garage'|'gabled'|'church'|'archway'|'convenience_store')
   | 'container_stack' // solid stack of shipping containers (variant: colour)
   | 'crane'           // port gantry crane (decor)
   | 'silo'            // industrial silo (solid)
-  | 'gas_pump'        // solid fuel pump
-  | 'gas_canopy'      // translucent station roof (flat)
+  | 'gas_pump'        // solid fuel pump island
+  | 'gas_canopy'      // asphalt station forecourt apron with fueling-zone markings (flat)
+  | 'air_water'       // tyre-air, water & vacuum service island (solid)
   | 'price_sign'      // fuel price totem (solid)
   | 'lamp'            // street lamp (solid small)
   | 'sign'            // traffic sign (variant: 'stop'|'yield'|'speed'|'no_parking'|'pedestrian') (solid small)
@@ -132,7 +133,7 @@ const CHUNK_PX = 2048;
 
 const SOLID_TYPES = new Set<WObjType>([
   'wall', 'jersey_barrier', 'building', 'container_stack', 'silo',
-  'gas_pump', 'price_sign', 'lamp', 'sign', 'traffic_light', 'roundabout',
+  'gas_pump', 'air_water', 'price_sign', 'lamp', 'sign', 'traffic_light', 'roundabout',
   'dock_wall', 'compound',
 ]);
 
@@ -156,7 +157,7 @@ const PAVED_SURFACE_TYPES = new Set<WObjType>([
   'road_entry', 'road_entry_y', 'road_turnout',
   'pad_asphalt', 'parking_pad', 'parking_lot',
   'entrance', 'entrance_y', 'entrance_gas',
-  'dock', 'exam_dock', 'crosswalk',
+  'gas_canopy', 'dock', 'exam_dock', 'crosswalk',
 ]);
 
 function isFlatType(t: WObjType): boolean { return FLAT_TYPES.has(t); }
@@ -741,15 +742,32 @@ export class WorldObjects {
     this.add('jersey_barrier', 1530, 1680, 26, 360, { angle: Math.PI / 2 });
     // X exam (700,700): wet run — open approach, no barriers
 
-    // ---- Gas stations ----
-    this.add('gas_canopy', 3200, 2350, 420, 300);
+    // ---- Gas stations (pátio em alcatrão, zonas de abastecimento, loja de conveniência e serviços) ----
+    // Estação 1 (junto à arterial x=3456; bombas mantidas em 3140,2350 e 3260,2350 com pista livre a oeste em x=3060)
+    this.add('pad_asphalt', 3065, 2350, 680, 480);
+    this.add('road_entry', 3412, 2220, 100, 72, { angle: -Math.PI / 2, params: { lanes: 1 } });
+    this.add('road_entry', 3412, 2480, 100, 72, { angle: -Math.PI / 2, params: { lanes: 1 } });
+    this.add('gas_canopy', 3200, 2350, 420, 340);
     this.add('gas_pump', 3140, 2350, 48, 110);
     this.add('gas_pump', 3260, 2350, 48, 110);
-    this.add('price_sign', 3420, 2170, 50, 96);
-    this.add('gas_canopy', 8800, 7300, 420, 300);
-    this.add('gas_pump', 8720, 7300, 48, 110);
-    this.add('gas_pump', 8840, 7300, 48, 110);
-    this.add('price_sign', 9000, 7140, 50, 96);
+    this.add('price_sign', 3372, 2120, 50, 96);
+    this.add('building', 2815, 2340, 240, 136, { variant: 'convenience_store', angle: -Math.PI / 2 });
+    this.add('parking_lot', 3060, 2020, 320, 180);
+    this.add('air_water', 2930, 2545, 64, 36);
+    this.add('lamp', 2935, 2165, 14, 14, { angle: Math.PI / 2 });
+
+    // Estação 2 (a sul da arterial y=7168, com entradas duplas, bombas, loja de conveniência, parque e ar/água)
+    this.add('pad_asphalt', 8780, 7485, 680, 490);
+    this.add('road_entry', 8620, 7222, 110, 84, { angle: Math.PI, params: { lanes: 1 } });
+    this.add('road_entry', 8940, 7222, 110, 84, { angle: Math.PI, params: { lanes: 1 } });
+    this.add('gas_canopy', 8760, 7420, 420, 300);
+    this.add('gas_pump', 8700, 7420, 48, 110);
+    this.add('gas_pump', 8820, 7420, 48, 110);
+    this.add('price_sign', 9045, 7275, 50, 96);
+    this.add('building', 8760, 7648, 260, 136, { variant: 'convenience_store', angle: Math.PI });
+    this.add('parking_lot', 9065, 7550, 180, 280);
+    this.add('air_water', 8540, 7645, 64, 36);
+    this.add('lamp', 8555, 7295, 14, 14, { angle: Math.PI / 2 });
 
     // ---- Demo industrial business park (SE, south of the arterial y=9216) ----
     {
@@ -924,7 +942,6 @@ export class WorldObjects {
                 roadFlatObjs.push(p);
               } else if (isFlatType(p.type)) {
                 flatObjs.push(p);
-                if (p.type === 'gas_canopy' && overhead) this.drawOverhead(overhead, p);
               } else {
                 this.drawSolid(solids, p);
                 if (p.type === 'lamp' && overhead) this.drawOverhead(overhead, p);
@@ -943,9 +960,6 @@ export class WorldObjects {
             // painted after (or in a later grid cell than) a decorated floor
             // can never cover it — parking lots always sit on top of pads.
             flatObjs.push(o);
-            if (o.type === 'gas_canopy' && overhead) {
-              this.drawOverhead(overhead, o);
-            }
           } else {
             this.drawSolid(solids, o);
             if (o.type === 'lamp' && overhead) {
@@ -1360,11 +1374,11 @@ export class WorldObjects {
           break;
         }
         case 'entrance_gas': {
-          // Entrada de posto de combustível — pista pavimentada com ilhas de abastecimento e setas vermelhas/verdes
+          // Entrada de posto de combustível — pista em alcatrão com ilhas de abastecimento e setas
           const pumps = Math.max(1, Math.min(2, Number(o.params?.pumps ?? 1) || 1));
-          g.fillStyle(0x282d37, 1);
+          g.fillStyle(0x1e2634, 1);
           g.fillRect(x0, y0, o.w, o.h);
-          g.lineStyle(2, 0x475569, 0.8);
+          g.lineStyle(2, 0x3a4457, 0.9);
           g.strokeRect(x0 + 2, y0 + 2, o.w - 4, o.h - 4);
           // Juntas e faixa de saída/entrada
           g.fillStyle(0xe2e8f0, 0.65);
@@ -1711,49 +1725,141 @@ export class WorldObjects {
           break;
         }
         case 'gas_canopy': {
-          // Piso do posto de combustível (laje em betão claro com faixas de abastecimento e bases das colunas);
-          // a cobertura translúcida com vigas e LEDs é desenhada em drawOverhead (acima dos veículos).
-          g.fillStyle(0x282f3a, 1);
-          g.fillRect(x0 - 8, y0 - 8, o.w + 16, o.h + 16);
-          g.fillStyle(0x333c4a, 1);
-          g.fillRect(x0, y0, o.w, o.h);
-          // Juntas de dilatação do betão
-          g.lineStyle(1, 0x222832, 0.75);
-          for (let sx = x0 + 70; sx < x0 + o.w - 20; sx += 70) g.lineBetween(sx, y0 + 2, sx, y0 + o.h - 2);
-          for (let sy = y0 + 75; sy < y0 + o.h - 20; sy += 75) g.lineBetween(x0 + 2, sy, x0 + o.w - 2, sy);
-          // Bordadura e marcações das vias de abastecimento
-          g.lineStyle(2.5, 0x10b981, 0.65);
-          g.strokeRect(x0 + 2, y0 + 2, o.w - 4, o.h - 4);
-          g.lineStyle(2, 0xe2e8f0, 0.45);
-          const lanes = Math.max(2, Math.round(o.w / 140));
-          for (let i = 1; i < lanes; i++) {
-            const lx = x0 + (o.w * i) / lanes;
-            for (let dy = y0 + 18; dy < y0 + o.h - 24; dy += 28) {
-              g.lineBetween(lx, dy, lx, Math.min(dy + 14, y0 + o.h - 18));
-            }
+          // Superfície em alcatrão realista do posto de combustível (sem teto aéreo):
+          // pistas de abastecimento pintadas, setas direcionais, passadeira pedonal,
+          // grelhas de drenagem e bocais dos depósitos subterrâneos.
+          g.fillStyle(0x11151d, 0.6);
+          g.fillRoundedRect(x0 - 4, y0 - 4, o.w + 8, o.h + 8, 10);
+          // Reborbo / lancil em betão a contornar o pátio
+          g.fillStyle(0x3a4457, 1);
+          g.fillRoundedRect(x0 - 2, y0 - 2, o.w + 4, o.h + 4, 8);
+          // Alcatrão principal (mesma tonalidade da rede viária)
+          g.fillStyle(0x1e2634, 1);
+          g.fillRoundedRect(x0, y0, o.w, o.h, 6);
+
+          // Textura subtil do asfalto (agregado e remendos de alcatrão)
+          const num = parseInt(o.id.replace(/\D/g, ''), 10) || 1;
+          for (let i = 0; i < 22; i++) {
+            const s1 = Math.sin(num * 19.3 + i * 83.7) * 43758.5453;
+            const s2 = Math.sin(num * 7.9 + i * 41.3) * 24634.63;
+            const fx = s1 - Math.floor(s1);
+            const fy = s2 - Math.floor(s2);
+            g.fillStyle(i % 2 === 0 ? 0x263040 : 0x171d28, 0.55);
+            g.fillRect(x0 + 12 + fx * Math.max(10, o.w - 28), y0 + 12 + fy * Math.max(10, o.h - 28), 7, 5);
           }
-          // Setas discretas no pavimento
-          g.lineStyle(2, 0xfacc15, 0.45);
+
+          // Pistas / zonas de abastecimento desenhadas no alcatrão
+          const lanes = Math.max(2, Math.min(4, Math.round(o.w / 140)));
+          const laneW = o.w / lanes;
+          const bayY0 = y0 + 38;
+          const bayH = Math.max(80, o.h - 76);
+
           for (let i = 0; i < lanes; i++) {
-            const lx = x0 + (o.w * (i + 0.5)) / lanes;
-            g.beginPath();
-            g.moveTo(lx - 7, y0 + o.h - 22);
-            g.lineTo(lx, y0 + o.h - 30);
-            g.lineTo(lx + 7, y0 + o.h - 22);
-            g.strokePath();
-          }
-          // Sapatas das colunas metálicas nos cantos e meios laterais
-          const pxCols = [x0 + 10, x0 + o.w - 10];
-          const pyRows = [y0 + 14, y0 + o.h - 14];
-          for (const px of pxCols) {
-            for (const py of pyRows) {
-              g.fillStyle(0xfacc15, 0.85);
-              g.fillRect(px - 7, py - 7, 14, 14);
-              g.fillStyle(0x475569, 1);
-              g.fillRect(px - 5, py - 5, 10, 10);
-              g.fillStyle(0x1e293b, 1);
-              g.fillCircle(px, py, 3.5);
+            const lx0 = x0 + i * laneW;
+            const lcx = lx0 + laneW / 2;
+
+            // Marcas subtis de rodado nas pistas de entrada/saída
+            g.fillStyle(0x141a24, 0.52);
+            g.fillRect(lcx - 16, y0 + 14, 7, o.h - 28);
+            g.fillRect(lcx + 9, y0 + 14, 7, o.h - 28);
+
+            // Caixa de paragem / zona de abastecimento centrada na pista
+            const boxW = Math.max(46, laneW - 34);
+            const bx0 = lcx - boxW / 2;
+            const by0 = bayY0 + 14;
+            const bh = Math.max(46, bayH - 28);
+            g.fillStyle(0x242e3f, 0.55);
+            g.fillRect(bx0, by0, boxW, bh);
+
+            // Contorno branco tracejado lateral + cantoneiras amarelas de baia
+            g.lineStyle(2, 0xe2e8f0, 0.45);
+            for (let sy = by0 + 4; sy < by0 + bh - 8; sy += 16) {
+              g.lineBetween(bx0, sy, bx0, Math.min(sy + 9, by0 + bh - 2));
+              g.lineBetween(bx0 + boxW, sy, bx0 + boxW, Math.min(sy + 9, by0 + bh - 2));
             }
+            const cLen = 12;
+            g.lineStyle(2.5, 0xfacc15, 0.82);
+            for (const [cx, cy, dx, dy] of [
+              [bx0, by0, 1, 1], [bx0 + boxW, by0, -1, 1],
+              [bx0, by0 + bh, 1, -1], [bx0 + boxW, by0 + bh, -1, -1],
+            ]) {
+              g.lineBetween(cx, cy, cx + dx * cLen, cy);
+              g.lineBetween(cx, cy, cx, cy + dy * cLen);
+            }
+
+            // Pictograma estilizado de combustível + barras de paragem no piso da baia
+            g.fillStyle(0x10b981, 0.22);
+            g.fillRoundedRect(lcx - 12, o.y - 14, 24, 28, 4);
+            g.lineStyle(1.5, 0x10b981, 0.65);
+            g.strokeRoundedRect(lcx - 12, o.y - 14, 24, 28, 4);
+            g.fillStyle(0xfacc15, 0.7);
+            g.fillRect(lcx - 7, o.y - 9, 14, 7);
+            // Barra de paragem dianteira/traseira na baia
+            g.fillStyle(0xe2e8f0, 0.55);
+            g.fillRect(bx0 + 6, by0 + 6, boxW - 12, 3);
+            g.fillRect(bx0 + 6, by0 + bh - 9, boxW - 12, 3);
+
+            // Setas de entrada (sul -> centro) e saída (centro -> norte) no alcatrão
+            const drawFloorArrow = (ax: number, ay: number, col: number) => {
+              g.lineStyle(2.5, col, 0.7);
+              g.lineBetween(ax, ay + 9, ax, ay - 7);
+              g.beginPath();
+              g.moveTo(ax - 7, ay);
+              g.lineTo(ax, ay - 9);
+              g.lineTo(ax + 7, ay);
+              g.strokePath();
+            };
+            drawFloorArrow(lcx, y0 + o.h - 22, 0xfacc15);
+            drawFloorArrow(lcx, y0 + 22, 0xe2e8f0);
+          }
+
+          // Separadores de zona entre pistas (onde assentam as ilhas de bomba)
+          for (let i = 1; i < lanes; i++) {
+            const divX = x0 + i * laneW;
+            const padW = 30;
+            const padH = Math.min(132, o.h - 84);
+            g.fillStyle(0x2a3444, 0.85);
+            g.fillRoundedRect(divX - padW / 2, o.y - padH / 2, padW, padH, 6);
+            g.lineStyle(2, 0xfacc15, 0.72);
+            g.strokeRoundedRect(divX - padW / 2, o.y - padH / 2, padW, padH, 6);
+            // Zonas zebradas nas pontas do eixo da ilha
+            g.lineStyle(2, 0xfacc15, 0.45);
+            for (const zy of [o.y - padH / 2 - 14, o.y + padH / 2 + 8]) {
+              g.lineBetween(divX - 10, zy, divX + 10, zy + 6);
+              g.lineBetween(divX + 10, zy, divX - 10, zy + 6);
+            }
+          }
+
+          // Passadeira pedonal discreta ao longo da borda oeste (acesso à loja)
+          g.fillStyle(0xe2e8f0, 0.58);
+          for (let py = y0 + 28; py < y0 + o.h - 28; py += 18) {
+            g.fillRect(x0 + 6, py, 14, 9);
+          }
+          g.lineStyle(2, 0xfacc15, 0.55);
+          g.lineBetween(x0 + 24, y0 + 18, x0 + 24, y0 + o.h - 18);
+
+          // Grelha de drenagem / separador de hidrocarbonetos junto à borda sul
+          g.fillStyle(0x0f172a, 0.9);
+          g.fillRect(o.x - 42, y0 + o.h - 10, 84, 5);
+          g.lineStyle(1, 0x475569, 0.85);
+          for (let gx = o.x - 38; gx <= o.x + 38; gx += 6) {
+            g.lineBetween(gx, y0 + o.h - 10, gx, y0 + o.h - 5);
+          }
+
+          // Tampas de visita / bocais de enchimento dos tanques subterrâneos (canto NO)
+          const tankX = x0 + 36, tankY = y0 + 14;
+          g.fillStyle(0x283242, 0.95);
+          g.fillRect(tankX, tankY, 54, 20);
+          g.lineStyle(1.5, 0xfacc15, 0.8);
+          g.strokeRect(tankX, tankY, 54, 20);
+          const capCols = [0x0f172a, 0x16a34a, 0x2563eb]; // Gasóleo, 95, AdBlue
+          for (let k = 0; k < 3; k++) {
+            const cx = tankX + 11 + k * 16;
+            const cy = tankY + 10;
+            g.fillStyle(0x11151d, 1);
+            g.fillCircle(cx, cy, 5.5);
+            g.fillStyle(capCols[k], 0.95);
+            g.fillCircle(cx, cy, 3.2);
           }
           break;
         }
@@ -2233,6 +2339,73 @@ export class WorldObjects {
             break;
           }
 
+          if (o.variant === 'convenience_store') {
+            // Loja de conveniência de estação de serviço: cobertura plana em ardósia,
+            // clarabóia, unidades frigoríficas/AC, testa esmeralda+âmbar, portas envidraçadas e arca/caixotes exteriores
+            g.fillStyle(0x334155, 1);
+            g.fillRect(x0, y0, o.w, o.h);
+            // Passeio / soleira de entrada em betão claro ao longo da fachada (+y)
+            const apronH = 14;
+            g.fillStyle(0x64748b, 1);
+            g.fillRect(x0, y0 + o.h - apronH, o.w, apronH);
+            // Cobertura principal do edifício
+            const roofH = o.h - apronH;
+            g.fillStyle(0x475569, 1);
+            g.fillRect(x0 + 4, y0 + 4, o.w - 8, roofH - 4);
+            // Membrana escura central + juntas de telhado
+            g.fillStyle(0x293548, 1);
+            g.fillRect(x0 + 9, y0 + 9, o.w - 18, roofH - 12);
+            g.lineStyle(1, 0x3b485e, 0.75);
+            for (let sx = x0 + 42; sx < x0 + o.w - 20; sx += 42) {
+              g.lineBetween(sx, y0 + 9, sx, y0 + roofH - 4);
+            }
+            // Clarabóia retangular iluminada sobre o corredor da loja
+            const skyW = Math.min(o.w * 0.46, 110);
+            g.fillStyle(0xbae6fd, 0.55);
+            g.fillRoundedRect(o.x - skyW / 2, y0 + roofH * 0.34, skyW, 14, 3);
+            g.lineStyle(1.5, 0x94a3b8, 0.9);
+            g.strokeRoundedRect(o.x - skyW / 2, y0 + roofH * 0.34, skyW, 14, 3);
+            // 2 condensadores de arcas frigoríficas / HVAC no topo
+            for (const cx of [x0 + o.w * 0.2, x0 + o.w * 0.8 - 22]) {
+              g.fillStyle(0x94a3b8, 1);
+              g.fillRect(cx, y0 + 18, 22, 16);
+              g.fillStyle(0x1e293b, 1);
+              g.fillCircle(cx + 11, y0 + 26, 5.5);
+              g.lineStyle(1, 0x475569, 1);
+              g.strokeRect(cx, y0 + 18, 22, 16);
+            }
+            // Pala / testa de marca da loja ao longo da fachada frontal (esmeralda + friso amarelo)
+            g.fillStyle(0x059669, 1);
+            g.fillRect(x0 + 2, y0 + roofH - 8, o.w - 4, 12);
+            g.fillStyle(0xfacc15, 0.95);
+            g.fillRect(x0 + 2, y0 + roofH + 2, o.w - 4, 3);
+            // Porta automática envidraçada centrada na fachada + tapete de entrada
+            const doorW = Math.min(54, o.w * 0.24);
+            g.fillStyle(0x38bdf8, 0.78);
+            g.fillRect(o.x - doorW / 2, y0 + roofH + 4, doorW, 6);
+            g.fillStyle(0xfef3c7, 0.65);
+            g.fillRect(o.x - doorW / 2 + 4, y0 + roofH + 4, doorW - 8, 4);
+            g.fillStyle(0x0f172a, 1);
+            g.fillRect(o.x - doorW * 0.38, y0 + o.h - 4, doorW * 0.76, 4);
+            // Arca exterior de gelo/bebidas à esquerda + contentor de lixo/reciclagem à direita
+            g.fillStyle(0xe2e8f0, 1);
+            g.fillRect(x0 + 14, y0 + o.h - 10, 26, 8);
+            g.fillStyle(0x0284c7, 1);
+            g.fillRect(x0 + 16, y0 + o.h - 9, 22, 4);
+            g.fillStyle(0x16a34a, 1);
+            g.fillRect(x0 + o.w - 38, y0 + o.h - 10, 9, 8);
+            g.fillStyle(0x2563eb, 1);
+            g.fillRect(x0 + o.w - 26, y0 + o.h - 10, 9, 8);
+            // Pilaretes amarelos de proteção na frente da montra
+            for (const bx of [o.x - doorW / 2 - 12, o.x + doorW / 2 + 12, x0 + 52, x0 + o.w - 52]) {
+              g.fillStyle(0xfacc15, 1);
+              g.fillCircle(bx, y0 + o.h + 2, 3.2);
+            }
+            g.lineStyle(2, 0x0f172a, 1);
+            g.strokeRect(x0, y0, o.w, o.h);
+            break;
+          }
+
           // 'warehouse' (Edifício urbano padrão): terraço plano em betão/arenito com caixa de escadas e AC
           g.fillStyle(0x57534e, 1);
           g.fillRect(x0, y0, o.w, o.h);
@@ -2440,53 +2613,128 @@ export class WorldObjects {
           break;
         }
         case 'gas_pump': {
-          // Ilha com bomba de combustível moderna: lancil amarelo/preto, pilaretes, dispensador branco/esmeralda, ecrãs e mangueiras
-          const islandW = o.w + 16;
-          g.fillStyle(0x000000, 0.24);
-          g.fillRoundedRect(x0 - 6, y0 + 3, islandW, o.h, 8);
-          // Ilha em betão com rebordo amarelo de segurança
+          // Ilha realista com bombas duplas, lancil chanfrado amarelo/preto, pilaretes duplos,
+          // terminal de pagamento central, mangueiras flexíveis e ponto de extintor/limpeza
+          const islandW = o.w + 18;
+          g.fillStyle(0x000000, 0.28);
+          g.fillRoundedRect(x0 - 7, y0 + 3, islandW, o.h, 10);
+          // Ilha em betão com rebordo elevado e pontas de segurança amarelas
           g.fillStyle(0x334155, 1);
-          g.fillRoundedRect(x0 - 8, y0, islandW, o.h, 8);
-          g.lineStyle(2.5, 0xfacc15, 0.85);
-          g.strokeRoundedRect(x0 - 8, y0, islandW, o.h, 8);
-          // Pilaretes de proteção nas pontas da ilha
-          for (const by of [y0 + 7, y0 + o.h - 7]) {
-            g.fillStyle(0x0f172a, 1);
-            g.fillCircle(o.x, by, 5);
-            g.fillStyle(0xfacc15, 1);
-            g.fillCircle(o.x, by, 3.2);
+          g.fillRoundedRect(x0 - 9, y0, islandW, o.h, 10);
+          g.fillStyle(0x475569, 1);
+          g.fillRoundedRect(x0 - 6, y0 + 3, islandW - 6, o.h - 6, 8);
+          // Pontas sinalizadas a amarelo/preto (norte e sul da ilha)
+          g.fillStyle(0xfacc15, 0.9);
+          g.fillRoundedRect(x0 - 7, y0 + 1, islandW - 4, 11, 5);
+          g.fillRoundedRect(x0 - 7, y0 + o.h - 12, islandW - 4, 11, 5);
+          g.fillStyle(0x11151d, 0.85);
+          for (let sx = x0 - 4; sx < x0 + islandW - 14; sx += 10) {
+            g.fillRect(sx, y0 + 2, 4, 9);
+            g.fillRect(sx, y0 + o.h - 11, 4, 9);
           }
-          // Corpo do dispensador (chassi branco/prata com faixa esmeralda no topo)
-          const bodyY = y0 + 14, bodyH = o.h - 28;
+          g.lineStyle(2, 0xfacc15, 0.9);
+          g.strokeRoundedRect(x0 - 9, y0, islandW, o.h, 10);
+
+          // Pilaretes tubulares amarelos duplos nas duas extremidades da ilha
+          for (const by of [y0 + 8, y0 + o.h - 8]) {
+            g.lineStyle(3, 0x0f172a, 0.95);
+            g.lineBetween(o.x - 10, by, o.x + 10, by);
+            g.lineStyle(1.8, 0xfacc15, 0.95);
+            g.lineBetween(o.x - 10, by, o.x + 10, by);
+            for (const bx of [o.x - 10, o.x + 10]) {
+              g.fillStyle(0x0f172a, 1);
+              g.fillCircle(bx, by, 4.5);
+              g.fillStyle(0xfacc15, 1);
+              g.fillCircle(bx, by, 2.8);
+            }
+          }
+
+          // Dispensador central de combustível (chassi prata/branco + cabeça esmeralda)
+          const bodyY = y0 + 15, bodyH = o.h - 30;
           g.fillStyle(0xe2e8f0, 1);
-          g.fillRoundedRect(x0 + 2, bodyY, o.w - 4, bodyH, 4);
-          g.fillStyle(0x10b981, 1);
-          g.fillRect(x0 + 2, bodyY, o.w - 4, 8);
+          g.fillRoundedRect(x0 + 3, bodyY, o.w - 6, bodyH, 5);
+          g.fillStyle(0x059669, 1);
+          g.fillRect(x0 + 3, bodyY, o.w - 6, 9);
           g.fillStyle(0x334155, 1);
-          g.fillRect(x0 + 2, bodyY + bodyH - 7, o.w - 4, 7);
+          g.fillRect(x0 + 3, bodyY + bodyH - 8, o.w - 6, 8);
           g.lineStyle(1.5, 0x1e293b, 0.95);
-          g.strokeRoundedRect(x0 + 2, bodyY, o.w - 4, bodyH, 4);
-          // Ecrã digital duplo (preço + litros)
+          g.strokeRoundedRect(x0 + 3, bodyY, o.w - 6, bodyH, 5);
+
+          // Visores digitais duplos (lado esq e dir com LEDs verdes/âmbar)
           g.fillStyle(0x0b1016, 1);
           g.fillRect(x0 + 7, bodyY + 12, o.w - 14, 24);
-          g.fillStyle(0x22c55e, 0.95);
-          g.fillRect(x0 + 10, bodyY + 16, o.w - 20, 5);
-          g.fillStyle(0xf59e0b, 0.95);
-          g.fillRect(x0 + 10, bodyY + 25, o.w - 24, 4);
-          // Pistolas / bocais codificados por cor (Gasóleo preto, 95 verde, AdBlue azul)
-          g.fillStyle(0x0f172a, 1);
-          g.fillRect(x0 - 2, bodyY + 16, 4, 14); // gasóleo esq
-          g.fillStyle(0x16a34a, 1);
-          g.fillRect(x0 + o.w - 2, bodyY + 14, 4, 12); // 95 dir
-          g.fillStyle(0x2563eb, 1);
-          g.fillRect(x0 + o.w - 2, bodyY + 30, 4, 10); // adblue dir
-          // Mangueiras enroladas e teclado multibanco
+          g.fillStyle(0x4ade80, 0.95);
+          g.fillRect(x0 + 10, bodyY + 15, o.w - 20, 4.5);
+          g.fillStyle(0xfacc15, 0.95);
+          g.fillRect(x0 + 10, bodyY + 23, o.w - 24, 4);
+          g.fillStyle(0x38bdf8, 0.85);
+          g.fillRect(x0 + 10, bodyY + 30, o.w - 26, 3);
+
+          // Terminal multibanco / pagamento + teclado central
           g.fillStyle(0x475569, 1);
-          g.fillRect(x0 + 10, bodyY + 41, o.w - 20, 9);
-          g.lineStyle(2, 0x1e293b, 0.9);
+          g.fillRoundedRect(x0 + 10, bodyY + 40, o.w - 20, 12, 2);
+          g.fillStyle(0x38bdf8, 0.75);
+          g.fillRect(x0 + 13, bodyY + 42, 8, 5);
+          g.fillStyle(0xcbd5e1, 0.85);
+          g.fillRect(x0 + 24, bodyY + 42, 10, 8);
+
+          // Pistolas codificadas por cor + mangueiras flexíveis dos dois lados
+          g.fillStyle(0x0f172a, 1);
+          g.fillRect(x0 - 3, bodyY + 15, 6, 13); // Gasóleo esq
+          g.fillStyle(0x2563eb, 1);
+          g.fillRect(x0 - 3, bodyY + 32, 6, 10); // AdBlue esq
+          g.fillStyle(0x16a34a, 1);
+          g.fillRect(x0 + o.w - 3, bodyY + 15, 6, 13); // Gasolina 95 dir
+          g.fillStyle(0x0f172a, 1);
+          g.fillRect(x0 + o.w - 3, bodyY + 32, 6, 10); // Gasóleo dir
+          g.lineStyle(2, 0x0f172a, 0.9);
           g.beginPath();
-          g.arc(o.x, bodyY + bodyH - 12, 7, 0, Math.PI);
+          g.arc(x0 + 1, bodyY + 42, 7, Math.PI * 0.4, Math.PI * 1.35);
           g.strokePath();
+          g.beginPath();
+          g.arc(x0 + o.w - 1, bodyY + 42, 7, -Math.PI * 0.35, Math.PI * 0.6);
+          g.strokePath();
+
+          // Extintor vermelho no topo do dispensador + balde limpa-vidros/lixo na base
+          g.fillStyle(0xdc2626, 1);
+          g.fillCircle(o.x - 10, bodyY + bodyH - 13, 4);
+          g.fillStyle(0x0284c7, 1);
+          g.fillRect(o.x + 4, bodyY + bodyH - 16, 10, 7);
+          break;
+        }
+        case 'air_water': {
+          // Ilha de Ar comprimido / Água / Aspirador de estação de serviço
+          g.fillStyle(0x000000, 0.24);
+          g.fillRoundedRect(x0 + 2, y0 + 3, o.w, o.h, 6);
+          g.fillStyle(0x334155, 1);
+          g.fillRoundedRect(x0, y0, o.w, o.h, 6);
+          g.lineStyle(2, 0xfacc15, 0.85);
+          g.strokeRoundedRect(x0, y0, o.w, o.h, 6);
+          // Coluna de Ar/Água (esquerda — azul e cinza com visor digital)
+          const cw = Math.max(14, o.w * 0.28);
+          const ch = o.h - 12;
+          g.fillStyle(0xe2e8f0, 1);
+          g.fillRoundedRect(x0 + 8, y0 + 6, cw, ch, 3);
+          g.fillStyle(0x2563eb, 1);
+          g.fillRect(x0 + 8, y0 + 6, cw, 6);
+          g.fillStyle(0x0b1016, 1);
+          g.fillRect(x0 + 10, y0 + 14, cw - 4, 8);
+          g.fillStyle(0x38bdf8, 0.95);
+          g.fillRect(x0 + 12, y0 + 16, cw - 8, 4);
+          // Aspirador industrial (direita — cúpula âmbar/carvão com mangueira enrolada)
+          const vx = x0 + o.w - 8 - cw;
+          g.fillStyle(0x1e293b, 1);
+          g.fillRoundedRect(vx, y0 + 6, cw, ch, 4);
+          g.fillStyle(0xf59e0b, 1);
+          g.fillCircle(vx + cw / 2, y0 + o.h / 2, Math.min(cw, ch) * 0.36);
+          g.lineStyle(2, 0x0f172a, 0.95);
+          g.beginPath();
+          g.arc(o.x, o.y + 3, 7, 0, Math.PI * 1.4);
+          g.strokePath();
+          // Pilaretes laterais de proteção
+          g.fillStyle(0xfacc15, 1);
+          g.fillCircle(x0 + 4, o.y, 2.8);
+          g.fillCircle(x0 + o.w - 4, o.y, 2.8);
           break;
         }
         case 'price_sign': {
@@ -2703,53 +2951,23 @@ export class WorldObjects {
     });
   }
 
-  /** Overhead parts rendered above vehicles (streetlamp luminaires & translucent service-station canopies). */
+  /** Overhead parts rendered above vehicles (streetlamp arms & luminaires so trucks pass beneath). */
   private drawOverhead(g: Phaser.GameObjects.Graphics, o: WorldObject) {
-    if (o.type === 'lamp') {
-      this.rotated(g, o, () => {
-        // Cantilevered galvanized steel arm (+x toward carriageway)
-        g.lineStyle(3.5, 0xcbd5e1, 1);
-        g.lineBetween(o.x + 2, o.y, o.x + 20, o.y);
-        g.lineStyle(1, 0x475569, 0.7);
-        g.lineBetween(o.x + 3, o.y + 1.5, o.x + 19, o.y + 1.5);
-        // Cobra-head luminaire housing + visible daylight diffuser lens
-        g.fillStyle(0xe2e8f0, 1);
-        g.fillRoundedRect(o.x + 14, o.y - 5, 14, 10, 4);
-        g.lineStyle(1.5, 0x334155, 0.95);
-        g.strokeRoundedRect(o.x + 14, o.y - 5, 14, 10, 4);
-        g.fillStyle(0xfef3c7, 0.9);
-        g.fillCircle(o.x + 22, o.y, 3.4);
-      });
-      return;
-    }
-
-    if (o.type === 'gas_canopy') {
-      this.rotated(g, o, () => {
-        const x0 = o.x - o.w / 2, y0 = o.y - o.h / 2;
-        // Cobertura translúcida em vidro/policarbonato para manter os camiões visíveis por baixo
-        g.fillStyle(0xbae6fd, 0.16);
-        g.fillRoundedRect(x0, y0, o.w, o.h, 6);
-        // Painéis translúcidos da clarabóia + vigas metálicas estruturais
-        g.lineStyle(2, 0x64748b, 0.55);
-        const bays = Math.max(2, Math.round(o.w / 140));
-        for (let i = 1; i < bays; i++) {
-          const bx = x0 + (o.w * i) / bays;
-          g.lineBetween(bx, y0 + 6, bx, y0 + o.h - 6);
-        }
-        g.lineBetween(x0 + 6, o.y, x0 + o.w - 6, o.y);
-        // Moldura periférica opaca (testa da estação de serviço em ardósia + faixa esmeralda)
-        g.lineStyle(8, 0x1e293b, 0.92);
-        g.strokeRoundedRect(x0, y0, o.w, o.h, 6);
-        g.lineStyle(3, 0x10b981, 0.95);
-        g.strokeRoundedRect(x0 - 1, y0 - 1, o.w + 2, o.h + 2, 6);
-        // Réguas luminosas LED suspensas sobre cada pista
-        for (let i = 0; i < bays; i++) {
-          const lx = x0 + (o.w * (i + 0.5)) / bays;
-          g.fillStyle(0xfef3c7, 0.65);
-          g.fillRoundedRect(lx - 4, y0 + 26, 8, o.h - 52, 3);
-        }
-      });
-    }
+    if (o.type !== 'lamp') return;
+    this.rotated(g, o, () => {
+      // Cantilevered galvanized steel arm (+x toward carriageway)
+      g.lineStyle(3.5, 0xcbd5e1, 1);
+      g.lineBetween(o.x + 2, o.y, o.x + 20, o.y);
+      g.lineStyle(1, 0x475569, 0.7);
+      g.lineBetween(o.x + 3, o.y + 1.5, o.x + 19, o.y + 1.5);
+      // Cobra-head luminaire housing + visible daylight diffuser lens
+      g.fillStyle(0xe2e8f0, 1);
+      g.fillRoundedRect(o.x + 14, o.y - 5, 14, 10, 4);
+      g.lineStyle(1.5, 0x334155, 0.95);
+      g.strokeRoundedRect(o.x + 14, o.y - 5, 14, 10, 4);
+      g.fillStyle(0xfef3c7, 0.9);
+      g.fillCircle(o.x + 22, o.y, 3.4);
+    });
   }
 
   public destroy() {
