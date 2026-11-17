@@ -924,6 +924,7 @@ export class WorldObjects {
                 roadFlatObjs.push(p);
               } else if (isFlatType(p.type)) {
                 flatObjs.push(p);
+                if (p.type === 'gas_canopy' && overhead) this.drawOverhead(overhead, p);
               } else {
                 this.drawSolid(solids, p);
                 if (p.type === 'lamp' && overhead) this.drawOverhead(overhead, p);
@@ -942,6 +943,9 @@ export class WorldObjects {
             // painted after (or in a later grid cell than) a decorated floor
             // can never cover it — parking lots always sit on top of pads.
             flatObjs.push(o);
+            if (o.type === 'gas_canopy' && overhead) {
+              this.drawOverhead(overhead, o);
+            }
           } else {
             this.drawSolid(solids, o);
             if (o.type === 'lamp' && overhead) {
@@ -1057,14 +1061,40 @@ export class WorldObjects {
       const x0 = o.x - o.w / 2, y0 = o.y - o.h / 2;
       switch (o.type) {
         case 'dock': {
-          g.fillStyle(0x3a4150, 1);
+          // Cais portuário/industrial: laje em betão com juntas, defensas em borracha, cabeços de amarração e nivelador
+          g.fillStyle(0x475569, 1);
           g.fillRect(x0, y0, o.w, o.h);
-          g.fillStyle(0x2b2f38, 1);
-          g.fillRect(x0, y0, o.w, 10);           // water-side edge
-          g.lineStyle(2, 0xd7a13b, 0.85);
-          g.strokeRect(x0 + 4, y0 + 14, o.w - 8, o.h - 18);
-          g.fillStyle(0x22262e, 1);
-          g.fillRect(x0 + o.w / 2 - 12, y0 + 24, 24, 18); // bumper
+          g.fillStyle(0x3b4252, 1);
+          g.fillRect(x0 + 3, y0 + 10, o.w - 6, o.h - 13);
+          // Juntas da laje
+          g.lineStyle(1, 0x2a303c, 0.7);
+          g.lineBetween(o.x, y0 + 12, o.x, y0 + o.h - 4);
+          g.lineBetween(x0 + 4, o.y + 4, x0 + o.w - 4, o.y + 4);
+          // Rebordo do lado da água / encosto + defensas pretas
+          g.fillStyle(0x1e222a, 1);
+          g.fillRect(x0, y0, o.w, 10);
+          g.fillStyle(0x0f1217, 1);
+          for (const fx of [x0 + o.w * 0.22, x0 + o.w * 0.78]) {
+            g.fillRoundedRect(fx - 10, y0 - 2, 20, 7, 2);
+          }
+          // Faixa amarela de segurança junto ao cais
+          g.lineStyle(2.5, 0xfacc15, 0.85);
+          g.strokeRect(x0 + 5, y0 + 13, o.w - 10, o.h - 18);
+          // Plataforma niveladora metálica + batentes
+          g.fillStyle(0x64748b, 1);
+          g.fillRect(o.x - 16, y0 + 16, 32, 22);
+          g.lineStyle(1.5, 0x1e293b, 0.9);
+          g.strokeRect(o.x - 16, y0 + 16, 32, 22);
+          g.fillStyle(0x11151d, 1);
+          g.fillRect(o.x - 22, y0 + 14, 5, 16);
+          g.fillRect(o.x + 17, y0 + 14, 5, 16);
+          // Cabeços de amarração em ferro fundido nos cantos frontais
+          for (const bx of [x0 + 12, x0 + o.w - 12]) {
+            g.fillStyle(0x1e293b, 1);
+            g.fillCircle(bx, y0 + 18, 5);
+            g.fillStyle(0xfacc15, 0.9);
+            g.fillCircle(bx, y0 + 18, 2.2);
+          }
           break;
         }
         case 'exam_dock': {
@@ -1330,43 +1360,47 @@ export class WorldObjects {
           break;
         }
         case 'entrance_gas': {
-          // Fuel-station entrance lane — flat apron with pump island(s) on
-          // the sides and red direction chevrons on the drive lane, like a
-          // service-station forecourt entry.
+          // Entrada de posto de combustível — pista pavimentada com ilhas de abastecimento e setas vermelhas/verdes
           const pumps = Math.max(1, Math.min(2, Number(o.params?.pumps ?? 1) || 1));
-          g.fillStyle(0x2e333d, 1);
+          g.fillStyle(0x282d37, 1);
           g.fillRect(x0, y0, o.w, o.h);
-          g.lineStyle(2, 0xe2e8f0, 0.45);
-          g.strokeRect(x0 + 3, y0 + 3, o.w - 6, o.h - 6);
-          // Door sill stripes on the forecourt edge (+y)
-          g.fillStyle(0xe2e8f0, 0.5);
+          g.lineStyle(2, 0x475569, 0.8);
+          g.strokeRect(x0 + 2, y0 + 2, o.w - 4, o.h - 4);
+          // Juntas e faixa de saída/entrada
+          g.fillStyle(0xe2e8f0, 0.65);
           g.fillRect(x0 + 10, y0 + o.h - 10, o.w - 20, 5);
-          // Pump islands — concrete kerb + pump body + glowing screen
-          const iw = Math.max(22, o.w * 0.18);           // island width
-          const iy0 = y0 + o.h * 0.2, ih = o.h * 0.55;   // island vertical span
-          const cxL = x0 + iw * 0.7, cxR = x0 + o.w - iw * 0.7;
+          g.lineStyle(2, 0x10b981, 0.75);
+          g.lineBetween(x0 + 8, y0 + 6, x0 + o.w - 8, y0 + 6);
+          // Ilhas de bombas — lancil arredondado, pilaretes amarelos, corpo branco/esmeralda e ecrã digital
+          const iw = Math.max(24, o.w * 0.18);
+          const iy0 = y0 + o.h * 0.18, ih = o.h * 0.56;
+          const cxL = x0 + iw * 0.72, cxR = x0 + o.w - iw * 0.72;
           for (const cx of pumps === 2 ? [cxL, cxR] : [cxL]) {
-            g.fillStyle(0x2e333e, 1);
-            g.fillRect(cx - iw / 2, iy0, iw, ih);
-            g.lineStyle(2, 0x4a505c, 0.6);
-            g.strokeRect(cx - iw / 2, iy0, iw, ih);
+            g.fillStyle(0x334155, 1);
+            g.fillRoundedRect(cx - iw / 2, iy0, iw, ih, 6);
+            g.lineStyle(2, 0xfacc15, 0.7);
+            g.strokeRoundedRect(cx - iw / 2, iy0, iw, ih, 6);
             const pw = iw * 0.62;
-            g.fillStyle(0x3a4150, 1);
-            g.fillRect(cx - pw / 2, iy0 + 8, pw, ih - 16);
-            g.lineStyle(1, 0x5b6370, 0.5);
-            g.strokeRect(cx - pw / 2, iy0 + 8, pw, ih - 16);
+            g.fillStyle(0xe2e8f0, 1);
+            g.fillRoundedRect(cx - pw / 2, iy0 + 10, pw, ih - 20, 3);
+            g.fillStyle(0x10b981, 1);
+            g.fillRect(cx - pw / 2, iy0 + 10, pw, 6);
             g.fillStyle(0x0b1016, 1);
-            g.fillRect(cx - pw / 2 + 4, iy0 + 13, pw - 8, 20);
-            g.fillStyle(0x22c55e, 0.9);
-            g.fillRect(cx - pw / 2 + 7, iy0 + 18, pw - 14, 4);
-            g.fillRect(cx - pw / 2 + 7, iy0 + 26, pw - 22, 3);
+            g.fillRect(cx - pw / 2 + 3, iy0 + 20, pw - 6, 18);
+            g.fillStyle(0x22c55e, 0.95);
+            g.fillRect(cx - pw / 2 + 6, iy0 + 24, pw - 12, 4);
+            g.fillStyle(0xf59e0b, 0.95);
+            g.fillRect(cx - pw / 2 + 6, iy0 + 31, pw - 16, 3);
+            g.fillStyle(0xfacc15, 1);
+            g.fillCircle(cx, iy0 + 4, 2.5);
+            g.fillCircle(cx, iy0 + ih - 4, 2.5);
           }
-          // Red direction chevrons on the drive lane pointing to the forecourt
+          // Setas de circulação na faixa de passagem
           const acx = pumps === 2 ? o.x : x0 + o.w * 0.62;
           for (let k = 0; k < 2; k++) {
-            const ay = y0 + o.h * (0.62 + k * 0.2);
+            const ay = y0 + o.h * (0.58 + k * 0.2);
             const s = 9;
-            g.fillStyle(0xf87171, 0.85);
+            g.fillStyle(0xf87171, 0.9);
             g.beginPath();
             g.moveTo(acx - s, ay - s);
             g.lineTo(acx + s, ay - s);
@@ -1677,15 +1711,50 @@ export class WorldObjects {
           break;
         }
         case 'gas_canopy': {
-          g.fillStyle(0x4a505c, 1);
-          g.fillRect(x0 - 6, y0 - 6, 10, o.h + 12);  // pillars
-          g.fillRect(x0 + o.w - 4, y0 - 6, 10, o.h + 12);
-          g.fillStyle(0x7fa3d1, 0.22);
+          // Piso do posto de combustível (laje em betão claro com faixas de abastecimento e bases das colunas);
+          // a cobertura translúcida com vigas e LEDs é desenhada em drawOverhead (acima dos veículos).
+          g.fillStyle(0x282f3a, 1);
+          g.fillRect(x0 - 8, y0 - 8, o.w + 16, o.h + 16);
+          g.fillStyle(0x333c4a, 1);
           g.fillRect(x0, y0, o.w, o.h);
-          g.lineStyle(2, 0x9db8dd, 0.5);
-          g.strokeRect(x0, y0, o.w, o.h);
-          g.fillStyle(0xffd166, 0.8);
-          g.fillRect(x0 + 10, y0 + o.h / 2 - 4, o.w - 20, 8); // light strip
+          // Juntas de dilatação do betão
+          g.lineStyle(1, 0x222832, 0.75);
+          for (let sx = x0 + 70; sx < x0 + o.w - 20; sx += 70) g.lineBetween(sx, y0 + 2, sx, y0 + o.h - 2);
+          for (let sy = y0 + 75; sy < y0 + o.h - 20; sy += 75) g.lineBetween(x0 + 2, sy, x0 + o.w - 2, sy);
+          // Bordadura e marcações das vias de abastecimento
+          g.lineStyle(2.5, 0x10b981, 0.65);
+          g.strokeRect(x0 + 2, y0 + 2, o.w - 4, o.h - 4);
+          g.lineStyle(2, 0xe2e8f0, 0.45);
+          const lanes = Math.max(2, Math.round(o.w / 140));
+          for (let i = 1; i < lanes; i++) {
+            const lx = x0 + (o.w * i) / lanes;
+            for (let dy = y0 + 18; dy < y0 + o.h - 24; dy += 28) {
+              g.lineBetween(lx, dy, lx, Math.min(dy + 14, y0 + o.h - 18));
+            }
+          }
+          // Setas discretas no pavimento
+          g.lineStyle(2, 0xfacc15, 0.45);
+          for (let i = 0; i < lanes; i++) {
+            const lx = x0 + (o.w * (i + 0.5)) / lanes;
+            g.beginPath();
+            g.moveTo(lx - 7, y0 + o.h - 22);
+            g.lineTo(lx, y0 + o.h - 30);
+            g.lineTo(lx + 7, y0 + o.h - 22);
+            g.strokePath();
+          }
+          // Sapatas das colunas metálicas nos cantos e meios laterais
+          const pxCols = [x0 + 10, x0 + o.w - 10];
+          const pyRows = [y0 + 14, y0 + o.h - 14];
+          for (const px of pxCols) {
+            for (const py of pyRows) {
+              g.fillStyle(0xfacc15, 0.85);
+              g.fillRect(px - 7, py - 7, 14, 14);
+              g.fillStyle(0x475569, 1);
+              g.fillRect(px - 5, py - 5, 10, 10);
+              g.fillStyle(0x1e293b, 1);
+              g.fillCircle(px, py, 3.5);
+            }
+          }
           break;
         }
       }
@@ -1820,246 +1889,650 @@ export class WorldObjects {
           g.fillRect(x0 + 4, y0 + 5, o.w, o.h);
           g.fillStyle(0x3a3d44, 1);
           g.fillRect(x0, y0, o.w, o.h);
-          g.fillStyle(0x565b66, 1); // lit top face
+          g.fillStyle(0x646b78, 1); // capeamento superior iluminado
           g.fillRect(x0, y0, o.w, Math.min(6, o.h / 3));
-          // Masonry seams
+          // Juntas de alvenaria e pilares espaçados
           g.lineStyle(1, 0x2b2e35, 0.8);
           const seamStep = 34;
           if (o.w >= o.h) {
             for (let sx = x0 + seamStep; sx < x0 + o.w - 4; sx += seamStep) {
               g.lineBetween(sx, y0, sx, y0 + o.h);
             }
+            for (let px = x0; px <= x0 + o.w; px += 140) {
+              const cx = Math.min(x0 + o.w - 6, Math.max(x0 + 6, px));
+              g.fillStyle(0x4b515c, 1);
+              g.fillRect(cx - 5, y0 - 2, 10, o.h + 4);
+              g.lineStyle(1, 0x1e222a, 0.8);
+              g.strokeRect(cx - 5, y0 - 2, 10, o.h + 4);
+            }
           } else {
             for (let sy = y0 + seamStep; sy < y0 + o.h - 4; sy += seamStep) {
               g.lineBetween(x0, sy, x0 + o.w, sy);
+            }
+            for (let py = y0; py <= y0 + o.h; py += 140) {
+              const cy = Math.min(y0 + o.h - 6, Math.max(y0 + 6, py));
+              g.fillStyle(0x4b515c, 1);
+              g.fillRect(x0 - 2, cy - 5, o.w + 4, 10);
+              g.lineStyle(1, 0x1e222a, 0.8);
+              g.strokeRect(x0 - 2, cy - 5, o.w + 4, 10);
             }
           }
           break;
         }
         case 'jersey_barrier': {
-          g.fillStyle(0x8f97a3, 1);
+          // Perfil New Jersey chanfrado com base larga, crista iluminada, juntas modulares e refletores
+          const horiz = o.w >= o.h;
+          g.fillStyle(0x000000, 0.22);
+          g.fillRect(x0 + 3, y0 + 4, o.w, o.h);
+          // Sapata da base em betão
+          g.fillStyle(0x64748b, 1);
           g.fillRect(x0, y0, o.w, o.h);
-          g.fillStyle(0x6b7280, 1);
-          g.fillRect(x0, y0, o.w, Math.min(8, o.h / 3));
-          g.lineStyle(1.5, 0x4b5563, 1);
+          // Face inclinada intermédia
+          g.fillStyle(0x94a3b8, 1);
+          if (horiz) g.fillRect(x0 + 2, y0 + 3, o.w - 4, o.h - 6);
+          else g.fillRect(x0 + 3, y0 + 2, o.w - 6, o.h - 4);
+          // Crista superior estreita
+          g.fillStyle(0xcbd5e1, 1);
+          if (horiz) g.fillRect(x0 + 2, o.y - Math.max(3, o.h * 0.16), o.w - 4, Math.max(6, o.h * 0.32));
+          else g.fillRect(o.x - Math.max(3, o.w * 0.16), y0 + 2, Math.max(6, o.w * 0.32), o.h - 4);
+          // Juntas entre módulos + balizadores refletores âmbar
+          const span = horiz ? o.w : o.h;
+          const mods = Math.max(1, Math.round(span / 46));
+          g.lineStyle(1.5, 0x334155, 0.85);
+          for (let i = 1; i < mods; i++) {
+            const p = (horiz ? x0 : y0) + (span * i) / mods;
+            if (horiz) g.lineBetween(p, y0, p, y0 + o.h);
+            else g.lineBetween(x0, p, x0 + o.w, p);
+          }
+          g.fillStyle(0xf59e0b, 0.95);
+          for (let i = 0; i < mods; i++) {
+            const p = (horiz ? x0 : y0) + (span * (i + 0.5)) / mods;
+            if (horiz) g.fillRect(p - 3, o.y - 2, 6, 4);
+            else g.fillRect(o.x - 2, p - 3, 4, 6);
+          }
+          g.lineStyle(1.5, 0x334155, 1);
           g.strokeRect(x0, y0, o.w, o.h);
           break;
         }
         case 'building': {
-          // Light industrial variants: flat light-grey roof / ribbed white roof
-          if (o.variant === 'warehouse_big' || o.variant === 'shed' || o.variant === 'warehouse_docks') {
-            g.fillStyle(0x000000, 0.28);
-            g.fillRect(x0 + 6, y0 + 8, o.w, o.h);
-            // Wall band
-            g.fillStyle(0x9aa2ac, 1);
+          // Drop shadow shared across buildings
+          g.fillStyle(0x000000, 0.28);
+          g.fillRect(x0 + 6, y0 + 8, o.w, o.h);
+
+          if (o.variant === 'warehouse_big') {
+            // Armazém logístico moderno: cobertura metálica azul-ardósia com painéis solares e clarabóias
+            g.fillStyle(0x475569, 1);
             g.fillRect(x0, y0, o.w, o.h);
-            const roof = o.variant === 'shed' ? 0xe8ecef : 0xc3c9d2;
-            g.fillStyle(roof, 1);
-            g.fillRect(x0 + 5, y0 + 5, o.w - 10, o.h - 10);
-            if (o.variant === 'shed') {
-              // Parallel ridge lines (nave industrial)
-              g.lineStyle(2, 0xb9c0c6, 1);
-              const step = Math.max(26, Math.min(56, o.h / 6));
-              for (let sy = y0 + 5 + step; sy < y0 + o.h - 8; sy += step) {
-                g.lineBetween(x0 + 5, sy, x0 + o.w - 5, sy);
-              }
-            } else {
-              // Panel seams + skylight strip + HVAC units (armazém logístico)
-              g.lineStyle(1.5, 0xa8b0ba, 0.9);
-              for (let sx = x0 + 40; sx < x0 + o.w - 10; sx += 40) g.lineBetween(sx, y0 + 5, sx, y0 + o.h - 5);
-              for (let sy = y0 + 40; sy < y0 + o.h - 10; sy += 40) g.lineBetween(x0 + 5, sy, x0 + o.w - 5, sy);
-              g.fillStyle(0x9fb4c4, 0.8);
-              g.fillRect(x0 + 10, y0 + o.h * 0.62, o.w - 20, 14);
-              g.fillStyle(0x8a93a8, 1);
-              for (let i = 0; i < 4; i++) {
-                const hx = x0 + o.w * (0.2 + 0.18 * i);
-                const hy = y0 + o.h * 0.24;
-                g.fillRect(hx, hy, 26, 18);
-                g.fillStyle(0x6e7681, 1);
-                g.fillRect(hx + 3, hy + 3, 20, 12);
-                g.fillStyle(0x8a93a8, 1);
-              }
+            g.fillStyle(0x7c8a99, 1);
+            g.fillRect(x0 + 6, y0 + 6, o.w - 12, o.h - 12);
+            // Juntas de cobertura
+            g.lineStyle(1.5, 0x64748b, 0.85);
+            for (let sx = x0 + 50; sx < x0 + o.w - 12; sx += 50) g.lineBetween(sx, y0 + 6, sx, y0 + o.h - 6);
+            // Faixas de clarabóia translúcidas
+            g.fillStyle(0xbae6fd, 0.65);
+            g.fillRect(x0 + 18, y0 + o.h * 0.64, o.w - 36, 13);
+            g.fillRect(x0 + 18, y0 + o.h * 0.78, o.w - 36, 10);
+            // Painéis solares fotovoltaicos (azul escuro com grelha fina)
+            const solarCols = Math.max(2, Math.floor((o.w - 80) / 110));
+            const solarStep = (o.w - 40) / solarCols;
+            for (let i = 0; i < solarCols; i++) {
+              const px = x0 + 24 + i * solarStep;
+              const py = y0 + o.h * 0.14;
+              const pw = Math.min(82, solarStep - 14);
+              const ph = Math.min(48, o.h * 0.26);
+              g.fillStyle(0x172554, 1);
+              g.fillRect(px, py, pw, ph);
+              g.lineStyle(1, 0x38bdf8, 0.45);
+              g.strokeRect(px, py, pw, ph);
+              g.lineBetween(px, py + ph * 0.5, px + pw, py + ph * 0.5);
+              g.lineBetween(px + pw * 0.5, py, px + pw * 0.5, py + ph);
+            }
+            // Unidades HVAC industriais com ventoinhas
+            const hvacCount = Math.max(2, Math.floor(o.w / 240));
+            for (let i = 0; i < hvacCount; i++) {
+              const hx = x0 + o.w * (0.18 + (0.64 / Math.max(1, hvacCount - 1 || 1)) * i) - 14;
+              const hy = y0 + o.h * 0.46;
+              g.fillStyle(0x334155, 1);
+              g.fillRect(hx, hy, 28, 20);
+              g.fillStyle(0x1e293b, 1);
+              g.fillCircle(hx + 8, hy + 10, 5.5);
+              g.fillCircle(hx + 20, hy + 10, 5.5);
             }
             g.lineStyle(2, 0x1c202a, 1);
             g.strokeRect(x0, y0, o.w, o.h);
-            if (o.variant === 'warehouse_docks') {
-              // Dock doors along the SOUTH wall (local +y): dark openings,
-              // hazard-striped lintels, dock plates + bumpers outside
-              const nd = Math.max(1, Math.floor(Number(o.params?.docks) || 5));
-              const spacing = o.w / nd;
-              for (let i = 0; i < nd; i++) {
-                const cx = x0 + (i + 0.5) * spacing;
-                g.fillStyle(0x0d1015, 1);
-                g.fillRect(cx - 28, y0 + o.h - 12, 56, 12);
-                g.fillStyle(0xfacc15, 0.9);
-                g.fillRect(cx - 30, y0 + o.h - 16, 60, 4);
-                g.fillStyle(0x1c202a, 1);
-                for (let dx = 0; dx < 60; dx += 12) g.fillRect(cx - 30 + dx, y0 + o.h - 16, 6, 4);
-                g.fillStyle(0x5a616c, 1);
-                g.fillRect(cx - 22, y0 + o.h, 44, 7);
-                g.fillStyle(0x22262e, 1);
-                g.fillRect(cx - 28, y0 + o.h + 7, 8, 6);
-                g.fillRect(cx + 20, y0 + o.h + 7, 8, 6);
-              }
+            break;
+          }
+
+          if (o.variant === 'warehouse_docks') {
+            // Armazém c/ docas: cobertura clara em betão pré-fabricado + faixa âmbar na fachada das docas
+            g.fillStyle(0x475569, 1);
+            g.fillRect(x0, y0, o.w, o.h);
+            g.fillStyle(0xdbe1e8, 1);
+            g.fillRect(x0 + 6, y0 + 6, o.w - 12, o.h - 12);
+            const nd = Math.max(1, Math.floor(Number(o.params?.docks) || 5));
+            const spacing = o.w / nd;
+            // Nervuras alinhadas com os cais + extratores rotativos no topo
+            g.lineStyle(1.5, 0xb8c2ce, 0.9);
+            for (let i = 1; i < nd; i++) {
+              const lx = x0 + i * spacing;
+              g.lineBetween(lx, y0 + 6, lx, y0 + o.h - 18);
+            }
+            for (let i = 0; i < nd; i++) {
+              const cx = x0 + (i + 0.5) * spacing;
+              g.fillStyle(0x64748b, 1);
+              g.fillCircle(cx, y0 + o.h * 0.28, 11);
+              g.fillStyle(0x334155, 1);
+              g.fillCircle(cx, y0 + o.h * 0.28, 5);
+            }
+            // Faixa de sinalização âmbar ao longo da fachada sul (lado das docas)
+            g.fillStyle(0xf59e0b, 0.9);
+            g.fillRect(x0 + 6, y0 + o.h - 22, o.w - 12, 6);
+            g.lineStyle(2, 0x1c202a, 1);
+            g.strokeRect(x0, y0, o.w, o.h);
+            // Portões de cais na parede SUL (local +y) + niveladores e batentes
+            for (let i = 0; i < nd; i++) {
+              const cx = x0 + (i + 0.5) * spacing;
+              g.fillStyle(0x0d1015, 1);
+              g.fillRect(cx - 28, y0 + o.h - 12, 56, 12);
+              g.fillStyle(0xfacc15, 0.95);
+              g.fillRect(cx - 30, y0 + o.h - 16, 60, 4);
+              g.fillStyle(0x1c202a, 1);
+              for (let dx = 0; dx < 60; dx += 12) g.fillRect(cx - 30 + dx, y0 + o.h - 16, 6, 4);
+              g.fillStyle(0x5a616c, 1);
+              g.fillRect(cx - 22, y0 + o.h, 44, 7);
+              g.fillStyle(0x22262e, 1);
+              g.fillRect(cx - 28, y0 + o.h + 7, 8, 6);
+              g.fillRect(cx + 20, y0 + o.h + 7, 8, 6);
             }
             break;
           }
-          // shadow
-          g.fillStyle(0x000000, 0.28);
-          g.fillRect(x0 + 6, y0 + 8, o.w, o.h);
-          // body + roof
-          g.fillStyle(0x2a2f3a, 1);
-          g.fillRect(x0, y0, o.w, o.h);
-          g.fillStyle(o.variant === 'church' ? 0x4a4550 : 0x3f4756, 1);
-          g.fillRect(x0 + 4, y0 + 4, o.w - 8, o.h - 8);
-          if (o.variant === 'gabled') {
-            // Two-slope roof: lighter half + ridge line along the long axis
+
+          if (o.variant === 'shed') {
+            // Nave industrial: cobertura metálica curva/2 águas em zinco + cumeeira translúcida + pórticos transversais
+            g.fillStyle(0x64748b, 1);
+            g.fillRect(x0, y0, o.w, o.h);
             const horiz = o.w >= o.h;
-            g.fillStyle(0x4d5666, 1);
-            if (horiz) g.fillRect(x0 + 4, y0 + 4, o.w - 8, (o.h - 8) / 2);
-            else g.fillRect(x0 + 4, y0 + 4, (o.w - 8) / 2, o.h - 8);
-            g.lineStyle(2, 0x6a7484, 1);
+            g.fillStyle(0xdce4ec, 1);
+            g.fillRect(x0 + 4, y0 + 4, o.w - 8, o.h - 8);
+            g.fillStyle(0xbcc7d4, 1);
+            if (horiz) g.fillRect(x0 + 4, o.y, o.w - 8, (o.h - 8) / 2);
+            else g.fillRect(o.x, y0 + 4, (o.w - 8) / 2, o.h - 8);
+            // Chapa ondulada longitudinal
+            g.lineStyle(1, 0x94a3b8, 0.55);
+            if (horiz) {
+              for (let sy = y0 + 14; sy < y0 + o.h - 10; sy += 14) g.lineBetween(x0 + 6, sy, x0 + o.w - 6, sy);
+            } else {
+              for (let sx = x0 + 14; sx < x0 + o.w - 10; sx += 14) g.lineBetween(sx, y0 + 6, sx, y0 + o.h - 6);
+            }
+            // Pórticos estruturais transversais (nervuras escuras)
+            g.lineStyle(3, 0x475569, 0.9);
+            const spanCount = Math.max(3, Math.floor((horiz ? o.w : o.h) / 70));
+            for (let i = 1; i < spanCount; i++) {
+              if (horiz) {
+                const rx = x0 + (o.w * i) / spanCount;
+                g.lineBetween(rx, y0 + 4, rx, y0 + o.h - 4);
+              } else {
+                const ry = y0 + (o.h * i) / spanCount;
+                g.lineBetween(x0 + 4, ry, x0 + o.w - 4, ry);
+              }
+            }
+            // Clarabóia contínua na cumeeira
+            g.fillStyle(0x7dd3fc, 0.6);
+            if (horiz) g.fillRect(x0 + 12, o.y - 7, o.w - 24, 14);
+            else g.fillRect(o.x - 7, y0 + 12, 14, o.h - 24);
+            g.lineStyle(2, 0x1c202a, 1);
+            g.strokeRect(x0, y0, o.w, o.h);
+            break;
+          }
+
+          if (o.variant === 'garage') {
+            // Garagem / oficina mecânica: cobertura azul-petróleo escura, faixa oficina âmbar, extratores e portões de rolo com pilaretes
+            g.fillStyle(0x1e293b, 1);
+            g.fillRect(x0, y0, o.w, o.h);
+            g.fillStyle(0x3b485b, 1);
+            g.fillRect(x0 + 5, y0 + 5, o.w - 10, o.h - 10);
+            // Faixa de identificação oficina na fachada das portas
+            g.fillStyle(0xd97706, 0.92);
+            g.fillRect(x0 + 5, y0 + o.h - 32, o.w - 10, 7);
+            // Extratores circulares de fumo/oficina
+            const fans = o.w >= 260 ? 3 : 2;
+            for (let i = 0; i < fans; i++) {
+              const fx = x0 + o.w * ((i + 1) / (fans + 1));
+              const fy = y0 + o.h * 0.34;
+              g.fillStyle(0x1e293b, 1);
+              g.fillCircle(fx, fy, 13);
+              g.fillStyle(0x64748b, 1);
+              g.fillCircle(fx, fy, 7);
+              g.lineStyle(1.5, 0x0f172a, 0.9);
+              g.lineBetween(fx - 7, fy, fx + 7, fy);
+              g.lineBetween(fx, fy - 7, fx, fy + 7);
+            }
+            // Portões de serviço múltiplos (2 ou 3 baias) com pilaretes amarelos
+            const bays = o.w >= 360 ? 3 : o.w >= 210 ? 2 : 1;
+            const bayW = Math.min(72, (o.w - 36 - (bays - 1) * 16) / bays);
+            const totalW = bays * bayW + (bays - 1) * 16;
+            const startX = o.x - totalW / 2;
+            for (let i = 0; i < bays; i++) {
+              const bx = startX + i * (bayW + 16);
+              g.fillStyle(0x0f172a, 1);
+              g.fillRect(bx, y0 + o.h - 22, bayW, 22);
+              g.fillStyle(0x334155, 1);
+              for (let sy = y0 + o.h - 19; sy < y0 + o.h - 3; sy += 5) {
+                g.fillRect(bx + 2, sy, bayW - 4, 2.5);
+              }
+              // Pilaretes amarelos de proteção
+              g.fillStyle(0xfacc15, 1);
+              g.fillCircle(bx - 3, y0 + o.h + 4, 3.5);
+              g.fillCircle(bx + bayW + 3, y0 + o.h + 4, 3.5);
+            }
+            g.lineStyle(2, 0x0f172a, 1);
+            g.strokeRect(x0, y0, o.w, o.h);
+            break;
+          }
+
+          if (o.variant === 'gabled') {
+            // Telhado 2 águas tradicional: telha cerâmica terracota (encosta iluminada vs sombreada) + cumeeira + chaminé
+            const horiz = o.w >= o.h;
+            g.fillStyle(0x57261a, 1);
+            g.fillRect(x0, y0, o.w, o.h);
+            g.fillStyle(0xc25b3f, 1); // água iluminada
+            g.fillRect(x0 + 4, y0 + 4, o.w - 8, o.h - 8);
+            g.fillStyle(0x8e3b25, 1); // água sombreada
+            if (horiz) g.fillRect(x0 + 4, o.y, o.w - 8, (o.h - 8) / 2);
+            else g.fillRect(o.x, y0 + 4, (o.w - 8) / 2, o.h - 8);
+            // Fiadas de telha
+            g.lineStyle(1, 0x6b2818, 0.55);
+            if (horiz) {
+              for (let sy = y0 + 16; sy < y0 + o.h - 8; sy += 14) g.lineBetween(x0 + 6, sy, x0 + o.w - 6, sy);
+            } else {
+              for (let sx = x0 + 16; sx < x0 + o.w - 8; sx += 14) g.lineBetween(sx, y0 + 6, sx, y0 + o.h - 6);
+            }
+            // Cumeeira cerâmica clara ao centro
+            g.lineStyle(4, 0xe9c9a8, 0.95);
             if (horiz) g.lineBetween(x0 + 4, o.y, x0 + o.w - 4, o.y);
             else g.lineBetween(o.x, y0 + 4, o.x, y0 + o.h - 4);
+            // Chaminé de alvenaria
+            const chX = horiz ? x0 + o.w * 0.24 : o.x + o.w * 0.22;
+            const chY = horiz ? y0 + o.h * 0.22 : y0 + o.h * 0.24;
+            g.fillStyle(0x57534e, 1);
+            g.fillRect(chX - 9, chY - 9, 18, 18);
+            g.fillStyle(0x1c1917, 1);
+            g.fillRect(chX - 4, chY - 4, 8, 8);
+            g.lineStyle(2, 0x2b1510, 1);
+            g.strokeRect(x0, y0, o.w, o.h);
+            break;
           }
-          g.fillStyle(0x565f6e, 1);
-          // skylights
-          for (let sy = y0 + 14; sy < y0 + o.h - 20; sy += 34) {
-            g.fillRect(x0 + 14, sy, Math.min(60, o.w / 3), 12);
-          }
-          if (o.variant === 'garage') {
-            g.fillStyle(0x14171d, 1);
-            g.fillRect(x0 + o.w * 0.2, y0 + o.h - 26, o.w * 0.6, 26);
-            g.fillStyle(0xfacc15, 0.7);
-            g.fillRect(x0 + o.w * 0.2, y0 + o.h - 28, o.w * 0.6, 3);
-          }
+
           if (o.variant === 'church') {
-            g.fillStyle(0x5a5464, 1);
-            g.fillRect(x0 + o.w / 2 - 12, y0 - 26, 24, 30);
-            g.lineStyle(2, 0xfacc15, 0.9);
-            g.strokeRect(x0 + o.w / 2 - 12, y0 - 26, 24, 30);
+            // Igreja histórica: paredes em calcário claro, nave + transepto em cruz e torre sineira com cruz dourada
+            g.fillStyle(0xd6cfc2, 1); // base em pedra calcária
+            g.fillRect(x0, y0, o.w, o.h);
+            // Telhado da nave central e braços do transepto em telha envelhecida
+            g.fillStyle(0x7c4a46, 1);
+            g.fillRect(x0 + 10, y0 + o.h * 0.18, o.w - 20, o.h * 0.64);
+            g.fillRect(x0 + o.w * 0.3, y0 + 6, o.w * 0.4, o.h - 12);
+            // Sombra das águas dos telhados
+            g.fillStyle(0x5e3432, 0.9);
+            g.fillRect(x0 + 10, o.y, o.w - 20, o.h * 0.32);
+            g.fillRect(o.x, y0 + 6, o.w * 0.2, o.h - 12);
+            // Cumeeira em cruz dourada/creme
+            g.lineStyle(3, 0xe7d8c3, 0.95);
+            g.lineBetween(x0 + 10, o.y, x0 + o.w - 10, o.y);
+            g.lineBetween(o.x, y0 + 6, o.x, y0 + o.h - 6);
+            // Torre sineira na fachada norte
+            const tw = 36, th = 36;
+            const tx = o.x - tw / 2, ty = y0 - 16;
+            g.fillStyle(0xe5dfd3, 1);
+            g.fillRect(tx, ty, tw, th);
+            g.fillStyle(0x4a3f46, 1);
+            g.fillRect(tx + 4, ty + 4, tw - 8, th - 8);
+            // Arestas piramidais da torre + cruz dourada
+            g.lineStyle(1.5, 0xcbd5e1, 0.7);
+            g.lineBetween(tx + 4, ty + 4, tx + tw - 4, ty + th - 4);
+            g.lineBetween(tx + tw - 4, ty + 4, tx + 4, ty + th - 4);
+            g.fillStyle(0xfacc15, 1);
+            g.fillRect(o.x - 1.8, ty + th / 2 - 7, 3.6, 14);
+            g.fillRect(o.x - 5.5, ty + th / 2 - 2.2, 11, 3.6);
+            g.lineStyle(2, 0x292524, 1);
+            g.strokeRect(tx, ty, tw, th);
+            g.strokeRect(x0, y0, o.w, o.h);
+            break;
           }
+
           if (o.variant === 'archway') {
-            g.fillStyle(0x14171d, 1);
-            g.fillRect(x0 + o.w / 2 - 22, y0 + 10, 44, o.h - 10);
+            // Arco triunfal / pórtico em cantaria de pedra com dois pilares laterais e vão central abobadado
+            const pierW = Math.max(36, Math.round(o.w * 0.28));
+            const archW = Math.max(36, o.w - pierW * 2);
+            // Corpo em pedra calcária clara
+            g.fillStyle(0xb8b1a3, 1);
+            g.fillRect(x0, y0, o.w, o.h);
+            // Pilares maciços laterais (esquerdo e direito) com relevo de cornija
+            g.fillStyle(0x8e8779, 1);
+            g.fillRect(x0, y0, pierW, o.h);
+            g.fillRect(x0 + o.w - pierW, y0, pierW, o.h);
+            g.fillStyle(0xcbc4b6, 1);
+            g.fillRect(x0 + 5, y0 + 5, pierW - 10, o.h - 10);
+            g.fillRect(x0 + o.w - pierW + 5, y0 + 5, pierW - 10, o.h - 10);
+            // Tabuleiro/lintel central sobre o arco + pedra-chave radial
+            g.fillStyle(0x9c9586, 1);
+            g.fillRect(x0 + pierW, y0 + 18, archW, o.h - 36);
+            // Vãos escuros rebaixados nas bocas norte e sul para leitura imediata de arco
+            g.fillStyle(0x11151d, 1);
+            g.fillRect(x0 + pierW + 8, y0, archW - 16, 18);
+            g.fillRect(x0 + pierW + 8, y0 + o.h - 18, archW - 16, 18);
+            g.fillStyle(0x272c36, 1);
+            g.fillRect(x0 + pierW + 14, y0 + 18, archW - 28, 6);
+            g.fillRect(x0 + pierW + 14, y0 + o.h - 24, archW - 28, 6);
+            // Medalhão central / pedra-chave no topo do arco
+            g.lineStyle(2, 0xe7e1d5, 0.8);
+            g.strokeCircle(o.x, o.y, Math.min(18, archW * 0.22));
+            g.lineStyle(1.5, 0x696358, 0.85);
+            g.strokeRect(x0 + pierW, y0, archW, o.h);
+            g.lineStyle(2, 0x1c202a, 1);
+            g.strokeRect(x0, y0, o.w, o.h);
+            break;
           }
+
+          // 'warehouse' (Edifício urbano padrão): terraço plano em betão/arenito com caixa de escadas e AC
+          g.fillStyle(0x57534e, 1);
+          g.fillRect(x0, y0, o.w, o.h);
+          g.fillStyle(0xa8a29e, 1);
+          g.fillRect(x0 + 6, y0 + 6, o.w - 12, o.h - 12);
+          g.lineStyle(1.5, 0x78716c, 0.7);
+          g.strokeRect(x0 + 10, y0 + 10, o.w - 20, o.h - 20);
+          // Caixa de escadas / elevador no canto
+          const phW = Math.min(64, o.w * 0.26);
+          const phH = Math.min(52, o.h * 0.3);
+          g.fillStyle(0x78716c, 1);
+          g.fillRect(x0 + 18, y0 + 18, phW, phH);
+          g.lineStyle(1.5, 0x44403c, 1);
+          g.strokeRect(x0 + 18, y0 + 18, phW, phH);
+          g.fillStyle(0x44403c, 1);
+          g.fillRect(x0 + 22, y0 + 22, phW * 0.45, 7);
+          // Unidades exteriores de AC
+          g.fillStyle(0x44403c, 1);
+          g.fillRect(x0 + o.w - 46, y0 + 20, 24, 16);
+          g.fillRect(x0 + o.w - 46, y0 + 42, 24, 16);
+          g.fillStyle(0x1c1917, 1);
+          g.fillCircle(x0 + o.w - 34, y0 + 28, 5);
+          g.fillCircle(x0 + o.w - 34, y0 + 50, 5);
           g.lineStyle(2, 0x1c202a, 1);
           g.strokeRect(x0, y0, o.w, o.h);
           break;
         }
         case 'container_stack': {
-          // Container colour palette (variant) — rust/brown is the legacy default
-          const CONTAINER_COLORS: Record<string, number> = {
-            blue: 0x2b5f8f, red: 0xa33b3b, green: 0x2f7d4f, rust: 0x8a5a2b,
-            orange: 0xc2652a, yellow: 0xd7b23b, white: 0xd8dde3, teal: 0x2f7d78,
+          // Contentores ISO com vigas perimetrais, cantoneiras twist-lock, nervuras de chapa e portas traseiras
+          const CONTAINER_COLORS: Record<string, [number, number]> = {
+            blue:   [0x2563eb, 0x1d4ed8],
+            red:    [0xb91c1c, 0x991b1b],
+            green:  [0x15803d, 0x166534],
+            rust:   [0x9a5b25, 0x7c4518],
+            orange: [0xea580c, 0xc2410c],
+            yellow: [0xeab308, 0xca8a04],
+            white:  [0xe2e8f0, 0xcbd5e1],
+            teal:   [0x0d9488, 0x0f766e],
           };
-          const col = CONTAINER_COLORS[o.variant ?? 'rust'] ?? 0x8a5a2b;
-          g.fillStyle(0x000000, 0.25);
+          const [colLit, colDark] = CONTAINER_COLORS[o.variant ?? 'rust'] ?? [0x9a5b25, 0x7c4518];
+          g.fillStyle(0x000000, 0.28);
           g.fillRect(x0 + 5, y0 + 6, o.w, o.h);
-          const rows = Math.max(1, Math.round(o.h / 34));
-          for (let r = 0; r < rows; r++) {
-            g.fillStyle(col, 1);
-            g.fillRect(x0, y0 + r * (o.h / rows), o.w, o.h / rows - 4);
-            g.fillStyle(0x000000, 0.22);
-            for (let rx = x0 + 6; rx < x0 + o.w - 4; rx += 14) {
-              g.fillRect(rx, y0 + r * (o.h / rows) + 3, 4, o.h / rows - 10);
+
+          const horiz = o.w >= o.h;
+          const shortSide = horiz ? o.h : o.w;
+          const count = Math.max(1, Math.round(shortSide / 44));
+          const step = shortSide / count;
+          const gap = count > 1 ? 3 : 0;
+
+          for (let i = 0; i < count; i++) {
+            const cx = horiz ? x0 : x0 + i * step;
+            const cy = horiz ? y0 + i * step : y0;
+            const cw = horiz ? o.w : step - gap;
+            const ch = horiz ? step - gap : o.h;
+            const baseCol = i % 2 === 0 ? colLit : colDark;
+
+            // Corpo principal + moldura estrutural
+            g.fillStyle(baseCol, 1);
+            g.fillRect(cx, cy, cw, ch);
+            // Bordo iluminado (topo/esquerda) e sombra (base/direita)
+            g.fillStyle(0xffffff, 0.16);
+            g.fillRect(cx + 2, cy + 2, cw - 4, 3);
+            g.fillStyle(0x000000, 0.24);
+            g.fillRect(cx + 2, cy + ch - 4, cw - 4, 2.5);
+
+            // Chapas onduladas transversais (pares luz/sombra)
+            if (horiz) {
+              for (let rx = cx + 10; rx < cx + cw - 12; rx += 10) {
+                g.fillStyle(0x000000, 0.22);
+                g.fillRect(rx, cy + 5, 3.5, ch - 10);
+                g.fillStyle(0xffffff, 0.1);
+                g.fillRect(rx + 3.5, cy + 5, 1.5, ch - 10);
+              }
+              // Portas traseiras (extremidade direita) com barras de tranca
+              g.fillStyle(0x000000, 0.35);
+              g.fillRect(cx + cw - 5, cy + 3, 4, ch - 6);
+              g.fillStyle(0xcbd5e1, 0.75);
+              g.fillRect(cx + cw - 3, cy + ch * 0.28, 2, ch * 0.16);
+              g.fillRect(cx + cw - 3, cy + ch * 0.56, 2, ch * 0.16);
+            } else {
+              for (let ry = cy + 10; ry < cy + ch - 12; ry += 10) {
+                g.fillStyle(0x000000, 0.22);
+                g.fillRect(cx + 5, ry, cw - 10, 3.5);
+                g.fillStyle(0xffffff, 0.1);
+                g.fillRect(cx + 5, ry + 3.5, cw - 10, 1.5);
+              }
+              g.fillStyle(0x000000, 0.35);
+              g.fillRect(cx + 3, cy + ch - 5, cw - 6, 4);
+              g.fillStyle(0xcbd5e1, 0.75);
+              g.fillRect(cx + cw * 0.28, cy + ch - 3, cw * 0.16, 2);
+              g.fillRect(cx + cw * 0.56, cy + ch - 3, cw * 0.16, 2);
             }
+
+            // Cantoneiras metálicas ISO (twist-lock castings)
+            g.fillStyle(0x1e293b, 0.95);
+            for (const [kx, ky] of [
+              [cx, cy], [cx + cw - 5, cy],
+              [cx, cy + ch - 5], [cx + cw - 5, cy + ch - 5],
+            ]) {
+              g.fillRect(kx, ky, 5, 5);
+            }
+            g.lineStyle(1.5, 0x0f172a, 0.95);
+            g.strokeRect(cx, cy, cw, ch);
           }
-          g.lineStyle(1.5, 0x12161c, 1);
-          g.strokeRect(x0, y0, o.w, o.h);
           break;
         }
         case 'crane': {
-          g.fillStyle(0x000000, 0.25);
-          g.fillRect(x0 + 6, y0 + 8, o.w, o.h);
-          g.fillStyle(0xd7a13b, 1);
-          g.fillRect(x0 + 6, y0, 18, o.h);            // legs
-          g.fillRect(x0 + o.w - 24, y0, 18, o.h);
-          g.fillRect(x0, y0 + o.h / 2 - 7, o.w, 14);  // boom
-          g.fillStyle(0x8a6a1e, 1);
-          g.fillRect(x0 + 6, y0, 18, 16);
-          g.fillRect(x0 + o.w - 24, y0, 18, 16);
-          g.lineStyle(1.5, 0x5c4a12, 1);
-          g.strokeRect(x0, y0 + o.h / 2 - 7, o.w, 14);
+          // Pórtico portuário de contentores: carris, bogies com batentes, treliça metálica, cabina e spreader
+          g.fillStyle(0x000000, 0.26);
+          g.fillRect(x0 + 8, y0 + 10, o.w, o.h);
+          // Carris e bogies de translação nos 4 cantos das pernas
+          const legL = x0 + 12, legR = x0 + o.w - 28;
+          const legW = 16;
+          g.fillStyle(0x334155, 1);
+          g.fillRect(legL - 3, y0 - 4, legW + 6, 16);
+          g.fillRect(legR - 3, y0 - 4, legW + 6, 16);
+          g.fillRect(legL - 3, y0 + o.h - 12, legW + 6, 16);
+          g.fillRect(legR - 3, y0 + o.h - 12, legW + 6, 16);
+          // Pernas estruturais em amarelo industrial
+          g.fillStyle(0xeab308, 1);
+          g.fillRect(legL, y0 + 2, legW, o.h - 4);
+          g.fillRect(legR, y0 + 2, legW, o.h - 4);
+          // Treliça diagonal nas pernas
+          g.lineStyle(1.5, 0x854d0e, 0.85);
+          for (let yy = y0 + 12; yy < y0 + o.h - 22; yy += 24) {
+            g.lineBetween(legL + 2, yy, legL + legW - 2, yy + 22);
+            g.lineBetween(legR + 2, yy, legR + legW - 2, yy + 22);
+          }
+          // Batentes de segurança amarelo/preto nos bogies
+          g.fillStyle(0x11151d, 1);
+          g.fillRect(legL - 3, y0 - 4, legW + 6, 4);
+          g.fillRect(legR - 3, y0 - 4, legW + 6, 4);
+          g.fillRect(legL - 3, y0 + o.h, legW + 6, 4);
+          g.fillRect(legR - 3, y0 + o.h, legW + 6, 4);
+          // Viga/lança principal horizontal com treliça
+          const boomY = o.y - 10, boomH = 20;
+          g.fillStyle(0xf59e0b, 1);
+          g.fillRect(x0, boomY, o.w, boomH);
+          g.fillStyle(0xb45309, 1);
+          g.fillRect(x0, boomY, o.w, 3);
+          g.fillRect(x0, boomY + boomH - 3, o.w, 3);
+          g.lineStyle(1.5, 0x78350f, 0.9);
+          for (let bx = x0 + 6; bx < x0 + o.w - 14; bx += 16) {
+            g.lineBetween(bx, boomY + 3, bx + 12, boomY + boomH - 3);
+            g.lineBetween(bx + 12, boomY + 3, bx, boomY + boomH - 3);
+          }
+          // Cabina do operador junto à viga
+          g.fillStyle(0x1e293b, 1);
+          g.fillRoundedRect(o.x - 16, o.y + 10, 22, 16, 3);
+          g.fillStyle(0x38bdf8, 0.85);
+          g.fillRect(o.x - 13, o.y + 13, 16, 7);
+          // Carro (trolley) + spreader de contentores suspenso
+          const spX = o.x + o.w * 0.16;
+          g.fillStyle(0x334155, 1);
+          g.fillRect(spX - 18, boomY - 3, 36, boomH + 6);
+          g.lineStyle(2, 0xd97706, 0.95);
+          g.strokeRect(spX - 16, boomY - 12, 32, boomH + 24);
+          g.fillStyle(0xdc2626, 1);
+          g.fillCircle(spX, o.y, 3);
           break;
         }
         case 'silo': {
-          const r = o.w / 2;
-          g.fillStyle(0x000000, 0.28);
-          g.beginPath(); g.arc(o.x + 5, o.y + 6, r, 0, Math.PI * 2); g.fillPath();
-          g.fillStyle(0x8b929c, 1);
-          g.beginPath(); g.arc(o.x, o.y, r, 0, Math.PI * 2); g.fillPath();
-          g.fillStyle(0x6e747d, 1);
-          g.beginPath(); g.arc(o.x, o.y, r * 0.62, 0, Math.PI * 2); g.fillPath();
-          g.fillStyle(0xaab1bb, 1);
-          g.beginPath(); g.arc(o.x - r * 0.25, o.y - r * 0.3, r * 0.3, 0, Math.PI * 2); g.fillPath();
+          // Silo industrial cilíndrico: base de betão com parafusos, cobertura cónica nervurada, cúpula de carga e escada com gaiola
+          const r = Math.min(o.w, o.h) / 2;
+          g.fillStyle(0x000000, 0.3);
+          g.fillCircle(o.x + 6, o.y + 7, r);
+          // Sapata circular em betão
+          g.fillStyle(0x475569, 1);
+          g.fillCircle(o.x, o.y, r);
+          g.lineStyle(2, 0x1e293b, 0.95);
+          g.strokeCircle(o.x, o.y, r);
+          // Corpo cilíndrico metálico + anel de reforço
+          g.fillStyle(0x94a3b8, 1);
+          g.fillCircle(o.x, o.y, r * 0.92);
+          g.fillStyle(0xb8c2ce, 1);
+          g.fillCircle(o.x, o.y, r * 0.84);
+          // Reflexo de cobertura cónica iluminada a NO
+          g.fillStyle(0xdce4ec, 0.45);
+          g.beginPath();
+          g.moveTo(o.x, o.y);
+          g.arc(o.x, o.y, r * 0.84, Math.PI * 0.9, Math.PI * 1.65);
+          g.closePath();
+          g.fillPath();
+          // 12 nervuras radiais da cobertura cónica
+          g.lineStyle(1.5, 0x64748b, 0.85);
+          for (let i = 0; i < 12; i++) {
+            const a = (i * Math.PI * 2) / 12;
+            g.lineBetween(o.x + Math.cos(a) * r * 0.24, o.y + Math.sin(a) * r * 0.24, o.x + Math.cos(a) * r * 0.84, o.y + Math.sin(a) * r * 0.84);
+          }
+          g.lineStyle(1.5, 0x475569, 0.9);
+          g.strokeCircle(o.x, o.y, r * 0.84);
+          g.strokeCircle(o.x, o.y, r * 0.52);
+          // Escada de acesso + passadiço de topo com guarda-corpos amarelo
+          g.fillStyle(0x334155, 1);
+          g.fillRect(o.x - 6, o.y - r * 0.96, 12, r * 0.72);
+          g.lineStyle(2, 0xfacc15, 0.9);
+          g.strokeRect(o.x - 6, o.y - r * 0.96, 12, r * 0.72);
+          // Cúpula / escotilha de inspeção no vértice
+          g.fillStyle(0x334155, 1);
+          g.fillCircle(o.x, o.y, r * 0.24);
+          g.fillStyle(0x64748b, 1);
+          g.fillCircle(o.x, o.y, r * 0.16);
+          g.lineStyle(2, 0xfacc15, 0.85);
+          g.strokeCircle(o.x, o.y, r * 0.24);
           break;
         }
         case 'gas_pump': {
-          // Fuel pump island — 2D silhouette (no canopy roof), inspired by real
-          // forecourt pumps.
-          const island = o.w + 16;
-          g.fillStyle(0x2e333e, 1);
-          g.fillRect(x0 - 8, y0, island, o.h); // concrete island
-          g.lineStyle(2, 0x4a505c, 0.6);
-          g.strokeRect(x0 - 8, y0, island, o.h);
-          // Pump body
-          g.fillStyle(0x3a4150, 1);
-          g.fillRect(x0, y0 + 10, o.w, o.h - 20);
-          g.lineStyle(1, 0x5b6370, 0.5);
-          g.strokeRect(x0, y0 + 10, o.w, o.h - 20);
-          // Display screen (digital, glowing)
+          // Ilha com bomba de combustível moderna: lancil amarelo/preto, pilaretes, dispensador branco/esmeralda, ecrãs e mangueiras
+          const islandW = o.w + 16;
+          g.fillStyle(0x000000, 0.24);
+          g.fillRoundedRect(x0 - 6, y0 + 3, islandW, o.h, 8);
+          // Ilha em betão com rebordo amarelo de segurança
+          g.fillStyle(0x334155, 1);
+          g.fillRoundedRect(x0 - 8, y0, islandW, o.h, 8);
+          g.lineStyle(2.5, 0xfacc15, 0.85);
+          g.strokeRoundedRect(x0 - 8, y0, islandW, o.h, 8);
+          // Pilaretes de proteção nas pontas da ilha
+          for (const by of [y0 + 7, y0 + o.h - 7]) {
+            g.fillStyle(0x0f172a, 1);
+            g.fillCircle(o.x, by, 5);
+            g.fillStyle(0xfacc15, 1);
+            g.fillCircle(o.x, by, 3.2);
+          }
+          // Corpo do dispensador (chassi branco/prata com faixa esmeralda no topo)
+          const bodyY = y0 + 14, bodyH = o.h - 28;
+          g.fillStyle(0xe2e8f0, 1);
+          g.fillRoundedRect(x0 + 2, bodyY, o.w - 4, bodyH, 4);
+          g.fillStyle(0x10b981, 1);
+          g.fillRect(x0 + 2, bodyY, o.w - 4, 8);
+          g.fillStyle(0x334155, 1);
+          g.fillRect(x0 + 2, bodyY + bodyH - 7, o.w - 4, 7);
+          g.lineStyle(1.5, 0x1e293b, 0.95);
+          g.strokeRoundedRect(x0 + 2, bodyY, o.w - 4, bodyH, 4);
+          // Ecrã digital duplo (preço + litros)
           g.fillStyle(0x0b1016, 1);
-          g.fillRect(x0 + 6, y0 + 16, o.w - 12, 26);
-          g.fillStyle(0x22c55e, 0.9);
-          g.fillRect(x0 + 10, y0 + 22, o.w - 20, 5);
-          g.fillRect(x0 + 10, y0 + 32, o.w - 30, 4);
-          // Nozzle holster on the right side
-          g.fillStyle(0x1c2027, 1);
-          g.fillRect(x0 + o.w - 10, y0 + 40, 6, 22);
-          // Hose loop hint
-          g.lineStyle(2, 0x4a505c, 0.4);
+          g.fillRect(x0 + 7, bodyY + 12, o.w - 14, 24);
+          g.fillStyle(0x22c55e, 0.95);
+          g.fillRect(x0 + 10, bodyY + 16, o.w - 20, 5);
+          g.fillStyle(0xf59e0b, 0.95);
+          g.fillRect(x0 + 10, bodyY + 25, o.w - 24, 4);
+          // Pistolas / bocais codificados por cor (Gasóleo preto, 95 verde, AdBlue azul)
+          g.fillStyle(0x0f172a, 1);
+          g.fillRect(x0 - 2, bodyY + 16, 4, 14); // gasóleo esq
+          g.fillStyle(0x16a34a, 1);
+          g.fillRect(x0 + o.w - 2, bodyY + 14, 4, 12); // 95 dir
+          g.fillStyle(0x2563eb, 1);
+          g.fillRect(x0 + o.w - 2, bodyY + 30, 4, 10); // adblue dir
+          // Mangueiras enroladas e teclado multibanco
+          g.fillStyle(0x475569, 1);
+          g.fillRect(x0 + 10, bodyY + 41, o.w - 20, 9);
+          g.lineStyle(2, 0x1e293b, 0.9);
           g.beginPath();
-          g.arc(x0 + o.w / 2, y0 + o.h - 12, 8, 0, Math.PI);
+          g.arc(o.x, bodyY + bodyH - 12, 7, 0, Math.PI);
           g.strokePath();
           break;
         }
         case 'price_sign': {
-          // Fuel price totem — tall vertical pylon, 2D, no roof.
-          g.fillStyle(0x4a505c, 1);
-          g.fillRect(o.x - 3, y0 + o.h * 0.4, 6, o.h * 0.6); // pylon stem
-          // Header with brand band
-          g.fillStyle(0x14261c, 1);
-          g.fillRect(x0, y0, o.w, o.h * 0.16);
+          // Totem luminoso de preços do posto: soco em betão, moldura em alumínio escuro, cabeçalho esmeralda e dígitos LED
+          g.fillStyle(0x000000, 0.25);
+          g.fillRoundedRect(x0 + 3, y0 + 3, o.w, o.h, 4);
+          // Soco / base de fixação no solo
+          g.fillStyle(0x475569, 1);
+          g.fillRect(x0 + 4, y0 + o.h - 10, o.w - 8, 10);
+          // Estrutura principal do totem
+          g.fillStyle(0x1e293b, 1);
+          g.fillRoundedRect(x0, y0, o.w, o.h - 4, 4);
+          g.lineStyle(1.5, 0x64748b, 0.9);
+          g.strokeRoundedRect(x0, y0, o.w, o.h - 4, 4);
+          // Cabeçalho com marca esmeralda e emblema
+          g.fillStyle(0x064e3b, 1);
+          g.fillRect(x0 + 2, y0 + 2, o.w - 4, o.h * 0.16);
           g.fillStyle(0x10b981, 1);
-          g.fillRect(x0 + 4, y0 + o.h * 0.05, o.w - 8, o.h * 0.08); // green brand stripe
-          // Three price rows (diesel / gasoline 95 / gasoline 98)
-          const rowH = o.h * 0.26;
-          const rowY = y0 + o.h * 0.2;
-          const prices = [
-            { label: 'Gasóleo', value: '1,749', color: 0xef4444 },     // red
-            { label: 'Gasolina 95', value: '1,799', color: 0xf59e0b }, // amber
-            { label: 'Gasolina 98', value: '1,849', color: 0x22c55e }, // green
+          g.fillRect(x0 + 5, y0 + 5, o.w - 18, o.h * 0.08);
+          g.fillStyle(0xfacc15, 1);
+          g.fillCircle(x0 + o.w - 8, y0 + 2 + o.h * 0.08, 3.5);
+          // 3 linhas de combustível (Gasóleo / 95 / 98) com visores LED
+          const rowH = o.h * 0.23;
+          const rowY = y0 + o.h * 0.21;
+          const rows = [
+            { badge: 0x0f172a, led: 0xfacc15 }, // Gasóleo
+            { badge: 0x16a34a, led: 0x4ade80 }, // Gasolina 95
+            { badge: 0x2563eb, led: 0x38bdf8 }, // Gasolina 98
           ];
           for (let i = 0; i < 3; i++) {
             const ry = rowY + i * rowH;
-            // Row background
-            g.fillStyle(i % 2 === 0 ? 0x0f172a : 0x1e293b, 1);
-            g.fillRect(x0, ry, o.w, rowH - 2);
-            // Label (left-aligned blocks)
-            g.fillStyle(0x94a3b8, 1);
-            g.fillRect(x0 + 6, ry + 4, o.w - 40, 3);
-            // Price digits (right-aligned glowing blocks)
-            g.fillStyle(prices[i].color, 1);
-            g.fillRect(x0 + o.w - 34, ry + 4, 28, rowH * 0.5);
-            g.fillRect(x0 + o.w - 34, ry + rowH * 0.6, 20, rowH * 0.3);
-            // Unit
-            g.fillStyle(0x64748b, 1);
-            g.fillRect(x0 + o.w - 12, ry + rowH * 0.55, 6, 6);
+            g.fillStyle(0x0b1016, 1);
+            g.fillRect(x0 + 3, ry, o.w - 6, rowH - 3);
+            // Etiqueta de tipo à esquerda
+            g.fillStyle(rows[i].badge, 1);
+            g.fillRect(x0 + 5, ry + 3, 9, rowH - 9);
+            // Dígitos estilo 7 segmentos à direita
+            g.fillStyle(rows[i].led, 0.95);
+            for (let d = 0; d < 4; d++) {
+              const dx = x0 + 18 + d * 6.5;
+              g.fillRect(dx, ry + 4, 4.2, 2);
+              g.fillRect(dx, ry + rowH * 0.42, 4.2, 1.8);
+              g.fillRect(dx, ry + rowH - 8, 4.2, 2);
+              g.fillRect(dx + (d % 2 === 0 ? 2.4 : 0), ry + 4, 1.8, rowH - 10);
+            }
           }
-          // Footer band
-          g.fillStyle(0x10b981, 1);
-          g.fillRect(x0, y0 + o.h * 0.98, o.w, o.h * 0.02);
           break;
         }
         case 'lamp': {
@@ -2078,48 +2551,123 @@ export class WorldObjects {
           break;
         }
         case 'sign': {
-          // Traffic-sign variants — compact 2D discs/plates at ground level
+          // Sinais de trânsito — chapas nítidas e fiéis à descrição do catálogo
+          const s = Math.max(12, Math.min(o.w, o.h) * 0.55);
+          const u = s / 12;
+
           if (o.variant === 'yield') {
-            // Cedência: white downward triangle with a thick red border
-            g.fillStyle(0xdc2626, 1);
-            g.fillTriangle(o.x - 10, o.y - 8, o.x + 10, o.y - 8, o.x, o.y + 9);
+            // Cedência de passagem (B1): triângulo invertido branco com orla vermelha
+            g.fillStyle(0x000000, 0.3);
+            g.fillTriangle(o.x - 11 * u + 1.5, o.y - 9.5 * u + 2, o.x + 11 * u + 1.5, o.y - 9.5 * u + 2, o.x + 1.5, o.y + 11 * u + 2);
             g.fillStyle(0xffffff, 1);
-            g.fillTriangle(o.x - 6.5, o.y - 4.5, o.x + 6.5, o.y - 4.5, o.x, o.y + 4.5);
+            g.fillTriangle(o.x - 11.5 * u, o.y - 10 * u, o.x + 11.5 * u, o.y - 10 * u, o.x, o.y + 11.2 * u);
+            g.fillStyle(0xdc2626, 1);
+            g.fillTriangle(o.x - 10.2 * u, o.y - 9 * u, o.x + 10.2 * u, o.y - 9 * u, o.x, o.y + 9.6 * u);
+            g.fillStyle(0xffffff, 1);
+            g.fillTriangle(o.x - 5.6 * u, o.y - 5.8 * u, o.x + 5.6 * u, o.y - 5.8 * u, o.x, o.y + 4.4 * u);
           } else if (o.variant === 'speed') {
-            // Limite de velocidade: white disc, red ring, dark digits hint
+            // Limite de velocidade 50 (C13): disco branco, anel vermelho e dígitos "50"
+            g.fillStyle(0x000000, 0.3);
+            g.fillCircle(o.x + 1.5, o.y + 2, s);
+            g.fillStyle(0x0f172a, 1);
+            g.fillCircle(o.x, o.y, s + 0.8 * u);
             g.fillStyle(0xffffff, 1);
-            g.beginPath(); g.arc(o.x, o.y, 10, 0, Math.PI * 2); g.fillPath();
-            g.lineStyle(3.5, 0xdc2626, 1);
-            g.beginPath(); g.arc(o.x, o.y, 8.2, 0, Math.PI * 2); g.strokePath();
-            g.fillStyle(0x11151b, 1);
-            g.fillRect(o.x - 5.5, o.y - 4, 3, 8);
-            g.fillRect(o.x + 1, o.y - 4, 3.5, 8);
-            g.fillRect(o.x - 5.5, o.y - 1, 10, 2);
+            g.fillCircle(o.x, o.y, s);
+            g.lineStyle(2.8 * u, 0xdc2626, 1);
+            g.strokeCircle(o.x, o.y, 10.1 * u);
+            // Dígito "5"
+            g.fillStyle(0x0f172a, 1);
+            g.fillRect(o.x - 5.6 * u, o.y - 4.3 * u, 4.5 * u, 1.6 * u);
+            g.fillRect(o.x - 5.6 * u, o.y - 4.3 * u, 1.6 * u, 4.7 * u);
+            g.fillRect(o.x - 5.6 * u, o.y - 0.8 * u, 4.6 * u, 1.6 * u);
+            g.fillRect(o.x - 2.6 * u, o.y - 0.8 * u, 1.6 * u, 4.9 * u);
+            g.fillRect(o.x - 5.6 * u, o.y + 2.7 * u, 4.6 * u, 1.6 * u);
+            // Dígito "0"
+            g.fillRect(o.x + 1.1 * u, o.y - 4.3 * u, 4.2 * u, 1.6 * u);
+            g.fillRect(o.x + 1.1 * u, o.y + 2.7 * u, 4.2 * u, 1.6 * u);
+            g.fillRect(o.x + 0.8 * u, o.y - 3.7 * u, 1.6 * u, 7.4 * u);
+            g.fillRect(o.x + 4.0 * u, o.y - 3.7 * u, 1.6 * u, 7.4 * u);
           } else if (o.variant === 'no_parking') {
-            // Proibido estacionar: blue disc, red ring + diagonal slash
-            g.fillStyle(0x2563eb, 1);
-            g.beginPath(); g.arc(o.x, o.y, 10, 0, Math.PI * 2); g.fillPath();
-            g.lineStyle(2.5, 0xdc2626, 1);
-            g.beginPath(); g.arc(o.x, o.y, 8.7, 0, Math.PI * 2); g.strokePath();
-            g.lineBetween(o.x - 6, o.y + 6, o.x + 6, o.y - 6);
+            // Proibido estacionar (C15): disco azul, orla vermelha e faixa diagonal (\)
+            g.fillStyle(0x000000, 0.3);
+            g.fillCircle(o.x + 1.5, o.y + 2, s);
+            g.fillStyle(0xffffff, 1);
+            g.fillCircle(o.x, o.y, s + 0.7 * u);
+            g.fillStyle(0x1d4ed8, 1);
+            g.fillCircle(o.x, o.y, s);
+            g.lineStyle(2.6 * u, 0xdc2626, 1);
+            g.strokeCircle(o.x, o.y, 10.2 * u);
+            g.lineBetween(o.x - 6.4 * u, o.y - 6.4 * u, o.x + 6.4 * u, o.y + 6.4 * u);
           } else if (o.variant === 'pedestrian') {
-            // Passagem de peões: blue square + white pictogram
-            g.fillStyle(0x2563eb, 1);
-            g.fillRect(o.x - 9, o.y - 9, 18, 18);
+            // Passagem para peões (H7): quadrado azul com triângulo branco, passadeira e peão
+            g.fillStyle(0x000000, 0.3);
+            g.fillRoundedRect(o.x - s + 1.5, o.y - s + 2, s * 2, s * 2, 2.5 * u);
             g.fillStyle(0xffffff, 1);
-            g.fillCircle(o.x, o.y - 4.5, 2.2);       // head
-            g.fillRect(o.x - 1.5, o.y - 2.5, 3, 5);  // torso
-            g.fillRect(o.x - 1.5, o.y + 2.5, 2, 5);  // legs
-            g.fillRect(o.x + 0.5, o.y + 2.5, 2, 5);
+            g.fillRoundedRect(o.x - s, o.y - s, s * 2, s * 2, 2.5 * u);
+            g.fillStyle(0x1d4ed8, 1);
+            g.fillRoundedRect(o.x - 10.7 * u, o.y - 10.7 * u, 21.4 * u, 21.4 * u, 1.8 * u);
+            g.fillStyle(0xffffff, 1);
+            g.fillTriangle(o.x, o.y - 8.5 * u, o.x - 8.6 * u, o.y + 7.8 * u, o.x + 8.6 * u, o.y + 7.8 * u);
+            // Passadeira (3 traços) + silhueta de peão
+            g.fillStyle(0x0f172a, 1);
+            g.fillRect(o.x - 4.4 * u, o.y + 5.2 * u, 2.0 * u, 1.6 * u);
+            g.fillRect(o.x - 1.0 * u, o.y + 5.2 * u, 2.0 * u, 1.6 * u);
+            g.fillRect(o.x + 2.4 * u, o.y + 5.2 * u, 2.0 * u, 1.6 * u);
+            g.fillCircle(o.x - 0.2 * u, o.y - 3.0 * u, 1.5 * u);
+            g.lineStyle(1.6 * u, 0x0f172a, 1);
+            g.lineBetween(o.x - 0.2 * u, o.y - 1.5 * u, o.x + 0.2 * u, o.y + 1.8 * u);
+            g.lineBetween(o.x + 0.2 * u, o.y + 1.6 * u, o.x - 2.4 * u, o.y + 4.8 * u);
+            g.lineBetween(o.x + 0.2 * u, o.y + 1.6 * u, o.x + 2.5 * u, o.y + 4.8 * u);
+            g.lineStyle(1.2 * u, 0x0f172a, 1);
+            g.lineBetween(o.x - 2.3 * u, o.y + 0.5 * u, o.x + 2.2 * u, o.y - 0.5 * u);
           } else if (o.variant === 'stop') {
-            g.fillStyle(0xdc2626, 1);
-            g.beginPath(); g.arc(o.x, o.y, 10, 0, Math.PI * 2); g.fillPath();
+            // STOP (B2): octógono vermelho com rebordo branco e letras "STOP"
+            const drawOct = (cx: number, cy: number, rad: number) => {
+              g.beginPath();
+              for (let k = 0; k < 8; k++) {
+                const a = (Math.PI / 8) + k * (Math.PI / 4);
+                const px = cx + Math.cos(a) * rad;
+                const py = cy + Math.sin(a) * rad;
+                if (k === 0) g.moveTo(px, py); else g.lineTo(px, py);
+              }
+              g.closePath();
+              g.fillPath();
+            };
+            g.fillStyle(0x000000, 0.3);
+            drawOct(o.x + 1.5, o.y + 2, s * 1.04);
+            g.fillStyle(0x0f172a, 1);
+            drawOct(o.x, o.y, s * 1.06);
             g.fillStyle(0xffffff, 1);
-            g.fillRect(o.x - 5, o.y - 1.5, 10, 3);
+            drawOct(o.x, o.y, s);
+            g.fillStyle(0xdc2626, 1);
+            drawOct(o.x, o.y, s * 0.86);
+            // Letras "STOP" em branco nítido
+            g.fillStyle(0xffffff, 1);
+            // S
+            g.fillRect(o.x - 7.4 * u, o.y - 3.2 * u, 3.0 * u, 1.1 * u);
+            g.fillRect(o.x - 7.4 * u, o.y - 3.2 * u, 1.1 * u, 3.6 * u);
+            g.fillRect(o.x - 7.4 * u, o.y - 0.55 * u, 3.0 * u, 1.1 * u);
+            g.fillRect(o.x - 5.5 * u, o.y - 0.55 * u, 1.1 * u, 3.75 * u);
+            g.fillRect(o.x - 7.4 * u, o.y + 2.1 * u, 3.0 * u, 1.1 * u);
+            // T
+            g.fillRect(o.x - 3.5 * u, o.y - 3.2 * u, 3.0 * u, 1.1 * u);
+            g.fillRect(o.x - 2.55 * u, o.y - 3.2 * u, 1.1 * u, 6.4 * u);
+            // O
+            g.fillRect(o.x + 0.5 * u, o.y - 3.2 * u, 1.1 * u, 6.4 * u);
+            g.fillRect(o.x + 2.4 * u, o.y - 3.2 * u, 1.1 * u, 6.4 * u);
+            g.fillRect(o.x + 0.5 * u, o.y - 3.2 * u, 3.0 * u, 1.1 * u);
+            g.fillRect(o.x + 0.5 * u, o.y + 2.1 * u, 3.0 * u, 1.1 * u);
+            // P
+            g.fillRect(o.x + 4.4 * u, o.y - 3.2 * u, 1.1 * u, 6.4 * u);
+            g.fillRect(o.x + 4.4 * u, o.y - 3.2 * u, 3.0 * u, 1.1 * u);
+            g.fillRect(o.x + 4.4 * u, o.y - 0.3 * u, 3.0 * u, 1.1 * u);
+            g.fillRect(o.x + 6.3 * u, o.y - 3.2 * u, 1.1 * u, 4.0 * u);
           } else {
-            // Generic warning plate (fallback)
-            g.fillStyle(0xef4444, 1);
-            g.fillRect(o.x - 9, o.y - 9, 18, 18);
+            // Placa triangular de perigo (fallback genérico)
+            g.fillStyle(0xffffff, 1);
+            g.fillTriangle(o.x, o.y - 10 * u, o.x - 10.5 * u, o.y + 9 * u, o.x + 10.5 * u, o.y + 9 * u);
+            g.lineStyle(2.4 * u, 0xdc2626, 1);
+            g.strokeTriangle(o.x, o.y - 10 * u, o.x - 10.5 * u, o.y + 9 * u, o.x + 10.5 * u, o.y + 9 * u);
           }
           break;
         }
@@ -2155,23 +2703,53 @@ export class WorldObjects {
     });
   }
 
-  /** Overhead parts rendered above vehicles (e.g. streetlamp arm & luminaire head). */
+  /** Overhead parts rendered above vehicles (streetlamp luminaires & translucent service-station canopies). */
   private drawOverhead(g: Phaser.GameObjects.Graphics, o: WorldObject) {
-    if (o.type !== 'lamp') return;
-    this.rotated(g, o, () => {
-      // Cantilevered galvanized steel arm (+x toward carriageway)
-      g.lineStyle(3.5, 0xcbd5e1, 1);
-      g.lineBetween(o.x + 2, o.y, o.x + 20, o.y);
-      g.lineStyle(1, 0x475569, 0.7);
-      g.lineBetween(o.x + 3, o.y + 1.5, o.x + 19, o.y + 1.5);
-      // Cobra-head luminaire housing + visible daylight diffuser lens
-      g.fillStyle(0xe2e8f0, 1);
-      g.fillRoundedRect(o.x + 14, o.y - 5, 14, 10, 4);
-      g.lineStyle(1.5, 0x334155, 0.95);
-      g.strokeRoundedRect(o.x + 14, o.y - 5, 14, 10, 4);
-      g.fillStyle(0xfef3c7, 0.9);
-      g.fillCircle(o.x + 22, o.y, 3.4);
-    });
+    if (o.type === 'lamp') {
+      this.rotated(g, o, () => {
+        // Cantilevered galvanized steel arm (+x toward carriageway)
+        g.lineStyle(3.5, 0xcbd5e1, 1);
+        g.lineBetween(o.x + 2, o.y, o.x + 20, o.y);
+        g.lineStyle(1, 0x475569, 0.7);
+        g.lineBetween(o.x + 3, o.y + 1.5, o.x + 19, o.y + 1.5);
+        // Cobra-head luminaire housing + visible daylight diffuser lens
+        g.fillStyle(0xe2e8f0, 1);
+        g.fillRoundedRect(o.x + 14, o.y - 5, 14, 10, 4);
+        g.lineStyle(1.5, 0x334155, 0.95);
+        g.strokeRoundedRect(o.x + 14, o.y - 5, 14, 10, 4);
+        g.fillStyle(0xfef3c7, 0.9);
+        g.fillCircle(o.x + 22, o.y, 3.4);
+      });
+      return;
+    }
+
+    if (o.type === 'gas_canopy') {
+      this.rotated(g, o, () => {
+        const x0 = o.x - o.w / 2, y0 = o.y - o.h / 2;
+        // Cobertura translúcida em vidro/policarbonato para manter os camiões visíveis por baixo
+        g.fillStyle(0xbae6fd, 0.16);
+        g.fillRoundedRect(x0, y0, o.w, o.h, 6);
+        // Painéis translúcidos da clarabóia + vigas metálicas estruturais
+        g.lineStyle(2, 0x64748b, 0.55);
+        const bays = Math.max(2, Math.round(o.w / 140));
+        for (let i = 1; i < bays; i++) {
+          const bx = x0 + (o.w * i) / bays;
+          g.lineBetween(bx, y0 + 6, bx, y0 + o.h - 6);
+        }
+        g.lineBetween(x0 + 6, o.y, x0 + o.w - 6, o.y);
+        // Moldura periférica opaca (testa da estação de serviço em ardósia + faixa esmeralda)
+        g.lineStyle(8, 0x1e293b, 0.92);
+        g.strokeRoundedRect(x0, y0, o.w, o.h, 6);
+        g.lineStyle(3, 0x10b981, 0.95);
+        g.strokeRoundedRect(x0 - 1, y0 - 1, o.w + 2, o.h + 2, 6);
+        // Réguas luminosas LED suspensas sobre cada pista
+        for (let i = 0; i < bays; i++) {
+          const lx = x0 + (o.w * (i + 0.5)) / bays;
+          g.fillStyle(0xfef3c7, 0.65);
+          g.fillRoundedRect(lx - 4, y0 + 26, 8, o.h - 52, 3);
+        }
+      });
+    }
   }
 
   public destroy() {
