@@ -2,13 +2,21 @@ import type { TrailerType } from '../entities/Trailer';
 
 export type ImpactZone = 'front' | 'side' | 'rear';
 
+export interface RearLightsDamageState {
+  brakeLeft: number;    // 0..100 (left stop / tail lamp)
+  brakeRight: number;   // 0..100 (right stop / tail lamp)
+  reverseLeft: number;  // 0..100 (left reverse lamp)
+  reverseRight: number; // 0..100 (right reverse lamp)
+}
+
 export interface TruckDamageState {
   engine: number;     // 0..100 (affects torque & top speed)
   steering: number;   // 0..100 (affects steering response & slight pull)
   chassis: number;    // 0..100 (structural integrity)
-  lights: number;     // 0..100 (combined headlight integrity)
+  lights: number;     // 0..100 (combined front + rear lighting integrity)
   leftLight: number;  // 0..100 (front-left headlamp)
   rightLight: number; // 0..100 (front-right headlamp)
+  rearLights: RearLightsDamageState;
   overall: number;    // 0..100 (weighted average)
   steerPull: number;  // -1..+1 lateral bias direction from off-center hits
 }
@@ -79,6 +87,15 @@ export const MIN_TRUCK_DAMAGE_SPEED_PXS = 22; // ~4.9 km/h — gentle parking bu
 export const MIN_TRAILER_DAMAGE_SPEED_PXS = 24;
 export const DAMAGE_COOLDOWN_MS = 200;
 
+export function createCleanRearLightsDamage(): RearLightsDamageState {
+  return {
+    brakeLeft: 100,
+    brakeRight: 100,
+    reverseLeft: 100,
+    reverseRight: 100,
+  };
+}
+
 export function createCleanTruckDamage(): TruckDamageState {
   return {
     engine: 100,
@@ -87,9 +104,17 @@ export function createCleanTruckDamage(): TruckDamageState {
     lights: 100,
     leftLight: 100,
     rightLight: 100,
+    rearLights: createCleanRearLightsDamage(),
     overall: 100,
     steerPull: 0,
   };
+}
+
+export function computeCombinedLightsHealth(d: TruckDamageState): number {
+  const frontAvg = (d.leftLight + d.rightLight) * 0.5;
+  const r = d.rearLights;
+  const rearAvg = (r.brakeLeft + r.brakeRight + r.reverseLeft + r.reverseRight) * 0.25;
+  return Math.round(frontAvg * 0.65 + rearAvg * 0.35);
 }
 
 export function computeTruckOverall(d: TruckDamageState): number {
@@ -103,13 +128,13 @@ export interface HeadlightOutput {
 }
 
 /**
- * Computes live output for a single headlight from its 0..100 health:
+ * Computes live output for a single lamp (headlight, brake/tail, or reverse) from its 0..100 health:
  *  - >= 75%: full illumination (1.0)
- *  - 45..74%: noticeably dimmed/cracked beam (0.35..1.0)
+ *  - 45..74%: noticeably dimmed/cracked lamp (0.35..1.0)
  *  - 25..44%: failing electrical contact (intermittent flicker at 0.42)
  *  - < 25%: smashed / burnt out — completely OFF (stops illuminating)
  */
-export function computeHeadlightOutput(health: number, nowMs: number, phaseOffset: number): HeadlightOutput {
+export function computeLampOutput(health: number, nowMs: number, phaseOffset: number): HeadlightOutput {
   if (health < 25) {
     return { active: false, factor: 0 };
   }
@@ -123,6 +148,8 @@ export function computeHeadlightOutput(health: number, nowMs: number, phaseOffse
   return { active: true, factor: 1.0 };
 }
 
+export const computeHeadlightOutput = computeLampOutput;
+
 /**
  * Resolves live left/right headlight output while remaining compatible with direct
  * `damage.lights` overrides (e.g. tests setting `damage.lights = 0`).
@@ -131,14 +158,74 @@ export function getEffectiveHeadlightStates(
   d: TruckDamageState,
   nowMs: number,
 ): { left: HeadlightOutput; right: HeadlightOutput } {
-  const avg = Math.round((d.leftLight + d.rightLight) * 0.5);
-  const manualOverride = Math.abs(avg - Math.round(d.lights)) > 2;
+  const expected = computeCombinedLightsHealth(d);
+  const manualOverride = Math.abs(expected - Math.round(d.lights)) > 2;
   const leftHp = manualOverride ? d.lights : d.leftLight;
   const rightHp = manualOverride ? d.lights : d.rightLight;
   return {
-    left: computeHeadlightOutput(leftHp, nowMs, 0),
-    right: computeHeadlightOutput(rightHp, nowMs, 1.9),
+    left: computeLampOutput(leftHp, nowMs, 0),
+    right: computeLampOutput(rightHp, nowMs, 1.9),
   };
+}
+
+/**
+ * Resolves live rear brake/tail and reverse lamp outputs from a RearLightsDamageState
+ * (optionally falling back to a manual scalar `lights` override when provided).
+ */
+export function getEffectiveRearLightStates(
+  r: RearLightsDamageState,
+  nowMs: number,
+  manualLightsOverride?: number,
+): {
+  brakeLeft: HeadlightOutput;
+  brakeRight: HeadlightOutput;
+  reverseLeft: HeadlightOutput;
+  reverseRight: HeadlightOutput;
+} {
+  const useOverride = manualLightsOverride !== undefined;
+  return {
+    brakeLeft: computeLampOutput(useOverride ? manualLightsOverride : r.brakeLeft, nowMs, 0.7),
+    brakeRight: computeLampOutput(useOverride ? manualLightsOverride : r.brakeRight, nowMs, 2.4),
+    reverseLeft: computeLampOutput(useOverride ? manualLightsOverride : r.reverseLeft, nowMs, 1.3),
+    reverseRight: computeLampOutput(useOverride ? manualLightsOverride : r.reverseRight, nowMs, 3.1),
+  };
+}
+
+export function getTruckEffectiveRearLightStates(d: TruckDamageState, nowMs: number) {
+  const expected = computeCombinedLightsHealth(d);
+  const manualOverride = Math.abs(expected - Math.round(d.lights)) > 2 ? d.lights : undefined;
+  return getEffectiveRearLightStates(d.rearLights, nowMs, manualOverride);
+}
+
+/**
+ * Applies rear impact damage directly to stop/tail and reverse lamps based on
+ * impact speed and lateral offset (corner hits burn out that side faster).
+ */
+export function applyRearLightsImpactDamage(
+  r: RearLightsDamageState,
+  speedPxS: number,
+  sideSign: -1 | 0 | 1,
+  minSpeedPxS: number,
+): void {
+  if (speedPxS < minSpeedPxS) return;
+  const baseHit = Math.min(85, Math.max(8, (speedPxS - minSpeedPxS) * 1.65));
+
+  if (sideSign === -1) {
+    r.brakeLeft = Math.max(0, r.brakeLeft - baseHit * 1.5);
+    r.reverseLeft = Math.max(0, r.reverseLeft - baseHit * 1.2);
+    r.brakeRight = Math.max(0, r.brakeRight - baseHit * 0.15);
+    r.reverseRight = Math.max(0, r.reverseRight - baseHit * 0.15);
+  } else if (sideSign === 1) {
+    r.brakeRight = Math.max(0, r.brakeRight - baseHit * 1.5);
+    r.reverseRight = Math.max(0, r.reverseRight - baseHit * 1.2);
+    r.brakeLeft = Math.max(0, r.brakeLeft - baseHit * 0.15);
+    r.reverseLeft = Math.max(0, r.reverseLeft - baseHit * 0.15);
+  } else {
+    r.brakeLeft = Math.max(0, r.brakeLeft - baseHit * 1.45);
+    r.brakeRight = Math.max(0, r.brakeRight - baseHit * 1.45);
+    r.reverseLeft = Math.max(0, r.reverseLeft - baseHit * 1.45);
+    r.reverseRight = Math.max(0, r.reverseRight - baseHit * 1.45);
+  }
 }
 
 /**
@@ -241,7 +328,7 @@ export function applyTruckImpactDamage(
       state.leftLight = Math.max(0, state.leftLight - baseSeverity * 2.0);
       state.rightLight = Math.max(0, state.rightLight - baseSeverity * 2.0);
     }
-    state.lights = Math.round((state.leftLight + state.rightLight) * 0.5);
+    state.lights = computeCombinedLightsHealth(state);
     if (sideSign !== 0) {
       state.steering = Math.max(0, state.steering - baseSeverity * 0.5);
       state.steerPull = Math.max(-1, Math.min(1, state.steerPull + sideSign * 0.25));
@@ -254,8 +341,10 @@ export function applyTruckImpactDamage(
       state.steerPull = Math.max(-1, Math.min(1, state.steerPull + sideSign * 0.35));
     }
   } else {
-    state.chassis = Math.max(0, state.chassis - baseSeverity * 0.85);
-    state.engine = Math.max(0, state.engine - baseSeverity * 0.25);
+    state.chassis = Math.max(0, state.chassis - baseSeverity * 0.9);
+    state.engine = Math.max(0, state.engine - baseSeverity * 0.2);
+    applyRearLightsImpactDamage(state.rearLights, speedPxS, sideSign, MIN_TRUCK_DAMAGE_SPEED_PXS);
+    state.lights = computeCombinedLightsHealth(state);
   }
 
   state.overall = computeTruckOverall(state);

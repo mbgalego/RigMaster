@@ -17,6 +17,8 @@ import {
   ImpactEvent,
   createCleanTruckDamage,
   getEffectiveHeadlightStates,
+  getEffectiveRearLightStates,
+  getTruckEffectiveRearLightStates,
 } from '../systems/DamageSystem';
 
 export class MainScene extends Phaser.Scene {
@@ -1817,7 +1819,10 @@ export class MainScene extends Phaser.Scene {
         collisions: this.truck.collisionCount + (this.trailer?.impactCount || 0),
         fragileHealth: Math.round(minCargoHealth),
         truckHealth: this.truck.health,
-        truckDamage: { ...this.truck.damage },
+        truckDamage: {
+          ...this.truck.damage,
+          rearLights: { ...this.truck.damage.rearLights },
+        },
         trailerHealth: Math.round(minTrailerHealth),
         cargoHealth: Math.round(minCargoHealth),
         weather: this.garageSystem.getActiveModifier(),
@@ -2780,42 +2785,64 @@ export class MainScene extends Phaser.Scene {
     const rearEntity = this.pupTrailer || this.trailer || this.truck;
     const ra = rearEntity.body.angle;
     const rearLen = rearEntity.length;
+    const rearHw = rearEntity.width / 2;
     const tailX = rearEntity.body.position.x - Math.sin(ra) * (rearLen / 2 - 2);
     const tailY = rearEntity.body.position.y + Math.cos(ra) * (rearLen / 2 - 2);
+    const rRightX = Math.cos(ra);
+    const rRightY = Math.sin(ra);
+
+    const rearOut =
+      rearEntity === this.truck
+        ? getTruckEffectiveRearLightStates(this.truck.damage, this.time.now)
+        : getEffectiveRearLightStates(rearEntity.rearLights, this.time.now);
+
+    const bLeftF = rearOut.brakeLeft.active ? rearOut.brakeLeft.factor : 0;
+    const bRightF = rearOut.brakeRight.active ? rearOut.brakeRight.factor : 0;
+    const brakeFactor = (bLeftF + bRightF) * 0.5;
+    const brakeLatOffset =
+      bLeftF > 0 && bRightF === 0 ? -(rearHw - 8) : bRightF > 0 && bLeftF === 0 ? rearHw - 8 : 0;
 
     if (this.brakeLight) {
-      if (this.truck.isBraking) {
+      if (brakeFactor <= 0) {
+        this.brakeLight.setVisible(false).setIntensity(0);
+      } else if (this.truck.isBraking) {
         this.brakeLight
           .setVisible(true)
-          .setPosition(tailX, tailY)
-          .setRadius(155)
+          .setPosition(tailX + rRightX * brakeLatOffset, tailY + rRightY * brakeLatOffset)
+          .setRadius(155 * (0.58 + 0.42 * brakeFactor))
           .setColor(0xff1e4d)
-          .setIntensity(0.55 + lampFactor * 1.15)
+          .setIntensity((0.55 + lampFactor * 1.15) * brakeFactor)
           .setZ(55);
       } else if (mode !== 'off' && lampFactor > 0.1) {
         this.brakeLight
           .setVisible(true)
-          .setPosition(tailX, tailY)
-          .setRadius(95)
+          .setPosition(tailX + rRightX * brakeLatOffset, tailY + rRightY * brakeLatOffset)
+          .setRadius(95 * (0.58 + 0.42 * brakeFactor))
           .setColor(0xdc2626)
-          .setIntensity(lampFactor * 0.65)
+          .setIntensity(lampFactor * 0.65 * brakeFactor)
           .setZ(45);
       } else {
-        this.brakeLight.setVisible(false);
+        this.brakeLight.setVisible(false).setIntensity(0);
       }
     }
 
+    const rLeftF = rearOut.reverseLeft.active ? rearOut.reverseLeft.factor : 0;
+    const rRightF = rearOut.reverseRight.active ? rearOut.reverseRight.factor : 0;
+    const revFactor = (rLeftF + rRightF) * 0.5;
+    const revLatOffset =
+      rLeftF > 0 && rRightF === 0 ? -(rearHw - 16) : rRightF > 0 && rLeftF === 0 ? rearHw - 16 : 0;
+
     if (this.reverseLight) {
-      if (this.truck.isReversing) {
+      if (this.truck.isReversing && revFactor > 0) {
         this.reverseLight
           .setVisible(true)
-          .setPosition(tailX, tailY)
-          .setRadius(185)
+          .setPosition(tailX + rRightX * revLatOffset, tailY + rRightY * revLatOffset)
+          .setRadius(185 * (0.58 + 0.42 * revFactor))
           .setColor(0xf8fafc)
-          .setIntensity(0.75 + lampFactor * 1.60)
+          .setIntensity((0.75 + lampFactor * 1.60) * revFactor)
           .setZ(62);
       } else {
-        this.reverseLight.setVisible(false);
+        this.reverseLight.setVisible(false).setIntensity(0);
       }
     }
 

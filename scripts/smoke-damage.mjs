@@ -325,7 +325,7 @@ const beamCheck = await page.evaluate(() => {
   // Simulate right-front corner damage knocking rightLight < 25% while left stays healthy
   rig.truck.damage.rightLight = 10;
   rig.truck.damage.leftLight = 95;
-  rig.truck.damage.lights = 53;
+  rig.truck.damage.lights = 69;
   rig.update(performance.now() + 33.3334, 16.6667);
 
   const rightBroken = {
@@ -375,6 +375,116 @@ check(
     beamCheck.restored.leftVis === true &&
     beamCheck.restored.rightVis === true,
   JSON.stringify(beamCheck),
+);
+
+// 10. Rear collisions on solo truck and coupled trailer damage/burn out stop & reverse lights
+const rearLightCheck = await page.evaluate(() => {
+  const rig = window.__rig;
+  rig.timeOfDaySystem.setPeriod('night', true);
+
+  // Part A: Solo truck reversing straight into the north garage solid wall (tail faces north when angle = Math.PI)
+  rig.spawnVehicleRig('solo');
+  const bay = rig.world.repairBays[0];
+  rig.truck.setElevation(0, 0);
+  rig.truck.setHeadlightMode('low');
+  rig.truck.setPosition(bay.x, bay.y + 4, Math.PI); // rear at bay.y - 44, ~23.5px south of garage wall
+  rig.truck.vLong = -54;
+  rig.truck.vx = 0;
+  rig.truck.vy = -54;
+  rig.truck.currentSpeed = -54;
+  rig.matter.body.setVelocity(rig.truck.body, { x: 0, y: -54 / 60 });
+
+  let t = performance.now();
+  rig.truck.setTouchGear('R');
+  rig.truck.setTouchThrottle(1);
+  for (let i = 0; i < 30; i++) {
+    t += 16.6667;
+    rig.update(t, 16.6667);
+    rig.matter.world.step(16.6667);
+  }
+  const truckRearAfter1Hit = { ...rig.truck.damage.rearLights };
+
+  // Burn out completely with second rear hit, then verify brakeLight and reverseLight stay OFF
+  rig.truck.damage.rearLights = { brakeLeft: 0, brakeRight: 0, reverseLeft: 0, reverseRight: 0 };
+  rig.truck.damage.lights = 65;
+  rig.truck.isBraking = true;
+  rig.truck.isReversing = true;
+  rig.update(t + 16.6667, 16.6667);
+  const truckBurnedOut = {
+    brakeVis: rig.brakeLight?.visible ?? null,
+    brakeInt: rig.brakeLight?.intensity ?? 0,
+    revVis: rig.reverseLight?.visible ?? null,
+    revInt: rig.reverseLight?.intensity ?? 0,
+  };
+  rig.truck.setTouchThrottle(0);
+
+  // Part B: Coupled standard trailer reversing straight into the same wall
+  rig.spawnVehicleRig('standard');
+  rig.truck.setElevation(0, 0);
+  rig.trailer.setElevation(0, 0);
+  rig.truck.setHeadlightMode('low');
+  // Orient whole rig tail-north so trailer's rear bumper hits wall
+  rig.truck.setPosition(bay.x, bay.y + 185, Math.PI);
+  rig.trailer.setPosition(bay.x, bay.y + 60, Math.PI);
+  rig.trailer.vx = 0;
+  rig.trailer.vy = -54;
+  rig.truck.vx = 0;
+  rig.truck.vy = -54;
+  rig.truck.vLong = -54;
+  rig.matter.body.setVelocity(rig.trailer.body, { x: 0, y: -54 / 60 });
+  rig.matter.body.setVelocity(rig.truck.body, { x: 0, y: -54 / 60 });
+  rig.truck.setTouchGear('R');
+  rig.truck.setTouchThrottle(1);
+  for (let i = 0; i < 30; i++) {
+    t += 16.6667;
+    rig.update(t, 16.6667);
+    rig.matter.world.step(16.6667);
+  }
+  rig.truck.setTouchThrottle(0);
+  const trailerRearAfter1Hit = { ...rig.trailer.rearLights };
+
+  // Burn out trailer rear lamps and check projected brake/reverse lights stay OFF
+  rig.trailer.rearLights = { brakeLeft: 0, brakeRight: 0, reverseLeft: 0, reverseRight: 0 };
+  rig.truck.isBraking = true;
+  rig.truck.isReversing = true;
+  rig.update(t + 33.3334, 16.6667);
+  const trailerBurnedOut = {
+    brakeVis: rig.brakeLight?.visible ?? null,
+    brakeInt: rig.brakeLight?.intensity ?? 0,
+    revVis: rig.reverseLight?.visible ?? null,
+    revInt: rig.reverseLight?.intensity ?? 0,
+  };
+
+  // Repair structure restores trailer rear lamps
+  rig.trailer.repairStructure();
+  rig.truck.repairToFull();
+  rig.truck.isBraking = true;
+  rig.truck.isReversing = true;
+  rig.update(t + 50, 16.6667);
+  const trailerRestored = {
+    brakeVis: rig.brakeLight?.visible ?? null,
+    brakeInt: rig.brakeLight?.intensity ?? 0,
+    revVis: rig.reverseLight?.visible ?? null,
+    revInt: rig.reverseLight?.intensity ?? 0,
+  };
+
+  return { truckRearAfter1Hit, truckBurnedOut, trailerRearAfter1Hit, trailerBurnedOut, trailerRestored };
+});
+check(
+  'colisão traseira no camião e atrelado danifica e funde stops e luzes de marcha-atrás',
+  Math.min(rearLightCheck.truckRearAfter1Hit.brakeLeft, rearLightCheck.truckRearAfter1Hit.brakeRight) < 100 &&
+    Math.min(rearLightCheck.truckRearAfter1Hit.reverseLeft, rearLightCheck.truckRearAfter1Hit.reverseRight) < 100 &&
+    rearLightCheck.truckBurnedOut.brakeVis === false &&
+    rearLightCheck.truckBurnedOut.revVis === false &&
+    Math.min(rearLightCheck.trailerRearAfter1Hit.brakeLeft, rearLightCheck.trailerRearAfter1Hit.brakeRight) < 100 &&
+    Math.min(rearLightCheck.trailerRearAfter1Hit.reverseLeft, rearLightCheck.trailerRearAfter1Hit.reverseRight) < 100 &&
+    rearLightCheck.trailerBurnedOut.brakeVis === false &&
+    rearLightCheck.trailerBurnedOut.revVis === false &&
+    rearLightCheck.trailerRestored.brakeVis === true &&
+    rearLightCheck.trailerRestored.brakeInt > 0 &&
+    rearLightCheck.trailerRestored.revVis === true &&
+    rearLightCheck.trailerRestored.revInt > 0,
+  JSON.stringify(rearLightCheck),
 );
 
 check('zero erros JS durante o smoke test de danos', pageErrors.length === 0, pageErrors.slice(0, 2).join(' | '));

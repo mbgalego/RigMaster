@@ -66,7 +66,7 @@ Simulador de condução pesada em **2D Top-Down** (Phaser 4 + Matter.js + React 
     - Classificação local do contacto (`front` / `side` / `rear` + lado esquerdo/direito): colisões frontais castigam mais motor/faróis, laterais afetam direção/chassi e introduzem um ligeiro desvio (`steerPull`), e traseiras afetam chassi/acoplamento.
   - **Consequências mecânicas, visuais e de condução**:
     - Degradação progressiva de binário e velocidade máxima com o desgaste do motor; abaixo de `15%` entra em **modo de emergência** (torque e velocidade reduzidos) com som de motor a falhar e fumo de capô (`engine < 40%`).
-    - Riscos/amolgadelas visíveis na pintura da cabine (`<80%` e `<45%`) e dano independente por farol (`leftLight` / `rightLight`): perda gradual entre `45–74%`, falha intermitente entre `25–44%` e corte completo do feixe WebGL (`visible = false`, `intensity = 0`) e da lente abaixo de `25%`.
+    - Riscos/amolgadelas visíveis na pintura da cabine (`<80%` e `<45%`) e dano independente por farol (`leftLight` / `rightLight`) e luzes traseiras (`rearLights`: stops/presença e marcha-atrás no camião e nos atrelados): perda gradual entre `45–74%`, falha intermitente entre `25–44%` e corte completo das luzes WebGL e das lentes abaixo de `25%`.
     - Desgaste contínuo em condução abusiva: *jackknife* sustentado (`> 0.6s`), curvas a alta velocidade com G lateral elevado e condução rápida em terra batida/fora de estrada afetam `trailerHealth` e `cargoHealth`.
   - **Baias de Reparação nas Oficinas (`garage`) sem microgestão financeira**:
     - `WorldObjects.repairBays` expõe as baias frontais de todos os edifícios `building` com `variant: 'garage'` (incluindo os integrados em compostos), com destaque pulsante ao aproximar (`≤ 160 px`).

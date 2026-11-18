@@ -3,7 +3,12 @@ import { COLLISION_CAT, COLLISION_MASK } from '../physics/CollisionLayers';
 import {
   CARGO_PROFILES,
   DAMAGE_COOLDOWN_MS,
+  MIN_TRAILER_DAMAGE_SPEED_PXS,
   ImpactEvent,
+  RearLightsDamageState,
+  createCleanRearLightsDamage,
+  applyRearLightsImpactDamage,
+  getEffectiveRearLightStates,
   applyTrailerAndCargoImpact,
   computeNormalImpactSpeedPxS,
   localizeImpact,
@@ -45,6 +50,7 @@ export class Trailer {
   public isFragile: boolean = false;
   public trailerHealth: number = 100;
   public cargoHealth: number = 100;
+  public rearLights: RearLightsDamageState = createCleanRearLightsDamage();
   public maxGForce: number = 0;
   public impactCount: number = 0;
   public lastImpactEvent: ImpactEvent | null = null;
@@ -67,6 +73,8 @@ export class Trailer {
   /** Repairs structural trailer damage (garages fix structure, not damaged cargo in transit). */
   public repairStructure(): void {
     this.trailerHealth = 100;
+    this.rearLights = createCleanRearLightsDamage();
+    this.lastTrailerLightsKey = '';
     this.lastImpactEvent = null;
   }
 
@@ -74,6 +82,8 @@ export class Trailer {
   public resetIntegrity(): void {
     this.trailerHealth = 100;
     this.cargoHealth = 100;
+    this.rearLights = createCleanRearLightsDamage();
+    this.lastTrailerLightsKey = '';
     this.maxGForce = 0;
     this.lastImpactEvent = null;
   }
@@ -232,28 +242,34 @@ export class Trailer {
         this.maxGForce = Math.max(this.maxGForce, speedPxS / 60);
 
         if (now - this.lastDamageAt >= DAMAGE_COOLDOWN_MS) {
+          const support = pair.collision?.supports?.[0];
+          const contactPt = support
+            ? { x: support.x, y: support.y }
+            : {
+                x: (this.body.position.x + (other.position?.x ?? this.body.position.x)) * 0.5,
+                y: (this.body.position.y + (other.position?.y ?? this.body.position.y)) * 0.5,
+              };
+          const { zone, sideSign } = localizeImpact(
+            this.body.position.x,
+            this.body.position.y,
+            this.body.angle,
+            this.width,
+            this.length,
+            contactPt,
+          );
+
           const profile = CARGO_PROFILES[this.type] || CARGO_PROFILES.standard;
           const res = applyTrailerAndCargoImpact(this.trailerHealth, this.cargoHealth, profile, speedPxS);
           this.trailerHealth = res.trailerHealth;
           this.cargoHealth = res.cargoHealth;
 
-          if (res.trailerLoss > 0 || res.cargoLoss > 0 || speedPxS >= 24) {
+          if (zone === 'rear' && speedPxS >= MIN_TRAILER_DAMAGE_SPEED_PXS) {
+            applyRearLightsImpactDamage(this.rearLights, speedPxS, sideSign, MIN_TRAILER_DAMAGE_SPEED_PXS);
+            this.lastTrailerLightsKey = '';
+          }
+
+          if (res.trailerLoss > 0 || res.cargoLoss > 0 || speedPxS >= MIN_TRAILER_DAMAGE_SPEED_PXS) {
             this.lastDamageAt = now;
-            const support = pair.collision?.supports?.[0];
-            const contactPt = support
-              ? { x: support.x, y: support.y }
-              : {
-                  x: (this.body.position.x + (other.position?.x ?? this.body.position.x)) * 0.5,
-                  y: (this.body.position.y + (other.position?.y ?? this.body.position.y)) * 0.5,
-                };
-            const { zone, sideSign } = localizeImpact(
-              this.body.position.x,
-              this.body.position.y,
-              this.body.angle,
-              this.width,
-              this.length,
-              contactPt,
-            );
             this.lastImpactEvent = {
               x: contactPt.x,
               y: contactPt.y,
@@ -514,7 +530,9 @@ export class Trailer {
   private drawTrailerLights(isBraking: boolean) {
     const truck = (this.scene as unknown as { truck?: { headlightMode: string } })?.truck;
     const runningLightsOn = truck ? truck.headlightMode !== 'off' : false;
-    const key = `${isBraking ? 1 : 0}|${this.isReversing ? 1 : 0}|${runningLightsOn ? 1 : 0}`;
+    const rearOut = getEffectiveRearLightStates(this.rearLights, this.scene.time?.now ?? 0);
+    const q = (o: { active: boolean; factor: number }) => (o.active ? Math.round(o.factor * 10) : -1);
+    const key = `${isBraking ? 1 : 0}|${this.isReversing ? 1 : 0}|${runningLightsOn ? 1 : 0}|${q(rearOut.brakeLeft)}|${q(rearOut.brakeRight)}|${q(rearOut.reverseLeft)}|${q(rearOut.reverseRight)}`;
     if (key === this.lastTrailerLightsKey) return;
     this.lastTrailerLightsKey = key;
 
@@ -524,30 +542,41 @@ export class Trailer {
     const hw = this.width / 2;
     const hl = this.length / 2;
 
-    if (isBraking) {
-      g.fillStyle(0xff0055, 1);
-      g.fillCircle(-hw + 8, hl - 2, 5);
-      g.fillCircle(hw - 8, hl - 2, 5);
-    } else if (runningLightsOn) {
-      g.fillStyle(0xef4444, 0.9);
-      g.fillCircle(-hw + 8, hl - 2, 3.5);
-      g.fillCircle(hw - 8, hl - 2, 3.5);
-    } else {
-      g.fillStyle(0x7f1d1d, 0.75);
-      g.fillCircle(-hw + 8, hl - 2, 3);
-      g.fillCircle(hw - 8, hl - 2, 3);
-    }
+    const drawBrakeLamp = (x: number, out: { active: boolean; factor: number }) => {
+      if (!out.active) {
+        // Burnt out / broken stop & tail lamp stays dark even when braking
+        g.fillStyle(0x27272a, 0.9);
+        g.fillCircle(x, hl - 2, 3);
+      } else if (isBraking) {
+        g.fillStyle(out.factor < 0.85 ? 0xbe123c : 0xff0055, 0.45 + 0.55 * out.factor);
+        g.fillCircle(x, hl - 2, 3.5 + 1.5 * out.factor);
+      } else if (runningLightsOn) {
+        g.fillStyle(0xef4444, 0.35 + 0.55 * out.factor);
+        g.fillCircle(x, hl - 2, 3.5);
+      } else {
+        g.fillStyle(0x7f1d1d, 0.75);
+        g.fillCircle(x, hl - 2, 3);
+      }
+    };
+    drawBrakeLamp(-hw + 8, rearOut.brakeLeft);
+    drawBrakeLamp(hw - 8, rearOut.brakeRight);
 
     // Reverse lamps (white): same style as the truck's, next to the brake lamps
-    if (this.isReversing) {
-      g.fillStyle(0xffffff, 1);
-      g.fillCircle(-hw + 16, hl - 2, 5);
-      g.fillCircle(hw - 16, hl - 2, 5);
-    } else {
-      g.fillStyle(0x64748b, 0.75);
-      g.fillCircle(-hw + 16, hl - 2, 3);
-      g.fillCircle(hw - 16, hl - 2, 3);
-    }
+    const drawReverseLamp = (x: number, out: { active: boolean; factor: number }) => {
+      if (!out.active) {
+        // Burnt out / broken reverse lamp stays dark even when reversing
+        g.fillStyle(0x1e293b, 0.9);
+        g.fillCircle(x, hl - 2, 3);
+      } else if (this.isReversing) {
+        g.fillStyle(out.factor < 0.85 ? 0x94a3b8 : 0xffffff, 0.45 + 0.55 * out.factor);
+        g.fillCircle(x, hl - 2, 3.5 + 1.5 * out.factor);
+      } else {
+        g.fillStyle(0x64748b, 0.75);
+        g.fillCircle(x, hl - 2, 3);
+      }
+    };
+    drawReverseLamp(-hw + 16, rearOut.reverseLeft);
+    drawReverseLamp(hw - 16, rearOut.reverseRight);
   }
 
   public setPosition(x: number, y: number, angle: number = 0) {

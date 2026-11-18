@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { COLLISION_CAT, COLLISION_MASK } from '../physics/CollisionLayers';
 import {
+  RearLightsDamageState,
   TruckDamageState,
   ImpactEvent,
   DAMAGE_COOLDOWN_MS,
@@ -9,6 +10,7 @@ import {
   localizeImpact,
   applyTruckImpactDamage,
   getEffectiveHeadlightStates,
+  getTruckEffectiveRearLightStates,
 } from '../systems/DamageSystem';
 
 export type HeadlightMode = 'off' | 'low' | 'high';
@@ -90,11 +92,16 @@ export class Truck {
     return this.damage.engine <= 15;
   }
 
+  public get rearLights(): RearLightsDamageState {
+    return this.damage.rearLights;
+  }
+
   /** Restores all mechanical and structural subsystems to 100%. */
   public repairToFull(): void {
     this.damage = createCleanTruckDamage();
     this.impactDetected = false;
     this.lastImpactEvent = null;
+    this.lastLightsKey = '';
     if (this.lastChassisVisualTier !== 3) {
       this.lastChassisVisualTier = 3;
       this.drawTruck();
@@ -838,15 +845,13 @@ export class Truck {
   }
 
   private drawLights() {
+    const nowMs = this.scene.time?.now ?? 0;
     const dark = this.ambientDarkness;
-    const { left: leftOut, right: rightOut } = getEffectiveHeadlightStates(
-      this.damage,
-      this.scene.time?.now ?? 0,
-    );
-    const leftQ = leftOut.active ? Math.round(leftOut.factor * 10) : -1;
-    const rightQ = rightOut.active ? Math.round(rightOut.factor * 10) : -1;
+    const { left: leftOut, right: rightOut } = getEffectiveHeadlightStates(this.damage, nowMs);
+    const rearOut = getTruckEffectiveRearLightStates(this.damage, nowMs);
+    const q = (o: { active: boolean; factor: number }) => (o.active ? Math.round(o.factor * 10) : -1);
     const darkQ = dark > 0.05 ? Math.round(dark * 20) : 0;
-    const key = `${this.headlightMode}|${this.isBraking ? 1 : 0}|${this.isReversing ? 1 : 0}|${darkQ}|${leftQ}|${rightQ}`;
+    const key = `${this.headlightMode}|${this.isBraking ? 1 : 0}|${this.isReversing ? 1 : 0}|${darkQ}|${q(leftOut)}|${q(rightOut)}|${q(rearOut.brakeLeft)}|${q(rearOut.brakeRight)}|${q(rearOut.reverseLeft)}|${q(rearOut.reverseRight)}`;
     if (key === this.lastLightsKey) return;
     this.lastLightsKey = key;
 
@@ -905,31 +910,40 @@ export class Truck {
       g.fillCircle(hw - 8, -hl + 2, 3.5);
     }
 
-    if (this.isBraking) {
-      g.fillStyle(0xff0055, 1);
-      g.fillCircle(-hw + 8, hl - 2, 5);
-      g.fillCircle(hw - 8, hl - 2, 5);
-    } else if (this.headlightMode !== 'off') {
-      g.fillStyle(0xef4444, 0.9);
-      g.fillCircle(-hw + 8, hl - 2, 3.5);
-      g.fillCircle(hw - 8, hl - 2, 3.5);
-    } else {
-      g.fillStyle(0x7f1d1d, 0.75);
-      g.fillCircle(-hw + 8, hl - 2, 3);
-      g.fillCircle(hw - 8, hl - 2, 3);
-    }
+    const drawRearBrakeLamp = (x: number, out: { active: boolean; factor: number }) => {
+      if (!out.active) {
+        // Burnt out / broken stop & tail lamp stays dark even when braking
+        g.fillStyle(0x27272a, 0.9);
+        g.fillCircle(x, hl - 2, 3);
+      } else if (this.isBraking) {
+        g.fillStyle(out.factor < 0.85 ? 0xbe123c : 0xff0055, 0.45 + 0.55 * out.factor);
+        g.fillCircle(x, hl - 2, 3.5 + 1.5 * out.factor);
+      } else if (this.headlightMode !== 'off') {
+        g.fillStyle(0xef4444, 0.35 + 0.55 * out.factor);
+        g.fillCircle(x, hl - 2, 3.5);
+      } else {
+        g.fillStyle(0x7f1d1d, 0.75);
+        g.fillCircle(x, hl - 2, 3);
+      }
+    };
+    drawRearBrakeLamp(-hw + 8, rearOut.brakeLeft);
+    drawRearBrakeLamp(hw - 8, rearOut.brakeRight);
 
-    if (this.isReversing) {
-      // Reverse lamps (white): lit while reverse gear is engaged — same style as the brake lamps
-      g.fillStyle(0xffffff, 1);
-      g.fillCircle(-hw + 16, hl - 2, 5);
-      g.fillCircle(hw - 16, hl - 2, 5);
-    } else {
-      // Unlit reverse lens next to the brake lamps
-      g.fillStyle(0x64748b, 0.75);
-      g.fillCircle(-hw + 16, hl - 2, 3);
-      g.fillCircle(hw - 16, hl - 2, 3);
-    }
+    const drawRearReverseLamp = (x: number, out: { active: boolean; factor: number }) => {
+      if (!out.active) {
+        // Burnt out / broken reverse lamp stays dark even in reverse gear
+        g.fillStyle(0x1e293b, 0.9);
+        g.fillCircle(x, hl - 2, 3);
+      } else if (this.isReversing) {
+        g.fillStyle(out.factor < 0.85 ? 0x94a3b8 : 0xffffff, 0.45 + 0.55 * out.factor);
+        g.fillCircle(x, hl - 2, 3.5 + 1.5 * out.factor);
+      } else {
+        g.fillStyle(0x64748b, 0.75);
+        g.fillCircle(x, hl - 2, 3);
+      }
+    };
+    drawRearReverseLamp(-hw + 16, rearOut.reverseLeft);
+    drawRearReverseLamp(hw - 16, rearOut.reverseRight);
   }
 
   public setPosition(x: number, y: number, angle: number = 0) {

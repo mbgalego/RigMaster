@@ -492,7 +492,8 @@ export default function App() {
         const t = scene.telemetry;
         const telKey =
           `${t.speedKmh}|${t.isReversing ? 1 : 0}|${t.truckHealth}|${t.trailerHealth}|${t.cargoHealth}|` +
-          `${t.truckDamage.engine},${t.truckDamage.steering},${t.truckDamage.chassis},${t.truckDamage.lights},${Math.round(t.truckDamage.leftLight)},${Math.round(t.truckDamage.rightLight)}|` +
+          `${t.truckDamage.engine},${t.truckDamage.steering},${t.truckDamage.chassis},${t.truckDamage.lights},${Math.round(t.truckDamage.leftLight)},${Math.round(t.truckDamage.rightLight)},` +
+          `${Math.round(t.truckDamage.rearLights.brakeLeft)},${Math.round(t.truckDamage.rearLights.brakeRight)},${Math.round(t.truckDamage.rearLights.reverseLeft)},${Math.round(t.truckDamage.rearLights.reverseRight)}|` +
           `${Math.round(t.fuelPercent * 10)}|${Math.round(t.fuelLevel * 10)}|${t.isOutOfFuel ? 1 : 0}|` +
           `${t.isRefuelling ? 1 : 0}|${t.isRepairing ? 1 : 0}|${t.isJackknifed ? 1 : 0}|` +
           `${t.headlightMode}|${t.timePeriod}|${t.timeClock}|${t.autoTimeCycle ? 1 : 0}|${t.timeRealTime ? 1 : 0}|` +
@@ -825,7 +826,7 @@ export default function App() {
                   className={`flex items-center gap-1 whitespace-nowrap font-mono text-xs font-black ${
                     telemetry.truckHealth < 35 ? 'text-red-400 animate-pulse' : telemetry.truckHealth < 70 ? 'text-amber-300' : 'text-slate-200'
                   }`}
-                  title={`Integridade do Camião — Motor ${telemetry.truckDamage.engine}% · Direção ${telemetry.truckDamage.steering}% · Chassi ${telemetry.truckDamage.chassis}% · Faróis ${telemetry.truckDamage.lights}% (E:${Math.round(telemetry.truckDamage.leftLight)}% D:${Math.round(telemetry.truckDamage.rightLight)}%)`}
+                  title={`Integridade do Camião — Motor ${telemetry.truckDamage.engine}% · Direção ${telemetry.truckDamage.steering}% · Chassi ${telemetry.truckDamage.chassis}% · Luzes ${telemetry.truckDamage.lights}% (Fr E:${Math.round(telemetry.truckDamage.leftLight)}% D:${Math.round(telemetry.truckDamage.rightLight)}% · Tr Stop:${Math.round(Math.min(telemetry.truckDamage.rearLights.brakeLeft, telemetry.truckDamage.rearLights.brakeRight))}% MA:${Math.round(Math.min(telemetry.truckDamage.rearLights.reverseLeft, telemetry.truckDamage.rearLights.reverseRight))}%)`}
                 >
                   <Wrench className="w-3 h-3" />
                   {telemetry.truckHealth}%
