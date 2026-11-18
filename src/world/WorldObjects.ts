@@ -127,6 +127,7 @@ export function compoundPartWorldObject(compound: WorldObject, index: number): W
 }
 
 interface DockZone { x: number; y: number; width: number; height: number; requiredAngle: number; id: string; }
+export interface RepairBay { x: number; y: number; width: number; height: number; angle: number; garageId: string; }
 
 const OBJ_CELL = 1024;
 const CHUNK_PX = 2048;
@@ -187,6 +188,8 @@ export class WorldObjects {
   private lastCY = NaN;
   private nextId = 1;
   private lightClock = 0;
+  private cachedRepairBays: RepairBay[] = [];
+  private cachedRepairBaysVersion = -1;
 
   /** World position of the streetlamp luminaire head (offset +22px along its arm). */
   public static getLampBulbPos(o: WorldObject): { x: number; y: number } {
@@ -361,6 +364,44 @@ export class WorldObjects {
       }
     }
     return zones;
+  }
+
+  /** Service / repair bay centered in front of every 'garage' building's roller doors (+y local face). */
+  public get repairBays(): RepairBay[] {
+    if (this.cachedRepairBaysVersion === this.version) {
+      return this.cachedRepairBays;
+    }
+    const bays: RepairBay[] = [];
+    const pushGarage = (gObj: WorldObject) => {
+      if (gObj.type !== 'building' || gObj.variant !== 'garage') return;
+      const c = Math.cos(gObj.angle), s = Math.sin(gObj.angle);
+      const bayDepth = 115;
+      const ly = gObj.h / 2 + bayDepth * 0.5 + 10;
+      bays.push({
+        x: Math.round(gObj.x - s * ly),
+        y: Math.round(gObj.y + c * ly),
+        width: Math.min(Math.max(120, gObj.w - 20), 230),
+        height: bayDepth,
+        angle: gObj.angle,
+        garageId: gObj.id,
+      });
+    };
+    for (const o of this.objects) {
+      if (o.type === 'building' && o.variant === 'garage') {
+        pushGarage(o);
+      } else if (o.type === 'compound') {
+        const parts = compoundParts(o);
+        for (let i = 0; i < parts.length; i++) {
+          if (parts[i].type === 'building' && parts[i].variant === 'garage') {
+            const partObj = compoundPartWorldObject(o, i);
+            if (partObj) pushGarage(partObj);
+          }
+        }
+      }
+    }
+    this.cachedRepairBays = bays;
+    this.cachedRepairBaysVersion = this.version;
+    return bays;
   }
 
   public get parkingPads(): Array<{ x: number; y: number; angle: number; type: TrailerType }> {
@@ -2233,6 +2274,11 @@ export class WorldObjects {
             }
             g.lineStyle(2, 0x0f172a, 1);
             g.strokeRect(x0, y0, o.w, o.h);
+            // Baia de serviço frontal estática (desenhada no cache dos sólidos)
+            const svcW = Math.min(Math.max(120, o.w - 20), 230);
+            const svcH = 115;
+            g.lineStyle(1.5, 0x38bdf8, 0.25);
+            g.strokeRect(o.x - svcW / 2, y0 + o.h + 10, svcW, svcH);
             break;
           }
 

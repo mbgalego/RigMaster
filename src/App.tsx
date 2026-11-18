@@ -13,6 +13,7 @@ import { TimeOfDaySystem, TimePeriod } from './systems/TimeOfDaySystem';
 import type { RoadSurface } from './systems/RoadNetwork';
 import type { AddObjectSpec } from './scenes/EditorScene';
 import { compoundParts } from './world/WorldObjects';
+import { createCleanTruckDamage } from './systems/DamageSystem';
 import { TouchControls } from './components/TouchControls';
 import {
   RotateCcw,
@@ -330,6 +331,10 @@ export default function App() {
     isReversing: false,
     collisions: 0,
     fragileHealth: 100,
+    truckHealth: 100,
+    truckDamage: createCleanTruckDamage(),
+    trailerHealth: 100,
+    cargoHealth: 100,
     weather: 'clear',
     headlightMode: 'low',
     timePeriod: 'day',
@@ -342,8 +347,10 @@ export default function App() {
     fuelPercent: 100,
     isOutOfFuel: false,
     isRefuelling: false,
+    isRepairing: false,
     fuelPrice: 1.749,
     nearbyPump: null,
+    nearbyRepairBay: null,
     coupling: { decoupleReady: false, coupledName: null, blocked: null, notice: null, noticeKind: 'info', noticeSeq: 0 },
   });
 
@@ -355,8 +362,10 @@ export default function App() {
   // Track previous warning states to detect transitions (edge-triggered toasts)
   const prevOutOfFuel = useRef(telemetry.isOutOfFuel);
   const prevNearbyPump = useRef(telemetry.nearbyPump);
+  const prevNearbyRepairBay = useRef(telemetry.nearbyRepairBay);
   const prevJackknifed = useRef(telemetry.isJackknifed);
-  const prevFragileHealth = useRef(telemetry.fragileHealth);
+  const prevCargoHealth = useRef(telemetry.cargoHealth);
+  const prevEngineHealth = useRef(telemetry.truckDamage.engine);
 
   const addToast = (text: string, kind: 'info' | 'success' | 'blocked' | 'fuel' = 'info', durationMs = 3000) => {
     const id = ++toastIdRef.current;
@@ -382,6 +391,19 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [telemetry.nearbyPump]);
 
+  // Nearby garage repair bay → toast (only when damaged and entering bay)
+  useEffect(() => {
+    if (
+      !prevNearbyRepairBay.current &&
+      telemetry.nearbyRepairBay &&
+      (telemetry.truckHealth < 100 || telemetry.trailerHealth < 100)
+    ) {
+      addToast('Oficina por perto — toque ou E para reparar', 'info');
+    }
+    prevNearbyRepairBay.current = telemetry.nearbyRepairBay;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [telemetry.nearbyRepairBay, telemetry.truckHealth, telemetry.trailerHealth]);
+
   // Jackknife → toast
   useEffect(() => {
     if (!prevJackknifed.current && telemetry.isJackknifed) {
@@ -391,14 +413,26 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [telemetry.isJackknifed]);
 
-  // Fragile health warning → toast
+  // Engine damage / limp mode warnings → toast
   useEffect(() => {
-    if (prevFragileHealth.current > telemetry.fragileHealth && telemetry.fragileHealth <= 50) {
-      addToast(`Carga frágil danificada: ${telemetry.fragileHealth}%`, 'blocked');
+    const engine = telemetry.truckDamage?.engine ?? 100;
+    if (prevEngineHealth.current > 15 && engine <= 15) {
+      addToast('Motor em modo de emergência — repare numa garagem', 'fuel', 4200);
+    } else if (prevEngineHealth.current > 40 && engine <= 40) {
+      addToast(`Motor danificado (${engine}%) — procure uma garagem`, 'blocked', 3600);
     }
-    prevFragileHealth.current = telemetry.fragileHealth;
+    prevEngineHealth.current = engine;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [telemetry.fragileHealth]);
+  }, [telemetry.truckDamage?.engine]);
+
+  // Cargo health warning → toast
+  useEffect(() => {
+    if (prevCargoHealth.current > telemetry.cargoHealth && telemetry.cargoHealth <= 50) {
+      addToast(`Carga danificada: ${telemetry.cargoHealth}%`, 'blocked');
+    }
+    prevCargoHealth.current = telemetry.cargoHealth;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [telemetry.cargoHealth]);
 
   useEffect(() => {
     const n = telemetry.coupling?.notice;
@@ -444,6 +478,9 @@ export default function App() {
     });
 
     // Telemetry polling loop from MainScene
+    let lastTelKey = '';
+    let lastEditorFlag: boolean | null = null;
+    let lastExamKey = '';
     const interval = setInterval(() => {
       const scene = getMainScene();
       const edScene = getEditorScene();
@@ -452,9 +489,33 @@ export default function App() {
           scene.world.restoredFromDraft = false;
           addToast('Mapa restaurado a partir do browser storage', 'success', 4000);
         }
-        setTelemetry({ ...scene.telemetry });
-        setIsEditorMode(scene.isEditorMode);
-        setActiveExam(licSys.getActiveExam());
+        const t = scene.telemetry;
+        const telKey =
+          `${t.speedKmh}|${t.isReversing ? 1 : 0}|${t.truckHealth}|${t.trailerHealth}|${t.cargoHealth}|` +
+          `${t.truckDamage.engine},${t.truckDamage.steering},${t.truckDamage.chassis},${t.truckDamage.lights},${Math.round(t.truckDamage.leftLight)},${Math.round(t.truckDamage.rightLight)}|` +
+          `${Math.round(t.fuelPercent * 10)}|${Math.round(t.fuelLevel * 10)}|${t.isOutOfFuel ? 1 : 0}|` +
+          `${t.isRefuelling ? 1 : 0}|${t.isRepairing ? 1 : 0}|${t.isJackknifed ? 1 : 0}|` +
+          `${t.headlightMode}|${t.timePeriod}|${t.timeClock}|${t.autoTimeCycle ? 1 : 0}|${t.timeRealTime ? 1 : 0}|` +
+          `${t.nearbyPump ? `${t.nearbyPump.x},${t.nearbyPump.y}` : ''}|` +
+          `${t.nearbyRepairBay ? `${t.nearbyRepairBay.x},${t.nearbyRepairBay.y}` : ''}|` +
+          `${t.coupling.noticeSeq}|${t.coupling.decoupleReady ? 1 : 0}|${t.coupling.coupledName ?? ''}|${t.coupling.blocked ?? ''}`;
+        if (telKey !== lastTelKey) {
+          lastTelKey = telKey;
+          setTelemetry({ ...t });
+        }
+        if (scene.isEditorMode !== lastEditorFlag) {
+          lastEditorFlag = scene.isEditorMode;
+          setIsEditorMode(scene.isEditorMode);
+        }
+        const ex = licSys.getActiveExam();
+        const examKey =
+          ex.active || ex.isPassed || ex.isFailed
+            ? `${ex.active}|${ex.isPassed}|${ex.isFailed}|${Math.ceil(ex.remainingTime)}|${ex.collisionCount}|${ex.inDockZone}|${Math.round(ex.dockAlignmentDeg)}|${ex.dockHoldSec.toFixed(1)}`
+            : 'idle';
+        if (examKey !== lastExamKey) {
+          lastExamKey = examKey;
+          setActiveExam(ex);
+        }
         const activeZoom =
           (scene.isEditorMode ? edScene?.cameras?.main?.zoom : scene.cameras?.main?.zoom) ?? 1;
         const roundedZoom = Math.round(activeZoom * 100) / 100;
@@ -757,6 +818,20 @@ export default function App() {
             <span className={`font-mono text-xs font-black ${telemetry.isReversing ? 'text-amber-400' : 'text-cyan-400'}`}>
               {telemetry.isReversing ? 'R' : 'D'}
             </span>
+            {telemetry.truckHealth < 100 && (
+              <>
+                <div className="w-px h-3 bg-white/20" />
+                <span
+                  className={`flex items-center gap-1 whitespace-nowrap font-mono text-xs font-black ${
+                    telemetry.truckHealth < 35 ? 'text-red-400 animate-pulse' : telemetry.truckHealth < 70 ? 'text-amber-300' : 'text-slate-200'
+                  }`}
+                  title={`Integridade do Camião — Motor ${telemetry.truckDamage.engine}% · Direção ${telemetry.truckDamage.steering}% · Chassi ${telemetry.truckDamage.chassis}% · Faróis ${telemetry.truckDamage.lights}% (E:${Math.round(telemetry.truckDamage.leftLight)}% D:${Math.round(telemetry.truckDamage.rightLight)}%)`}
+                >
+                  <Wrench className="w-3 h-3" />
+                  {telemetry.truckHealth}%
+                </span>
+              </>
+            )}
             <div className="w-px h-3 bg-white/20" />
             <span className="flex items-center gap-1 whitespace-nowrap" title="Hora do mundo (24h)">
               <PeriodIcon className="w-3 h-3 text-amber-300" />
@@ -2110,6 +2185,10 @@ export default function App() {
         coupling={telemetry.coupling}
         fuelPercent={telemetry.fuelPercent}
         fuelLevel={telemetry.fuelLevel}
+        truckHealth={telemetry.truckHealth}
+        trailerHealth={telemetry.trailerHealth}
+        cargoHealth={telemetry.cargoHealth}
+        nearbyRepairBay={telemetry.nearbyRepairBay}
         headlightMode={telemetry.headlightMode}
         onToggleLowBeam={() => {
           const scene = getMainScene();
@@ -2122,6 +2201,10 @@ export default function App() {
         onDecouple={() => {
           const scene = getMainScene();
           if (scene) scene.decoupleAction();
+        }}
+        onRepair={() => {
+          const scene = getMainScene();
+          if (scene) scene.tryRepair();
         }}
       />
     </div>

@@ -1,0 +1,384 @@
+/**
+ * Truck, Trailer & Cargo Damage / Garage Repair smoke test (headless Playwright).
+ * Prerequisites: npm run dev running on http://localhost:3000
+ *
+ * Verifies:
+ *  1. Initial truck, trailer structure and cargo integrity all start at 100%, and garage repair bays exist.
+ *  2. Slow parking/dock nudge (< 22 px/s) causes zero truck and cargo damage.
+ *  3. High-speed frontal crash into a building damages truck subsystems (engine, lights, chassis, overall)
+ *     and updates HUD telemetry cleanly without errors.
+ *  4. Engine limp mode (engine <= 15%) significantly caps top speed compared to a healthy truck.
+ *  5. Cargo sensitivity profiles: fragile_glass loses more cargoHealth than standard on equivalent impact.
+ *  6. Sustained jackknife (> 0.6s) causes continuous trailer & cargo wear.
+ *  7. Stopping on a garage repair bay and pressing E repairs truck & trailerHealth to 100%
+ *     while preserving in-transit cargoHealth damage.
+ *  8. Respawn (R / resetVehicleToSpawn) restores truck, trailer and cargo to 100%.
+ */
+import fs from 'node:fs';
+import { chromium } from 'playwright';
+
+const URL = process.env.SMOKE_URL || 'http://localhost:3000';
+let failures = 0;
+const check = (name, ok, detail = '') => {
+  console.log(`${ok ? '✅' : '❌'} ${name}${detail ? ' — ' + detail : ''}`);
+  if (!ok) failures++;
+};
+
+const fallbackExe = '/ms-playwright/chrome-headless-shell-linux64/chrome-headless-shell';
+const executablePath = !fs.existsSync(chromium.executablePath()) && fs.existsSync(fallbackExe) ? fallbackExe : undefined;
+const browser = await chromium.launch(executablePath ? { executablePath } : {});
+const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+const pageErrors = [];
+page.on('pageerror', (e) => pageErrors.push(String(e)));
+
+await page.goto(URL, { waitUntil: 'domcontentloaded' });
+await page.waitForFunction(() => !!window.__rig, { timeout: 30000 });
+await page.waitForTimeout(1500);
+
+const stepSim = (opts) =>
+  page.evaluate(({ frames, throttle = 1, steer = 0, reverse = false }) => {
+    const rig = window.__rig;
+    const tr = rig.truck;
+    tr.setTouchGear(reverse ? 'R' : 'D');
+    tr.setTouchHandbrake(false);
+    tr.setTouchThrottle(throttle);
+    tr.setTouchBrake(0);
+    tr.setTouchSteer(steer);
+    tr.fuelLevel = tr.fuelCapacity;
+    tr.isOutOfFuel = false;
+
+    let t = performance.now();
+    for (let i = 0; i < frames; i++) {
+      t += 16.6667;
+      rig.update(t, 16.6667);
+      rig.matter.world.step(16.6667);
+    }
+    tr.setTouchThrottle(0);
+    tr.setTouchSteer(0);
+    return {
+      truckHealth: rig.truck.health,
+      engine: Math.round(rig.truck.damage.engine),
+      lights: Math.round(rig.truck.damage.lights),
+      chassis: Math.round(rig.truck.damage.chassis),
+      steering: Math.round(rig.truck.damage.steering),
+      vLong: Math.round(rig.truck.vLong),
+      isLimp: rig.truck.isLimpMode,
+      trailerHealth: rig.trailer ? Math.round(rig.trailer.trailerHealth) : 100,
+      cargoHealth: rig.trailer ? Math.round(rig.trailer.cargoHealth) : 100,
+      telemetry: rig.telemetry,
+    };
+  }, opts);
+
+// 1. Clean initial integrity & repair bays loaded
+const initState = await page.evaluate(() => {
+  const rig = window.__rig;
+  return {
+    truckHealth: rig.truck.health,
+    trailerHealth: rig.trailer?.trailerHealth ?? null,
+    cargoHealth: rig.trailer?.cargoHealth ?? null,
+    repairBays: rig.world.repairBays.length,
+    firstBay: rig.world.repairBays[0] ?? null,
+  };
+});
+check(
+  'integridade inicial a 100% e oficinas disponíveis no mapa',
+  initState.truckHealth === 100 && initState.trailerHealth === 100 && initState.cargoHealth === 100 && initState.repairBays >= 1,
+  `bays=${initState.repairBays}`,
+);
+
+// 2. Slow parking nudge (< 22 px/s) into the first garage building wall deals ZERO damage
+await page.evaluate(() => {
+  const rig = window.__rig;
+  const bay = rig.world.repairBays[0];
+  // Position truck facing north right outside the garage wall (bay sits ~67px below wall bottom)
+  rig.spawnVehicleRig('solo');
+  rig.truck.setElevation(0, 0);
+  rig.truck.setPosition(bay.x, bay.y + 10, 0); // facing North toward garage building
+  rig.truck.vLong = 12;
+  rig.truck.vx = 0;
+  rig.truck.vy = -12;
+  rig.truck.currentSpeed = 12;
+});
+const nudgeRes = await stepSim({ frames: 35, throttle: 0.08, steer: 0 });
+check(
+  'toque lento de estacionamento (< 22 px/s) causa zero dano ao camião',
+  nudgeRes.truckHealth === 100 && nudgeRes.engine === 100,
+  `health=${nudgeRes.truckHealth}%, v=${nudgeRes.vLong}`,
+);
+
+// 3. High-speed frontal crash into the same garage building causes localized front damage (engine/lights/chassis)
+await page.evaluate(() => {
+  const rig = window.__rig;
+  const bay = rig.world.repairBays[0];
+  rig.truck.repairToFull();
+  rig.truck.setElevation(0, 0);
+  rig.truck.setPosition(bay.x, bay.y + 40, 0); // facing North straight into garage solid body
+  rig.truck.vLong = 155;
+  rig.truck.vx = 0;
+  rig.truck.vy = -155;
+  rig.truck.currentSpeed = 155;
+  rig.matter.body.setVelocity(rig.truck.body, { x: 0, y: -155 / 60 });
+});
+const crashRes = await stepSim({ frames: 24, throttle: 1, steer: 0 });
+check(
+  'colisão frontal rápida reduz integridade (motor, luzes e geral)',
+  crashRes.truckHealth < 100 && crashRes.engine < 100 && crashRes.lights < 100 && crashRes.telemetry.truckHealth === crashRes.truckHealth,
+  `overall=${crashRes.truckHealth}%, engine=${crashRes.engine}%, lights=${crashRes.lights}%`,
+);
+
+// 4. Engine limp mode (engine <= 15%) caps top speed compared to healthy truck
+const speedComparison = await page.evaluate(() => {
+  const rig = window.__rig;
+  rig.spawnVehicleRig('solo');
+  rig.truck.setElevation(0, 0);
+  rig.truck.setPosition(5760, 4700, Math.PI / 2);
+  rig.truck.setTouchGear('D');
+  rig.truck.setTouchHandbrake(false);
+  rig.truck.setTouchThrottle(1);
+
+  let t = performance.now();
+  for (let i = 0; i < 160; i++) {
+    t += 16.6667;
+    rig.update(t, 16.6667);
+    rig.matter.world.step(16.6667);
+  }
+  const healthyMaxV = rig.truck.vLong;
+
+  // Now put truck in limp mode at same starting line
+  rig.truck.setPosition(5760, 4700, Math.PI / 2);
+  rig.truck.damage.engine = 10;
+  rig.truck.damage.overall = 64;
+  rig.truck.fuelLevel = rig.truck.fuelCapacity;
+  rig.truck.isOutOfFuel = false;
+  rig.truck.setTouchGear('D');
+  rig.truck.setTouchHandbrake(false);
+  rig.truck.setTouchThrottle(1);
+  for (let i = 0; i < 160; i++) {
+    t += 16.6667;
+    rig.update(t, 16.6667);
+    rig.matter.world.step(16.6667);
+  }
+  const limpMaxV = rig.truck.vLong;
+  rig.truck.setTouchThrottle(0);
+  return { healthyMaxV, limpMaxV, isLimp: rig.truck.isLimpMode };
+});
+check(
+  'modo de emergência (motor <= 15%) limita claramente a velocidade máxima',
+  speedComparison.isLimp && speedComparison.limpMaxV > 10 && speedComparison.limpMaxV < speedComparison.healthyMaxV * 0.72,
+  `healthy=${speedComparison.healthyMaxV.toFixed(1)} vs limp=${speedComparison.limpMaxV.toFixed(1)}`,
+);
+
+// 5. Cargo sensitivity profiles: fragile_glass takes heavier damage than standard under identical impact
+const cargoProfileCheck = await page.evaluate(() => {
+  const rig = window.__rig;
+  const runImpact = (rigType) => {
+    rig.spawnVehicleRig(rigType);
+    const bay = rig.world.repairBays[0];
+    // Position trailer back squarely approaching the solid garage body
+    rig.truck.setElevation(0, 0);
+    rig.trailer.setElevation(0, 0);
+    rig.truck.setPosition(bay.x, bay.y + 185, 0);
+    rig.trailer.setPosition(bay.x, bay.y + 55, 0);
+    rig.trailer.vx = 0;
+    rig.trailer.vy = -95;
+    rig.truck.vx = 0;
+    rig.truck.vy = -95;
+    rig.truck.vLong = 95;
+    rig.matter.body.setVelocity(rig.trailer.body, { x: 0, y: -95 / 60 });
+    rig.matter.body.setVelocity(rig.truck.body, { x: 0, y: -95 / 60 });
+
+    let t = performance.now();
+    for (let i = 0; i < 20; i++) {
+      t += 16.6667;
+      rig.update(t, 16.6667);
+      rig.matter.world.step(16.6667);
+    }
+    return {
+      trailerHealth: rig.trailer.trailerHealth,
+      cargoHealth: rig.trailer.cargoHealth,
+    };
+  };
+
+  const std = runImpact('standard');
+  const glass = runImpact('fragile_glass');
+  return { std, glass };
+});
+check(
+  'vidro frágil perde mais integridade de carga do que carga standard no mesmo impacto',
+  cargoProfileCheck.std.cargoHealth < 100 && cargoProfileCheck.glass.cargoHealth < cargoProfileCheck.std.cargoHealth,
+  `standard=${cargoProfileCheck.std.cargoHealth.toFixed(1)}%, glass=${cargoProfileCheck.glass.cargoHealth.toFixed(1)}%`,
+);
+
+// 6. Sustained jackknife (> 0.6s) while moving causes continuous trailer & cargo wear
+const jackknifeWear = await page.evaluate(() => {
+  const rig = window.__rig;
+  rig.spawnVehicleRig('standard');
+  rig.truck.setElevation(0, 0);
+  rig.trailer.setElevation(0, 0);
+  // Orient truck at ~80 deg relative to trailer (jackknife >= 55 deg) and reverse slowly so articulation locks/sustains
+  rig.trailer.setPosition(5620, 4700, 0);
+  rig.truck.setPosition(5620, 4630, Math.PI * 0.45);
+  rig.truck.setTouchGear('R');
+  rig.truck.setTouchHandbrake(false);
+  rig.truck.setTouchThrottle(0.75);
+  rig.truck.setTouchSteer(1);
+  let t = performance.now();
+  for (let i = 0; i < 90; i++) {
+    t += 16.6667;
+    rig.update(t, 16.6667);
+    rig.matter.world.step(16.6667);
+  }
+  rig.truck.setTouchThrottle(0);
+  rig.truck.setTouchSteer(0);
+  return {
+    trailerHealth: rig.trailer.trailerHealth,
+    cargoHealth: rig.trailer.cargoHealth,
+  };
+});
+check(
+  'jackknife sustentado desgasta estrutura do atrelado e carga',
+  jackknifeWear.trailerHealth < 100 && jackknifeWear.cargoHealth < 100,
+  `trailer=${jackknifeWear.trailerHealth.toFixed(1)}%, cargo=${jackknifeWear.cargoHealth.toFixed(1)}%`,
+);
+
+// 7. Garage repair bay + E key repairs truck & trailerHealth to 100%, keeping cargoHealth damaged
+await page.evaluate(() => {
+  const rig = window.__rig;
+  rig.spawnVehicleRig('standard');
+  const bay = rig.world.repairBays[0];
+  rig.truck.setElevation(0, 0);
+  rig.trailer.setElevation(0, 0);
+  rig.truck.setPosition(bay.x, bay.y, Math.PI / 2);
+  rig.trailer.setPosition(bay.x - 131, bay.y, Math.PI / 2);
+  rig.truck.vLong = 0;
+  rig.truck.currentSpeed = 0;
+  rig.matter.body.setVelocity(rig.truck.body, { x: 0, y: 0 });
+  // Inflict damage on truck, trailer structure, and cargo
+  rig.truck.damage.engine = 32;
+  rig.truck.damage.chassis = 48;
+  rig.truck.damage.lights = 50;
+  rig.truck.damage.overall = 42;
+  rig.trailer.trailerHealth = 64;
+  rig.trailer.cargoHealth = 72;
+  rig.update(performance.now() + 16.6667, 16.6667);
+});
+await page.waitForTimeout(150);
+await page.keyboard.press('e');
+await page.waitForTimeout(200);
+const postRepair = await page.evaluate(() => {
+  const rig = window.__rig;
+  rig.update(performance.now() + 16.6667, 16.6667);
+  return {
+    truckHealth: rig.truck.health,
+    engine: rig.truck.damage.engine,
+    trailerHealth: rig.trailer.trailerHealth,
+    cargoHealth: rig.trailer.cargoHealth,
+    telemetryTruck: rig.telemetry.truckHealth,
+    telemetryCargo: rig.telemetry.cargoHealth,
+  };
+});
+check(
+  'oficina (tecla E) repara camião e estrutura do atrelado a 100% mantendo dano na carga',
+  postRepair.truckHealth === 100 &&
+    postRepair.engine === 100 &&
+    postRepair.trailerHealth === 100 &&
+    postRepair.cargoHealth === 72 &&
+    postRepair.telemetryTruck === 100 &&
+    postRepair.telemetryCargo === 72,
+  JSON.stringify(postRepair),
+);
+
+// 8. Respawn (R) resets truck, trailer, and cargo integrity all back to 100%
+await page.keyboard.press('r');
+await page.waitForTimeout(250);
+const postRespawn = await page.evaluate(() => {
+  const rig = window.__rig;
+  rig.update(performance.now() + 16.6667, 16.6667);
+  return {
+    truckHealth: rig.truck.health,
+    trailerHealth: rig.trailer?.trailerHealth ?? 100,
+    cargoHealth: rig.trailer?.cargoHealth ?? 100,
+    fuelPercent: rig.telemetry.fuelPercent,
+  };
+});
+check(
+  'respawn (R) repõe integridade de camião, atrelado, carga e combustível a 100%',
+  postRespawn.truckHealth === 100 && postRespawn.trailerHealth === 100 && postRespawn.cargoHealth === 100 && postRespawn.fuelPercent === 100,
+  JSON.stringify(postRespawn),
+);
+
+// 9. Nighttime WebGL projected ConeLight beams respond to per-headlight damage & shut off when broken
+const beamCheck = await page.evaluate(() => {
+  const rig = window.__rig;
+  rig.timeOfDaySystem.setPeriod('night', true);
+  rig.truck.repairToFull();
+  rig.truck.setHeadlightMode('low');
+  rig.update(performance.now() + 16.6667, 16.6667);
+
+  const healthy = {
+    leftVis: rig.headlightLeft?.visible ?? null,
+    leftInt: rig.headlightLeft?.intensity ?? 0,
+    rightVis: rig.headlightRight?.visible ?? null,
+    rightInt: rig.headlightRight?.intensity ?? 0,
+  };
+
+  // Simulate right-front corner damage knocking rightLight < 25% while left stays healthy
+  rig.truck.damage.rightLight = 10;
+  rig.truck.damage.leftLight = 95;
+  rig.truck.damage.lights = 53;
+  rig.update(performance.now() + 33.3334, 16.6667);
+
+  const rightBroken = {
+    leftVis: rig.headlightLeft?.visible ?? null,
+    leftInt: rig.headlightLeft?.intensity ?? 0,
+    rightVis: rig.headlightRight?.visible ?? null,
+    rightInt: rig.headlightRight?.intensity ?? 0,
+  };
+
+  // Both smashed -> zero projected illumination
+  rig.truck.damage.leftLight = 0;
+  rig.truck.damage.rightLight = 0;
+  rig.truck.damage.lights = 0;
+  rig.update(performance.now() + 50, 16.6667);
+
+  const bothBroken = {
+    leftVis: rig.headlightLeft?.visible ?? null,
+    leftInt: rig.headlightLeft?.intensity ?? 0,
+    rightVis: rig.headlightRight?.visible ?? null,
+    rightInt: rig.headlightRight?.intensity ?? 0,
+  };
+
+  // Repair restores both beams
+  rig.truck.repairToFull();
+  rig.update(performance.now() + 66.6667, 16.6667);
+  const restored = {
+    leftVis: rig.headlightLeft?.visible ?? null,
+    leftInt: rig.headlightLeft?.intensity ?? 0,
+    rightVis: rig.headlightRight?.visible ?? null,
+    rightInt: rig.headlightRight?.intensity ?? 0,
+  };
+
+  return { healthy, rightBroken, bothBroken, restored };
+});
+check(
+  'farol partido deixa de projetar feixe WebGL individualmente e restaura ao reparar',
+  beamCheck.healthy.leftVis === true &&
+    beamCheck.healthy.rightVis === true &&
+    beamCheck.healthy.leftInt > 0 &&
+    beamCheck.healthy.rightInt > 0 &&
+    beamCheck.rightBroken.leftVis === true &&
+    beamCheck.rightBroken.leftInt > 0 &&
+    beamCheck.rightBroken.rightVis === false &&
+    beamCheck.rightBroken.rightInt === 0 &&
+    beamCheck.bothBroken.leftVis === false &&
+    beamCheck.bothBroken.rightVis === false &&
+    beamCheck.restored.leftVis === true &&
+    beamCheck.restored.rightVis === true,
+  JSON.stringify(beamCheck),
+);
+
+check('zero erros JS durante o smoke test de danos', pageErrors.length === 0, pageErrors.slice(0, 2).join(' | '));
+
+await browser.close();
+console.log(failures === 0 ? '\n🔧 TODOS OS TESTES DE DANOS PASSARAM' : `\n🔴 ${failures} TESTE(S) FALHARAM`);
+process.exit(failures === 0 ? 0 : 1);

@@ -1,5 +1,15 @@
 import Phaser from 'phaser';
 import { COLLISION_CAT, COLLISION_MASK } from '../physics/CollisionLayers';
+import {
+  TruckDamageState,
+  ImpactEvent,
+  DAMAGE_COOLDOWN_MS,
+  createCleanTruckDamage,
+  computeNormalImpactSpeedPxS,
+  localizeImpact,
+  applyTruckImpactDamage,
+  getEffectiveHeadlightStates,
+} from '../systems/DamageSystem';
 
 export type HeadlightMode = 'off' | 'low' | 'high';
 
@@ -62,6 +72,35 @@ export class Truck {
   public collisionCount: number = 0;
   public headlightMode: HeadlightMode = 'low';
   public ambientDarkness: number = 0; // 0 = day, 1 = night (drives volumetric beam scatter)
+
+  // Damage & Mechanical Integrity
+  public damage: TruckDamageState = createCleanTruckDamage();
+  public lastImpactEvent: ImpactEvent | null = null;
+  private lastDamageAt: number = -1000;
+  private lastChassisVisualTier: number = 3; // 3=clean, 2=<80%, 1=<45%, 0=<20%
+  private lastWheelsKey: string = '';
+  private lastLightsKey: string = '';
+  public trailerRollingDragFactor: number = 1.0;
+
+  public get health(): number {
+    return this.damage.overall;
+  }
+
+  public get isLimpMode(): boolean {
+    return this.damage.engine <= 15;
+  }
+
+  /** Restores all mechanical and structural subsystems to 100%. */
+  public repairToFull(): void {
+    this.damage = createCleanTruckDamage();
+    this.impactDetected = false;
+    this.lastImpactEvent = null;
+    if (this.lastChassisVisualTier !== 3) {
+      this.lastChassisVisualTier = 3;
+      this.drawTruck();
+    }
+    this.drawLights();
+  }
 
   public get headlightsOn(): boolean {
     return this.headlightMode !== 'off';
@@ -229,6 +268,7 @@ export class Truck {
 
   private setupCollisions() {
     this.collisionHandler = (event: any) => {
+      const now = this.scene.time?.now ?? performance.now();
       for (const pair of event.pairs) {
         if (pair.bodyA === this.body || pair.bodyB === this.body) {
           const other = pair.bodyA === this.body ? pair.bodyB : pair.bodyA;
@@ -236,11 +276,66 @@ export class Truck {
 
           this.collisionCount++;
           this.impactDetected = true;
-          this.peakImpactSpeed = Math.max(this.peakImpactSpeed, Math.abs(this.vLong));
+
+          const isBodyA = pair.bodyA === this.body;
+          const normal = pair.collision?.normal;
+          const speedPxS = Math.max(
+            computeNormalImpactSpeedPxS(
+              this.vx,
+              this.vy,
+              0,
+              0,
+              this.body.velocity.x,
+              this.body.velocity.y,
+              other.velocity?.x ?? 0,
+              other.velocity?.y ?? 0,
+              normal,
+            ),
+            Math.abs(this.vLong) * 0.5,
+          );
+          this.peakImpactSpeed = Math.max(this.peakImpactSpeed, Math.abs(this.vLong), speedPxS);
+
+          if (now - this.lastDamageAt >= DAMAGE_COOLDOWN_MS) {
+            const support = pair.collision?.supports?.[0];
+            const contactPt = support
+              ? { x: support.x, y: support.y }
+              : {
+                  x: (this.body.position.x + (other.position?.x ?? this.body.position.x)) * 0.5,
+                  y: (this.body.position.y + (other.position?.y ?? this.body.position.y)) * 0.5,
+                };
+            const { zone, sideSign } = localizeImpact(
+              this.body.position.x,
+              this.body.position.y,
+              this.body.angle,
+              this.width,
+              this.length,
+              contactPt,
+            );
+            const dealt = applyTruckImpactDamage(this.damage, speedPxS, zone, sideSign);
+            if (dealt > 0 || speedPxS >= 22) {
+              this.lastDamageAt = now;
+              this.lastImpactEvent = {
+                x: contactPt.x,
+                y: contactPt.y,
+                speedPxS,
+                zone,
+                sideSign,
+                target: 'truck',
+                damageDealt: dealt,
+                cargoDamageDealt: 0,
+              };
+              const tier = this.damage.chassis >= 80 ? 3 : this.damage.chassis >= 45 ? 2 : this.damage.chassis >= 20 ? 1 : 0;
+              if (tier !== this.lastChassisVisualTier) {
+                this.lastChassisVisualTier = tier;
+                this.drawTruck();
+              }
+            }
+          }
 
           // Physical rebound against obstacles
           this.vLong = -this.vLong * 0.2;
           this.currentSpeed = this.vLong;
+          void isBodyA;
         }
       }
     };
@@ -416,13 +511,28 @@ export class Truck {
     const isBrakeActive = keyDown || this.touchInput.brake > 0.05;
     const isHandbrake = keyHandbrake || this.touchInput.handbrake;
 
-    // Surface rolling resistance & longitudinal traction:
+    // Surface rolling resistance & longitudinal traction + mechanical wear scaling:
     // Asphalt roads and paved asphalt pads share roadGrip = 1.0 (zero extra resistance).
     // Cobble (0.88), dirt (0.68), and off-road grass (0.55) add rolling drag and trim top speed.
+    const engineHp = this.damage.engine;
+    const enginePowerScale =
+      engineHp <= 15
+        ? 0.34
+        : engineHp >= 85
+          ? 1.0
+          : Phaser.Math.Linear(0.48, 1.0, (engineHp - 15) / 70);
+    const engineMaxSpeedScale =
+      engineHp <= 15
+        ? 0.35
+        : engineHp >= 85
+          ? 1.0
+          : Phaser.Math.Linear(0.55, 1.0, (engineHp - 15) / 70);
+
     const surfaceLoss = Math.max(0, 1 - this.roadGrip);
-    const rollingMult = 1 + surfaceLoss * 2.2;
-    const effectiveMaxFwd = this.maxForwardSpeed * (1 - surfaceLoss * 0.5);
-    const surfaceAccelScale = 1 - surfaceLoss * 0.35;
+    const rollingMult = (1 + surfaceLoss * 2.2) * this.trailerRollingDragFactor;
+    const effectiveMaxFwd = this.maxForwardSpeed * (1 - surfaceLoss * 0.5) * engineMaxSpeedScale;
+    const effectiveMaxRev = this.maxReverseSpeed * Math.max(0.45, engineMaxSpeedScale);
+    const surfaceAccelScale = (1 - surfaceLoss * 0.35) * enginePowerScale;
     const coastDecel = 18 * rollingMult * dt;
 
     this.isBraking = false;
@@ -460,10 +570,10 @@ export class Truck {
           this.vLong -= this.brakeForce * dt;
           this.isBraking = true;
         } else {
-          const revRatio = Math.min(Math.max(0, -this.vLong) / this.maxReverseSpeed, 1.0);
+          const revRatio = Math.min(Math.max(0, -this.vLong) / effectiveMaxRev, 1.0);
           const revTorqueFactor = Math.max(0.4, 1.0 - revRatio * 0.5);
-          const revAccel = this.engineAccel * 0.65 * revTorqueFactor * throttleMult * (1 - surfaceLoss * 0.25);
-          this.vLong = Math.max(-this.maxReverseSpeed, this.vLong - revAccel * dt);
+          const revAccel = this.engineAccel * 0.65 * revTorqueFactor * throttleMult * (1 - surfaceLoss * 0.25) * enginePowerScale;
+          this.vLong = Math.max(-effectiveMaxRev, this.vLong - revAccel * dt);
         }
       }
     } else if (isBrakeActive) {
@@ -486,10 +596,10 @@ export class Truck {
           this.vLong = Math.max(0, this.vLong - this.brakeForce * dt);
         } else {
           // Slow reverse on S key
-          const revRatio = Math.min(Math.max(0, -this.vLong) / this.maxReverseSpeed, 1.0);
+          const revRatio = Math.min(Math.max(0, -this.vLong) / effectiveMaxRev, 1.0);
           const revTorqueFactor = Math.max(0.4, 1.0 - revRatio * 0.5);
-          const revAccel = this.engineAccel * 0.6 * revTorqueFactor * brakeMult * (1 - surfaceLoss * 0.25);
-          this.vLong = Math.max(-this.maxReverseSpeed, this.vLong - revAccel * dt);
+          const revAccel = this.engineAccel * 0.6 * revTorqueFactor * brakeMult * (1 - surfaceLoss * 0.25) * enginePowerScale;
+          this.vLong = Math.max(-effectiveMaxRev, this.vLong - revAccel * dt);
           this.isReversing = true;
         }
       }
@@ -515,9 +625,16 @@ export class Truck {
     this.vLat *= (1.0 - lateralGripFactor);
     if (Math.abs(this.vLat) < 0.1) this.vLat = 0;
 
-    // 4. Ackermann Steering & Angular Velocity (rad/s)
+    // 4. Ackermann Steering & Angular Velocity (rad/s) with steering wear pull
     const wheelbase = 56;
-    const effectiveSteer = this.currentSteerAngle * totalGrip;
+    const steerWear = Math.max(0, (80 - this.damage.steering) / 80);
+    const speedRollWeight = Phaser.Math.Clamp(Math.abs(this.vLong) / 35, 0, 1);
+    const pullBias = this.damage.steerPull * steerWear * 0.065 * speedRollWeight;
+    const effectiveSteer = Phaser.Math.Clamp(
+      this.currentSteerAngle * totalGrip + pullBias,
+      -this.maxSteerAngle,
+      this.maxSteerAngle,
+    );
     const omega = (this.vLong / wheelbase) * Math.tan(effectiveSteer);
 
     // 5. Apply Natural Velocity to Matter.js Body
@@ -640,9 +757,28 @@ export class Truck {
     g.moveTo(0, 35);
     g.lineTo(0, 49);
     g.strokePath();
+
+    // Subtle visual wear marks when chassis is damaged
+    if (this.damage.chassis < 80) {
+      const wearAlpha = this.damage.chassis < 45 ? 0.85 : 0.55;
+      g.lineStyle(1.8, 0xf97316, wearAlpha);
+      g.lineBetween(-hw + 5, -hl + 3, -hw + 14, -hl + 14);
+      g.lineBetween(hw - 6, -hl + 18, hw - 15, -hl + 28);
+      if (this.damage.chassis < 45) {
+        g.lineStyle(2, 0xef4444, 0.8);
+        g.lineBetween(-hw + 10, -hl + 12, hw - 10, -hl + 24);
+        g.fillStyle(0x1f2937, 0.85);
+        g.fillRect(-6, -hl - 1, 12, 4); // dented front grille
+      }
+    }
   }
 
   private drawWheels() {
+    const steerQ = Math.round(this.currentSteerAngle * 200);
+    const key = `${steerQ}`;
+    if (key === this.lastWheelsKey) return;
+    this.lastWheelsKey = key;
+
     const g = this.wheelGraphics;
     const gRear = this.rearWheelsGraphics;
     g.clear();
@@ -702,6 +838,18 @@ export class Truck {
   }
 
   private drawLights() {
+    const dark = this.ambientDarkness;
+    const { left: leftOut, right: rightOut } = getEffectiveHeadlightStates(
+      this.damage,
+      this.scene.time?.now ?? 0,
+    );
+    const leftQ = leftOut.active ? Math.round(leftOut.factor * 10) : -1;
+    const rightQ = rightOut.active ? Math.round(rightOut.factor * 10) : -1;
+    const darkQ = dark > 0.05 ? Math.round(dark * 20) : 0;
+    const key = `${this.headlightMode}|${this.isBraking ? 1 : 0}|${this.isReversing ? 1 : 0}|${darkQ}|${leftQ}|${rightQ}`;
+    if (key === this.lastLightsKey) return;
+    this.lastLightsKey = key;
+
     const g = this.lightsGraphics;
     const bg = this.beamGraphics;
     g.clear();
@@ -709,34 +857,46 @@ export class Truck {
 
     const hw = this.width / 2;
     const hl = this.length / 2;
-    const dark = this.ambientDarkness;
 
     if (this.headlightMode === 'low') {
       // Ultra-subtle near-lens atmospheric bloom (real cone illumination comes from Phaser 4 WebGL ConeLights)
       if (dark > 0.05) {
-        bg.fillStyle(0xfff2cf, 0.035 * dark);
-        bg.fillCircle(-hw + 8, -hl - 16, 22);
-        bg.fillCircle(hw - 8, -hl - 16, 22);
+        if (leftOut.active) {
+          bg.fillStyle(0xfff2cf, 0.035 * dark * leftOut.factor);
+          bg.fillCircle(-hw + 8, -hl - 16, 22 * (0.65 + 0.35 * leftOut.factor));
+        }
+        if (rightOut.active) {
+          bg.fillStyle(0xfff2cf, 0.035 * dark * rightOut.factor);
+          bg.fillCircle(hw - 8, -hl - 16, 22 * (0.65 + 0.35 * rightOut.factor));
+        }
       }
 
-      // Emissive warm-white headlamp lenses
-      g.fillStyle(0xfff6dc, 1);
+      // Emissive warm-white headlamp lenses (dark glass when broken)
+      g.fillStyle(!leftOut.active ? 0x1e293b : leftOut.factor < 0.85 ? 0x94a3b8 : 0xfff6dc, !leftOut.active ? 0.9 : 0.4 + 0.6 * leftOut.factor);
       g.fillCircle(-hw + 8, -hl + 2, 4);
+      g.fillStyle(!rightOut.active ? 0x1e293b : rightOut.factor < 0.85 ? 0x94a3b8 : 0xfff6dc, !rightOut.active ? 0.9 : 0.4 + 0.6 * rightOut.factor);
       g.fillCircle(hw - 8, -hl + 2, 4);
     } else if (this.headlightMode === 'high') {
       // Subtle near-lens cool-white bloom (real long-range beam comes from Phaser 4 WebGL ConeLights)
       if (dark > 0.05) {
-        bg.fillStyle(0xe8f4ff, 0.055 * dark);
-        bg.fillCircle(-hw + 8, -hl - 24, 30);
-        bg.fillCircle(hw - 8, -hl - 24, 30);
-        bg.fillStyle(0xffffff, 0.04 * dark);
-        bg.fillCircle(-hw + 8, -hl - 8, 14);
-        bg.fillCircle(hw - 8, -hl - 8, 14);
+        if (leftOut.active) {
+          bg.fillStyle(0xe8f4ff, 0.055 * dark * leftOut.factor);
+          bg.fillCircle(-hw + 8, -hl - 24, 30 * (0.65 + 0.35 * leftOut.factor));
+          bg.fillStyle(0xffffff, 0.04 * dark * leftOut.factor);
+          bg.fillCircle(-hw + 8, -hl - 8, 14 * (0.65 + 0.35 * leftOut.factor));
+        }
+        if (rightOut.active) {
+          bg.fillStyle(0xe8f4ff, 0.055 * dark * rightOut.factor);
+          bg.fillCircle(hw - 8, -hl - 24, 30 * (0.65 + 0.35 * rightOut.factor));
+          bg.fillStyle(0xffffff, 0.04 * dark * rightOut.factor);
+          bg.fillCircle(hw - 8, -hl - 8, 14 * (0.65 + 0.35 * rightOut.factor));
+        }
       }
 
-      // Intense cool-white high-beam lenses
-      g.fillStyle(0xffffff, 1);
+      // Intense cool-white high-beam lenses (dark glass when broken)
+      g.fillStyle(!leftOut.active ? 0x1e293b : leftOut.factor < 0.85 ? 0x94a3b8 : 0xffffff, !leftOut.active ? 0.9 : 0.4 + 0.6 * leftOut.factor);
       g.fillCircle(-hw + 8, -hl + 2, 4.5);
+      g.fillStyle(!rightOut.active ? 0x1e293b : rightOut.factor < 0.85 ? 0x94a3b8 : 0xffffff, !rightOut.active ? 0.9 : 0.4 + 0.6 * rightOut.factor);
       g.fillCircle(hw - 8, -hl + 2, 4.5);
     } else {
       // Unlit headlamps

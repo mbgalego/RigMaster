@@ -113,6 +113,7 @@ export class World {
   }
 
   public get dockZones() { return this.objects.dockZones; }
+  public get repairBays() { return this.objects.repairBays; }
   public get parkingPads() { return this.objects.parkingPads; }
 
   public update(delta: number) {

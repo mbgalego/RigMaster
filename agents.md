@@ -7,20 +7,21 @@ Simulador de condução pesada em **2D Top-Down** (Phaser 4 + Matter.js + React 
 
 ### 1.2 Estado Atual da Arquitetura (`src/`)
 - **Motor & Cenas (`scenes/`, `config.ts`, `main.ts`)**:
-  - `MainScene`: simulação de condução, física Matter.js, acoplamento quinta-roda, semáforos, bombas de combustível, som sintetizado Web Audio e iluminação dinâmica WebGL (`LightsManager` + `ConeLight` + pool de emissores).
+  - `MainScene`: simulação de condução, física Matter.js, acoplamento quinta-roda, semáforos, bombas de combustível, baias de reparação em garagens, faíscas/fumo de impacto, som sintetizado Web Audio e iluminação dinâmica WebGL (`LightsManager` + `ConeLight` + pool de emissores).
   - `EditorScene`: editor de mundo ao vivo (estradas por splines, objetos/prefabs, redimensionamento, rotação, spawn e exportação/importação JSON).
   - `MinimapScene`: cena dedicada com zoom bloqueado em `1.0` no canto superior direito.
 - **Veículos & Física (`entities/`, `physics/`)**:
-  - `Truck`: direção Ackermann, curva de binário diesel, consumo e reserva de combustível (`≤20%`), deslize natural sem combustível, respawn com depósito a `100%` e modos de faróis (`off` / `low` / `high`).
-  - `Trailer` & `Kingpin`: atrelado standard (13.6m), pá eólica (62m), bitrem B-Double e vidro frágil, com cinemática anti-derrapagem lateral e proteção de jackknife.
+  - `Truck`: direção Ackermann, curva de binário diesel, consumo e reserva de combustível (`≤20%`), deslize natural sem combustível, respawn com depósito e integridade a `100%`, modos de faróis (`off` / `low` / `high`) e estado de danos localizado por subsistema (`engine`, `steering`, `chassis`, `lights` com modo de emergência `≤15%`, desvio subtil de direção e degradação visual/óptica).
+  - `Trailer` & `Kingpin`: atrelado standard (13.6m), pá eólica (62m), bitrem B-Double e vidro frágil, com integridade estrutural (`trailerHealth`), resistência de rolamento progressiva, integridade de carga (`cargoHealth`) por perfil de fragilidade, desgaste contínuo em jackknife/curva brusca/terra batida, cinemática anti-derrapagem lateral e proteção de jackknife.
 - **Mundo & Sistemas (`world/`, `systems/`)**:
-  - `World`, `WorldTerrain`, `WorldObjects`: ilha contínua com streaming de chunks e hitboxes estáticas.
-  - `RoadNetwork`: rede vetorial por splines Hermite com largura variável, sentido único/duplo e aderência por piso (`asphalt`, `cobble`, `dirt`).
+  - `World`, `WorldTerrain`, `WorldObjects`: ilha contínua com streaming de chunks, hitboxes estáticas e deteção de baias de reparação (`repairBays`) em todas as oficinas (`variant: 'garage'`).
+  - `DamageSystem`: física de impacto por velocidade normal em `px/s` com tolerância de estacionamento (`<22 px/s` = zero dano), classificação por zona de impacto (`front`/`side`/`rear`) e perfis de sensibilidade de carga (`CARGO_PROFILES`).
+  - `RoadNetwork`: rede vetorial por splines Hermite com largura variável, sentido único/duplo, camadas de viaduto (`layer: 0 | 1`) e aderência por piso (`asphalt`, `cobble`, `dirt`).
   - `LicenseSystem`, `GarageSystem`, `TimeOfDaySystem`, `TrailerManager`: progressão de licenças com exames práticos, hubs regionais com modificadores meteorológicos, períodos do dia com ciclo 24h e acoplamento livre.
 - **Interface & Controlos (`App.tsx`, `components/TouchControls.tsx`)**:
-  - HUD minimalista com velocímetro/marcha, notificações toast (incluindo reserva `≤20%` persistente), volante/pedais touch semi-transparentes, botões de **Médios/Máximos** e switch `D/R`.
+  - HUD minimalista com velocímetro/marcha, ícone compacto de integridade (visível apenas quando `<100%`), notificações toast (incluindo reserva `≤20%`, alertas de motor/carga e proximidade de oficina), volante/pedais touch semi-transparentes, botões de **Médios/Máximos**, botão contextual **Reparar (`🔧` / tecla `E`)**, e switch `D/R`.
 - **Testes Automáticos (`scripts/`)**:
-  - `smoke-test.mjs` (estradas, atrelado, respawn), `smoke-fuel.mjs` (consumo, aviso 20%, minimapa, deslize sem combustível, abastecimento, respawn) e `smoke-bridge.mjs` (viadutos semente, passagem inferior, grip off-road sob tabuleiro, promoção antecipada em rampa curta, contenção de guardas L1 e normalização `layer` em JSON).
+  - `smoke-test.mjs` (estradas, atrelado, respawn), `smoke-fuel.mjs` (consumo, aviso 20%, minimapa, deslize sem combustível, abastecimento, respawn), `smoke-bridge.mjs` (viadutos semente, passagem inferior, grip off-road sob tabuleiro, promoção antecipada em rampa curta, contenção de guardas L1 e normalização `layer` em JSON) e `smoke-damage.mjs` (toque lento seguro, colisão por zona, modo de emergência, fragilidade diferenciada de carga, desgaste em jackknife, reparação em garagem preservando carga e respawn a 100%).
 
 ### 1.3 Plano Geral & Roadmap (Prioridade Sugerida)
 > *Nota: as funcionalidades abaixo refletem os objetivos globais definidos para o projeto, organizados em fases lógicas de dependência técnica.*
@@ -32,7 +33,7 @@ Simulador de condução pesada em **2D Top-Down** (Phaser 4 + Matter.js + React 
 
 #### Fase B — Transporte Marítimo, Indústrias & Missões (Loop Principal)
 4. **Locais Industriais & Destinos Dedicados**: adicionar fábricas, garagens, armazéns, pedreiras, refinarias, portos e docas temáticas com geometrias de manobra variadas.
-5. **Sistema de Missões / Contratos de Transporte**: entregas ponto-a-ponto entre indústrias com tipos de carga específicos, requisitos de manobra/estacionamento, danos em carga e conclusão sem foco financeiro.
+5. **Sistema de Missões / Contratos de Transporte**: entregas ponto-a-ponto entre indústrias com tipos de carga específicos, requisitos de manobra/estacionamento, aproveitamento do sistema de danos/integridade já implementado no camião/atrelado/carga e conclusão sem foco financeiro.
 6. **Transporte por Barco / Ferry Simplificado**: terminais portuários onde a manobra-chave é entrar no porto e **estacionar o conjunto dentro do barco de transporte** para atravessar entre ilhas.
 7. **Progressão de Frota (Camiões Desbloqueáveis)**: múltiplos camiões com características distintas (potência, eixos, tração, chassi) conquistados ao completar missões/objetivos, desbloqueando por sua vez missões mais exigentes.
 
@@ -48,13 +49,35 @@ Simulador de condução pesada em **2D Top-Down** (Phaser 4 + Matter.js + React 
 
 ### 1.4 Regras de Manutenção
 - Manter sempre o **`agents.md`** e o **`package.json`** atualizados a cada versão.
-- Validar alterações com `npm run lint`, `npm run build` e os testes `smoke-test.mjs` / `smoke-fuel.mjs` / `smoke-bridge.mjs`.
+- Validar alterações com `npm run lint`, `npm run build` e os testes `smoke-test.mjs` / `smoke-fuel.mjs` / `smoke-bridge.mjs` / `smoke-damage.mjs`.
 
 ---
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.9.0** (Versão Atual — branch main)
+### **v2.10.0** (Versão Atual — branch main)
+- **Sistema Realista de Danos, Desgaste & Reparação em Garagem (`DamageSystem.ts`, `Truck.ts`, `Trailer.ts`, `WorldObjects.ts`, `World.ts`, `MainScene.ts`, `TouchControls.tsx`, `App.tsx`)**:
+  - **Modelo de integridade em 3 camadas**:
+    - **Camião (`truck.damage`)**: subsistemas independentes (`engine`, `steering`, `chassis`, `lights`) com índice ponderado (`overall`: 35% motor, 25% direção, 25% chassi, 15% luzes) e tendência lateral subtil (`steerPull`).
+    - **Estrutura do Atrelado (`trailer.trailerHealth`)**: integridade estrutural/eixos que aumenta gradualmente o arrasto de rolamento (`rollingDragFactor`) quando danificada.
+    - **Carga (`trailer.cargoHealth`)**: perfis de sensibilidade por tipo de atrelado (`CARGO_PROFILES` para `standard`, `long_cargo`, `bitrem_lead`, `bitrem_pup` e `fragile_glass`), mantendo o alias retrocompatível `fragileHealth`.
+  - **Física de colisão por velocidade normal (`px/s`) & zona de impacto**:
+    - Calculada a velocidade real de impacto ao longo da normal de contacto (`computeNormalImpactSpeedPxS` com `cooldown` de `200ms`); toques lentos de estacionamento ou encosto em doca (`< 22 px/s` / `< ~4.9 km/h`) aplicam **0% de dano** no camião e carga.
+    - Classificação local do contacto (`front` / `side` / `rear` + lado esquerdo/direito): colisões frontais castigam mais motor/faróis, laterais afetam direção/chassi e introduzem um ligeiro desvio (`steerPull`), e traseiras afetam chassi/acoplamento.
+  - **Consequências mecânicas, visuais e de condução**:
+    - Degradação progressiva de binário e velocidade máxima com o desgaste do motor; abaixo de `15%` entra em **modo de emergência** (torque e velocidade reduzidos) com som de motor a falhar e fumo de capô (`engine < 40%`).
+    - Riscos/amolgadelas visíveis na pintura da cabine (`<80%` e `<45%`) e dano independente por farol (`leftLight` / `rightLight`): perda gradual entre `45–74%`, falha intermitente entre `25–44%` e corte completo do feixe WebGL (`visible = false`, `intensity = 0`) e da lente abaixo de `25%`.
+    - Desgaste contínuo em condução abusiva: *jackknife* sustentado (`> 0.6s`), curvas a alta velocidade com G lateral elevado e condução rápida em terra batida/fora de estrada afetam `trailerHealth` e `cargoHealth`.
+  - **Baias de Reparação nas Oficinas (`garage`) sem microgestão financeira**:
+    - `WorldObjects.repairBays` expõe as baias frontais de todos os edifícios `building` com `variant: 'garage'` (incluindo os integrados em compostos), com destaque pulsante ao aproximar (`≤ 160 px`).
+    - Parado na oficina (`≤ 3 km/h`), premir **`E`**, tocar na baia no mapa ou no botão **`🔧`** repara o camião (`100%`) e a estrutura do atrelado (`100%`), **preservando os danos já sofridos na carga** até ao fim da viagem; o respawn (`R`) repõe tudo a `100%` para testes e exames limpos.
+  - **Feedback áudio/visual e HUD minimalista**:
+    - Faíscas de impacto, fumo de motor, tremor de câmara proporcional, áudio sintetizado (embate metálico, vidro frágil, chave de oficina) e avisos *edge-triggered* sem poluir o ecrã quando tudo está a `100%`.
+  - **Otimização de Renderização & HUD**:
+    - `updateWebGLLighting()` ativa o pipeline shader WebGL apenas quando `lampFactor >= 0.08`, o ambiente escurece significativamente ou há chuva/nevoeiro (evitando o custo do shader `Light2D` durante horas diurnas limpas fora do pico `12:30`), `maxLights` ajustado para `8` (`MAX_WORLD_LIGHTS = 4`), cache de `repairBays` por `WorldObjects.version` com marcação estática movida para `solidsGraphics`, margem de *eviction* do terreno reduzida para `±1` chunk, *dirty-tracking* em `pumpGraphics`/`impactGraphics`/`weatherGraphics`/rodas/luzes e deduplicação do *polling* de telemetria em `App.tsx`.
+  - **Teste automático (`scripts/smoke-damage.mjs`)**: novo script `npm run test:smoke:damage` integrado na bateria de validação.
+
+### **v2.9.0** (branch main)
 - **Sistema de Pontes & Viadutos / Desníveis (`CollisionLayers.ts`, `RoadNetwork.ts`, `IntersectionSystem.ts`, `Truck.ts`, `Trailer.ts`, `TrailerManager.ts`, `MainScene.ts`, `MinimapScene.ts`, `EditorScene.ts`, `App.tsx`)**:
   - **Camada vertical por estrada (`layer: 0` Solo vs `layer: 1` Viaduto)**: estradas elevadas cruzam sobre vias e objectos no solo sem gerar nós de intersecção a meio do vão (`IntersectionSystem`), enquanto as extremidades das rampas ligam normalmente à malha de piso `0`.
   - **Rampas automáticas e histerese de portal**: `RoadNetwork.sampleBridgeRoad()` cria automaticamente rampas de entrada/saída nos dois extremos (`rampLen = min(180px, 32% * totalLen)`, aviso de ponte curta `< 260px`) e `resolveVehicleElevation()` verifica o centro e os extremos dianteiro/traseiro do veículo garantindo que camiões/atrelados que passam por baixo nunca saltam para o tabuleiro, entrando suavemente assim que o pára-choques entra no portal (`z <= 0.28`).

@@ -1,5 +1,13 @@
 import Phaser from 'phaser';
 import { COLLISION_CAT, COLLISION_MASK } from '../physics/CollisionLayers';
+import {
+  CARGO_PROFILES,
+  DAMAGE_COOLDOWN_MS,
+  ImpactEvent,
+  applyTrailerAndCargoImpact,
+  computeNormalImpactSpeedPxS,
+  localizeImpact,
+} from '../systems/DamageSystem';
 
 export type TrailerType = 'standard' | 'long_cargo' | 'bitrem_lead' | 'bitrem_pup' | 'fragile_glass';
 
@@ -35,9 +43,50 @@ export class Trailer {
   public blockerDepth: number;
 
   public isFragile: boolean = false;
-  public fragileHealth: number = 100;
+  public trailerHealth: number = 100;
+  public cargoHealth: number = 100;
   public maxGForce: number = 0;
   public impactCount: number = 0;
+  public lastImpactEvent: ImpactEvent | null = null;
+  private lastDamageAt: number = -1000;
+  private lastTrailerLightsKey: string = '';
+
+  /** Backwards-compatible alias for cargoHealth (used by LicenseSystem & telemetry). */
+  public get fragileHealth(): number {
+    return this.cargoHealth;
+  }
+
+  public set fragileHealth(value: number) {
+    this.cargoHealth = Phaser.Math.Clamp(value, 0, 100);
+  }
+
+  public get rollingDragFactor(): number {
+    return 1 + Math.max(0, (70 - this.trailerHealth) / 70) * 0.45;
+  }
+
+  /** Repairs structural trailer damage (garages fix structure, not damaged cargo in transit). */
+  public repairStructure(): void {
+    this.trailerHealth = 100;
+    this.lastImpactEvent = null;
+  }
+
+  /** Resets both structural and cargo integrity to 100% (spawn / respawn). */
+  public resetIntegrity(): void {
+    this.trailerHealth = 100;
+    this.cargoHealth = 100;
+    this.maxGForce = 0;
+    this.lastImpactEvent = null;
+  }
+
+  /** Applies gradual structural/cargo wear from jackknife, lateral G, or rough off-road speed. */
+  public applyContinuousWear(trailerLoss: number, cargoLoss: number): void {
+    if (trailerLoss > 0) {
+      this.trailerHealth = Math.max(0, this.trailerHealth - trailerLoss);
+    }
+    if (cargoLoss > 0) {
+      this.cargoHealth = Math.max(0, this.cargoHealth - cargoLoss);
+    }
+  }
 
   public kingpinDist: number = 80;
   public wheelbase: number = 141.6;
@@ -162,22 +211,66 @@ export class Trailer {
   }
 
   private onCollisionStart = (event: any) => {
+    const now = this.scene.time?.now ?? performance.now();
     for (const pair of event.pairs) {
       if (pair.bodyA === this.body || pair.bodyB === this.body) {
         const other = pair.bodyA === this.body ? pair.bodyB : pair.bodyA;
         if (other.label && (other.label.startsWith('truck') || other.label.startsWith('trailer'))) continue;
 
         this.impactCount++;
-        const impact = Math.hypot(this.body.velocity.x, this.body.velocity.y);
-        this.maxGForce = Math.max(this.maxGForce, impact);
-        if (this.isFragile) {
-          const damage = Math.min(Math.max(impact * 8, 10), 30);
-          this.fragileHealth = Math.max(0, this.fragileHealth - damage);
+        const speedPxS = computeNormalImpactSpeedPxS(
+          this.vx,
+          this.vy,
+          0,
+          0,
+          this.body.velocity.x,
+          this.body.velocity.y,
+          other.velocity?.x ?? 0,
+          other.velocity?.y ?? 0,
+          pair.collision?.normal,
+        );
+        this.maxGForce = Math.max(this.maxGForce, speedPxS / 60);
+
+        if (now - this.lastDamageAt >= DAMAGE_COOLDOWN_MS) {
+          const profile = CARGO_PROFILES[this.type] || CARGO_PROFILES.standard;
+          const res = applyTrailerAndCargoImpact(this.trailerHealth, this.cargoHealth, profile, speedPxS);
+          this.trailerHealth = res.trailerHealth;
+          this.cargoHealth = res.cargoHealth;
+
+          if (res.trailerLoss > 0 || res.cargoLoss > 0 || speedPxS >= 24) {
+            this.lastDamageAt = now;
+            const support = pair.collision?.supports?.[0];
+            const contactPt = support
+              ? { x: support.x, y: support.y }
+              : {
+                  x: (this.body.position.x + (other.position?.x ?? this.body.position.x)) * 0.5,
+                  y: (this.body.position.y + (other.position?.y ?? this.body.position.y)) * 0.5,
+                };
+            const { zone, sideSign } = localizeImpact(
+              this.body.position.x,
+              this.body.position.y,
+              this.body.angle,
+              this.width,
+              this.length,
+              contactPt,
+            );
+            this.lastImpactEvent = {
+              x: contactPt.x,
+              y: contactPt.y,
+              speedPxS,
+              zone,
+              sideSign,
+              target: 'trailer',
+              damageDealt: res.trailerLoss,
+              cargoDamageDealt: res.cargoLoss,
+            };
+          }
         }
 
-        // If trailer impacts obstacle, stop truck motion
-        if (this.scene && (this.scene as any).truck) {
-          (this.scene as any).truck.currentSpeed = -(this.scene as any).truck.currentSpeed * 0.15;
+        // If trailer impacts obstacle meaningfully, rebound truck motion slightly
+        const truck = (this.scene as unknown as { truck?: { currentSpeed: number } })?.truck;
+        if (speedPxS >= 18 && truck) {
+          truck.currentSpeed = -truck.currentSpeed * 0.15;
         }
       }
     }
@@ -419,13 +512,17 @@ export class Trailer {
   }
 
   private drawTrailerLights(isBraking: boolean) {
+    const truck = (this.scene as unknown as { truck?: { headlightMode: string } })?.truck;
+    const runningLightsOn = truck ? truck.headlightMode !== 'off' : false;
+    const key = `${isBraking ? 1 : 0}|${this.isReversing ? 1 : 0}|${runningLightsOn ? 1 : 0}`;
+    if (key === this.lastTrailerLightsKey) return;
+    this.lastTrailerLightsKey = key;
+
     const g = this.lightsGraphics;
     g.clear();
 
     const hw = this.width / 2;
     const hl = this.length / 2;
-    const truck = (this.scene as any)?.truck;
-    const runningLightsOn = truck ? truck.headlightMode !== 'off' : false;
 
     if (isBraking) {
       g.fillStyle(0xff0055, 1);

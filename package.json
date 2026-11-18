@@ -1,7 +1,7 @@
 {
   "name": "rigmaster",
   "private": true,
-  "version": "2.9.0",
+  "version": "2.10.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
@@ -11,7 +11,8 @@
     "lint": "tsc --noEmit",
     "test:smoke": "node scripts/smoke-test.mjs",
     "test:smoke:fuel": "node scripts/smoke-fuel.mjs",
-    "test:smoke:bridge": "node scripts/smoke-bridge.mjs"
+    "test:smoke:bridge": "node scripts/smoke-bridge.mjs",
+    "test:smoke:damage": "node scripts/smoke-damage.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

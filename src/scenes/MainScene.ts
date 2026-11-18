@@ -3,7 +3,7 @@ import { Truck, HeadlightMode } from '../entities/Truck';
 import { Trailer, TrailerType } from '../entities/Trailer';
 import { Kingpin, ArticulationTelemetry } from '../physics/Kingpin';
 import { World } from '../world/World';
-import { WorldObjects } from '../world/WorldObjects';
+import { WorldObjects, RepairBay } from '../world/WorldObjects';
 import { LicenseSystem, LicenseExam, LicenseId } from '../systems/LicenseSystem';
 import { GarageSystem, WeatherModifier } from '../systems/GarageSystem';
 import { TimeOfDaySystem, TimePeriod, TimeOfDaySnapshot } from '../systems/TimeOfDaySystem';
@@ -11,6 +11,13 @@ import { TrailerManager, TRAILER_TYPE_TO_LICENSE, CouplingCandidate } from '../s
 import { RoadNetwork, RoadData, RoadSample, BridgeRoadCache } from '../systems/RoadNetwork';
 import { IntersectionSystem } from '../systems/IntersectionSystem';
 import { COLLISION_CAT, COLLISION_MASK } from '../physics/CollisionLayers';
+import {
+  TruckDamageState,
+  CARGO_PROFILES,
+  ImpactEvent,
+  createCleanTruckDamage,
+  getEffectiveHeadlightStates,
+} from '../systems/DamageSystem';
 
 export class MainScene extends Phaser.Scene {
   public truck!: Truck;
@@ -24,8 +31,8 @@ export class MainScene extends Phaser.Scene {
   public garageSystem!: GarageSystem;
   public timeOfDaySystem!: TimeOfDaySystem;
 
-  // WebGL Lights (Phaser 4 LightsPlugin: 2 headlights + brake + reverse + 6 world emitters = 10)
-  private static readonly MAX_WORLD_LIGHTS = 6;
+  // WebGL Lights (Phaser 4 LightsPlugin: 2 headlights + brake + reverse + 4 world emitters = 8)
+  private static readonly MAX_WORLD_LIGHTS = 4;
   private webglLightingActive: boolean = false;
   private headlightLeft: Phaser.GameObjects.Light | null = null;
   private headlightRight: Phaser.GameObjects.Light | null = null;
@@ -65,6 +72,8 @@ export class MainScene extends Phaser.Scene {
   private preEditorZoom: number = 1.0;
   /** Refuelling in progress (set by tryRefuel, cleared after a toast delay). */
   private isRefuelling: boolean = false;
+  /** Garage repair in progress (set by tryRepair). */
+  private isRepairing: boolean = false;
 
   // Trailer coupling (free-drive fifth wheel): transient action notice (toast)
   private couplingNotice: string | null = null;
@@ -79,13 +88,26 @@ export class MainScene extends Phaser.Scene {
   private decoupleLockoutUntil: number = 0;
   private pinchStartDist: number = 0;
 
-  // Gas pump interaction
+  // Gas pump & Garage repair bay interaction
   /** Nearest gas pump within highlight range (set each frame in update). */
   private nearbyPump: { x: number; y: number } | null = null;
   /** The pump currently being refuelled (visual feedback). */
   private refuellingPump: { x: number; y: number } | null = null;
-  /** Highlight pulse phase for the nearby pump (0..1). */
+  /** Nearest garage repair bay within range. */
+  private nearbyRepairBay: { x: number; y: number; garageId: string } | null = null;
+  /** The repair bay currently servicing the vehicle. */
+  private repairingBay: { x: number; y: number } | null = null;
+  /** Highlight pulse phase for the nearby pump/repair bay (0..1). */
   private pumpPulsePhase: number = 0;
+
+  // Damage & Impact FX
+  private impactGraphics: Phaser.GameObjects.Graphics | null = null;
+  private impactGraphicsDirty: boolean = false;
+  private pumpGraphicsDirty: boolean = false;
+  private weatherGraphicsDirty: boolean = false;
+  private impactSparks: Array<{ x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: number; size: number }> = [];
+  private lastEngineSmokeAt: number = 0;
+  private jackknifeWearTimer: number = 0;
 
   // Audio
   private refuelOsc: OscillatorNode | null = null;
@@ -142,6 +164,10 @@ export class MainScene extends Phaser.Scene {
     isReversing: boolean;
     collisions: number;
     fragileHealth: number;
+    truckHealth: number;
+    truckDamage: TruckDamageState;
+    trailerHealth: number;
+    cargoHealth: number;
     weather: WeatherModifier;
     headlightMode: HeadlightMode;
     timePeriod: TimePeriod;
@@ -154,8 +180,10 @@ export class MainScene extends Phaser.Scene {
     fuelPercent: number;
     isOutOfFuel: boolean;
     isRefuelling: boolean;
+    isRepairing: boolean;
     fuelPrice: number;
     nearbyPump: { x: number; y: number } | null;
+    nearbyRepairBay: { x: number; y: number } | null;
     coupling: {
       decoupleReady: boolean;      // coupled && stopped — the red decouple button is live
       coupledName: string | null;  // cargo of the trailer currently coupled
@@ -176,6 +204,10 @@ export class MainScene extends Phaser.Scene {
     isReversing: false,
     collisions: 0,
     fragileHealth: 100,
+    truckHealth: 100,
+    truckDamage: createCleanTruckDamage(),
+    trailerHealth: 100,
+    cargoHealth: 100,
     weather: 'clear',
     headlightMode: 'low',
     timePeriod: 'day',
@@ -188,8 +220,10 @@ export class MainScene extends Phaser.Scene {
     fuelPercent: 100,
     isOutOfFuel: false,
     isRefuelling: false,
+    isRepairing: false,
     fuelPrice: 1.749,
     nearbyPump: null,
+    nearbyRepairBay: null,
     coupling: { decoupleReady: false, coupledName: null, blocked: null, notice: null, noticeKind: 'info', noticeSeq: 0 },
   };
 
@@ -232,8 +266,10 @@ export class MainScene extends Phaser.Scene {
     this.bridgeShadowGraphics = this.add.graphics().setDepth(15).setLighting(false);
     this.bridgeRoadGraphics = this.add.graphics().setDepth(16).setLighting(false);
     this.syncBridgeBarriers();
-    // Gas pump highlight layer (above vehicles, depth 10)
+    // Gas pump & garage bay highlight layer (above vehicles, depth 11)
     this.pumpGraphics = this.add.graphics().setDepth(11).setLighting(false);
+    // Impact sparks & hood smoke (above vehicles/bridges, depth 23)
+    this.impactGraphics = this.add.graphics().setDepth(23).setLighting(false);
 
     // Set world physics bounds (island edge)
     const worldW = World.WORLD_W;
@@ -322,6 +358,26 @@ export class MainScene extends Phaser.Scene {
         }
         return;
       }
+
+      // Tap / click on a garage repair bay to service truck & trailer
+      for (const bay of this.world.repairBays) {
+        const dx = worldPt.x - bay.x;
+        const dy = worldPt.y - bay.y;
+        const cos = Math.cos(-bay.angle);
+        const sin = Math.sin(-bay.angle);
+        const lx = dx * cos - dy * sin;
+        const ly = dx * sin + dy * cos;
+        const pad = 22 / cam.zoom;
+        if (Math.abs(lx) <= bay.width / 2 + pad && Math.abs(ly) <= bay.height / 2 + pad) {
+          const distToTruck = Phaser.Math.Distance.Between(tx, ty, bay.x, bay.y);
+          if (distToTruck < 165) {
+            this.tryRepair(bay.x, bay.y);
+          } else {
+            this.setCouplingNotice('Aproxime-se da oficina para reparar', 'info');
+          }
+          return;
+        }
+      }
     });
 
     // 4. Weather Overlay
@@ -355,6 +411,9 @@ export class MainScene extends Phaser.Scene {
 
       // Refuel at a gas pump with F
       this.input.keyboard.on('keydown-F', () => this.tryRefuel());
+
+      // Repair at a garage service bay with E
+      this.input.keyboard.on('keydown-E', () => this.tryRepair());
 
       // Cycle headlights (Off -> Low -> High -> Off) with L
       this.input.keyboard.on('keydown-L', () => {
@@ -468,6 +527,9 @@ export class MainScene extends Phaser.Scene {
     } else {
       this.truck.setPosition(spawn.x, spawn.y, spawnAngleRad);
     }
+    this.truck.repairToFull();
+    this.truck.trailerRollingDragFactor = 1.0;
+    this.jackknifeWearTimer = 0;
 
     if (configType === 'solo') {
       return;
@@ -587,6 +649,11 @@ export class MainScene extends Phaser.Scene {
 
     this.truck.setPosition(spawn.x, spawn.y, spawnAngleRad);
     this.truck.refuelToFull();
+    this.truck.repairToFull();
+    this.truck.trailerRollingDragFactor = 1.0;
+    this.jackknifeWearTimer = 0;
+    this.trailer?.resetIntegrity();
+    this.pupTrailer?.resetIntegrity();
     const truckElev = this.roadNetwork.initialLayerAt(spawn.x, spawn.y);
     let leadElev: { layer: 0 | 1; z: number } | null = null;
     let pupElev: { layer: 0 | 1; z: number } | null = null;
@@ -807,6 +874,211 @@ export class MainScene extends Phaser.Scene {
     } catch (e) {
       // Ignore audio errors
     }
+  }
+
+  /** Try to repair truck & trailer structure at a nearby garage bay. Press E or tap the bay. */
+  public tryRepair(bayX?: number, bayY?: number) {
+    if (!this.truck || this.isEditorMode) return;
+
+    this.matter.body.setVelocity(this.truck.body, { x: 0, y: 0 });
+    this.truck.vLong = 0;
+    this.truck.currentSpeed = 0;
+
+    if (Math.abs(this.truck.speedKmh) > 3) {
+      this.setCouplingNotice('Pare totalmente na oficina para reparar', 'info');
+      return;
+    }
+
+    const tx = this.truck.body.position.x;
+    const ty = this.truck.body.position.y;
+    let nearest: { x: number; y: number } | null = null;
+    let nearestDist = bayX !== undefined ? 0 : 165;
+
+    if (bayX !== undefined && bayY !== undefined) {
+      nearest = { x: bayX, y: bayY };
+    } else {
+      for (const bay of this.world.repairBays) {
+        const d = Phaser.Math.Distance.Between(tx, ty, bay.x, bay.y);
+        if (d < nearestDist) {
+          nearestDist = d;
+          nearest = { x: bay.x, y: bay.y };
+        }
+      }
+    }
+
+    if (!nearest) {
+      this.setCouplingNotice('Não há oficina de reparação por perto', 'info');
+      return;
+    }
+
+    const truckDamaged = this.truck.health < 100;
+    const trailerDamaged =
+      (this.trailer ? this.trailer.trailerHealth < 100 : false) ||
+      (this.pupTrailer ? this.pupTrailer.trailerHealth < 100 : false);
+    const cargoDamaged =
+      (this.trailer ? this.trailer.cargoHealth < 100 : false) ||
+      (this.pupTrailer ? this.pupTrailer.cargoHealth < 100 : false);
+
+    if (!truckDamaged && !trailerDamaged) {
+      if (cargoDamaged) {
+        this.setCouplingNotice('Veículo a 100% — danos na carga não são reparáveis em viagem', 'info');
+      } else {
+        this.setCouplingNotice('Veículo já está em perfeitas condições (100%)', 'info');
+      }
+      return;
+    }
+
+    this.truck.repairToFull();
+    this.truck.trailerRollingDragFactor = 1.0;
+    this.trailer?.repairStructure();
+    this.pupTrailer?.repairStructure();
+
+    this.isRepairing = true;
+    this.repairingBay = nearest;
+    this.setCouplingNotice(
+      cargoDamaged
+        ? 'Veículo reparado a 100% (integridade da carga mantida)'
+        : 'Camião e atrelado reparados a 100%',
+      'success',
+    );
+    this.playRepairSound();
+
+    this.time.delayedCall(1400, () => {
+      this.isRepairing = false;
+      this.repairingBay = null;
+      this.playRefuelEndSound();
+    });
+  }
+
+  /** Synthesized pneumatic wrench / garage repair sound. */
+  private playRepairSound() {
+    if (!this.audioCtx || !this.soundEnabled) return;
+    try {
+      const now = this.audioCtx.currentTime;
+      for (let i = 0; i < 3; i++) {
+        const osc = this.audioCtx.createOscillator();
+        const gain = this.audioCtx.createGain();
+        osc.type = 'triangle';
+        const t0 = now + i * 0.14;
+        osc.frequency.setValueAtTime(320 + i * 90, t0);
+        osc.frequency.exponentialRampToValueAtTime(520 + i * 110, t0 + 0.09);
+        gain.gain.setValueAtTime(0.06, t0);
+        gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.11);
+        osc.connect(gain);
+        gain.connect(this.audioCtx.destination);
+        osc.start(t0);
+        osc.stop(t0 + 0.12);
+      }
+    } catch (e) {
+      // Ignore audio errors
+    }
+  }
+
+  /** Synthesized impact thud + optional fragile glass chime. */
+  private playImpactSound(speedPxS: number, withFragileChime: boolean) {
+    if (!this.audioCtx || !this.soundEnabled) return;
+    try {
+      const now = this.audioCtx.currentTime;
+      const strength = Phaser.Math.Clamp((speedPxS - 18) / 140, 0.15, 1.0);
+      const osc = this.audioCtx.createOscillator();
+      const gain = this.audioCtx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(125 + strength * 40, now);
+      osc.frequency.exponentialRampToValueAtTime(38, now + 0.18);
+      gain.gain.setValueAtTime(0.10 * strength, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+      osc.connect(gain);
+      gain.connect(this.audioCtx.destination);
+      osc.start(now);
+      osc.stop(now + 0.21);
+
+      if (withFragileChime) {
+        const gOsc = this.audioCtx.createOscillator();
+        const gGain = this.audioCtx.createGain();
+        gOsc.type = 'sine';
+        gOsc.frequency.setValueAtTime(1950, now + 0.02);
+        gOsc.frequency.exponentialRampToValueAtTime(1180, now + 0.16);
+        gGain.gain.setValueAtTime(0.045 * strength, now + 0.02);
+        gGain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+        gOsc.connect(gGain);
+        gGain.connect(this.audioCtx.destination);
+        gOsc.start(now + 0.02);
+        gOsc.stop(now + 0.19);
+      }
+    } catch (e) {
+      // Ignore audio errors
+    }
+  }
+
+  private spawnImpactFeedback(ev: ImpactEvent, isFragileCargo: boolean) {
+    const count = Phaser.Math.Clamp(Math.round(ev.speedPxS / 18), 4, 14);
+    for (let i = 0; i < count; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const spd = 40 + Math.random() * (90 + ev.speedPxS * 0.6);
+      this.impactSparks.push({
+        x: ev.x,
+        y: ev.y,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd,
+        life: 0,
+        maxLife: 0.22 + Math.random() * 0.18,
+        color: isFragileCargo && ev.cargoDamageDealt > 0 ? 0x67e8f9 : i % 2 === 0 ? 0xfacc15 : 0xf97316,
+        size: 1.8 + Math.random() * 1.6,
+      });
+    }
+    if (!this.isEditorMode && ev.speedPxS >= 28) {
+      const intensity = Phaser.Math.Clamp((ev.speedPxS - 24) / 26000, 0.0015, 0.0085);
+      this.cameras.main.shake(120, intensity);
+    }
+    this.playImpactSound(ev.speedPxS, isFragileCargo && ev.cargoDamageDealt > 0);
+  }
+
+  private updateImpactEffects(dt: number, time: number) {
+    const g = this.impactGraphics;
+    if (!g) return;
+
+    // Emit subtle engine smoke puffs when engine integrity is critically worn (< 40%)
+    if (!this.isEditorMode && this.truck && this.truck.damage.engine < 40 && time - this.lastEngineSmokeAt > 180) {
+      this.lastEngineSmokeAt = time;
+      const a = this.truck.body.angle;
+      const hoodX = this.truck.body.position.x + Math.sin(a) * (this.truck.length * 0.36);
+      const hoodY = this.truck.body.position.y - Math.cos(a) * (this.truck.length * 0.36);
+      this.impactSparks.push({
+        x: hoodX + (Math.random() - 0.5) * 10,
+        y: hoodY + (Math.random() - 0.5) * 10,
+        vx: (Math.random() - 0.5) * 18,
+        vy: -22 - Math.random() * 18,
+        life: 0,
+        maxLife: 0.55,
+        color: this.truck.damage.engine <= 15 ? 0x334155 : 0x64748b,
+        size: 4 + Math.random() * 3,
+      });
+    }
+
+    if (this.impactSparks.length === 0) {
+      if (this.impactGraphicsDirty) {
+        g.clear();
+        this.impactGraphicsDirty = false;
+      }
+      return;
+    }
+
+    g.clear();
+    const alive: typeof this.impactSparks = [];
+    for (const p of this.impactSparks) {
+      p.life += dt;
+      if (p.life >= p.maxLife) continue;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= 0.94;
+      p.vy *= 0.94;
+      const alpha = 1 - p.life / p.maxLife;
+      g.fillStyle(p.color, alpha * 0.9);
+      g.fillCircle(p.x, p.y, p.size * (0.6 + 0.4 * alpha));
+      alive.push(p);
+    }
+    this.impactSparks = alive;
+    this.impactGraphicsDirty = alive.length > 0;
   }
 
   /**
@@ -1357,6 +1629,10 @@ export class MainScene extends Phaser.Scene {
 
     // When not in editor mode, update vehicle driving physics
     if (!this.isEditorMode) {
+      this.truck.trailerRollingDragFactor = Math.max(
+        this.trailer?.rollingDragFactor ?? 1.0,
+        this.pupTrailer?.rollingDragFactor ?? 1.0,
+      );
       this.truck.ambientDarkness = timeSnap.lampFactor;
       this.truck.update(delta);
 
@@ -1383,6 +1659,7 @@ export class MainScene extends Phaser.Scene {
         offTrackingDeltaPx: 0,
         offTrackingWorldPos: { x: 0, y: 0 },
       };
+      let pupJackknifed = false;
 
       if (this.trailer && this.kingpin) {
         const truckAngle = this.truck.body.angle;
@@ -1413,8 +1690,61 @@ export class MainScene extends Phaser.Scene {
 
         this.pupTrailer.followHitch(pupHitchX, pupHitchY, pupHitchVx, pupHitchVy, leadAngle, delta, this.truck.isBraking);
         const pupTelemetry = this.pupKingpin.update(this.truck.isReversing, this.truck.speedKmh);
+        pupJackknifed = pupTelemetry.isJackknifed;
         this.pupKingpin.renderDebug(pupTelemetry, this.debugMatter);
       }
+
+      // Sustained jackknife, cornering G-force, and high-speed off-road cargo/trailer wear
+      if (this.trailer) {
+        const profile = CARGO_PROFILES[this.trailer.type] || CARGO_PROFILES.standard;
+        const anyJackknife = artTelemetry.isJackknifed || pupJackknifed;
+        if (anyJackknife && Math.abs(this.truck.vLong) > 6) {
+          this.jackknifeWearTimer += dt;
+          if (this.jackknifeWearTimer > 0.6) {
+            const jScale = artTelemetry.isMechanicalLocked ? 1.5 : 1.0;
+            this.trailer.applyContinuousWear(
+              profile.jackknifeRate * 0.65 * jScale * dt,
+              profile.jackknifeRate * jScale * dt,
+            );
+            this.pupTrailer?.applyContinuousWear(
+              profile.jackknifeRate * 0.55 * jScale * dt,
+              profile.jackknifeRate * jScale * dt,
+            );
+          }
+        } else {
+          this.jackknifeWearTimer = Math.max(0, this.jackknifeWearTimer - dt * 2);
+        }
+
+        const absSpeed = Math.abs(this.truck.vLong);
+        if (absSpeed > 65) {
+          const latAccel = Math.abs(this.truck.vLong * this.truck.omega);
+          this.trailer.maxGForce = Math.max(this.trailer.maxGForce, latAccel / 60);
+          if (latAccel > profile.lateralGThreshold) {
+            const excess = (latAccel - profile.lateralGThreshold) / 100;
+            this.trailer.applyContinuousWear(0, excess * 2.2 * dt);
+            this.pupTrailer?.applyContinuousWear(0, excess * 2.2 * dt);
+          }
+          if (this.truck.roadGrip < 0.65 && absSpeed > 75) {
+            this.trailer.applyContinuousWear(0, profile.offroadPenaltyRate * dt);
+            this.pupTrailer?.applyContinuousWear(0, profile.offroadPenaltyRate * dt);
+          }
+        }
+      }
+
+      // Consume impact events for sparks, camera shake, and synthesized impact audio
+      if (this.truck.lastImpactEvent) {
+        this.spawnImpactFeedback(this.truck.lastImpactEvent, false);
+        this.truck.lastImpactEvent = null;
+      }
+      if (this.trailer?.lastImpactEvent) {
+        this.spawnImpactFeedback(this.trailer.lastImpactEvent, this.trailer.isFragile);
+        this.trailer.lastImpactEvent = null;
+      }
+      if (this.pupTrailer?.lastImpactEvent) {
+        this.spawnImpactFeedback(this.pupTrailer.lastImpactEvent, this.pupTrailer.isFragile);
+        this.pupTrailer.lastImpactEvent = null;
+      }
+      this.updateImpactEffects(dt, time);
 
       // Automatic fifth-wheel coupling (tractor sits in the kingpin zone)
       this.updateDecoupleLockoutArming();
@@ -1432,13 +1762,14 @@ export class MainScene extends Phaser.Scene {
           artTelemetry.isJackknifed,
           inDock.inZone,
           inDock.alignmentDeg,
-          this.trailer?.fragileHealth || 100,
+          this.trailer?.cargoHealth ?? 100,
           this.truck.isReversing
         );
       }
 
-      // Gas pump proximity highlight — find nearest pump within highlight range
+      // Gas pump & garage repair bay proximity detection
       this.nearbyPump = null;
+      this.nearbyRepairBay = null;
       const tx = this.truck.body.position.x;
       const ty = this.truck.body.position.y;
       let nearestDist = 110; // highlight distance
@@ -1450,8 +1781,27 @@ export class MainScene extends Phaser.Scene {
           this.nearbyPump = { x: o.x, y: o.y };
         }
       }
+      if (this.truck.layer === 0) {
+        let nearestBayDist = 160;
+        for (const bay of this.world.repairBays) {
+          const d = Phaser.Math.Distance.Between(tx, ty, bay.x, bay.y);
+          if (d < nearestBayDist) {
+            nearestBayDist = d;
+            this.nearbyRepairBay = { x: bay.x, y: bay.y, garageId: bay.garageId };
+          }
+        }
+      }
       // Pulse animation for the highlight
       this.pumpPulsePhase = (this.pumpPulsePhase + dt * 2) % 1;
+
+      const minTrailerHealth = Math.min(
+        this.trailer?.trailerHealth ?? 100,
+        this.pupTrailer?.trailerHealth ?? 100,
+      );
+      const minCargoHealth = Math.min(
+        this.trailer?.cargoHealth ?? 100,
+        this.pupTrailer?.cargoHealth ?? 100,
+      );
 
       // Update Telemetry Cache
       this.telemetry = {
@@ -1465,7 +1815,11 @@ export class MainScene extends Phaser.Scene {
         offTrackingPx: Math.round(artTelemetry.offTrackingDeltaPx),
         isReversing: this.truck.isReversing,
         collisions: this.truck.collisionCount + (this.trailer?.impactCount || 0),
-        fragileHealth: Math.round(this.trailer?.fragileHealth || 100),
+        fragileHealth: Math.round(minCargoHealth),
+        truckHealth: this.truck.health,
+        truckDamage: { ...this.truck.damage },
+        trailerHealth: Math.round(minTrailerHealth),
+        cargoHealth: Math.round(minCargoHealth),
         weather: this.garageSystem.getActiveModifier(),
         headlightMode: this.truck.headlightMode,
         timePeriod: timeSnap.period,
@@ -1478,13 +1832,18 @@ export class MainScene extends Phaser.Scene {
         fuelPercent: this.truck.isOutOfFuel ? 0 : Math.round(this.truck.fuelPercent * 10) / 10,
         isOutOfFuel: this.truck.isOutOfFuel,
         isRefuelling: this.isRefuelling,
+        isRepairing: this.isRepairing,
         fuelPrice: 1.749,
         nearbyPump: this.nearbyPump,
+        nearbyRepairBay: this.nearbyRepairBay ? { x: this.nearbyRepairBay.x, y: this.nearbyRepairBay.y } : null,
         coupling: this.computeCouplingState(time),
       };
 
       // Sound Updates
       this.updateSyntheticAudio(time);
+    } else if (this.impactGraphicsDirty) {
+      this.impactGraphics?.clear();
+      this.impactGraphicsDirty = false;
     }
 
     // Real Phaser 4 WebGL dynamic lighting & atmospheric weather
@@ -2018,12 +2377,18 @@ export class MainScene extends Phaser.Scene {
     strokeSideBarriers('deck_rail', 4, 0x94a3b8, 0.98);
   }
 
-  /** Draws a highlight ring around the gas pump when the truck is within refuel range,
-   *  and a brighter ring while actively refuelling that pump. */
+  /** Draws a highlight ring around the gas pump or garage repair bay when the truck is
+   *  within range, or actively refuelling/repairing. */
   private renderPumps() {
     const g = this.pumpGraphics;
     if (!g) return;
-    g.clear();
+    if (this.isEditorMode || !this.truck) {
+      if (this.pumpGraphicsDirty) {
+        g.clear();
+        this.pumpGraphicsDirty = false;
+      }
+      return;
+    }
 
     const cam = this.cameras.main;
     const view = cam.worldView;
@@ -2031,12 +2396,22 @@ export class MainScene extends Phaser.Scene {
 
     const tx = this.truck.body.position.x;
     const ty = this.truck.body.position.y;
+    let cleared = false;
+
+    const ensureCleared = () => {
+      if (!cleared) {
+        g.clear();
+        cleared = true;
+        this.pumpGraphicsDirty = true;
+      }
+    };
 
     const drawPump = (x: number, y: number, mode: 'near' | 'active') => {
       // Cull to viewport
       if (x + 80 < view.x - M || x - 80 > view.x + view.width + M ||
           y + 80 < view.y - M || y - 80 > view.y + view.height + M) return;
 
+      ensureCleared();
       const pulse = Math.sin(this.pumpPulsePhase * Math.PI * 2) * 0.5 + 0.5;
       const isActive = mode === 'active';
       const ringR = isActive ? 40 + pulse * 10 : 36 + pulse * 6;
@@ -2080,7 +2455,58 @@ export class MainScene extends Phaser.Scene {
         // Within refuel range — show the "near" highlight
         drawPump(o.x, o.y, 'near');
       }
-      // Otherwise: nothing drawn — pump is invisible until you get close
+    }
+
+    // Garage repair bay active & proximity highlight (static bay outline lives in cached solidsGraphics)
+    if (this.truck.layer === 0 || this.repairingBay !== null) {
+      const hasRepairableDamage =
+        this.truck.health < 100 ||
+        (this.trailer ? this.trailer.trailerHealth < 100 : false) ||
+        (this.pupTrailer ? this.pupTrailer.trailerHealth < 100 : false);
+
+      for (const bay of this.world.repairBays) {
+        if (bay.x + 140 < view.x - M || bay.x - 140 > view.x + view.width + M ||
+            bay.y + 140 < view.y - M || bay.y - 140 > view.y + view.height + M) continue;
+
+        const isActive =
+          this.repairingBay !== null &&
+          Math.abs(this.repairingBay.x - bay.x) < 2 &&
+          Math.abs(this.repairingBay.y - bay.y) < 2;
+        const dist = Phaser.Math.Distance.Between(tx, ty, bay.x, bay.y);
+        const isNear = this.truck.layer === 0 && dist <= 160;
+        if (!isActive && !isNear) continue;
+
+        ensureCleared();
+        const hw = bay.width / 2;
+        const hh = bay.height / 2;
+        const c = Math.cos(bay.angle);
+        const s = Math.sin(bay.angle);
+        const toW = (lx: number, ly: number) => ({ x: bay.x + lx * c - ly * s, y: bay.y + lx * s + ly * c });
+        const corners = [toW(-hw, -hh), toW(hw, -hh), toW(hw, hh), toW(-hw, hh)];
+        const bayCol = isActive ? 0x22c55e : hasRepairableDamage ? 0xf59e0b : 0x38bdf8;
+        const bayAlpha = isActive ? 0.95 : 0.72;
+
+        g.lineStyle(3, bayCol, bayAlpha);
+        g.beginPath();
+        g.moveTo(corners[0].x, corners[0].y);
+        g.lineTo(corners[1].x, corners[1].y);
+        g.lineTo(corners[2].x, corners[2].y);
+        g.lineTo(corners[3].x, corners[3].y);
+        g.closePath();
+        g.strokePath();
+
+        const pulse = Math.sin(this.pumpPulsePhase * Math.PI * 2) * 0.5 + 0.5;
+        const ringR = isActive ? 42 + pulse * 10 : 34 + pulse * 6;
+        g.lineStyle(isActive ? 4.5 : 2.5, bayCol, isActive ? 0.95 : 0.75);
+        g.beginPath();
+        g.arc(bay.x, bay.y, ringR, 0, Math.PI * 2);
+        g.strokePath();
+      }
+    }
+
+    if (!cleared && this.pumpGraphicsDirty) {
+      g.clear();
+      this.pumpGraphicsDirty = false;
     }
   }
 
@@ -2259,8 +2685,13 @@ export class MainScene extends Phaser.Scene {
     }
     const ambientHex = (r << 16) | (g << 8) | b;
 
-    // Only pay the WebGL lighting shader cost when the scene isn't already 100% sunlit white
-    const needsWebGLLighting = ambientHex !== 0xffffff || snap.lampFactor > 0.01;
+    // Only pay the WebGL lighting shader cost when dusk, night, dawn, or overcast weather meaningfully dims the scene
+    const needsWebGLLighting =
+      snap.lampFactor >= 0.08 ||
+      r < 238 ||
+      g < 228 ||
+      b < 214 ||
+      weather !== 'clear';
     this.setWebGLLightingActive(needsWebGLLighting);
     if (!needsWebGLLighting) {
       this.lights.setAmbientColor(0xffffff);
@@ -2293,15 +2724,16 @@ export class MainScene extends Phaser.Scene {
     // 1. Truck Headlights (Phaser 4 ConeLight shaders illuminating terrain/roads/buildings/vehicles)
     const mode = this.truck.headlightMode;
     if (mode === 'off') {
-      this.headlightLeft?.setVisible(false);
-      this.headlightRight?.setVisible(false);
+      this.headlightLeft?.setVisible(false).setIntensity(0);
+      this.headlightRight?.setVisible(false).setIntensity(0);
     } else {
       const isHigh = mode === 'high';
       const radius = isHigh ? 720 : 420;
       const color = isHigh ? 0xeef6ff : 0xfff3d1;
       const intensity = isHigh ? (0.50 + lampFactor * 3.10) : (0.35 + lampFactor * 2.35);
-      const inner = isHigh ? 0.32 : 0.40;
-      const outer = isHigh ? 0.76 : 0.95;
+      const inner = isHigh ? 0.26 : 0.34;
+      const outer = isHigh ? 0.66 : 0.82;
+      const aimSpread = isHigh ? 0.06 : 0.07;
       const z = isHigh ? 180 : 110;
       const heading = a - Math.PI / 2;
 
@@ -2312,25 +2744,35 @@ export class MainScene extends Phaser.Scene {
       const rx = this.truck.body.position.x + fwdX * frontOffset + rightX * latOffset;
       const ry = this.truck.body.position.y + fwdY * frontOffset + rightY * latOffset;
 
+      const { left: leftOut, right: rightOut } = getEffectiveHeadlightStates(this.truck.damage, this.time.now);
+
       if (this.headlightLeft) {
-        this.headlightLeft
-          .setVisible(true)
-          .setPosition(lx, ly)
-          .setRadius(radius)
-          .setColor(color)
-          .setIntensity(intensity)
-          .setZ(z)
-          .setCone(heading - 0.03, inner, outer);
+        if (!leftOut.active) {
+          this.headlightLeft.setVisible(false).setIntensity(0);
+        } else {
+          this.headlightLeft
+            .setVisible(true)
+            .setPosition(lx, ly)
+            .setRadius(radius * (0.62 + 0.38 * leftOut.factor))
+            .setColor(color)
+            .setIntensity(intensity * leftOut.factor)
+            .setZ(z)
+            .setCone(heading - aimSpread, inner, outer);
+        }
       }
       if (this.headlightRight) {
-        this.headlightRight
-          .setVisible(true)
-          .setPosition(rx, ry)
-          .setRadius(radius)
-          .setColor(color)
-          .setIntensity(intensity)
-          .setZ(z)
-          .setCone(heading + 0.03, inner, outer);
+        if (!rightOut.active) {
+          this.headlightRight.setVisible(false).setIntensity(0);
+        } else {
+          this.headlightRight
+            .setVisible(true)
+            .setPosition(rx, ry)
+            .setRadius(radius * (0.62 + 0.38 * rightOut.factor))
+            .setColor(color)
+            .setIntensity(intensity * rightOut.factor)
+            .setZ(z)
+            .setCone(heading + aimSpread, inner, outer);
+        }
       }
     }
 
@@ -2492,11 +2934,20 @@ export class MainScene extends Phaser.Scene {
 
   private renderWeather(time: number, delta: number, snap: TimeOfDaySnapshot) {
     const g = this.weatherGraphics;
+    const weather = this.garageSystem.getActiveModifier();
+    if (weather === 'clear') {
+      if (this.weatherGraphicsDirty) {
+        g.clear();
+        this.weatherGraphicsDirty = false;
+      }
+      return;
+    }
+
     g.clear();
+    this.weatherGraphicsDirty = true;
 
     const w = this.scale.width;
     const h = this.scale.height;
-    const weather = this.garageSystem.getActiveModifier();
     const dt = Math.min(delta / 1000, 0.05);
 
     if (weather === 'fog') {
@@ -2584,9 +3035,13 @@ export class MainScene extends Phaser.Scene {
 
     this.engineGain.gain.setTargetAtTime(0.04, this.audioCtx.currentTime, 0.06);
 
-    // Engine RPM Pitch based on truck speed & throttle
+    // Engine RPM Pitch based on truck speed & throttle (+ sputter when engine is heavily worn)
     const speedRatio = Math.min(this.truck.speedKmh / 65, 1.0);
-    const targetFreq = 34 + speedRatio * 48 + (this.truck.isAccelerating ? 12 : 0);
+    const engineSputter =
+      this.truck.damage.engine < 35
+        ? Math.sin(time * 0.025) * (1 - this.truck.damage.engine / 35) * 6
+        : 0;
+    const targetFreq = Math.max(22, 34 + speedRatio * 48 + (this.truck.isAccelerating ? 12 : 0) + engineSputter);
     this.engineOsc.frequency.setTargetAtTime(targetFreq, this.audioCtx.currentTime, 0.1);
 
     // Reverse Beep Warning

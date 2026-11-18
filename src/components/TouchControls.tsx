@@ -8,10 +8,15 @@ interface TouchControlsProps {
   coupling?: MainScene['telemetry']['coupling'];
   fuelPercent?: number;
   fuelLevel?: number;
+  truckHealth?: number;
+  trailerHealth?: number;
+  cargoHealth?: number;
+  nearbyRepairBay?: { x: number; y: number } | null;
   headlightMode?: HeadlightMode;
   onToggleLowBeam?: () => void;
   onToggleHighBeam?: () => void;
   onDecouple?: () => void;
+  onRepair?: () => void;
 }
 
 export const TouchControls: React.FC<TouchControlsProps> = ({
@@ -19,10 +24,15 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
   coupling,
   fuelPercent,
   fuelLevel,
+  truckHealth = 100,
+  trailerHealth = 100,
+  cargoHealth = 100,
+  nearbyRepairBay = null,
   headlightMode = 'low',
   onToggleLowBeam,
   onToggleHighBeam,
   onDecouple,
+  onRepair,
 }) => {
   const wheelRef = useRef<HTMLDivElement>(null);
   const brakeRef = useRef<HTMLButtonElement>(null);
@@ -358,8 +368,25 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
               </button>
             </div>
 
-            {/* Desacoplar (C) / bloqueado + Travão de Mão (P) */}
+            {/* Reparar na oficina (E) / Desacoplar (C) / bloqueado + Travão de Mão (P) */}
             <div className="flex items-center gap-2">
+              {nearbyRepairBay && (truckHealth < 100 || trailerHealth < 100) && (
+                <button
+                  type="button"
+                  data-testid="btn-repair"
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (onRepair) onRepair();
+                    else getMainScene()?.tryRepair();
+                  }}
+                  style={{ touchAction: 'none' }}
+                  className="w-8 h-8 rounded-full text-sm border bg-emerald-500/90 text-slate-950 border-emerald-200 shadow-md shadow-emerald-500/50 transition flex items-center justify-center select-none touch-none animate-pulse"
+                  title="Reparar na Oficina (Tecla E)"
+                >
+                  🔧
+                </button>
+              )}
               {coupling && coupling.decoupleReady && (
                 <button
                   type="button"
@@ -407,6 +434,35 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
 
           {/* Fuel bar stacked directly ABOVE the gear switch (D / R) */}
           <div className="flex flex-col items-center gap-1">
+            {(truckHealth < 100 || trailerHealth < 100 || cargoHealth < 100) && (
+              <div
+                className="flex items-center justify-center gap-1 w-16 text-[9px] font-mono font-black leading-none"
+                title={`Camião ${truckHealth}% · Reboque ${trailerHealth}% · Carga ${cargoHealth}%`}
+              >
+                {(truckHealth < 100 || trailerHealth < 100) && (
+                  <span
+                    className={`px-1 py-0.5 rounded border backdrop-blur-sm ${
+                      Math.min(truckHealth, trailerHealth) <= 35
+                        ? 'bg-red-950/90 border-red-400/80 text-red-200'
+                        : 'bg-amber-950/85 border-amber-400/60 text-amber-200'
+                    }`}
+                  >
+                    🔧{Math.round(Math.min(truckHealth, trailerHealth))}%
+                  </span>
+                )}
+                {cargoHealth < 100 && (
+                  <span
+                    className={`px-1 py-0.5 rounded border backdrop-blur-sm ${
+                      cargoHealth <= 50
+                        ? 'bg-red-950/90 border-red-400/80 text-red-200'
+                        : 'bg-amber-950/85 border-amber-400/60 text-amber-200'
+                    }`}
+                  >
+                    📦{Math.round(cargoHealth)}%
+                  </span>
+                )}
+              </div>
+            )}
             {fuelPercent !== undefined && (
               <div
                 className="relative w-16 h-3.5 bg-slate-700 rounded overflow-hidden border border-white/20 shadow-inner"

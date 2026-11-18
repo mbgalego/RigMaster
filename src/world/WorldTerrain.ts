@@ -178,10 +178,10 @@ export class WorldTerrain {
       }
       break;
     }
-    // Evict chunks far away (keep 2-chunk margin)
+    // Evict chunks far away (keep 1-chunk margin)
     const keep = new Set<string>();
-    for (let cy = c0y - 2; cy <= c1y + 2; cy++) {
-      for (let cx = c0x - 2; cx <= c1x + 2; cx++) {
+    for (let cy = c0y - 1; cy <= c1y + 1; cy++) {
+      for (let cx = c0x - 1; cx <= c1x + 1; cx++) {
         keep.add(`${cx}_${cy}`);
       }
     }
