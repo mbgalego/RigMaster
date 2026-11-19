@@ -817,7 +817,7 @@
       "w": 130,
       "h": 300,
       "params": {
-        "trailer": "standard"
+        "trailer": "reefer"
       }
     },
     {
@@ -829,7 +829,7 @@
       "w": 130,
       "h": 300,
       "params": {
-        "trailer": "standard"
+        "trailer": "container"
       }
     },
     {
@@ -841,7 +841,7 @@
       "w": 130,
       "h": 300,
       "params": {
-        "trailer": "standard"
+        "trailer": "tanker_milk"
       }
     },
     {
@@ -865,7 +865,7 @@
       "w": 170,
       "h": 700,
       "params": {
-        "trailer": "long_cargo"
+        "trailer": "flatbed_heavy"
       }
     },
     {
@@ -901,7 +901,7 @@
       "w": 140,
       "h": 420,
       "params": {
-        "trailer": "bitrem_lead"
+        "trailer": "bitrem_tanker_lead"
       }
     },
     {
@@ -925,7 +925,7 @@
       "w": 140,
       "h": 300,
       "params": {
-        "trailer": "fragile_glass"
+        "trailer": "tanker_hazmat"
       }
     },
     {
@@ -1179,7 +1179,7 @@
       "w": 110,
       "h": 300,
       "params": {
-        "trailer": "standard"
+        "trailer": "reefer"
       }
     },
     {
@@ -1191,7 +1191,7 @@
       "w": 110,
       "h": 300,
       "params": {
-        "trailer": "standard"
+        "trailer": "container"
       }
     },
     {
@@ -2967,7 +2967,7 @@
       "w": 46,
       "h": 220,
       "params": {
-        "trailer": "standard"
+        "trailer": "tanker_milk"
       }
     },
     {
@@ -3127,6 +3127,30 @@
       "angle": 90,
       "w": 14,
       "h": 14
+    },
+    {
+      "id": "wo_273",
+      "type": "parking_pad",
+      "x": 11080,
+      "y": 1650,
+      "angle": 180,
+      "w": 170,
+      "h": 420,
+      "params": {
+        "trailer": "timber"
+      }
+    },
+    {
+      "id": "wo_274",
+      "type": "parking_pad",
+      "x": 10900,
+      "y": 1650,
+      "angle": 180,
+      "w": 170,
+      "h": 420,
+      "params": {
+        "trailer": "tanker_fuel"
+      }
     }
   ]
 }

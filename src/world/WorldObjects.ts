@@ -759,16 +759,23 @@ export class WorldObjects {
     // Nose faces SOUTH (angle PI) — the classic depot posture.
     const pad = (x: number, y: number, w: number, h: number, trailer: string) =>
       this.add('parking_pad', x, y, w, h, { params: { trailer }, angle: Math.PI });
-    // Standard (C) — east of Porto
-    for (let i = 0; i < 4; i++) pad(1950 + i * 150, 1560, 130, 300, 'standard');
-    // Long cargo (C+E) — south of Estaleiro
+    // Porto (C) — east of Porto
+    pad(1950, 1560, 130, 300, 'standard');
+    pad(2100, 1560, 130, 300, 'reefer');
+    pad(2250, 1560, 130, 300, 'container');
+    pad(2400, 1560, 130, 300, 'tanker_milk');
+    // Estaleiro (C+E) — south of Estaleiro
+    pad(10900, 1650, 170, 420, 'tanker_fuel');
+    pad(11080, 1650, 170, 420, 'timber');
     pad(11260, 1650, 170, 700, 'long_cargo');
-    pad(11450, 1650, 170, 700, 'long_cargo');
+    pad(11450, 1650, 170, 700, 'flatbed_heavy');
     // Bitrem (H) — north of Zona Industrial
-    for (let i = 0; i < 3; i++) pad(11750 + i * 150, 7650, 140, 420, 'bitrem_lead');
-    // Fragile glass (X) — east of Centro Histórico
+    pad(11750, 7650, 140, 420, 'bitrem_lead');
+    pad(11900, 7650, 140, 420, 'bitrem_lead');
+    pad(12050, 7650, 140, 420, 'bitrem_tanker_lead');
+    // Fragile glass & Hazmat tanker (X) — east of Centro Histórico
     pad(1500, 8300, 140, 300, 'fragile_glass');
-    pad(1650, 8300, 140, 300, 'fragile_glass');
+    pad(1650, 8300, 140, 300, 'tanker_hazmat');
 
     // ---- Exam practice courses (jersey lanes near the exam sites) ----
     // C exam (1920,1400): flanked approach lane
@@ -834,8 +841,9 @@ export class WorldObjects {
       //      pads (nose north, toward the docks) — future capture points ----
       this.add('pad_asphalt', 10840, 10050, 460, 360);
       this.add('dock_wall', 10840, 9898, 420, 56, { params: { docks: 3 } });
+      const dockYardTypes = ['standard', 'reefer', 'container'];
       for (let i = 0; i < 3; i++) {
-        this.add('parking_pad', 10720 + i * 120, 10080, 110, 300, { params: { trailer: 'standard' } });
+        this.add('parking_pad', 10720 + i * 120, 10080, 110, 300, { params: { trailer: dockYardTypes[i] } });
       }
     }
 
@@ -935,7 +943,7 @@ export class WorldObjects {
       this.add('trailer', 6535, 3995, 46, 220, { angle: deg(89.4), params: { trailer: 'standard' } });
       this.add('trailer', 7262, 3667, 46, 220, { angle: deg(-89.9), params: { trailer: 'fragile_glass' } });
       this.add('trailer', 6549, 3501, 46, 310, { angle: deg(89.6), params: { trailer: 'long_cargo' } });
-      this.add('trailer', 7269, 3576, 46, 220, { angle: deg(-90.4), params: { trailer: 'standard' } });
+      this.add('trailer', 7269, 3576, 46, 220, { angle: deg(-90.4), params: { trailer: 'tanker_milk' } });
       this.add('dock', 7252, 3580, 66, 286, { angle: deg(-90.1) });
       this.add('dock', 7253, 3664, 70, 284, { angle: deg(-90.5) });
     }
@@ -1168,10 +1176,18 @@ export class WorldObjects {
           // silhouette of the trailer it spawns. Doubles as a future
           // arrival/capture trigger point.
           const tr = String(o.params?.trailer || 'standard');
-          const mark = tr === 'long_cargo' ? 0x4ade80 : tr.startsWith('bitrem') ? 0x60a5fa : tr === 'fragile_glass' ? 0xf87171 : 0xfacc15;
+          const mark =
+            tr === 'long_cargo' || tr === 'flatbed_heavy' || tr === 'timber' || tr === 'tanker_fuel'
+              ? 0x4ade80
+              : tr.startsWith('bitrem')
+                ? 0x60a5fa
+                : tr === 'fragile_glass' || tr === 'tanker_hazmat'
+                  ? 0xf87171
+                  : 0xfacc15;
+          const isTanker = tr.includes('tanker');
           g.fillStyle(0x1c2027, 1);
           g.fillRect(x0, y0, o.w, o.h);
-          // Bay boundary (solid yellow, dim) + bright corner brackets
+          // Bay boundary (solid license color, dim) + bright corner brackets
           g.lineStyle(2, mark, 0.45);
           g.strokeRect(x0 + 4, y0 + 4, o.w - 8, o.h - 8);
           g.lineStyle(3, mark, 0.85);
@@ -1204,19 +1220,33 @@ export class WorldObjects {
           // Faint silhouettes of the parked trailer(s) near the nose end
           const box = (cy: number, L: number, W: number) => {
             g.fillStyle(0x11151b, 0.9);
-            g.fillRect(o.x - W / 2, cy - L / 2, W, L);
-            g.lineStyle(1.5, 0x3c4550, 1);
-            g.strokeRect(o.x - W / 2, cy - L / 2, W, L);
-            g.lineStyle(2, 0x232b35, 1);
-            g.lineBetween(o.x - W / 2 + 6, cy, o.x + W / 2 - 6, cy);
+            if (isTanker) {
+              g.fillRoundedRect(o.x - W / 2, cy - L / 2, W, L, 16);
+              g.lineStyle(1.5, 0x3c4550, 1);
+              g.strokeRoundedRect(o.x - W / 2, cy - L / 2, W, L, 16);
+              g.lineStyle(1.5, 0x26313e, 1);
+              g.lineBetween(o.x, cy - L / 2 + 12, o.x, cy + L / 2 - 12);
+            } else {
+              g.fillRect(o.x - W / 2, cy - L / 2, W, L);
+              g.lineStyle(1.5, 0x3c4550, 1);
+              g.strokeRect(o.x - W / 2, cy - L / 2, W, L);
+              g.lineStyle(2, 0x232b35, 1);
+              g.lineBetween(o.x - W / 2 + 6, cy, o.x + W / 2 - 6, cy);
+            }
           };
-          if (tr === 'bitrem_lead' || tr === 'bitrem_pup') {
+          if (tr === 'bitrem_lead' || tr === 'bitrem_pup' || tr === 'bitrem_tanker_lead' || tr === 'bitrem_tanker_pup') {
             const pupCy = y0 + 16 + 77.5;
             box(pupCy, 155, 46);
             box(pupCy + 167, 155, 46);
           } else {
-            const L = tr === 'long_cargo' ? 310 : 220;
-            box(y0 + 16 + L / 2, L, 46);
+            const L =
+              tr === 'long_cargo' ? 310 :
+              tr === 'flatbed_heavy' ? 275 :
+              tr === 'timber' ? 255 :
+              tr === 'tanker_fuel' ? 248 :
+              tr === 'tanker_hazmat' ? 225 : 220;
+            const W = tr === 'flatbed_heavy' ? 48 : 46;
+            box(y0 + 16 + L / 2, L, W);
           }
           break;
         }

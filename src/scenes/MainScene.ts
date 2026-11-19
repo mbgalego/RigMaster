@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { Truck, HeadlightMode } from '../entities/Truck';
-import { Trailer, TrailerType } from '../entities/Trailer';
+import { Trailer, TrailerType, isBitremLeadType } from '../entities/Trailer';
 import { Kingpin, ArticulationTelemetry } from '../physics/Kingpin';
 import { World } from '../world/World';
 import { WorldObjects, RepairBay } from '../world/WorldObjects';
@@ -20,6 +20,21 @@ import {
   getEffectiveRearLightStates,
   getTruckEffectiveRearLightStates,
 } from '../systems/DamageSystem';
+
+export type VehicleConfigType =
+  | 'solo'
+  | 'standard'
+  | 'reefer'
+  | 'container'
+  | 'tanker_milk'
+  | 'long_cargo'
+  | 'flatbed_heavy'
+  | 'timber'
+  | 'tanker_fuel'
+  | 'bitrem'
+  | 'bitrem_tanker'
+  | 'fragile_glass'
+  | 'tanker_hazmat';
 
 export class MainScene extends Phaser.Scene {
   public truck!: Truck;
@@ -70,7 +85,7 @@ export class MainScene extends Phaser.Scene {
 
   public isEditorMode: boolean = false;
   public debugMatter: boolean = true;
-  public currentVehicleConfig: 'solo' | 'standard' | 'long_cargo' | 'bitrem' | 'fragile_glass' = 'standard';
+  public currentVehicleConfig: VehicleConfigType = 'standard';
   private preEditorZoom: number = 1.0;
   /** Refuelling in progress (set by tryRefuel, cleared after a toast delay). */
   private isRefuelling: boolean = false;
@@ -495,7 +510,20 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
-  public spawnVehicleRig(configType: 'solo' | 'standard' | 'long_cargo' | 'bitrem' | 'fragile_glass') {
+  private getSingleRigOffset(configType: VehicleConfigType): number {
+    switch (configType) {
+      case 'long_cargo': return 155;
+      case 'flatbed_heavy': return 140;
+      case 'timber': return 131;
+      case 'tanker_fuel': return 128;
+      case 'tanker_hazmat': return 117;
+      case 'bitrem':
+      case 'bitrem_tanker': return 87.5;
+      default: return 115;
+    }
+  }
+
+  public spawnVehicleRig(configType: VehicleConfigType) {
     this.currentVehicleConfig = configType;
 
     // Destroy existing trailers and joints
@@ -540,53 +568,18 @@ export class MainScene extends Phaser.Scene {
     const backwardX = -Math.sin(spawnAngleRad);
     const backwardY = Math.cos(spawnAngleRad);
 
-    if (configType === 'standard' || configType === 'fragile_glass') {
-      const isFragile = configType === 'fragile_glass';
-      const offset = 115;
-      const tx = spawn.x + backwardX * offset;
-      const ty = spawn.y + backwardY * offset;
-
-      this.trailer = new Trailer(this, {
-        x: tx,
-        y: ty,
-        angle: spawnAngleRad,
-        type: isFragile ? 'fragile_glass' : 'standard',
-      });
-
-      this.kingpin = new Kingpin(this, this.truck.body, this.trailer.body, this.trailer.length, {
-        parentOffset: { x: 0, y: 35 },
-        trailerOffset: { x: 0, y: -this.trailer.length / 2 + 14 },
-        jackknifeLimitDeg: 75,
-        mechanicalLockDeg: 95,
-      });
-    } else if (configType === 'long_cargo') {
-      const offset = 155;
-      const tx = spawn.x + backwardX * offset;
-      const ty = spawn.y + backwardY * offset;
-
-      this.trailer = new Trailer(this, {
-        x: tx,
-        y: ty,
-        angle: spawnAngleRad,
-        type: 'long_cargo',
-      });
-
-      this.kingpin = new Kingpin(this, this.truck.body, this.trailer.body, this.trailer.length, {
-        parentOffset: { x: 0, y: 35 },
-        trailerOffset: { x: 0, y: -this.trailer.length / 2 + 18 },
-        jackknifeLimitDeg: 72,
-        mechanicalLockDeg: 95,
-      });
-    } else if (configType === 'bitrem') {
+    if (configType === 'bitrem' || configType === 'bitrem_tanker') {
       const leadOffset = 87.5;
       const lx = spawn.x + backwardX * leadOffset;
       const ly = spawn.y + backwardY * leadOffset;
+      const leadType: TrailerType = configType === 'bitrem_tanker' ? 'bitrem_tanker_lead' : 'bitrem_lead';
+      const pupType: TrailerType = configType === 'bitrem_tanker' ? 'bitrem_tanker_pup' : 'bitrem_pup';
 
       this.trailer = new Trailer(this, {
         x: lx,
         y: ly,
         angle: spawnAngleRad,
-        type: 'bitrem_lead',
+        type: leadType,
       });
 
       this.kingpin = new Kingpin(this, this.truck.body, this.trailer.body, this.trailer.length, {
@@ -604,13 +597,40 @@ export class MainScene extends Phaser.Scene {
         x: px,
         y: py,
         angle: spawnAngleRad,
-        type: 'bitrem_pup',
+        type: pupType,
       });
 
       this.pupKingpin = new Kingpin(this, this.trailer.body, this.pupTrailer.body, this.pupTrailer.length, {
         parentOffset: { x: 0, y: this.trailer.length / 2 - 18 },
         trailerOffset: { x: 0, y: -this.pupTrailer.length / 2 + 14 },
         jackknifeLimitDeg: 75,
+        mechanicalLockDeg: 95,
+      });
+    } else {
+      const trailerType = configType as TrailerType;
+      const offset = this.getSingleRigOffset(configType);
+      const tx = spawn.x + backwardX * offset;
+      const ty = spawn.y + backwardY * offset;
+
+      this.trailer = new Trailer(this, {
+        x: tx,
+        y: ty,
+        angle: spawnAngleRad,
+        type: trailerType,
+      });
+
+      const noseInset =
+        trailerType === 'long_cargo' ? 18 :
+        trailerType === 'flatbed_heavy' ? 16 : 14;
+      const jackknifeDeg =
+        trailerType === 'long_cargo' ? 72 :
+        trailerType === 'flatbed_heavy' ? 73 :
+        (trailerType === 'timber' || trailerType === 'tanker_fuel') ? 74 : 75;
+
+      this.kingpin = new Kingpin(this, this.truck.body, this.trailer.body, this.trailer.length, {
+        parentOffset: { x: 0, y: 35 },
+        trailerOffset: { x: 0, y: -this.trailer.length / 2 + noseInset },
+        jackknifeLimitDeg: jackknifeDeg,
         mechanicalLockDeg: 95,
       });
     }
@@ -661,9 +681,7 @@ export class MainScene extends Phaser.Scene {
     let pupElev: { layer: 0 | 1; z: number } | null = null;
 
     if (this.trailer) {
-      let offset = 115;
-      if (this.currentVehicleConfig === 'long_cargo') offset = 155;
-      if (this.currentVehicleConfig === 'bitrem') offset = 87.5;
+      const offset = this.getSingleRigOffset(this.currentVehicleConfig);
 
       const tx = spawn.x + backwardX * offset;
       const ty = spawn.y + backwardY * offset;
@@ -1100,11 +1118,12 @@ export class MainScene extends Phaser.Scene {
     };
     const reset = () => { this.autoCoupleErrorKey = null; };
 
-    // Bitrem: auto-couple the pup onto the lead's rear fifth wheel. Free
-    // trailer bodies exclude the trailer bit (0x0004), so the lead slides
-    // under the pup's nose plate to the pin — same corridor as the tractor.
+    // Bitrem: auto-couple the pup onto the lead's rear fifth wheel. Parked
+    // pup bodies exclude the trailer bit (TRAILER_PARKED_PUP_*), while their
+    // blocker starts 30px past the kingpin, so the lead slides cleanly under
+    // the pup's nose lip without breaking trailer-to-trailer collisions.
     if (this.trailer) {
-      if (this.trailer.type === 'bitrem_lead' && !this.pupTrailer) {
+      if (isBitremLeadType(this.trailer.type) && !this.pupTrailer) {
         const cand = mgr.findCouplablePup(this.trailer, 30, 28);
         if (!cand) { reset(); return; }
         if (!this.decoupleLockoutArmed(cand.trailer)) { reset(); return; }
@@ -1121,7 +1140,7 @@ export class MainScene extends Phaser.Scene {
 
     // Solo tractor: auto-couple the nearest aligned trailer in the kingpin zone (same layer)
     const hitch = this.getTruckHitch();
-    const cand = mgr.findCouplable(hitch.x, hitch.y, this.truck.body.angle, 30, 28, ['bitrem_pup'], this.truck.layer);
+    const cand = mgr.findCouplable(hitch.x, hitch.y, this.truck.body.angle, 30, 28, ['bitrem_pup', 'bitrem_tanker_pup'], this.truck.layer);
     if (!cand) { reset(); return; }
     if (!this.decoupleLockoutArmed(cand.trailer)) { reset(); return; }
 
@@ -1266,9 +1285,12 @@ export class MainScene extends Phaser.Scene {
     if (t.type === 'long_cargo') {
       trailerOffY = -t.length / 2 + 18;
       jackknife = 72;
-    } else if (t.type === 'bitrem_lead') {
+    } else if (t.type === 'flatbed_heavy') {
+      trailerOffY = -t.length / 2 + 16;
+      jackknife = 73;
+    } else if (t.type === 'timber' || t.type === 'tanker_fuel') {
       trailerOffY = -t.length / 2 + 14;
-      jackknife = 75;
+      jackknife = 74;
     } else {
       trailerOffY = -t.length / 2 + 14;
       jackknife = 75;
@@ -1285,9 +1307,9 @@ export class MainScene extends Phaser.Scene {
 
     // Keep reset-spawn offsets consistent with the manually built rig
     this.currentVehicleConfig =
-      t.type === 'long_cargo' ? 'long_cargo' :
-      t.type === 'bitrem_lead' ? 'bitrem' :
-      t.type === 'fragile_glass' ? 'fragile_glass' : 'standard';
+      t.type === 'bitrem_lead' || t.type === 'bitrem_pup' ? 'bitrem' :
+      t.type === 'bitrem_tanker_lead' || t.type === 'bitrem_tanker_pup' ? 'bitrem_tanker' :
+      (t.type as VehicleConfigType);
 
     this.setCouplingNotice(`Acoplado: ${t.cargoName}`, 'success');
   }
@@ -1377,7 +1399,7 @@ export class MainScene extends Phaser.Scene {
     // Hitch point that would re-couple it: the truck's fifth wheel for a lead
     // trailer, the lead's rear fifth wheel for a pup.
     let hx: number, hy: number;
-    if (this.trailer && this.trailer.type === 'bitrem_lead') {
+    if (this.trailer && isBitremLeadType(this.trailer.type)) {
       const h = this.getLeadRearHitch(this.trailer);
       hx = h.x; hy = h.y;
     } else if (!this.trailer) {
@@ -1432,7 +1454,7 @@ export class MainScene extends Phaser.Scene {
     // Solo: amber indicator while sitting in a locked trailer's kingpin zone (same layer)
     const mgr = TrailerManager.getInstance(this);
     const hitch = this.getTruckHitch();
-    const cand = mgr.findCouplable(hitch.x, hitch.y, this.truck.body.angle, 30, 28, ['bitrem_pup'], this.truck.layer);
+    const cand = mgr.findCouplable(hitch.x, hitch.y, this.truck.body.angle, 30, 28, ['bitrem_pup', 'bitrem_tanker_pup'], this.truck.layer);
     if (cand) {
       const lic = TRAILER_TYPE_TO_LICENSE[cand.trailer.type];
       if (!this.licenseSystem.isUnlocked(lic)) {
@@ -1642,8 +1664,13 @@ export class MainScene extends Phaser.Scene {
       // cannot keep backing into it — clamp its push so the rig stops like a
       // real one (the follower's imposed velocity would otherwise keep
       // compacting the rig against the wall).
-      if (this.trailer && this.trailer.tailBlocked) {
-        const ta = this.trailer.body.angle;
+      const blockedTrailer = this.pupTrailer?.tailBlocked
+        ? this.pupTrailer
+        : this.trailer?.tailBlocked
+          ? this.trailer
+          : null;
+      if (blockedTrailer) {
+        const ta = blockedTrailer.body.angle;
         const fx = Math.sin(ta), fy = -Math.cos(ta);
         const v = this.truck.body.velocity;
         const vl = v.x * fx + v.y * fy;

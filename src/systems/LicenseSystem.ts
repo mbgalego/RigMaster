@@ -88,7 +88,11 @@ export class LicenseSystem {
         unlocked: true, // Unlocked by default
         color: '#00f0ff',
         description: 'Domínio de semi-reboque standard 13.6m, geometria de viragem e travagem básica.',
-        unlockedPerks: ['Camião Trator 4x2', 'Atrelado Standard 13.6m (24t)', 'Editor: Peças Básicas de Asfalto'],
+        unlockedPerks: [
+          'Atrelado Standard 13.6m & Frigorífico',
+          'Porta-Contentores ISO 40ft',
+          'Cisterna Leite / Alimentar',
+        ],
         exam: {
           title: 'Exame de Admissão - Manobra em Linha',
           subtitle: 'Aproximação e paragem alinhada na doca.',
@@ -113,7 +117,11 @@ export class LicenseSystem {
         unlocked: false,
         color: '#f97316',
         description: 'Condução de cargas ultra-longas (Pás Eólicas / Vigas). Requer abertura de curva para compensar desvio de eixos.',
-        unlockedPerks: ['Atrelado Extensível Especial', 'Pá Eólica 62m (32t)', 'Editor: Rotundas e Curvas Largas'],
+        unlockedPerks: [
+          'Pá Eólica 62m & Prancha Pesada (Escavadora)',
+          'Florestal / Toros de Madeira',
+          'Cisterna Petróleo / Combustível ADR',
+        ],
         exam: {
           title: 'Exame de Curva Aberta (Off-Tracking Challenge)',
           subtitle: 'Navegação em curva fechada sem tocar nos cones interiores nem varrer barreiras.',
@@ -138,7 +146,11 @@ export class LicenseSystem {
         unlocked: false,
         color: '#a855f7',
         description: 'Controlo de comboio rodoviário com 2 pontos de articulação (quintas rodas). Requer mestria absoluta contra efeito Jackknife.',
-        unlockedPerks: ['Bitrem / B-Double 25.25m', 'Dupla Articulação Ativa', 'Editor: Docas de Carga Duplas'],
+        unlockedPerks: [
+          'Bitrem / B-Double 25.25m Standard',
+          'Bitrem Cisterna Dupla (Combustível)',
+          'Dupla Articulação Ativa',
+        ],
         exam: {
           title: 'Exame de Doca Estreita em Marcha-Atrás (Bitrem)',
           subtitle: 'Inserção de ré em baía estreita com 2 eixos de articulação simultâneos.',
@@ -163,7 +175,11 @@ export class LicenseSystem {
         unlocked: false,
         color: '#10b981',
         description: 'Transporte de vidro blindado e componentes aeroespaciais sob condições climáticas adversas com tolerância zero a impactos.',
-        unlockedPerks: ['Carga Sensível Vidro Óptico', 'Acelerómetro G-Meter Ativo', 'Editor: Zonas de Piso Escorregadio'],
+        unlockedPerks: [
+          'Vidro Óptico Especial (Tolerância Zero)',
+          'Cisterna Líquidos Perigosos ADR (Químicos)',
+          'Acelerómetro G-Meter Ativo',
+        ],
         exam: {
           title: 'Exame de Integridade Estrutural (Zero-Impact Wet Run)',
           subtitle: 'Transporte sob chuva intensa sem ativar sensor de choque.',

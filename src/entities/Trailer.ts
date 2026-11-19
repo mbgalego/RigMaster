@@ -14,7 +14,39 @@ import {
   localizeImpact,
 } from '../systems/DamageSystem';
 
-export type TrailerType = 'standard' | 'long_cargo' | 'bitrem_lead' | 'bitrem_pup' | 'fragile_glass';
+export type TrailerType =
+  | 'standard'
+  | 'reefer'
+  | 'container'
+  | 'tanker_milk'
+  | 'long_cargo'
+  | 'flatbed_heavy'
+  | 'timber'
+  | 'tanker_fuel'
+  | 'bitrem_lead'
+  | 'bitrem_pup'
+  | 'bitrem_tanker_lead'
+  | 'bitrem_tanker_pup'
+  | 'fragile_glass'
+  | 'tanker_hazmat';
+
+export function isBitremLeadType(type: TrailerType): boolean {
+  return type === 'bitrem_lead' || type === 'bitrem_tanker_lead';
+}
+
+export function isBitremPupType(type: TrailerType): boolean {
+  return type === 'bitrem_pup' || type === 'bitrem_tanker_pup';
+}
+
+export function isTankerType(type: TrailerType): boolean {
+  return (
+    type === 'tanker_milk' ||
+    type === 'tanker_fuel' ||
+    type === 'tanker_hazmat' ||
+    type === 'bitrem_tanker_lead' ||
+    type === 'bitrem_tanker_pup'
+  );
+}
 
 export interface TrailerConfig {
   x: number;
@@ -121,23 +153,71 @@ export class Trailer {
     this.scene = scene;
     this.type = config.type || 'standard';
 
-    if (this.type === 'long_cargo') {
-      this.width = config.width || 46;
-      this.length = config.length || 310;
-      this.cargoName = config.cargoName || 'Pá Eólica 62m (C+E)';
-    } else if (this.type === 'bitrem_lead' || this.type === 'bitrem_pup') {
-      this.width = config.width || 46;
-      this.length = config.length || 155;
-      this.cargoName = config.cargoName || (this.type === 'bitrem_lead' ? 'Bitrem Dianteiro (H)' : 'Bitrem Traseiro (H)');
-    } else if (this.type === 'fragile_glass') {
-      this.width = config.width || 46;
-      this.length = config.length || 220;
-      this.cargoName = config.cargoName || 'Vidro Especial / Óptica (X)';
-      this.isFragile = true;
-    } else {
-      this.width = config.width || 46;
-      this.length = config.length || 220;
-      this.cargoName = config.cargoName || 'Atrelado Standard 13.6m (C)';
+    switch (this.type) {
+      case 'long_cargo':
+        this.width = config.width || 46;
+        this.length = config.length || 310;
+        this.cargoName = config.cargoName || 'Pá Eólica 62m (C+E)';
+        break;
+      case 'flatbed_heavy':
+        this.width = config.width || 48;
+        this.length = config.length || 275;
+        this.cargoName = config.cargoName || 'Prancha Pesada / Escavadora (C+E)';
+        break;
+      case 'timber':
+        this.width = config.width || 46;
+        this.length = config.length || 255;
+        this.cargoName = config.cargoName || 'Florestal / Toros (C+E)';
+        break;
+      case 'tanker_fuel':
+        this.width = config.width || 46;
+        this.length = config.length || 248;
+        this.cargoName = config.cargoName || 'Cisterna Petróleo / Combustível (C+E)';
+        break;
+      case 'bitrem_lead':
+      case 'bitrem_pup':
+        this.width = config.width || 46;
+        this.length = config.length || 155;
+        this.cargoName = config.cargoName || (this.type === 'bitrem_lead' ? 'Bitrem Dianteiro (H)' : 'Bitrem Traseiro (H)');
+        break;
+      case 'bitrem_tanker_lead':
+      case 'bitrem_tanker_pup':
+        this.width = config.width || 46;
+        this.length = config.length || 155;
+        this.cargoName = config.cargoName || (this.type === 'bitrem_tanker_lead' ? 'Bitrem Cisterna Dianteiro (H)' : 'Bitrem Cisterna Traseiro (H)');
+        break;
+      case 'fragile_glass':
+        this.width = config.width || 46;
+        this.length = config.length || 220;
+        this.cargoName = config.cargoName || 'Vidro Especial / Óptica (X)';
+        this.isFragile = true;
+        break;
+      case 'tanker_hazmat':
+        this.width = config.width || 46;
+        this.length = config.length || 225;
+        this.cargoName = config.cargoName || 'Cisterna Líquidos Perigosos ADR (X)';
+        this.isFragile = true;
+        break;
+      case 'tanker_milk':
+        this.width = config.width || 46;
+        this.length = config.length || 220;
+        this.cargoName = config.cargoName || 'Cisterna Leite / Alimentar (C)';
+        break;
+      case 'reefer':
+        this.width = config.width || 46;
+        this.length = config.length || 220;
+        this.cargoName = config.cargoName || 'Frigorífico 13.6m (C)';
+        break;
+      case 'container':
+        this.width = config.width || 46;
+        this.length = config.length || 220;
+        this.cargoName = config.cargoName || 'Porta-Contentores ISO 40ft (C)';
+        break;
+      default:
+        this.width = config.width || 46;
+        this.length = config.length || 220;
+        this.cargoName = config.cargoName || 'Atrelado Standard 13.6m (C)';
+        break;
     }
 
     const spawnX = config.x;
@@ -153,18 +233,29 @@ export class Trailer {
     // the tractor's front-solid zone during articulation.
     if (this.type === 'long_cargo') {
       this.kingpinDist = (this.length / 2) - 18;
-    } else if (this.type === 'bitrem_lead' || this.type === 'bitrem_pup') {
-      this.kingpinDist = (this.length / 2) - 14;
+    } else if (this.type === 'flatbed_heavy') {
+      this.kingpinDist = (this.length / 2) - 16;
     } else {
       this.kingpinDist = (this.length / 2) - 14;
     }
     this.wheelbase = this.kingpinDist + this.rearAxleY;
 
     // Realistic mass for authentic heavy trailer inertia
-    let trailerMass = 85;
-    if (this.type === 'long_cargo') trailerMass = 120;
-    if (this.type === 'bitrem_lead' || this.type === 'bitrem_pup') trailerMass = 55;
+    let trailerMass = config.mass ?? 85;
+    if (config.mass === undefined) {
+      if (this.type === 'long_cargo') trailerMass = 120;
+      else if (this.type === 'flatbed_heavy') trailerMass = 135;
+      else if (this.type === 'timber') trailerMass = 115;
+      else if (this.type === 'tanker_fuel') trailerMass = 118;
+      else if (this.type === 'tanker_hazmat') trailerMass = 105;
+      else if (this.type === 'tanker_milk') trailerMass = 95;
+      else if (this.type === 'container') trailerMass = 92;
+      else if (this.type === 'reefer') trailerMass = 90;
+      else if (this.type === 'bitrem_tanker_lead' || this.type === 'bitrem_tanker_pup') trailerMass = 62;
+      else if (this.type === 'bitrem_lead' || this.type === 'bitrem_pup') trailerMass = 55;
+    }
 
+    const isPup = isBitremPupType(this.type);
     const matter = scene.matter;
     this.body = matter.add.rectangle(spawnX, spawnY, this.width, this.length, {
       mass: trailerMass,
@@ -175,7 +266,7 @@ export class Trailer {
       label: `trailer_${this.type}`,
       collisionFilter: {
         category: COLLISION_CAT.TRAILER_L0,
-        mask: COLLISION_MASK.TRAILER_PARKED_L0,
+        mask: isPup ? COLLISION_MASK.TRAILER_PARKED_PUP_L0 : COLLISION_MASK.TRAILER_PARKED_L0,
         group: 0,
       },
       render: {
@@ -185,10 +276,10 @@ export class Trailer {
 
     // Tractor-corridor blocker: static proxy body covering the box EXCEPT the
     // nose zone (depth from the nose edge to just past the kingpin seat). The
-    // trailer body itself never collides with the tractor's rear strip (nor
-    // with other trailer bodies), so without this proxy anything could drive
-    // straight through the middle of a free trailer. While coupled the blocker
-    // is switched off (mask 0).
+    // trailer body itself never collides with the tractor's rear strip, so
+    // without this proxy the cab could drive straight through a free trailer.
+    // On bitrem pups it also stops trailers past the nose lip; while coupled
+    // the blocker is switched off (mask 0).
     this.blockerDepth = this.length / 2 - this.kingpinDist + 30;
     const bOffX = -Math.sin(spawnAngle) * (this.blockerDepth / 2);
     const bOffY = Math.cos(spawnAngle) * (this.blockerDepth / 2);
@@ -197,7 +288,7 @@ export class Trailer {
       label: `trailer_blocker_${this.type}`,
       collisionFilter: {
         category: COLLISION_CAT.BLOCKER_L0,
-        mask: COLLISION_MASK.BLOCKER_L0,
+        mask: isPup ? COLLISION_MASK.BLOCKER_L0 : COLLISION_MASK.BLOCKER_TRUCK_L0,
         group: 0,
       },
       render: { visible: false },
@@ -206,7 +297,7 @@ export class Trailer {
     this.container = scene.add.container(spawnX, spawnY);
     // Trailers must ride ABOVE the tractor's rear (fifth-wheel coupling view);
     // the pup rides above the lead trailer of the bitrem.
-    this.container.setDepth(this.type === 'bitrem_pup' ? 12 : 11);
+    this.container.setDepth(isBitremPupType(this.type) ? 12 : 11);
 
     this.graphics = scene.add.graphics().setLighting(false);
     this.lightsGraphics = scene.add.graphics().setLighting(false);
@@ -222,10 +313,23 @@ export class Trailer {
 
   private onCollisionStart = (event: any) => {
     const now = this.scene.time?.now ?? performance.now();
+    const sc = this.scene as unknown as {
+      truck?: { body: MatterJS.BodyType; frontBody: MatterJS.BodyType; currentSpeed: number; vLong: number };
+      trailer?: { body: MatterJS.BodyType } | null;
+      pupTrailer?: { body: MatterJS.BodyType } | null;
+    };
     for (const pair of event.pairs) {
       if (pair.bodyA === this.body || pair.bodyB === this.body) {
         const other = pair.bodyA === this.body ? pair.bodyB : pair.bodyA;
-        if (other.label && (other.label.startsWith('truck') || other.label.startsWith('trailer'))) continue;
+        const isOwnRigBody =
+          other === this.body ||
+          other === this.blockerBody ||
+          (this.isCoupled &&
+            (other === sc.truck?.body ||
+              other === sc.truck?.frontBody ||
+              other === sc.trailer?.body ||
+              other === sc.pupTrailer?.body));
+        if (isOwnRigBody) continue;
 
         this.impactCount++;
         const speedPxS = computeNormalImpactSpeedPxS(
@@ -283,10 +387,10 @@ export class Trailer {
           }
         }
 
-        // If trailer impacts obstacle meaningfully, rebound truck motion slightly
-        const truck = (this.scene as unknown as { truck?: { currentSpeed: number } })?.truck;
-        if (speedPxS >= 18 && truck) {
-          truck.currentSpeed = -truck.currentSpeed * 0.15;
+        // If coupled trailer impacts obstacle or another trailer meaningfully, rebound truck motion slightly
+        if (this.isCoupled && speedPxS >= 18 && sc.truck) {
+          sc.truck.vLong = -sc.truck.vLong * 0.15;
+          sc.truck.currentSpeed = sc.truck.vLong;
         }
       }
     }
@@ -307,28 +411,80 @@ export class Trailer {
    * through them.
    */
   private computeTailBlocked(): boolean {
-    const ML = (Phaser as unknown as { Physics?: { Matter?: { Matter?: any } } }).Physics?.Matter?.Matter;
     const world = this.scene.matter?.world;
-    if (!ML || !world) return false;
-    const bodies = ML.Composite.allBodies(world.localWorld);
-    if (!bodies.length) return false;
+    if (!world) return false;
+    const ML = (Phaser as unknown as { Physics?: { Matter?: { Matter?: any } } }).Physics?.Matter?.Matter;
+    const allBodies: MatterJS.BodyType[] = ML?.Composite?.allBodies
+      ? ML.Composite.allBodies(world.localWorld)
+      : ((world.localWorld as { bodies?: MatterJS.BodyType[] }).bodies ?? []);
+    if (!allBodies.length) return false;
+
     const a = this.body.angle;
     const fx = Math.sin(a), fy = -Math.cos(a);  // forward (nose)
     const rx = Math.cos(a), ry = Math.sin(a);   // lateral
     const halfL = this.length / 2, halfW = this.width / 2;
-    const cx = this.body.position.x - fx * (halfL - 6);
-    const cy = this.body.position.y - fy * (halfL - 6);
-    const hits: any[] = ML.Query.point(bodies, [
+    const cx = this.body.position.x - fx * halfL;
+    const cy = this.body.position.y - fy * halfL;
+    const midCx = this.body.position.x - fx * (halfL - 6);
+    const midCy = this.body.position.y - fy * (halfL - 6);
+    const probes = [
       { x: cx, y: cy },
       { x: cx + rx * (halfW - 3), y: cy + ry * (halfW - 3) },
       { x: cx - rx * (halfW - 3), y: cy - ry * (halfW - 3) },
-    ]);
-    // Match obstacles on the trailer's active layer (+ shared ramp side walls)
+      { x: midCx, y: midCy },
+      { x: midCx + rx * (halfW - 3), y: midCy + ry * (halfW - 3) },
+      { x: midCx - rx * (halfW - 3), y: midCy - ry * (halfW - 3) },
+    ];
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const p of probes) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+
+    // Match obstacles and parked trailers on the trailer's active layer (+ shared ramp side walls)
     const activeObsBits =
       this.layer === 1
-        ? COLLISION_CAT.BRIDGE_RAIL | COLLISION_CAT.RAMP_WALL
-        : COLLISION_CAT.GROUND_OBS | COLLISION_CAT.RAMP_WALL;
-    return hits.some((b) => b.isStatic && (((b.collisionFilter?.category ?? 0) & activeObsBits) !== 0));
+        ? COLLISION_CAT.BRIDGE_RAIL | COLLISION_CAT.RAMP_WALL | COLLISION_CAT.TRAILER_L1 | COLLISION_CAT.BLOCKER_L1
+        : COLLISION_CAT.GROUND_OBS | COLLISION_CAT.RAMP_WALL | COLLISION_CAT.TRAILER_L0 | COLLISION_CAT.BLOCKER_L0;
+    const sc = this.scene as unknown as {
+      trailer?: { body: MatterJS.BodyType; blockerBody: MatterJS.BodyType } | null;
+      pupTrailer?: { body: MatterJS.BodyType; blockerBody: MatterJS.BodyType } | null;
+    };
+    const allowPupNosePass = isBitremLeadType(this.type);
+
+    for (const b of allBodies) {
+      if (!b.isStatic) continue;
+      const bounds = (b as unknown as { bounds?: { min: { x: number; y: number }; max: { x: number; y: number } } }).bounds;
+      if (bounds && (bounds.max.x < minX || bounds.min.x > maxX || bounds.max.y < minY || bounds.min.y > maxY)) {
+        continue;
+      }
+      if (((b.collisionFilter?.category ?? 0) & activeObsBits) === 0) continue;
+      if (b === this.body || b === this.blockerBody) continue;
+      if (
+        b === sc.trailer?.body ||
+        b === sc.trailer?.blockerBody ||
+        b === sc.pupTrailer?.body ||
+        b === sc.pupTrailer?.blockerBody
+      ) {
+        continue;
+      }
+      // A coupled bitrem lead slides its rear fifth wheel under a parked pup's nose lip;
+      // the pup's blockerBody (30px behind pin) still stops over-travel.
+      if (
+        allowPupNosePass &&
+        (b.label === 'trailer_bitrem_pup' || b.label === 'trailer_bitrem_tanker_pup')
+      ) {
+        continue;
+      }
+      for (const p of probes) {
+        if (this.scene.matter.containsPoint(b, p.x, p.y)) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   public followHitch(
@@ -452,6 +608,128 @@ export class Trailer {
     const hw = w / 2;
     const hl = l / 2;
 
+    const drawChassisFrame = (frameColor = 0x1e293b, borderColor = 0x475569) => {
+      g.fillStyle(frameColor, 1);
+      g.lineStyle(1.5, borderColor, 0.9);
+      g.fillRoundedRect(-hw + 3, -hl + 2, w - 6, l - 4, 4);
+      g.strokeRoundedRect(-hw + 3, -hl + 2, w - 6, l - 4, 4);
+      // Longitudinal steel rails
+      g.fillStyle(0x0f172a, 1);
+      g.fillRect(-hw + 7, -hl + 8, 4, l - 16);
+      g.fillRect(hw - 11, -hl + 8, 4, l - 16);
+      // Crossmembers
+      g.fillStyle(0x334155, 0.85);
+      for (let cy = -hl + 22; cy < hl - 18; cy += 28) {
+        g.fillRect(-hw + 8, cy, w - 16, 3);
+      }
+    };
+
+    const drawCylindricalTank = (opts: {
+      base: number;
+      darkEdge: number;
+      highlight: number;
+      stripe: number;
+      band: number;
+      topY: number;
+      botY: number;
+      hatches: number;
+      catwalk?: boolean;
+      adrKind?: 'fuel' | 'hazmat' | 'none';
+    }) => {
+      const tankW = w - 8;
+      const tankH = opts.botY - opts.topY;
+      const midY = (opts.topY + opts.botY) * 0.5;
+      const domeR = Math.round(tankW * 0.44);
+
+      // Barrel dark curved edges + main metal shell
+      g.fillStyle(opts.darkEdge, 1);
+      g.fillRoundedRect(-tankW / 2, opts.topY, tankW, tankH, domeR);
+      g.fillStyle(opts.base, 1);
+      g.fillRoundedRect(-tankW / 2 + 4, opts.topY + 2, tankW - 8, tankH - 4, Math.max(4, domeR - 3));
+      // Cylindrical top specular highlight ridge
+      g.fillStyle(opts.highlight, 0.72);
+      g.fillRoundedRect(-7, opts.topY + 6, 14, tankH - 12, 6);
+      g.fillStyle(0xffffff, 0.38);
+      g.fillRoundedRect(-3, opts.topY + 9, 5, tankH - 18, 2);
+
+      // End dome accent rings & safety bands
+      g.fillStyle(opts.stripe, 0.95);
+      g.fillRect(-tankW / 2 + 3, opts.topY + 12, tankW - 6, 6);
+      g.fillRect(-tankW / 2 + 3, opts.botY - 18, tankW - 6, 6);
+
+      // Circumferential baffle / structural bands
+      g.lineStyle(1.8, opts.band, 0.85);
+      for (let i = 1; i <= opts.hatches; i++) {
+        const by = opts.topY + (tankH * i) / (opts.hatches + 1);
+        g.lineBetween(-tankW / 2 + 2, by, tankW / 2 - 2, by);
+      }
+
+      // Top anti-slip catwalk & safety railing
+      if (opts.catwalk) {
+        g.fillStyle(0x0f172a, 0.72);
+        g.fillRect(-9, opts.topY + 16, 18, tankH - 32);
+        g.lineStyle(1, 0x94a3b8, 0.8);
+        g.strokeRect(-9, opts.topY + 16, 18, tankH - 32);
+      }
+
+      // Top manhole / inspection domes
+      for (let i = 0; i < opts.hatches; i++) {
+        const hy = opts.topY + (tankH * (i + 0.5)) / opts.hatches;
+        g.fillStyle(0x1e293b, 1);
+        g.fillCircle(0, hy, 5.8);
+        g.fillStyle(0xe2e8f0, 0.95);
+        g.fillCircle(0, hy, 3.6);
+        g.lineStyle(1, 0x475569, 1);
+        g.strokeCircle(0, hy, 5.8);
+      }
+
+      // ADR hazard placards / discharge valves
+      if (opts.adrKind === 'fuel') {
+        // Orange ADR placard + Red Class 3 Flammable diamond
+        g.fillStyle(0xf97316, 1);
+        g.fillRect(-10, midY - 22, 20, 10);
+        g.lineStyle(1, 0x0f172a, 1);
+        g.strokeRect(-10, midY - 22, 20, 10);
+        g.fillStyle(0xdc2626, 1);
+        g.fillTriangle(0, opts.botY - 32, 7, opts.botY - 25, 0, opts.botY - 18);
+        g.fillTriangle(0, opts.botY - 32, -7, opts.botY - 25, 0, opts.botY - 18);
+        // Side vapor recovery & valve box
+        g.fillStyle(0x334155, 1);
+        g.fillRect(-hw + 1, midY - 12, 4, 24);
+        g.fillRect(hw - 5, midY - 12, 4, 24);
+      } else if (opts.adrKind === 'hazmat') {
+        // Hazard yellow/black chevron stripes + ADR Toxic/Corrosive diamonds
+        g.fillStyle(0xfacc15, 1);
+        g.fillRect(-tankW / 2 + 2, midY - 10, tankW - 4, 20);
+        g.fillStyle(0x0f172a, 0.85);
+        for (let hx = -tankW / 2 + 4; hx < tankW / 2 - 6; hx += 8) {
+          g.fillRect(hx, midY - 10, 4, 20);
+        }
+        // White/black Corrosive diamond + Orange ADR box
+        g.fillStyle(0xf8fafc, 1);
+        g.fillTriangle(0, opts.topY + 22, 7, opts.topY + 29, 0, opts.topY + 36);
+        g.fillTriangle(0, opts.topY + 22, -7, opts.topY + 29, 0, opts.topY + 36);
+        g.fillStyle(0x0f172a, 1);
+        g.fillTriangle(0, opts.topY + 29, 6, opts.topY + 29, 0, opts.topY + 35);
+        g.fillTriangle(0, opts.topY + 29, -6, opts.topY + 29, 0, opts.topY + 35);
+        g.fillStyle(0xf97316, 1);
+        g.fillRect(-10, opts.botY - 32, 20, 10);
+        g.lineStyle(1, 0x0f172a, 1);
+        g.strokeRect(-10, opts.botY - 32, 20, 10);
+      } else {
+        // Food-grade dairy stainless discharge box
+        g.fillStyle(0x94a3b8, 1);
+        g.fillRect(-hw + 1, midY - 9, 4, 18);
+        g.fillRect(hw - 5, midY - 9, 4, 18);
+      }
+
+      // Rear ladder / discharge valve housing
+      g.fillStyle(0x334155, 1);
+      g.fillRect(-7, opts.botY - 4, 14, 7);
+      g.lineStyle(1.5, 0x94a3b8, 0.9);
+      g.strokeRoundedRect(-tankW / 2, opts.topY, tankW, tankH, domeR);
+    };
+
     if (this.type === 'long_cargo') {
       g.fillStyle(0x0f172a, 1);
       g.lineStyle(2, 0xf97316, 0.9);
@@ -471,6 +749,188 @@ export class Trailer {
       for (let y = -hl + 40; y < hl - 40; y += 45) {
         g.fillRect(-10, y, 20, 6);
       }
+    } else if (this.type === 'flatbed_heavy') {
+      // Heavy low-loader flatbed carrying tracked yellow hydraulic excavator
+      g.fillStyle(0x1e293b, 1);
+      g.lineStyle(2, 0xf59e0b, 0.92);
+      g.fillRoundedRect(-hw, -hl, w, l, 4);
+      g.strokeRoundedRect(-hw, -hl, w, l, 4);
+      // Oak deck planks
+      g.fillStyle(0x6b4c2a, 1);
+      g.fillRect(-hw + 5, -hl + 28, w - 10, l - 44);
+      g.lineStyle(1, 0x4a3319, 0.7);
+      for (let py = -hl + 36; py < hl - 20; py += 12) {
+        g.lineBetween(-hw + 5, py, hw - 5, py);
+      }
+      // Gooseneck front step & folded rear steel loading ramps
+      g.fillStyle(0x334155, 1);
+      g.fillRect(-hw + 4, -hl + 4, w - 8, 22);
+      g.fillStyle(0x0f172a, 1);
+      g.fillRect(-hw + 4, hl - 18, 16, 12);
+      g.fillRect(hw - 20, hl - 18, 16, 12);
+      g.lineStyle(1.5, 0xfacc15, 0.85);
+      g.strokeRect(-hw + 4, hl - 18, 16, 12);
+      g.strokeRect(hw - 20, hl - 18, 16, 12);
+
+      // Cargo: Tracked Hydraulic Excavator centered on deck
+      const exY = 8;
+      // Left & Right rubber/steel caterpillar tracks
+      g.fillStyle(0x09090b, 1);
+      g.fillRoundedRect(-18, exY - 38, 10, 76, 3);
+      g.fillRoundedRect(8, exY - 38, 10, 76, 3);
+      g.lineStyle(1, 0x475569, 0.9);
+      for (let ty = exY - 32; ty <= exY + 32; ty += 8) {
+        g.lineBetween(-18, ty, -8, ty);
+        g.lineBetween(8, ty, 18, ty);
+      }
+      // Upper rotating turret house (industrial yellow)
+      g.fillStyle(0xeab308, 1);
+      g.fillRoundedRect(-15, exY - 22, 30, 44, 5);
+      g.lineStyle(1.5, 0x854d0e, 1);
+      g.strokeRoundedRect(-15, exY - 22, 30, 44, 5);
+      // Counterweight & engine grill at back
+      g.fillStyle(0x1e293b, 1);
+      g.fillRoundedRect(-13, exY + 10, 26, 10, 3);
+      // Operator cab with sky-tinted glass
+      g.fillStyle(0x0f172a, 1);
+      g.fillRoundedRect(-13, exY - 17, 13, 20, 2);
+      g.fillStyle(0x38bdf8, 0.7);
+      g.fillRect(-11, exY - 15, 9, 14);
+      // Articulated hydraulic boom reaching forward
+      g.fillStyle(0xf59e0b, 1);
+      g.fillRect(-3, exY - 72, 7, 56);
+      g.lineStyle(1.5, 0x78350f, 1);
+      g.strokeRect(-3, exY - 72, 7, 56);
+      // Digging bucket at nose of boom
+      g.fillStyle(0x334155, 1);
+      g.fillRoundedRect(-8, exY - 84, 17, 13, 3);
+      // Tension chains to side rails
+      g.lineStyle(1.5, 0xf97316, 0.85);
+      g.lineBetween(-hw + 3, exY - 34, -14, exY - 28);
+      g.lineBetween(hw - 3, exY - 34, 14, exY - 28);
+      g.lineBetween(-hw + 3, exY + 34, -14, exY + 28);
+      g.lineBetween(hw - 3, exY + 34, 14, exY + 28);
+    } else if (this.type === 'timber') {
+      // Forestry log-carrier semi-trailer
+      drawChassisFrame(0x1e293b, 0xd97706);
+      // Front headache protection bulkhead
+      g.fillStyle(0xd97706, 1);
+      g.fillRect(-hw + 3, -hl + 8, w - 6, 7);
+      // Stacked pine/eucalyptus timber logs
+      const logCols = [
+        { x: -12, col: 0x78350f },
+        { x: -6, col: 0x92400e },
+        { x: 0, col: 0xb45309 },
+        { x: 6, col: 0x92400e },
+        { x: 12, col: 0x78350f },
+      ];
+      for (const lc of logCols) {
+        g.fillStyle(lc.col, 1);
+        g.fillRoundedRect(lc.x - 3.5, -hl + 18, 7, l - 34, 3);
+        // Light wood cut-end rings
+        g.fillStyle(0xfde68a, 0.88);
+        g.fillCircle(lc.x, -hl + 19, 2.3);
+        g.fillCircle(lc.x, hl - 17, 2.3);
+      }
+      // 4 pairs of heavy orange steel bolster stakes + tie-down straps
+      for (let sy = -hl + 36; sy <= hl - 36; sy += (l - 72) / 3) {
+        g.fillStyle(0xf97316, 1);
+        g.fillRect(-hw, sy - 3, 5, 6);
+        g.fillRect(hw - 5, sy - 3, 5, 6);
+        g.lineStyle(2, 0xfacc15, 0.85);
+        g.lineBetween(-hw + 4, sy, hw - 4, sy);
+      }
+    } else if (this.type === 'tanker_milk') {
+      drawChassisFrame(0x334155, 0x0284c7);
+      drawCylindricalTank({
+        base: 0xdbe4ee,
+        darkEdge: 0x94a3b8,
+        highlight: 0xffffff,
+        stripe: 0x0284c7,
+        band: 0x64748b,
+        topY: -hl + 10,
+        botY: hl - 12,
+        hatches: 3,
+        catwalk: false,
+        adrKind: 'none',
+      });
+    } else if (this.type === 'tanker_fuel') {
+      drawChassisFrame(0x1e293b, 0xdc2626);
+      drawCylindricalTank({
+        base: 0xe2e8f0,
+        darkEdge: 0x64748b,
+        highlight: 0xf8fafc,
+        stripe: 0xdc2626,
+        band: 0x475569,
+        topY: -hl + 10,
+        botY: hl - 12,
+        hatches: 4,
+        catwalk: true,
+        adrKind: 'fuel',
+      });
+    } else if (this.type === 'tanker_hazmat') {
+      drawChassisFrame(0x0f172a, 0xfacc15);
+      drawCylindricalTank({
+        base: 0x475569,
+        darkEdge: 0x1e293b,
+        highlight: 0x94a3b8,
+        stripe: 0xf59e0b,
+        band: 0xfacc15,
+        topY: -hl + 10,
+        botY: hl - 12,
+        hatches: 3,
+        catwalk: true,
+        adrKind: 'hazmat',
+      });
+    } else if (this.type === 'reefer') {
+      // Insulated refrigerated box with front ThermoKing cooling unit
+      g.fillStyle(0xf8fafc, 1);
+      g.lineStyle(2, 0x0ea5e9, 0.95);
+      g.fillRoundedRect(-hw, -hl, w, l, 5);
+      g.strokeRoundedRect(-hw, -hl, w, l, 5);
+      // Cold-chain blue longitudinal accent rails & roof thermal panel seams
+      g.fillStyle(0x0284c7, 0.85);
+      g.fillRect(-hw + 2, -hl + 24, 3.5, l - 32);
+      g.fillRect(hw - 5.5, -hl + 24, 3.5, l - 32);
+      g.lineStyle(1, 0xcbd5e1, 0.9);
+      for (let ry = -hl + 38; ry < hl - 16; ry += 32) {
+        g.lineBetween(-hw + 6, ry, hw - 6, ry);
+      }
+      // Front ThermoKing refrigeration housing
+      g.fillStyle(0x1e293b, 1);
+      g.fillRoundedRect(-hw + 5, -hl + 3, w - 10, 18, 3);
+      g.fillStyle(0x64748b, 1);
+      g.fillRect(-10, -hl + 6, 20, 11);
+      g.fillStyle(0x38bdf8, 0.95);
+      g.fillCircle(-13, -hl + 11, 2);
+      // Stainless rear door lock bars
+      g.fillStyle(0x64748b, 1);
+      g.fillRect(-10, hl - 10, 4, 4);
+      g.fillRect(6, hl - 10, 4, 4);
+    } else if (this.type === 'container') {
+      // Skeletal chassis carrying a 40ft corrugated ISO maritime container
+      drawChassisFrame(0x0f172a, 0x38bdf8);
+      const cw = w - 6;
+      const cl = l - 16;
+      g.fillStyle(0x1d4ed8, 1);
+      g.fillRoundedRect(-cw / 2, -cl / 2, cw, cl, 2);
+      // Corrugation ribs along roof
+      for (let ry = -cl / 2 + 8; ry < cl / 2 - 8; ry += 10) {
+        g.fillStyle(0x1e3a8a, 0.85);
+        g.fillRect(-cw / 2 + 4, ry, cw - 8, 3.5);
+        g.fillStyle(0x60a5fa, 0.35);
+        g.fillRect(-cw / 2 + 4, ry + 3.5, cw - 8, 1.5);
+      }
+      // 4 ISO twist-lock corner castings
+      g.fillStyle(0xfacc15, 0.95);
+      for (const [kx, ky] of [
+        [-cw / 2, -cl / 2], [cw / 2 - 5, -cl / 2],
+        [-cw / 2, cl / 2 - 5], [cw / 2 - 5, cl / 2 - 5],
+      ]) {
+        g.fillRect(kx, ky, 5, 5);
+      }
+      g.lineStyle(1.5, 0x0f172a, 0.95);
+      g.strokeRoundedRect(-cw / 2, -cl / 2, cw, cl, 2);
     } else if (this.type === 'fragile_glass') {
       g.fillStyle(0x022c22, 1);
       g.lineStyle(2, 0x10b981, 0.9);
@@ -495,14 +955,47 @@ export class Trailer {
       g.lineStyle(2, 0xfacc15, 0.95);
       g.fillCircle(0, hl - 18, 11);
       g.strokeCircle(0, hl - 18, 11);
+    } else if (this.type === 'bitrem_tanker_lead') {
+      drawChassisFrame(0x18181b, 0xa855f7);
+      drawCylindricalTank({
+        base: 0xe2e8f0,
+        darkEdge: 0x64748b,
+        highlight: 0xffffff,
+        stripe: 0xd97706,
+        band: 0xa855f7,
+        topY: -hl + 8,
+        botY: hl - 36,
+        hatches: 2,
+        catwalk: true,
+        adrKind: 'fuel',
+      });
+      // Exposed rear fifth wheel on chassis extension
+      g.fillStyle(0x09090b, 1);
+      g.lineStyle(2, 0xfacc15, 0.95);
+      g.fillCircle(0, hl - 18, 11);
+      g.strokeCircle(0, hl - 18, 11);
+    } else if (this.type === 'bitrem_tanker_pup') {
+      drawChassisFrame(0x18181b, 0xa855f7);
+      drawCylindricalTank({
+        base: 0xe2e8f0,
+        darkEdge: 0x64748b,
+        highlight: 0xffffff,
+        stripe: 0xd97706,
+        band: 0xa855f7,
+        topY: -hl + 8,
+        botY: hl - 12,
+        hatches: 2,
+        catwalk: true,
+        adrKind: 'fuel',
+      });
     } else {
-      // Standard
+      // Standard & bitrem_pup
       g.fillStyle(0x0f172a, 1);
-      g.lineStyle(2, 0xec4899, 0.9);
+      g.lineStyle(2, this.type === 'bitrem_pup' ? 0xa855f7 : 0xec4899, 0.9);
       g.fillRoundedRect(-hw, -hl, w, l, 6);
       g.strokeRoundedRect(-hw, -hl, w, l, 6);
 
-      g.fillStyle(0x1e293b, 1);
+      g.fillStyle(this.type === 'bitrem_pup' ? 0x3b0764 : 0x1e293b, 1);
       g.fillRoundedRect(-hw + 4, -hl + 8, w - 8, l - 16, 4);
     }
 
@@ -512,7 +1005,7 @@ export class Trailer {
     g.fillRect(-hw + 2, hl - 6, w - 4, 6);
     g.strokeRect(-hw + 2, hl - 6, w - 4, 6);
 
-    // Wheels
+    // Wheels (3 axles on heavy long/tanker rigs, 2 axles on standard/bitrem)
     const drawTrailerWheel = (x: number, y: number) => {
       g.fillStyle(0x020617, 1);
       g.lineStyle(1, 0x64748b, 0.7);
@@ -521,10 +1014,23 @@ export class Trailer {
     };
 
     const axleY = this.rearAxleY;
-    drawTrailerWheel(-hw - 2, axleY - 14);
-    drawTrailerWheel(-hw - 2, axleY + 14);
-    drawTrailerWheel(hw + 2, axleY - 14);
-    drawTrailerWheel(hw + 2, axleY + 14);
+    const isTriAxle =
+      this.type === 'long_cargo' ||
+      this.type === 'flatbed_heavy' ||
+      this.type === 'timber' ||
+      this.type === 'tanker_fuel' ||
+      this.type === 'tanker_hazmat';
+    if (isTriAxle) {
+      for (const dy of [-22, 0, 22]) {
+        drawTrailerWheel(-hw - 2, axleY + dy);
+        drawTrailerWheel(hw + 2, axleY + dy);
+      }
+    } else {
+      drawTrailerWheel(-hw - 2, axleY - 14);
+      drawTrailerWheel(-hw - 2, axleY + 14);
+      drawTrailerWheel(hw + 2, axleY - 14);
+      drawTrailerWheel(hw + 2, axleY + 14);
+    }
   }
 
   private drawTrailerLights(isBraking: boolean) {
@@ -610,8 +1116,12 @@ export class Trailer {
       this.blockerBody.collisionFilter.mask = 0;
       return;
     }
-    this.blockerBody.collisionFilter.category = this.layer === 1 ? COLLISION_CAT.BLOCKER_L1 : COLLISION_CAT.BLOCKER_L0;
-    this.blockerBody.collisionFilter.mask = this.layer === 1 ? COLLISION_MASK.BLOCKER_L1 : COLLISION_MASK.BLOCKER_L0;
+    const isL1 = this.layer === 1;
+    const isPup = isBitremPupType(this.type);
+    this.blockerBody.collisionFilter.category = isL1 ? COLLISION_CAT.BLOCKER_L1 : COLLISION_CAT.BLOCKER_L0;
+    this.blockerBody.collisionFilter.mask = isPup
+      ? (isL1 ? COLLISION_MASK.BLOCKER_L1 : COLLISION_MASK.BLOCKER_L0)
+      : (isL1 ? COLLISION_MASK.BLOCKER_TRUCK_L1 : COLLISION_MASK.BLOCKER_TRUCK_L0);
   }
 
   public setCoupledState(coupled: boolean) {
@@ -623,7 +1133,7 @@ export class Trailer {
     this.elevationZ = Phaser.Math.Clamp(z, 0, 1);
     const elevatedVisual = forceElevatedVisual || layer === 1 || this.elevationZ >= 0.06;
     const baseDepth = elevatedVisual ? 21 : 11;
-    const targetDepth = this.type === 'bitrem_pup' ? baseDepth + 1 : baseDepth;
+    const targetDepth = isBitremPupType(this.type) ? baseDepth + 1 : baseDepth;
     if (this.container.depth !== targetDepth) {
       this.container.setDepth(targetDepth);
     }
@@ -642,7 +1152,10 @@ export class Trailer {
       this.setBlockerActive(false);
     } else {
       this.body.collisionFilter.group = 0;
-      this.body.collisionFilter.mask = isL1 ? COLLISION_MASK.TRAILER_PARKED_L1 : COLLISION_MASK.TRAILER_PARKED_L0;
+      const isPup = isBitremPupType(this.type);
+      this.body.collisionFilter.mask = isPup
+        ? (isL1 ? COLLISION_MASK.TRAILER_PARKED_PUP_L1 : COLLISION_MASK.TRAILER_PARKED_PUP_L0)
+        : (isL1 ? COLLISION_MASK.TRAILER_PARKED_L1 : COLLISION_MASK.TRAILER_PARKED_L0);
       this.setBlockerActive(true);
     }
   }

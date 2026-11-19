@@ -12,7 +12,7 @@ Simulador de condução pesada em **2D Top-Down** (Phaser 4 + Matter.js + React 
   - `MinimapScene`: cena dedicada com zoom bloqueado em `1.0` no canto superior direito.
 - **Veículos & Física (`entities/`, `physics/`)**:
   - `Truck`: direção Ackermann, curva de binário diesel, consumo e reserva de combustível (`≤20%`), deslize natural sem combustível, respawn com depósito e integridade a `100%`, modos de faróis (`off` / `low` / `high`) e estado de danos localizado por subsistema (`engine`, `steering`, `chassis`, `lights` com modo de emergência `≤15%`, desvio subtil de direção e degradação visual/óptica).
-  - `Trailer` & `Kingpin`: atrelado standard (13.6m), pá eólica (62m), bitrem B-Double e vidro frágil, com integridade estrutural (`trailerHealth`), resistência de rolamento progressiva, integridade de carga (`cargoHealth`) por perfil de fragilidade, desgaste contínuo em jackknife/curva brusca/terra batida, cinemática anti-derrapagem lateral e proteção de jackknife.
+  - `Trailer` & `Kingpin`: 14 tipos de semi-reboques organizados pelas 4 licenças existentes (`C`, `C+E`, `H`, `X`), incluindo **cisternas** (Leite/Alimentar, Petróleo/Combustível ADR, Líquidos Perigosos ADR e Bitrem Cisterna Dupla) e **especializados** (Standard 13.6m, Frigorífico, Porta-Contentores ISO 40ft, Pá Eólica 62m, Prancha Pesada com Escavadora, Florestal/Toros, Bitrem Standard e Vidro Óptico), com integridade estrutural (`trailerHealth`), resistência de rolamento progressiva, integridade de carga (`cargoHealth`) por perfil de fragilidade/oscilação de líquidos (*slosh*), desgaste contínuo em jackknife/curva brusca/terra batida, cinemática anti-derrapagem lateral e proteção de jackknife.
 - **Mundo & Sistemas (`world/`, `systems/`)**:
   - `World`, `WorldTerrain`, `WorldObjects`: ilha contínua com streaming de chunks, hitboxes estáticas e deteção de baias de reparação (`repairBays`) em todas as oficinas (`variant: 'garage'`).
   - `DamageSystem`: física de impacto por velocidade normal em `px/s` com tolerância de estacionamento (`<22 px/s` = zero dano), classificação por zona de impacto (`front`/`side`/`rear`) e perfis de sensibilidade de carga (`CARGO_PROFILES`).
@@ -21,7 +21,7 @@ Simulador de condução pesada em **2D Top-Down** (Phaser 4 + Matter.js + React 
 - **Interface & Controlos (`App.tsx`, `components/TouchControls.tsx`)**:
   - HUD minimalista com velocímetro/marcha, ícone compacto de integridade (visível apenas quando `<100%`), notificações toast (incluindo reserva `≤20%`, alertas de motor/carga e proximidade de oficina), volante/pedais touch semi-transparentes, botões de **Médios/Máximos**, botão contextual **Reparar (`🔧` / tecla `E`)**, e switch `D/R`.
 - **Testes Automáticos (`scripts/`)**:
-  - `smoke-test.mjs` (estradas, atrelado, respawn), `smoke-fuel.mjs` (consumo, aviso 20%, minimapa, deslize sem combustível, abastecimento, respawn), `smoke-bridge.mjs` (viadutos semente, passagem inferior, grip off-road sob tabuleiro, promoção antecipada em rampa curta, contenção de guardas L1 e normalização `layer` em JSON) e `smoke-damage.mjs` (toque lento seguro, colisão por zona, modo de emergência, fragilidade diferenciada de carga, desgaste em jackknife, reparação em garagem preservando carga e respawn a 100%).
+  - `smoke-test.mjs` (estradas, atrelado, respawn), `smoke-fuel.mjs` (consumo, aviso 20%, minimapa, deslize sem combustível, abastecimento, respawn), `smoke-bridge.mjs` (viadutos semente, passagem inferior, grip off-road sob tabuleiro, promoção antecipada em rampa curta, contenção de guardas L1 e normalização `layer` em JSON), `smoke-damage.mjs` (toque lento seguro, colisão por zona, modo de emergência, fragilidade diferenciada de carga, desgaste em jackknife, reparação em garagem preservando carga e respawn a 100%) e `smoke-trailers.mjs` (mapa completo de cisternas/atrelados, controlo por licenças C/CE/H/X, Bitrem Cisterna, desengate por etapas e sensibilidade diferenciada).
 
 ### 1.3 Plano Geral & Roadmap (Prioridade Sugerida)
 > *Nota: as funcionalidades abaixo refletem os objetivos globais definidos para o projeto, organizados em fases lógicas de dependência técnica.*
@@ -49,13 +49,30 @@ Simulador de condução pesada em **2D Top-Down** (Phaser 4 + Matter.js + React 
 
 ### 1.4 Regras de Manutenção
 - Manter sempre o **`agents.md`** e o **`package.json`** atualizados a cada versão.
-- Validar alterações com `npm run lint`, `npm run build` e os testes `smoke-test.mjs` / `smoke-fuel.mjs` / `smoke-bridge.mjs` / `smoke-damage.mjs`.
+- Validar alterações com `npm run lint`, `npm run build` e os testes `smoke-test.mjs` / `smoke-fuel.mjs` / `smoke-bridge.mjs` / `smoke-damage.mjs` / `smoke-trailers.mjs`.
 
 ---
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.10.0** (Versão Atual — branch main)
+### **v2.11.0** (Versão Atual — branch main)
+- **Expansão de Frota: Cisternas & Novos Semi-Reboques Especializados (`Trailer.ts`, `DamageSystem.ts`, `TrailerManager.ts`, `LicenseSystem.ts`, `MainScene.ts`, `WorldObjects.ts`, `ilha_atlantica.json`, `App.tsx`)**:
+  - **Cisternas para Líquidos Variados**:
+    - `tanker_milk` (**Classe C**, inox polido, `46×220`, 95t): Cisterna Leite / Alimentar com bocas de inspeção e passadiço superior.
+    - `tanker_fuel` (**Classe C+E**, branco/vermelho combustível com placas ADR `30 / 1203`, `46×248`, 118t, 3 eixos): Cisterna Petróleo / Combustível ADR.
+    - `bitrem_tanker_lead` + `bitrem_tanker_pup` (**Classe H**, duplo tanque `2×155px`, 62t cada): Bitrem Cisterna Dupla para Combustível com acoplamento em 2 quintas rodas compatíveis exclusivamente entre si.
+    - `tanker_hazmat` (**Classe X**, amarelo/laranja perigosos com losangos ADR e válvulas reforçadas, `46×225`, 105t, `isFragile = true`): Cisterna Líquidos Perigosos ADR com tolerância reduzida a impactos e G lateral.
+  - **Novos Atrelados Especializados (Não-Cisternas)**:
+    - `reefer` (**Classe C**, `46×220`, 90t): Frigorífico 13.6m com unidade ThermoKing frontal, frisos de frio e depósito inferior.
+    - `container` (**Classe C**, `46×220`, 92t): Porta-Contentores ISO 40ft sobre chassis esquelético com travas *twist-lock* e nervuras onduladas.
+    - `flatbed_heavy` (**Classe C+E**, `48×275`, 135t, 3 eixos): Prancha Pesada em aço/madeira transportando uma escavadora hidráulica de rastos amarrada com correntes e rampas traseiras.
+    - `timber` (**Classe C+E**, `46×255`, 115t, 3 eixos): Florestal / Toros de Madeira com fueiros laterais de aço e feixes de troncos empilhados.
+  - **Física, Dano, Mapa & Editor**:
+    - Perfis próprios em `CARGO_PROFILES` calibrados por tipo (ex.: limiar de força lateral G reduzido nas cisternas para simular oscilação de líquidos/*slosh*).
+    - **Colisões entre atrelados (`CollisionLayers.ts`, `Trailer.ts`, `Truck.ts`, `MainScene.ts`)**: máscaras Matter.js atualizadas (`TRAILER_COUPLED_*` / `TRAILER_PARKED_*` / `TRAILER_PARKED_PUP_*`) com filtro por identidade do próprio conjunto (`isOwnRigBody`), resposta de ricochete via `truck.vLong` e deteção `computeTailBlocked()` no plano do pára-choques traseiro, impedindo atravessamentos sem bloquear o corredor de engate da quinta roda (incluindo `bitrem_lead` / `bitrem_tanker_lead` em `bitrem_pup` / `bitrem_tanker_pup`).
+    - Todas as variantes integradas na progressão das 4 cartas existentes (`C`, `CE`, `H`, `X`), distribuídas pelos parques do mapa (`WorldObjects.ts` / `ilha_atlantica.json`) com silhuetas e cores por carta nos `parking_pad`, e selecionáveis tanto no **Menu → Tipologia de Veículo** como no catálogo **Atrelados** / **Pads** e inspetor do Editor; validado por `npm run test:smoke:trailers` (`scripts/smoke-trailers.mjs`).
+
+### **v2.10.0** (branch main)
 - **Sistema Realista de Danos, Desgaste & Reparação em Garagem (`DamageSystem.ts`, `Truck.ts`, `Trailer.ts`, `WorldObjects.ts`, `World.ts`, `MainScene.ts`, `TouchControls.tsx`, `App.tsx`)**:
   - **Modelo de integridade em 3 camadas**:
     - **Camião (`truck.damage`)**: subsistemas independentes (`engine`, `steering`, `chassis`, `lights`) com índice ponderado (`overall`: 35% motor, 25% direção, 25% chassi, 15% luzes) e tendência lateral subtil (`steerPull`).

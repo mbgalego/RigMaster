@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { Trailer, TrailerType } from '../entities/Trailer';
+import { Trailer, TrailerType, isBitremLeadType } from '../entities/Trailer';
 import type { LicenseId } from './LicenseSystem';
 import type { WorldObject } from '../world/WorldObjects';
 import type { MainScene } from '../scenes/MainScene';
@@ -7,10 +7,19 @@ import type { MainScene } from '../scenes/MainScene';
 /** Trailer type -> license required to couple it */
 export const TRAILER_TYPE_TO_LICENSE: Record<TrailerType, LicenseId> = {
   standard: 'C',
+  reefer: 'C',
+  container: 'C',
+  tanker_milk: 'C',
   long_cargo: 'CE',
+  flatbed_heavy: 'CE',
+  timber: 'CE',
+  tanker_fuel: 'CE',
   bitrem_lead: 'H',
   bitrem_pup: 'H',
+  bitrem_tanker_lead: 'H',
+  bitrem_tanker_pup: 'H',
   fragile_glass: 'X',
+  tanker_hazmat: 'X',
 };
 
 export interface CouplingCandidate {
@@ -75,13 +84,14 @@ export class TrailerManager {
     this.applyParkedFilter(lead);
     this.loose.push(lead);
 
-    if (withPup && type === 'bitrem_lead') {
+    if (withPup && isBitremLeadType(type)) {
       // Pup behind the lead's rear bumper (opposite the nose direction)
       const D = lead.length / 2 + 155 / 2 + 12;
       const px = x - Math.sin(noseAngle) * D;
       const py = y + Math.cos(noseAngle) * D;
       const elevPup = rn.initialLayerAt(px, py);
-      const pup = new Trailer(this.scene, { x: px, y: py, angle: noseAngle, type: 'bitrem_pup' });
+      const pupType: TrailerType = type === 'bitrem_tanker_lead' ? 'bitrem_tanker_pup' : 'bitrem_pup';
+      const pup = new Trailer(this.scene, { x: px, y: py, angle: noseAngle, type: pupType });
       pup.setPosition(px, py, noseAngle);
       pup.setElevation(elevPup.layer, elevPup.z);
       this.applyParkedFilter(pup);
@@ -152,18 +162,19 @@ export class TrailerManager {
     return best;
   }
 
-  /** Finds a couplable bitrem_pup for the lead trailer's rear fifth wheel. */
+  /** Finds a couplable bitrem pup matching the lead trailer's rear fifth wheel. */
   public findCouplablePup(lead: Trailer, radius: number = 80, angleTolDeg: number = 30): CouplingCandidate | null {
     // Rear fifth-wheel point of the lead (same offset the pup Kingpin uses)
     const a = lead.body.angle;
     const offY = lead.length / 2 - 18;
     const hx = lead.body.position.x - Math.sin(a) * offY;
     const hy = lead.body.position.y + Math.cos(a) * offY;
+    const expectedPup: TrailerType = lead.type === 'bitrem_tanker_lead' ? 'bitrem_tanker_pup' : 'bitrem_pup';
 
     let best: CouplingCandidate | null = null;
     for (const t of this.loose) {
       if (t.layer !== lead.layer) continue;
-      if (t.type !== 'bitrem_pup') continue;
+      if (t.type !== expectedPup) continue;
       const pa = t.body.angle;
       const kx = t.body.position.x + Math.sin(pa) * t.kingpinDist;
       const ky = t.body.position.y - Math.cos(pa) * t.kingpinDist;

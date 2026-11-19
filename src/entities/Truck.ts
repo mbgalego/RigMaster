@@ -279,7 +279,11 @@ export class Truck {
       for (const pair of event.pairs) {
         if (pair.bodyA === this.body || pair.bodyB === this.body) {
           const other = pair.bodyA === this.body ? pair.bodyB : pair.bodyA;
-          if (other.label && other.label.startsWith('trailer')) continue;
+          const sc = this.scene as unknown as {
+            trailer?: { body: MatterJS.BodyType } | null;
+            pupTrailer?: { body: MatterJS.BodyType } | null;
+          };
+          if (other === sc.trailer?.body || other === sc.pupTrailer?.body) continue;
 
           this.collisionCount++;
           this.impactDetected = true;

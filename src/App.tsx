@@ -6,10 +6,12 @@ import {
   getGame,
   destroyGame,
 } from './main';
-import { MainScene } from './scenes/MainScene';
+import { MainScene, VehicleConfigType } from './scenes/MainScene';
 import { LicenseSystem, LicenseInfo, ExamStatus, LicenseId } from './systems/LicenseSystem';
 import { GarageSystem, HubData, WeatherModifier } from './systems/GarageSystem';
 import { TimeOfDaySystem, TimePeriod } from './systems/TimeOfDaySystem';
+import { TRAILER_TYPE_TO_LICENSE } from './systems/TrailerManager';
+import type { TrailerType } from './entities/Trailer';
 import type { RoadSurface } from './systems/RoadNetwork';
 import type { AddObjectSpec } from './scenes/EditorScene';
 import { compoundParts } from './world/WorldObjects';
@@ -122,11 +124,20 @@ const CREATE_CATALOG: Array<{
     label: 'Atrelados',
     icon: Truck,
     items: [
-      { spec: { type: 'trailer', w: 46, h: 220, params: { trailer: 'standard' }, label: 'Atrelado' }, icon: Truck },
-      { spec: { type: 'trailer', w: 46, h: 220, params: { trailer: 'fragile_glass' }, label: 'Vidro' }, icon: Truck },
-      { spec: { type: 'trailer', w: 46, h: 310, params: { trailer: 'long_cargo' }, label: 'Pá Eólica' }, icon: Truck },
-      { spec: { type: 'trailer', w: 46, h: 155, params: { trailer: 'bitrem_lead' }, label: 'Bitrem Frente' }, icon: Truck },
-      { spec: { type: 'trailer', w: 46, h: 155, params: { trailer: 'bitrem_pup' }, label: 'Bitrem Trás' }, icon: Truck },
+      { spec: { type: 'trailer', w: 46, h: 220, params: { trailer: 'standard' }, label: 'Standard (C)' }, icon: Truck },
+      { spec: { type: 'trailer', w: 46, h: 220, params: { trailer: 'reefer' }, label: 'Frigorífico (C)' }, icon: Truck },
+      { spec: { type: 'trailer', w: 46, h: 220, params: { trailer: 'container' }, label: 'Contentor 40ft (C)' }, icon: Container },
+      { spec: { type: 'trailer', w: 46, h: 220, params: { trailer: 'tanker_milk' }, label: 'Cisterna Leite (C)' }, icon: Truck },
+      { spec: { type: 'trailer', w: 46, h: 310, params: { trailer: 'long_cargo' }, label: 'Pá Eólica (C+E)' }, icon: Truck },
+      { spec: { type: 'trailer', w: 48, h: 275, params: { trailer: 'flatbed_heavy' }, label: 'Prancha Escavadora (C+E)' }, icon: Truck },
+      { spec: { type: 'trailer', w: 46, h: 255, params: { trailer: 'timber' }, label: 'Florestal Toros (C+E)' }, icon: Truck },
+      { spec: { type: 'trailer', w: 46, h: 248, params: { trailer: 'tanker_fuel' }, label: 'Cisterna Petróleo (C+E)' }, icon: Fuel },
+      { spec: { type: 'trailer', w: 46, h: 155, params: { trailer: 'bitrem_lead' }, label: 'Bitrem Frente (H)' }, icon: Truck },
+      { spec: { type: 'trailer', w: 46, h: 155, params: { trailer: 'bitrem_pup' }, label: 'Bitrem Trás (H)' }, icon: Truck },
+      { spec: { type: 'trailer', w: 46, h: 155, params: { trailer: 'bitrem_tanker_lead' }, label: 'Bitrem Cist. Fr. (H)' }, icon: Fuel },
+      { spec: { type: 'trailer', w: 46, h: 155, params: { trailer: 'bitrem_tanker_pup' }, label: 'Bitrem Cist. Tr. (H)' }, icon: Fuel },
+      { spec: { type: 'trailer', w: 46, h: 220, params: { trailer: 'fragile_glass' }, label: 'Vidro Óptico (X)' }, icon: Truck },
+      { spec: { type: 'trailer', w: 46, h: 225, params: { trailer: 'tanker_hazmat' }, label: 'Cisterna ADR (X)' }, icon: AlertTriangle },
     ],
   },
   {
@@ -134,11 +145,20 @@ const CREATE_CATALOG: Array<{
     label: 'Pads',
     icon: CarFront,
     items: [
-      { spec: { type: 'parking_pad', w: 130, h: 420, params: { trailer: 'standard' }, label: 'Pad C' }, icon: Truck },
-      { spec: { type: 'parking_pad', w: 170, h: 640, params: { trailer: 'long_cargo' }, label: 'Pad CE' }, icon: Truck },
-      { spec: { type: 'parking_pad', w: 140, h: 560, params: { trailer: 'bitrem_lead' }, label: 'Pad H' }, icon: Truck },
+      { spec: { type: 'parking_pad', w: 130, h: 420, params: { trailer: 'standard' }, label: 'Pad C Standard' }, icon: Truck },
+      { spec: { type: 'parking_pad', w: 130, h: 420, params: { trailer: 'reefer' }, label: 'Pad C Frigo' }, icon: Truck },
+      { spec: { type: 'parking_pad', w: 130, h: 420, params: { trailer: 'container' }, label: 'Pad C Contentor' }, icon: Container },
+      { spec: { type: 'parking_pad', w: 130, h: 420, params: { trailer: 'tanker_milk' }, label: 'Pad C Cist. Leite' }, icon: Truck },
+      { spec: { type: 'parking_pad', w: 170, h: 640, params: { trailer: 'long_cargo' }, label: 'Pad CE Pá Eólica' }, icon: Truck },
+      { spec: { type: 'parking_pad', w: 170, h: 520, params: { trailer: 'flatbed_heavy' }, label: 'Pad CE Prancha' }, icon: Truck },
+      { spec: { type: 'parking_pad', w: 160, h: 480, params: { trailer: 'timber' }, label: 'Pad CE Toros' }, icon: Truck },
+      { spec: { type: 'parking_pad', w: 160, h: 480, params: { trailer: 'tanker_fuel' }, label: 'Pad CE Petróleo' }, icon: Fuel },
+      { spec: { type: 'parking_pad', w: 140, h: 560, params: { trailer: 'bitrem_lead' }, label: 'Pad H Bitrem' }, icon: Truck },
+      { spec: { type: 'parking_pad', w: 140, h: 560, params: { trailer: 'bitrem_tanker_lead' }, label: 'Pad H Bitr. Cist.' }, icon: Fuel },
       { spec: { type: 'parking_pad', w: 140, h: 300, params: { trailer: 'bitrem_pup' }, label: 'Pad HP' }, icon: Truck },
-      { spec: { type: 'parking_pad', w: 140, h: 420, params: { trailer: 'fragile_glass' }, label: 'Pad X' }, icon: Truck },
+      { spec: { type: 'parking_pad', w: 140, h: 300, params: { trailer: 'bitrem_tanker_pup' }, label: 'Pad HPC' }, icon: Fuel },
+      { spec: { type: 'parking_pad', w: 140, h: 420, params: { trailer: 'fragile_glass' }, label: 'Pad X Vidro' }, icon: Truck },
+      { spec: { type: 'parking_pad', w: 140, h: 420, params: { trailer: 'tanker_hazmat' }, label: 'Pad X Cist. ADR' }, icon: AlertTriangle },
     ],
   },
   {
@@ -247,7 +267,7 @@ const PERIOD_ICONS: Record<TimePeriod, React.ComponentType<{ className?: string 
 export default function App() {
   const gameContainerRef = useRef<HTMLDivElement>(null);
   const [isEditorMode, setIsEditorMode] = useState<boolean>(false);
-  const [vehicleConfig, setVehicleConfig] = useState<'solo' | 'standard' | 'long_cargo' | 'bitrem' | 'fragile_glass'>('standard');
+  const [vehicleConfig, setVehicleConfig] = useState<VehicleConfigType>('standard');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [debugWireframe, setDebugWireframe] = useState<boolean>(true);
   const [showTouchControls, setShowTouchControls] = useState<boolean>(true);
@@ -573,9 +593,15 @@ export default function App() {
     }
   };
 
+  const getRequiredLicenseForConfig = (type: VehicleConfigType): LicenseId => {
+    if (type === 'solo') return 'C';
+    if (type === 'bitrem' || type === 'bitrem_tanker') return 'H';
+    return TRAILER_TYPE_TO_LICENSE[type as TrailerType] ?? 'C';
+  };
+
   // Change Vehicle Rig
   // `force` bypasses license gates — used when an exam assigns its own vehicle.
-  const handleSelectVehicle = (type: 'solo' | 'standard' | 'long_cargo' | 'bitrem' | 'fragile_glass', force: boolean = false) => {
+  const handleSelectVehicle = (type: VehicleConfigType, force: boolean = false) => {
     const licSys = LicenseSystem.getInstance();
 
     // During an active exam the exam's own vehicle is always allowed
@@ -585,15 +611,8 @@ export default function App() {
 
     // Check license requirement
     if (!force && !allowedByExam) {
-      if (type === 'long_cargo' && !licSys.isUnlocked('CE')) {
-        setShowLicenseModal(true);
-        return;
-      }
-      if (type === 'bitrem' && !licSys.isUnlocked('H')) {
-        setShowLicenseModal(true);
-        return;
-      }
-      if (type === 'fragile_glass' && !licSys.isUnlocked('X')) {
+      const reqLic = getRequiredLicenseForConfig(type);
+      if (reqLic !== 'C' && !licSys.isUnlocked(reqLic)) {
         setShowLicenseModal(true);
         return;
       }
@@ -883,32 +902,48 @@ export default function App() {
                 {/* 1. Vehicles */}
                 <div>
                   <div className="text-[10px] font-mono uppercase tracking-wider text-cyan-400 px-2 py-0.5 font-bold">
-                    Tipologia de Veículo
+                    Tipologia de Veículo & Carga
                   </div>
                   <div className="flex flex-col gap-0.5 mt-1">
-                    {[
-                      { id: 'solo', name: 'Solo 4x2 (Camião Rígido)', badge: 'SOLO' },
-                      { id: 'standard', name: 'Standard 13.6m (Classe C)', badge: 'C' },
-                      { id: 'long_cargo', name: 'Pá Eólica 62m (Classe C+E)', badge: 'C+E' },
-                      { id: 'bitrem', name: 'Bitrem B-Double (Classe H)', badge: 'H' },
-                      { id: 'fragile_glass', name: 'Vidro Óptico (Classe X)', badge: 'X' },
-                    ].map((v) => (
-                      <button
-                        key={v.id}
-                        onClick={() => {
-                          handleSelectVehicle(v.id as any);
-                          setIsMenuOpen(false);
-                        }}
-                        className={`text-left px-2 py-1.5 rounded flex items-center justify-between transition ${
-                          vehicleConfig === v.id
-                            ? 'bg-cyan-500 text-black font-bold'
-                            : 'text-slate-300 hover:bg-slate-900'
-                        }`}
-                      >
-                        <span className="truncate">{v.name}</span>
-                        <span className="text-[9px] font-mono px-1 rounded bg-black/40 text-white ml-2">{v.badge}</span>
-                      </button>
-                    ))}
+                    {([
+                      { id: 'solo', name: 'Solo 4x2 (Camião Rígido)', badge: 'SOLO', req: 'C' },
+                      { id: 'standard', name: 'Standard 13.6m', badge: 'C', req: 'C' },
+                      { id: 'reefer', name: 'Frigorífico 13.6m', badge: 'C', req: 'C' },
+                      { id: 'container', name: 'Porta-Contentores ISO 40ft', badge: 'C', req: 'C' },
+                      { id: 'tanker_milk', name: 'Cisterna Leite / Alimentar', badge: 'C', req: 'C' },
+                      { id: 'long_cargo', name: 'Pá Eólica 62m', badge: 'C+E', req: 'CE' },
+                      { id: 'flatbed_heavy', name: 'Prancha Pesada / Escavadora', badge: 'C+E', req: 'CE' },
+                      { id: 'timber', name: 'Florestal / Toros de Madeira', badge: 'C+E', req: 'CE' },
+                      { id: 'tanker_fuel', name: 'Cisterna Petróleo / Combustível', badge: 'C+E', req: 'CE' },
+                      { id: 'bitrem', name: 'Bitrem B-Double Standard', badge: 'H', req: 'H' },
+                      { id: 'bitrem_tanker', name: 'Bitrem Cisterna Combustível', badge: 'H', req: 'H' },
+                      { id: 'fragile_glass', name: 'Vidro Óptico Especial', badge: 'X', req: 'X' },
+                      { id: 'tanker_hazmat', name: 'Cisterna Líquidos Perigosos ADR', badge: 'X', req: 'X' },
+                    ] as Array<{ id: VehicleConfigType; name: string; badge: string; req: LicenseId }>).map((v) => {
+                      const unlocked = v.req === 'C' || (licenses.find((l) => l.id === v.req)?.unlocked ?? false);
+                      return (
+                        <button
+                          key={v.id}
+                          onClick={() => {
+                            handleSelectVehicle(v.id);
+                            setIsMenuOpen(false);
+                          }}
+                          className={`text-left px-2 py-1.5 rounded flex items-center justify-between transition ${
+                            vehicleConfig === v.id
+                              ? 'bg-cyan-500 text-black font-bold'
+                              : unlocked
+                                ? 'text-slate-300 hover:bg-slate-900'
+                                : 'text-slate-500 hover:bg-slate-900/70'
+                          }`}
+                        >
+                          <span className="truncate">{v.name}</span>
+                          <span className="flex items-center gap-1 ml-2 shrink-0">
+                            {!unlocked && <span className="text-[9px]" title={`Requer licença ${v.badge}`}>🔒</span>}
+                            <span className="text-[9px] font-mono px-1 rounded bg-black/40 text-white">{v.badge}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -1717,19 +1752,36 @@ export default function App() {
                     {objectUI.type === 'parking_pad' || objectUI.type === 'trailer' ? (
                       <>
                         <div className="ed-fs-sm font-bold text-slate-500 px-1 pt-0.5 shrink-0">tipo de atrelado</div>
-                        {([['C', 'standard'], ['CE', 'long_cargo'], ['H', 'bitrem_lead'], ['P', 'bitrem_pup'], ['X', 'fragile_glass']] as Array<[string, string]>).map(([lbl, val]) => (
-                          <button
-                            key={val}
-                            onClick={() => { const ed = getEditorScene(); if (ed) ed.setTrailerPadType(objectUI.id, val); }}
-                            className={`shrink-0 ed-fs font-bold px-2 py-1 rounded border text-left ${
-                              objectUI.trailer === val
-                                ? 'bg-amber-400 text-slate-900 border-amber-200'
-                                : 'bg-slate-800 text-amber-300 border-slate-600 hover:bg-slate-700'
-                            }`}
-                          >
-                            {lbl}
-                          </button>
-                        ))}
+                        <div className="grid grid-cols-2 gap-1 shrink-0">
+                          {([
+                            ['C · Std', 'standard'],
+                            ['C · Frigo', 'reefer'],
+                            ['C · ISO', 'container'],
+                            ['C · Leite', 'tanker_milk'],
+                            ['CE · Eólica', 'long_cargo'],
+                            ['CE · Prancha', 'flatbed_heavy'],
+                            ['CE · Toros', 'timber'],
+                            ['CE · Petrol.', 'tanker_fuel'],
+                            ['H · Bitrem', 'bitrem_lead'],
+                            ['H · B.Trás', 'bitrem_pup'],
+                            ['H · B.Cist', 'bitrem_tanker_lead'],
+                            ['H · B.C.Tr', 'bitrem_tanker_pup'],
+                            ['X · Vidro', 'fragile_glass'],
+                            ['X · ADR', 'tanker_hazmat'],
+                          ] as Array<[string, string]>).map(([lbl, val]) => (
+                            <button
+                              key={val}
+                              onClick={() => { const ed = getEditorScene(); if (ed) ed.setTrailerPadType(objectUI.id, val); }}
+                              className={`shrink-0 ed-fs font-bold px-1.5 py-1 rounded border text-left truncate ${
+                                objectUI.trailer === val
+                                  ? 'bg-amber-400 text-slate-900 border-amber-200'
+                                  : 'bg-slate-800 text-amber-300 border-slate-600 hover:bg-slate-700'
+                              }`}
+                            >
+                              {lbl}
+                            </button>
+                          ))}
+                        </div>
                       </>
                     ) : null}
                     <span className="ed-fs text-slate-400 shrink-0 hidden lg:inline">
