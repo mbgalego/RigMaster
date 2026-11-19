@@ -15,6 +15,7 @@ import {
   TruckDamageState,
   CARGO_PROFILES,
   ImpactEvent,
+  accelPxS2ToG,
   createCleanTruckDamage,
   getEffectiveHeadlightStates,
   getEffectiveRearLightStates,
@@ -115,9 +116,11 @@ export class MainScene extends Phaser.Scene {
   /** The repair bay currently servicing the vehicle. */
   private repairingBay: { x: number; y: number } | null = null;
   /** Highlight pulse phase for the nearby pump/repair bay (0..1). */
+  private static readonly REPAIR_BAY_RADIUS = 160;
+  private static readonly REPAIR_MAX_SPEED_KMH = 3;
   private pumpPulsePhase: number = 0;
 
-  // Damage & Impact FX
+  // Damage, G-Force & Impact FX
   private impactGraphics: Phaser.GameObjects.Graphics | null = null;
   private impactGraphicsDirty: boolean = false;
   private pumpGraphicsDirty: boolean = false;
@@ -125,6 +128,8 @@ export class MainScene extends Phaser.Scene {
   private impactSparks: Array<{ x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: number; size: number }> = [];
   private lastEngineSmokeAt: number = 0;
   private jackknifeWearTimer: number = 0;
+  private currentGForce: number = 0;
+  private peakGForce: number = 0;
 
   // Audio
   private refuelOsc: OscillatorNode | null = null;
@@ -138,10 +143,9 @@ export class MainScene extends Phaser.Scene {
   private examTargetMarker: Phaser.GameObjects.Graphics | null = null;
   private examTargetLabel: Phaser.GameObjects.Text | null = null;
   private preparedExamId: LicenseId | null = null;
-  // Cumulative collision counters (truck + trailer) at exam start: updateExam
-  // must count only collisions that happen DURING the exam, so the counters'
-  // pre-exam lifetime value is subtracted (the truck body is reused across
-  // resets and keeps its history).
+  private preExamWeather: WeatherModifier | null = null;
+  // Cumulative collision counters (truck + lead trailer + pup trailer) at exam start:
+  // updateExam counts only collisions occurring DURING the exam.
   private examCollisionBaseline: number = 0;
   // Road-snapped world position of the current exam dock (the real pass target)
   private examDockWorld: LicenseExam['targetDock'] | null = null;
@@ -185,6 +189,8 @@ export class MainScene extends Phaser.Scene {
     truckDamage: TruckDamageState;
     trailerHealth: number;
     cargoHealth: number;
+    currentGForce: number;
+    peakGForce: number;
     weather: WeatherModifier;
     headlightMode: HeadlightMode;
     timePeriod: TimePeriod;
@@ -225,6 +231,8 @@ export class MainScene extends Phaser.Scene {
     truckDamage: createCleanTruckDamage(),
     trailerHealth: 100,
     cargoHealth: 100,
+    currentGForce: 0,
+    peakGForce: 0,
     weather: 'clear',
     headlightMode: 'low',
     timePeriod: 'day',
@@ -376,7 +384,7 @@ export class MainScene extends Phaser.Scene {
         return;
       }
 
-      // Tap / click on a garage repair bay to service truck & trailer
+      // Tap / click on a garage repair bay to service truck & trailer (shared atomic validation in tryRepair)
       for (const bay of this.world.repairBays) {
         const dx = worldPt.x - bay.x;
         const dy = worldPt.y - bay.y;
@@ -386,12 +394,7 @@ export class MainScene extends Phaser.Scene {
         const ly = dx * sin + dy * cos;
         const pad = 22 / cam.zoom;
         if (Math.abs(lx) <= bay.width / 2 + pad && Math.abs(ly) <= bay.height / 2 + pad) {
-          const distToTruck = Phaser.Math.Distance.Between(tx, ty, bay.x, bay.y);
-          if (distToTruck < 165) {
-            this.tryRepair(bay.x, bay.y);
-          } else {
-            this.setCouplingNotice('Aproxime-se da oficina para reparar', 'info');
-          }
+          this.tryRepair(bay.x, bay.y);
           return;
         }
       }
@@ -558,10 +561,16 @@ export class MainScene extends Phaser.Scene {
       this.truck.setPosition(spawn.x, spawn.y, spawnAngleRad);
     }
     this.truck.repairToFull();
+    this.truck.resetTelemetry();
     this.truck.trailerRollingDragFactor = 1.0;
     this.jackknifeWearTimer = 0;
+    this.currentGForce = 0;
+    this.peakGForce = 0;
 
     if (configType === 'solo') {
+      if (this.licenseSystem?.getActiveExam().active) {
+        this.examCollisionBaseline = this.getTotalRigCollisions();
+      }
       return;
     }
 
@@ -585,7 +594,7 @@ export class MainScene extends Phaser.Scene {
       this.kingpin = new Kingpin(this, this.truck.body, this.trailer.body, this.trailer.length, {
         parentOffset: { x: 0, y: 35 },
         trailerOffset: { x: 0, y: -this.trailer.length / 2 + 14 },
-        jackknifeLimitDeg: 75,
+        jackknifeLimitDeg: 65,
         mechanicalLockDeg: 95,
       });
 
@@ -603,7 +612,7 @@ export class MainScene extends Phaser.Scene {
       this.pupKingpin = new Kingpin(this, this.trailer.body, this.pupTrailer.body, this.pupTrailer.length, {
         parentOffset: { x: 0, y: this.trailer.length / 2 - 18 },
         trailerOffset: { x: 0, y: -this.pupTrailer.length / 2 + 14 },
-        jackknifeLimitDeg: 75,
+        jackknifeLimitDeg: 65,
         mechanicalLockDeg: 95,
       });
     } else {
@@ -661,9 +670,18 @@ export class MainScene extends Phaser.Scene {
     this.truck?.setLightingEnabled(this.webglLightingActive);
     this.trailer?.setLightingEnabled(this.webglLightingActive);
     this.pupTrailer?.setLightingEnabled(this.webglLightingActive);
+
+    if (this.licenseSystem?.getActiveExam().active) {
+      this.examCollisionBaseline = this.getTotalRigCollisions();
+    }
   }
 
-  public resetVehicleToSpawn() {
+  public resetVehicleToSpawn(allowDuringExam: boolean = false) {
+    if (!allowDuringExam && this.licenseSystem?.getActiveExam().active) {
+      this.setCouplingNotice('Reposição (R) bloqueada durante exame ativo', 'blocked');
+      return;
+    }
+
     const spawn = this.world.spawnPoint;
     const spawnAngleRad = Phaser.Math.DegToRad(spawn.angle || 0);
     const backwardX = -Math.sin(spawnAngleRad);
@@ -672,10 +690,15 @@ export class MainScene extends Phaser.Scene {
     this.truck.setPosition(spawn.x, spawn.y, spawnAngleRad);
     this.truck.refuelToFull();
     this.truck.repairToFull();
+    this.truck.resetTelemetry();
     this.truck.trailerRollingDragFactor = 1.0;
     this.jackknifeWearTimer = 0;
+    this.currentGForce = 0;
+    this.peakGForce = 0;
     this.trailer?.resetIntegrity();
+    this.trailer?.resetTelemetry();
     this.pupTrailer?.resetIntegrity();
+    this.pupTrailer?.resetTelemetry();
     const truckElev = this.roadNetwork.initialLayerAt(spawn.x, spawn.y);
     let leadElev: { layer: 0 | 1; z: number } | null = null;
     let pupElev: { layer: 0 | 1; z: number } | null = null;
@@ -706,6 +729,10 @@ export class MainScene extends Phaser.Scene {
     }
     if (this.pupTrailer && pupElev) {
       this.pupTrailer.setElevation(pupElev.layer, pupElev.z, rigElevatedVisual);
+    }
+
+    if (this.licenseSystem?.getActiveExam().active) {
+      this.examCollisionBaseline = this.getTotalRigCollisions();
     }
 
     this.bridgeUnderpassAlpha = 1;
@@ -896,39 +923,65 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
-  /** Try to repair truck & trailer structure at a nearby garage bay. Press E or tap the bay. */
-  public tryRepair(bayX?: number, bayY?: number) {
-    if (!this.truck || this.isEditorMode) return;
+  /** Combined collision counter across tractor + lead trailer + bitrem pup. */
+  private getTotalRigCollisions(): number {
+    return (
+      (this.truck?.collisionCount ?? 0) +
+      (this.trailer?.impactCount ?? 0) +
+      (this.pupTrailer?.impactCount ?? 0)
+    );
+  }
 
-    this.matter.body.setVelocity(this.truck.body, { x: 0, y: 0 });
-    this.truck.vLong = 0;
-    this.truck.currentSpeed = 0;
-
-    if (Math.abs(this.truck.speedKmh) > 3) {
-      this.setCouplingNotice('Pare totalmente na oficina para reparar', 'info');
-      return;
-    }
-
+  /**
+   * Single source of truth for repair-bay reachability (shared by HUD highlight,
+   * keyboard E, TouchControls 🔧 button, and canvas tap). Requires ground layer (0)
+   * and distance <= REPAIR_BAY_RADIUS (160px) to an actual bay in world.repairBays.
+   */
+  private findReachableRepairBay(bayX?: number, bayY?: number): RepairBay | null {
+    if (!this.truck || this.truck.layer !== 0) return null;
     const tx = this.truck.body.position.x;
     const ty = this.truck.body.position.y;
-    let nearest: { x: number; y: number } | null = null;
-    let nearestDist = bayX !== undefined ? 0 : 165;
-
-    if (bayX !== undefined && bayY !== undefined) {
-      nearest = { x: bayX, y: bayY };
-    } else {
-      for (const bay of this.world.repairBays) {
-        const d = Phaser.Math.Distance.Between(tx, ty, bay.x, bay.y);
-        if (d < nearestDist) {
-          nearestDist = d;
-          nearest = { x: bay.x, y: bay.y };
-        }
+    let best: RepairBay | null = null;
+    let bestDist = MainScene.REPAIR_BAY_RADIUS;
+    for (const bay of this.world.repairBays) {
+      if (bayX !== undefined && bayY !== undefined) {
+        if (Phaser.Math.Distance.Between(bay.x, bay.y, bayX, bayY) > 8) continue;
+      }
+      const d = Phaser.Math.Distance.Between(tx, ty, bay.x, bay.y);
+      if (d <= bestDist) {
+        bestDist = d;
+        best = bay;
       }
     }
+    return best;
+  }
 
-    if (!nearest) {
-      this.setCouplingNotice('Não há oficina de reparação por perto', 'info');
-      return;
+  /**
+   * Atomic repair flow: validates ground layer, reachable bay, live speed (never braking
+   * the vehicle before validating), and damage before applying repairs.
+   */
+  public tryRepair(bayX?: number, bayY?: number): boolean {
+    if (!this.truck || this.isEditorMode) return false;
+
+    if (this.truck.layer !== 0) {
+      this.setCouplingNotice('A oficina só é acessível ao nível do solo', 'info');
+      return false;
+    }
+
+    const bay = this.findReachableRepairBay(bayX, bayY);
+    if (!bay) {
+      this.setCouplingNotice(
+        bayX !== undefined ? 'Aproxime-se da oficina para reparar' : 'Não há oficina de reparação por perto',
+        'info',
+      );
+      return false;
+    }
+
+    const bodySpeedPxS = Math.hypot(this.truck.body.velocity.x, this.truck.body.velocity.y) * 60;
+    const liveSpeedKmh = Math.max(Math.abs(this.truck.vLong), bodySpeedPxS) / 4.5;
+    if (liveSpeedKmh > MainScene.REPAIR_MAX_SPEED_KMH) {
+      this.setCouplingNotice('Pare totalmente na oficina para reparar', 'info');
+      return false;
     }
 
     const truckDamaged = this.truck.health < 100;
@@ -945,16 +998,17 @@ export class MainScene extends Phaser.Scene {
       } else {
         this.setCouplingNotice('Veículo já está em perfeitas condições (100%)', 'info');
       }
-      return;
+      return false;
     }
 
     this.truck.repairToFull();
     this.truck.trailerRollingDragFactor = 1.0;
     this.trailer?.repairStructure();
     this.pupTrailer?.repairStructure();
+    this.peakGForce = 0;
 
     this.isRepairing = true;
-    this.repairingBay = nearest;
+    this.repairingBay = { x: bay.x, y: bay.y };
     this.setCouplingNotice(
       cargoDamaged
         ? 'Veículo reparado a 100% (integridade da carga mantida)'
@@ -968,6 +1022,7 @@ export class MainScene extends Phaser.Scene {
       this.repairingBay = null;
       this.playRefuelEndSound();
     });
+    return true;
   }
 
   /** Synthesized pneumatic wrench / garage repair sound. */
@@ -1282,7 +1337,10 @@ export class MainScene extends Phaser.Scene {
 
     let trailerOffY: number;
     let jackknife: number;
-    if (t.type === 'long_cargo') {
+    if (isBitremLeadType(t.type)) {
+      trailerOffY = -t.length / 2 + 14;
+      jackknife = 65;
+    } else if (t.type === 'long_cargo') {
       trailerOffY = -t.length / 2 + 18;
       jackknife = 72;
     } else if (t.type === 'flatbed_heavy') {
@@ -1337,7 +1395,7 @@ export class MainScene extends Phaser.Scene {
     this.pupKingpin = new Kingpin(this, lead.body, t.body, t.length, {
       parentOffset: { x: 0, y: lead.length / 2 - 18 },
       trailerOffset: { x: 0, y: -t.length / 2 + 14 },
-      jackknifeLimitDeg: 75,
+      jackknifeLimitDeg: 65,
       mechanicalLockDeg: 95,
     });
 
@@ -1508,9 +1566,9 @@ export class MainScene extends Phaser.Scene {
     TrailerManager.getInstance(this).rebuild(this.world.parkingPads);
   }
 
-  /** Respawns every loose trailer from pads + editor 'trailer' objects (after JSON import). */
-  public rebuildTrailers() {
-    TrailerManager.getInstance(this).rebuild(this.world.parkingPads);
+  /** Respawns every loose trailer from pads + editor 'trailer' objects (optionally preserving damage). */
+  public rebuildTrailers(preserveDamage: boolean = false) {
+    TrailerManager.getInstance(this).rebuild(this.world.parkingPads, preserveDamage);
   }
 
   public togglePhysicsDebug() {
@@ -1521,7 +1579,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   public update(time: number, delta: number) {
-    const dt = delta / 1000;
+    const dt = Math.min(Math.max(delta / 1000, 0.001), 0.05);
 
     // Time of day progression + coordinated traffic light cycle
     this.timeOfDaySystem.update(delta);
@@ -1658,6 +1716,7 @@ export class MainScene extends Phaser.Scene {
         this.pupTrailer?.rollingDragFactor ?? 1.0,
       );
       this.truck.ambientDarkness = timeSnap.lampFactor;
+      const prevVLong = this.truck.vLong;
       this.truck.update(delta);
 
       // If the coupled trailer's tail is blocked by an obstacle, the tractor
@@ -1688,7 +1747,7 @@ export class MainScene extends Phaser.Scene {
         offTrackingDeltaPx: 0,
         offTrackingWorldPos: { x: 0, y: 0 },
       };
-      let pupJackknifed = false;
+      let pupTelemetry: ArticulationTelemetry | null = null;
 
       if (this.trailer && this.kingpin) {
         const truckAngle = this.truck.body.angle;
@@ -1718,44 +1777,81 @@ export class MainScene extends Phaser.Scene {
         const pupHitchVy = leadVy - leadOmega * (Math.sin(leadAngle) * leadHitchDist);
 
         this.pupTrailer.followHitch(pupHitchX, pupHitchY, pupHitchVx, pupHitchVy, leadAngle, delta, this.truck.isBraking);
-        const pupTelemetry = this.pupKingpin.update(this.truck.isReversing, this.truck.speedKmh);
-        pupJackknifed = pupTelemetry.isJackknifed;
+        pupTelemetry = this.pupKingpin.update(this.truck.isReversing, this.truck.speedKmh);
         this.pupKingpin.renderDebug(pupTelemetry, this.debugMatter);
       }
 
-      // Sustained jackknife, cornering G-force, and high-speed off-road cargo/trailer wear
+      const anyJackknife = artTelemetry.isJackknifed || (pupTelemetry?.isJackknifed ?? false);
+      const anyMechanicalLocked = artTelemetry.isMechanicalLocked || (pupTelemetry?.isMechanicalLocked ?? false);
+      const combinedArtDeg =
+        pupTelemetry && Math.abs(pupTelemetry.angleDeg) > Math.abs(artTelemetry.angleDeg)
+          ? pupTelemetry.angleDeg
+          : artTelemetry.angleDeg;
+      const combinedJackknifeSeverity = Math.max(
+        artTelemetry.jackknifeSeverity,
+        pupTelemetry?.jackknifeSeverity ?? 0,
+      );
+
+      // Physical G-force accelerometer (lateral + longitudinal driving G, plus peak impact G)
+      const latAccel = Math.abs(this.truck.vLong * this.truck.omega);
+      const longAccel = Math.abs(this.truck.vLong - prevVLong) / dt;
+      const latG = accelPxS2ToG(latAccel);
+      const longG = accelPxS2ToG(longAccel);
+      const drivingG = Math.hypot(latG, longG);
+      const impactG = Math.max(this.trailer?.lastImpactG ?? 0, this.pupTrailer?.lastImpactG ?? 0);
+      if (this.trailer) this.trailer.lastImpactG = 0;
+      if (this.pupTrailer) this.pupTrailer.lastImpactG = 0;
+      const instantG = Math.max(drivingG, impactG);
+      this.currentGForce = Math.round(instantG * 100) / 100;
+      this.peakGForce = Math.max(this.peakGForce, this.currentGForce);
+
+      // Sustained jackknife, cornering G-force, and high-speed dirt/off-road cargo/trailer wear
       if (this.trailer) {
         const profile = CARGO_PROFILES[this.trailer.type] || CARGO_PROFILES.standard;
-        const anyJackknife = artTelemetry.isJackknifed || pupJackknifed;
+        const pupProfile = this.pupTrailer
+          ? CARGO_PROFILES[this.pupTrailer.type] || CARGO_PROFILES.standard
+          : null;
+
         if (anyJackknife && Math.abs(this.truck.vLong) > 6) {
           this.jackknifeWearTimer += dt;
           if (this.jackknifeWearTimer > 0.6) {
-            const jScale = artTelemetry.isMechanicalLocked ? 1.5 : 1.0;
+            const jScale = anyMechanicalLocked ? 1.5 : 1.0;
             this.trailer.applyContinuousWear(
               profile.jackknifeRate * 0.65 * jScale * dt,
               profile.jackknifeRate * jScale * dt,
             );
-            this.pupTrailer?.applyContinuousWear(
-              profile.jackknifeRate * 0.55 * jScale * dt,
-              profile.jackknifeRate * jScale * dt,
-            );
+            if (this.pupTrailer && pupProfile) {
+              this.pupTrailer.applyContinuousWear(
+                pupProfile.jackknifeRate * 0.55 * jScale * dt,
+                pupProfile.jackknifeRate * jScale * dt,
+              );
+            }
           }
         } else {
           this.jackknifeWearTimer = Math.max(0, this.jackknifeWearTimer - dt * 2);
         }
 
+        this.trailer.maxGForce = Math.max(this.trailer.maxGForce, latG);
+        if (this.pupTrailer) {
+          this.pupTrailer.maxGForce = Math.max(this.pupTrailer.maxGForce, latG);
+        }
+
         const absSpeed = Math.abs(this.truck.vLong);
         if (absSpeed > 65) {
-          const latAccel = Math.abs(this.truck.vLong * this.truck.omega);
-          this.trailer.maxGForce = Math.max(this.trailer.maxGForce, latAccel / 60);
           if (latAccel > profile.lateralGThreshold) {
             const excess = (latAccel - profile.lateralGThreshold) / 100;
             this.trailer.applyContinuousWear(0, excess * 2.2 * dt);
-            this.pupTrailer?.applyContinuousWear(0, excess * 2.2 * dt);
           }
-          if (this.truck.roadGrip < 0.65 && absSpeed > 75) {
+          if (this.pupTrailer && pupProfile && latAccel > pupProfile.lateralGThreshold) {
+            const pupExcess = (latAccel - pupProfile.lateralGThreshold) / 100;
+            this.pupTrailer.applyContinuousWear(0, pupExcess * 2.2 * dt);
+          }
+          // Include dirt (0.68) and off-road (0.42), exclude asphalt (1.0) & cobblestone (0.84)
+          if (this.truck.roadGrip <= 0.70 && absSpeed > 75) {
             this.trailer.applyContinuousWear(0, profile.offroadPenaltyRate * dt);
-            this.pupTrailer?.applyContinuousWear(0, profile.offroadPenaltyRate * dt);
+            if (this.pupTrailer && pupProfile) {
+              this.pupTrailer.applyContinuousWear(0, pupProfile.offroadPenaltyRate * dt);
+            }
           }
         }
       }
@@ -1782,21 +1878,34 @@ export class MainScene extends Phaser.Scene {
       // Check Docking Sensor Proximity
       const inDock = this.checkDockAlignment();
 
+      const minTrailerHealth = Math.min(
+        this.trailer?.trailerHealth ?? 100,
+        this.pupTrailer?.trailerHealth ?? 100,
+      );
+      const minCargoHealth = Math.min(
+        this.trailer?.cargoHealth ?? 100,
+        this.pupTrailer?.cargoHealth ?? 100,
+      );
+      const totalRigCollisions = this.getTotalRigCollisions();
+
       // Update Active License Exam
       const activeExam = this.licenseSystem.getActiveExam();
       if (activeExam.active) {
         this.licenseSystem.updateExam(
           dt,
-          Math.max(0, this.truck.collisionCount + (this.trailer?.impactCount || 0) - this.examCollisionBaseline),
-          artTelemetry.isJackknifed,
+          Math.max(0, totalRigCollisions - this.examCollisionBaseline),
+          anyJackknife,
           inDock.inZone,
           inDock.alignmentDeg,
-          this.trailer?.cargoHealth ?? 100,
-          this.truck.isReversing
+          minCargoHealth,
+          this.truck.isReversing,
+          drivingG,
+          impactG,
+          this.currentVehicleConfig,
         );
       }
 
-      // Gas pump & garage repair bay proximity detection
+      // Gas pump & garage repair bay proximity detection (unified helper for repair bays)
       this.nearbyPump = null;
       this.nearbyRepairBay = null;
       const tx = this.truck.body.position.x;
@@ -1810,40 +1919,25 @@ export class MainScene extends Phaser.Scene {
           this.nearbyPump = { x: o.x, y: o.y };
         }
       }
-      if (this.truck.layer === 0) {
-        let nearestBayDist = 160;
-        for (const bay of this.world.repairBays) {
-          const d = Phaser.Math.Distance.Between(tx, ty, bay.x, bay.y);
-          if (d < nearestBayDist) {
-            nearestBayDist = d;
-            this.nearbyRepairBay = { x: bay.x, y: bay.y, garageId: bay.garageId };
-          }
-        }
+      const reachableBay = this.findReachableRepairBay();
+      if (reachableBay) {
+        this.nearbyRepairBay = { x: reachableBay.x, y: reachableBay.y, garageId: reachableBay.garageId };
       }
       // Pulse animation for the highlight
       this.pumpPulsePhase = (this.pumpPulsePhase + dt * 2) % 1;
-
-      const minTrailerHealth = Math.min(
-        this.trailer?.trailerHealth ?? 100,
-        this.pupTrailer?.trailerHealth ?? 100,
-      );
-      const minCargoHealth = Math.min(
-        this.trailer?.cargoHealth ?? 100,
-        this.pupTrailer?.cargoHealth ?? 100,
-      );
 
       // Update Telemetry Cache
       this.telemetry = {
         speedKmh: this.truck.speedKmh,
         steeringDeg: Math.round(Phaser.Math.RadToDeg(this.truck.currentSteerAngle)),
-        articulationDeg: Math.round(artTelemetry.angleDeg),
-        isJackknifed: artTelemetry.isJackknifed,
-        isMechanicalLocked: artTelemetry.isMechanicalLocked,
-        jackknifeSeverity: artTelemetry.jackknifeSeverity,
+        articulationDeg: Math.round(combinedArtDeg),
+        isJackknifed: anyJackknife,
+        isMechanicalLocked: anyMechanicalLocked,
+        jackknifeSeverity: combinedJackknifeSeverity,
         tailSwingPx: Math.round(artTelemetry.tailSwingOffsetPx),
         offTrackingPx: Math.round(artTelemetry.offTrackingDeltaPx),
         isReversing: this.truck.isReversing,
-        collisions: this.truck.collisionCount + (this.trailer?.impactCount || 0),
+        collisions: totalRigCollisions,
         fragileHealth: Math.round(minCargoHealth),
         truckHealth: this.truck.health,
         truckDamage: {
@@ -1852,6 +1946,8 @@ export class MainScene extends Phaser.Scene {
         },
         trailerHealth: Math.round(minTrailerHealth),
         cargoHealth: Math.round(minCargoHealth),
+        currentGForce: this.currentGForce,
+        peakGForce: this.peakGForce,
         weather: this.garageSystem.getActiveModifier(),
         headlightMode: this.truck.headlightMode,
         timePeriod: timeSnap.period,
@@ -1883,22 +1979,40 @@ export class MainScene extends Phaser.Scene {
     this.renderWeather(time, delta, timeSnap);
   }
 
+  private normalizeAngleDiffDeg(actualRad: number, requiredDeg: number): number {
+    let diffDeg = Phaser.Math.RadToDeg(actualRad) - requiredDeg;
+    while (diffDeg > 180) diffDeg -= 360;
+    while (diffDeg < -180) diffDeg += 360;
+    return diffDeg;
+  }
+
   private checkDockAlignment(): { inZone: boolean; alignmentDeg: number } {
     const checkBody = this.trailer?.body || this.truck.body;
 
     // During an exam only the exam's target dock counts for the pass condition.
-    // Uses the road-snapped placement prepared at exam start (authored coordinates may
-    // fall inside buildings/water on big procedural maps).
+    // For bitrem rigs, BOTH lead and pup trailers must be inside the dock zone and aligned.
     const exam = this.licenseSystem.getActiveExam();
     if (exam.active && exam.licenseId) {
       const td = this.examDockWorld || this.licenseSystem.getLicense(exam.licenseId).exam.targetDock;
-      const dist = Phaser.Math.Distance.Between(checkBody.position.x, checkBody.position.y, td.x, td.y);
       const radius = Math.max(td.width, td.height) / 2 + 25;
+      const dist = Phaser.Math.Distance.Between(checkBody.position.x, checkBody.position.y, td.x, td.y);
       if (dist < radius) {
-        let diffDeg = Phaser.Math.RadToDeg(checkBody.angle) - td.requiredAngleDeg;
-        while (diffDeg > 180) diffDeg -= 360;
-        while (diffDeg < -180) diffDeg += 360;
-        return { inZone: true, alignmentDeg: Math.round(diffDeg) };
+        const leadDiff = this.normalizeAngleDiffDeg(checkBody.angle, td.requiredAngleDeg);
+        if (this.trailer && this.pupTrailer) {
+          const pupDist = Phaser.Math.Distance.Between(
+            this.pupTrailer.body.position.x,
+            this.pupTrailer.body.position.y,
+            td.x,
+            td.y,
+          );
+          if (pupDist >= radius) {
+            return { inZone: false, alignmentDeg: 999 };
+          }
+          const pupDiff = this.normalizeAngleDiffDeg(this.pupTrailer.body.angle, td.requiredAngleDeg);
+          const worstDiff = Math.abs(leadDiff) >= Math.abs(pupDiff) ? leadDiff : pupDiff;
+          return { inZone: true, alignmentDeg: Math.round(worstDiff) };
+        }
+        return { inZone: true, alignmentDeg: Math.round(leadDiff) };
       }
       return { inZone: false, alignmentDeg: 999 };
     }
@@ -1906,10 +2020,20 @@ export class MainScene extends Phaser.Scene {
     for (const dock of this.world.dockZones) {
       const dist = Phaser.Math.Distance.Between(checkBody.position.x, checkBody.position.y, dock.x, dock.y);
       if (dist < 70) {
-        let diffDeg = Phaser.Math.RadToDeg(checkBody.angle) - dock.requiredAngle;
-        while (diffDeg > 180) diffDeg -= 360;
-        while (diffDeg < -180) diffDeg += 360;
-        return { inZone: true, alignmentDeg: Math.round(diffDeg) };
+        const leadDiff = this.normalizeAngleDiffDeg(checkBody.angle, dock.requiredAngle);
+        if (this.trailer && this.pupTrailer) {
+          const pupDist = Phaser.Math.Distance.Between(
+            this.pupTrailer.body.position.x,
+            this.pupTrailer.body.position.y,
+            dock.x,
+            dock.y,
+          );
+          if (pupDist >= 145) continue;
+          const pupDiff = this.normalizeAngleDiffDeg(this.pupTrailer.body.angle, dock.requiredAngle);
+          const worstDiff = Math.abs(leadDiff) >= Math.abs(pupDiff) ? leadDiff : pupDiff;
+          return { inZone: true, alignmentDeg: Math.round(worstDiff) };
+        }
+        return { inZone: true, alignmentDeg: Math.round(leadDiff) };
       }
     }
     return { inZone: false, alignmentDeg: 999 };
@@ -1921,7 +2045,7 @@ export class MainScene extends Phaser.Scene {
 
   /**
    * Ensures the active exam has a visible marker and a physically painted dock at its
-   * target coordinates; cleans both up when the exam ends.
+   * target coordinates; applies & restores Exam X rain weather cleanly.
    */
   private syncExamTarget(time: number) {
     const exam = this.licenseSystem.getActiveExam();
@@ -1931,13 +2055,26 @@ export class MainScene extends Phaser.Scene {
 
       if (this.preparedExamId !== exam.licenseId) {
         this.preparedExamId = exam.licenseId;
-        this.examCollisionBaseline = this.truck.collisionCount + (this.trailer?.impactCount || 0);
+        this.examCollisionBaseline = this.getTotalRigCollisions();
+        this.currentGForce = 0;
+        this.peakGForce = 0;
+        if (exam.licenseId === 'X') {
+          if (this.preExamWeather === null) {
+            this.preExamWeather = this.garageSystem.getActiveModifier();
+          }
+          this.garageSystem.setActiveModifier('rain');
+        }
         this.prepareExamTargetDock(lic.exam.targetDock);
       }
       if (this.examDockWorld) {
         this.renderExamTargetMarker(this.examDockWorld, time);
       }
     } else if (this.preparedExamId) {
+      if (this.preExamWeather !== null) {
+        const restore = this.preExamWeather;
+        this.preExamWeather = null;
+        this.garageSystem.setActiveModifier(restore);
+      }
       this.preparedExamId = null;
       this.examDockWorld = null;
       this.world.objects.removeExamDock();

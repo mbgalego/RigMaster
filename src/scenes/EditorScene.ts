@@ -160,7 +160,7 @@ export class EditorScene extends Phaser.Scene {
     this.lastSnapResult = null;
     this.weldCache = null;
     // Recria as entidades vivas dos atrelados (editor-placed trailers)
-    this.mainScene.rebuildTrailers();
+    this.mainScene.rebuildTrailers(true);
   }
 
   /** Cancela toda a sessão: restaura o mundo ao estado de entrada no editor. */
@@ -179,7 +179,7 @@ export class EditorScene extends Phaser.Scene {
     this.overlappingRoads = [];
     this.lastSnapResult = null;
     this.weldCache = null;
-    this.mainScene.rebuildTrailers();
+    this.mainScene.rebuildTrailers(true);
     this.mainScene.world.version++;
   }
 

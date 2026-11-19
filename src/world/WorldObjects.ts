@@ -1,6 +1,8 @@
 import Phaser from 'phaser';
 import { RoadNetwork, SURFACE_GRIP } from '../systems/RoadNetwork';
-import type { TrailerType } from '../entities/Trailer';
+import { isTankerType, type TrailerType } from '../entities/Trailer';
+import { LICENSE_COLORS_HEX } from '../systems/LicenseSystem';
+import { TRAILER_TYPE_TO_LICENSE } from '../systems/TrailerManager';
 import { WorldTerrain } from './WorldTerrain';
 import { COLLISION_CAT, COLLISION_MASK } from '../physics/CollisionLayers';
 
@@ -759,20 +761,20 @@ export class WorldObjects {
     // Nose faces SOUTH (angle PI) — the classic depot posture.
     const pad = (x: number, y: number, w: number, h: number, trailer: string) =>
       this.add('parking_pad', x, y, w, h, { params: { trailer }, angle: Math.PI });
-    // Porto (C) — east of Porto
-    pad(1950, 1560, 130, 300, 'standard');
-    pad(2100, 1560, 130, 300, 'reefer');
-    pad(2250, 1560, 130, 300, 'container');
-    pad(2400, 1560, 130, 300, 'tanker_milk');
+    // Porto (C) — east of Porto (clear of exam barriers & warehouses)
+    pad(1950, 2050, 130, 300, 'standard');
+    pad(2100, 2050, 130, 300, 'reefer');
+    pad(2250, 2050, 130, 300, 'container');
+    pad(2400, 2050, 130, 300, 'tanker_milk');
     // Estaleiro (C+E) — south of Estaleiro
     pad(10900, 1650, 170, 420, 'tanker_fuel');
     pad(11080, 1650, 170, 420, 'timber');
     pad(11260, 1650, 170, 700, 'long_cargo');
     pad(11450, 1650, 170, 700, 'flatbed_heavy');
-    // Bitrem (H) — north of Zona Industrial
-    pad(11750, 7650, 140, 420, 'bitrem_lead');
-    pad(11900, 7650, 140, 420, 'bitrem_lead');
-    pad(12050, 7650, 140, 420, 'bitrem_tanker_lead');
+    // Bitrem (H) — north of Zona Industrial (clear of warehouse wo_98)
+    pad(12020, 7680, 140, 420, 'bitrem_lead');
+    pad(12170, 7680, 140, 420, 'bitrem_lead');
+    pad(12320, 7680, 140, 420, 'bitrem_tanker_lead');
     // Fragile glass & Hazmat tanker (X) — east of Centro Histórico
     pad(1500, 8300, 140, 300, 'fragile_glass');
     pad(1650, 8300, 140, 300, 'tanker_hazmat');
@@ -1175,16 +1177,10 @@ export class WorldObjects {
           // Trailer bay marking — yellow bay lines, hatched entry, faint
           // silhouette of the trailer it spawns. Doubles as a future
           // arrival/capture trigger point.
-          const tr = String(o.params?.trailer || 'standard');
-          const mark =
-            tr === 'long_cargo' || tr === 'flatbed_heavy' || tr === 'timber' || tr === 'tanker_fuel'
-              ? 0x4ade80
-              : tr.startsWith('bitrem')
-                ? 0x60a5fa
-                : tr === 'fragile_glass' || tr === 'tanker_hazmat'
-                  ? 0xf87171
-                  : 0xfacc15;
-          const isTanker = tr.includes('tanker');
+          const tr = String(o.params?.trailer || 'standard') as TrailerType;
+          const licId = TRAILER_TYPE_TO_LICENSE[tr] ?? 'C';
+          const mark = LICENSE_COLORS_HEX[licId];
+          const isTanker = isTankerType(tr);
           g.fillStyle(0x1c2027, 1);
           g.fillRect(x0, y0, o.w, o.h);
           // Bay boundary (solid license color, dim) + bright corner brackets

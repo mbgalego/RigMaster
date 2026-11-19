@@ -49,102 +49,115 @@ export const CARGO_PROFILES: Record<TrailerType, CargoSensitivityProfile> = {
   standard: {
     minImpactPxS: 28,
     impactScale: 0.14,
-    lateralGThreshold: 230,
+    lateralGThreshold: 122,
     offroadPenaltyRate: 0.35,
     jackknifeRate: 4.0,
   },
   reefer: {
     minImpactPxS: 24,
     impactScale: 0.19,
-    lateralGThreshold: 205,
+    lateralGThreshold: 116,
     offroadPenaltyRate: 0.55,
     jackknifeRate: 4.8,
   },
   container: {
     minImpactPxS: 29,
     impactScale: 0.13,
-    lateralGThreshold: 225,
+    lateralGThreshold: 120,
     offroadPenaltyRate: 0.32,
     jackknifeRate: 3.8,
   },
   tanker_milk: {
     minImpactPxS: 22,
     impactScale: 0.21,
-    lateralGThreshold: 170,
+    lateralGThreshold: 98,
     offroadPenaltyRate: 0.7,
     jackknifeRate: 5.5,
   },
   long_cargo: {
     minImpactPxS: 24,
     impactScale: 0.19,
-    lateralGThreshold: 195,
+    lateralGThreshold: 110,
     offroadPenaltyRate: 0.55,
     jackknifeRate: 5.5,
   },
   flatbed_heavy: {
     minImpactPxS: 30,
     impactScale: 0.16,
-    lateralGThreshold: 185,
+    lateralGThreshold: 105,
     offroadPenaltyRate: 0.4,
     jackknifeRate: 5.0,
   },
   timber: {
     minImpactPxS: 26,
     impactScale: 0.17,
-    lateralGThreshold: 190,
+    lateralGThreshold: 108,
     offroadPenaltyRate: 0.25,
     jackknifeRate: 4.5,
   },
   tanker_fuel: {
     minImpactPxS: 20,
     impactScale: 0.25,
-    lateralGThreshold: 155,
+    lateralGThreshold: 90,
     offroadPenaltyRate: 0.85,
     jackknifeRate: 6.8,
   },
   bitrem_lead: {
     minImpactPxS: 25,
     impactScale: 0.16,
-    lateralGThreshold: 205,
+    lateralGThreshold: 115,
     offroadPenaltyRate: 0.45,
     jackknifeRate: 6.5,
   },
   bitrem_pup: {
     minImpactPxS: 25,
     impactScale: 0.16,
-    lateralGThreshold: 200,
+    lateralGThreshold: 112,
     offroadPenaltyRate: 0.45,
     jackknifeRate: 7.0,
   },
   bitrem_tanker_lead: {
     minImpactPxS: 21,
     impactScale: 0.23,
-    lateralGThreshold: 165,
+    lateralGThreshold: 95,
     offroadPenaltyRate: 0.75,
     jackknifeRate: 7.2,
   },
   bitrem_tanker_pup: {
     minImpactPxS: 21,
     impactScale: 0.23,
-    lateralGThreshold: 160,
+    lateralGThreshold: 92,
     offroadPenaltyRate: 0.75,
     jackknifeRate: 7.6,
   },
   fragile_glass: {
     minImpactPxS: 16,
     impactScale: 0.34,
-    lateralGThreshold: 125,
+    lateralGThreshold: 82,
     offroadPenaltyRate: 2.6,
     jackknifeRate: 9.0,
   },
   tanker_hazmat: {
     minImpactPxS: 15,
     impactScale: 0.36,
-    lateralGThreshold: 120,
+    lateralGThreshold: 78,
     offroadPenaltyRate: 2.4,
     jackknifeRate: 9.5,
   },
 };
+
+/** World scale: 13.6m trailer = 220px (~16.2 px/m). 1g (9.81 m/s^2) ≈ 159 px/s^2. */
+export const PX_PER_G = 159;
+/** Equivalent deceleration pulse duration (s) used to translate collision impulse speed into peak g. */
+export const IMPACT_DECEL_WINDOW_S = 0.15;
+
+export function accelPxS2ToG(accelPxS2: number): number {
+  return Math.abs(accelPxS2) / PX_PER_G;
+}
+
+export function impactSpeedPxSToG(speedPxS: number): number {
+  return (Math.abs(speedPxS) / IMPACT_DECEL_WINDOW_S) / PX_PER_G;
+}
 
 export const MIN_TRUCK_DAMAGE_SPEED_PXS = 22; // ~4.9 km/h — gentle parking bumps cause zero wear
 export const MIN_TRAILER_DAMAGE_SPEED_PXS = 24;

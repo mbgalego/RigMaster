@@ -86,24 +86,49 @@ check(
   `bays=${initState.repairBays}`,
 );
 
-// 2. Slow parking nudge (< 22 px/s) into the first garage building wall deals ZERO damage
+// 2. Slow parking nudge (< 22 px/s) genuinely touches the first garage building wall and deals ZERO damage & ZERO collision count
 await page.evaluate(() => {
   const rig = window.__rig;
   const bay = rig.world.repairBays[0];
-  // Position truck facing north right outside the garage wall (bay sits ~67px below wall bottom)
   rig.spawnVehicleRig('solo');
   rig.truck.setElevation(0, 0);
-  rig.truck.setPosition(bay.x, bay.y + 10, 0); // facing North toward garage building
-  rig.truck.vLong = 12;
+  // Bay center is ~67px south of garage wall bottom; truck half-length is 44px -> at bay.y - 10, nose is ~13px south of wall
+  rig.truck.setPosition(bay.x, bay.y - 10, 0); // facing North toward garage building
+  rig.truck.vLong = 14;
   rig.truck.vx = 0;
-  rig.truck.vy = -12;
-  rig.truck.currentSpeed = 12;
+  rig.truck.vy = -14;
+  rig.truck.currentSpeed = 14;
 });
-const nudgeRes = await stepSim({ frames: 35, throttle: 0.08, steer: 0 });
+const nudgeRes = await page.evaluate(() => {
+  const rig = window.__rig;
+  const tr = rig.truck;
+  tr.setTouchGear('D');
+  tr.setTouchHandbrake(false);
+  tr.setTouchThrottle(0.08);
+  tr.setTouchBrake(0);
+  tr.setTouchSteer(0);
+  let t = performance.now();
+  const startY = tr.body.position.y;
+  let minY = startY;
+  for (let i = 0; i < 90; i++) {
+    t += 16.6667;
+    rig.update(t, 16.6667);
+    rig.matter.world.step(16.6667);
+    if (tr.body.position.y < minY) minY = tr.body.position.y;
+  }
+  tr.setTouchThrottle(0);
+  return {
+    truckHealth: tr.health,
+    engine: Math.round(tr.damage.engine),
+    collisionCount: tr.collisionCount,
+    vLong: Math.round(tr.vLong),
+    movedPx: +(startY - minY).toFixed(1),
+  };
+});
 check(
-  'toque lento de estacionamento (< 22 px/s) causa zero dano ao camião',
-  nudgeRes.truckHealth === 100 && nudgeRes.engine === 100,
-  `health=${nudgeRes.truckHealth}%, v=${nudgeRes.vLong}`,
+  'toque lento de estacionamento (< 22 px/s) encosta na parede com zero dano e zero colisões de exame',
+  nudgeRes.movedPx >= 5 && nudgeRes.truckHealth === 100 && nudgeRes.engine === 100 && nudgeRes.collisionCount === 0,
+  JSON.stringify(nudgeRes),
 );
 
 // 3. High-speed frontal crash into the same garage building causes localized front damage (engine/lights/chassis)
@@ -111,15 +136,16 @@ await page.evaluate(() => {
   const rig = window.__rig;
   const bay = rig.world.repairBays[0];
   rig.truck.repairToFull();
+  rig.truck.resetTelemetry();
   rig.truck.setElevation(0, 0);
-  rig.truck.setPosition(bay.x, bay.y + 40, 0); // facing North straight into garage solid body
+  rig.truck.setPosition(bay.x, bay.y + 30, 0); // facing North straight into garage solid body
   rig.truck.vLong = 155;
   rig.truck.vx = 0;
   rig.truck.vy = -155;
   rig.truck.currentSpeed = 155;
   rig.matter.body.setVelocity(rig.truck.body, { x: 0, y: -155 / 60 });
 });
-const crashRes = await stepSim({ frames: 24, throttle: 1, steer: 0 });
+const crashRes = await stepSim({ frames: 35, throttle: 1, steer: 0 });
 check(
   'colisão frontal rápida reduz integridade (motor, luzes e geral)',
   crashRes.truckHealth < 100 && crashRes.engine < 100 && crashRes.lights < 100 && crashRes.telemetry.truckHealth === crashRes.truckHealth,
@@ -209,13 +235,13 @@ check(
   `standard=${cargoProfileCheck.std.cargoHealth.toFixed(1)}%, glass=${cargoProfileCheck.glass.cargoHealth.toFixed(1)}%`,
 );
 
-// 6. Sustained jackknife (> 0.6s) while moving causes continuous trailer & cargo wear
+// 6. Sustained jackknife (> 0.6s) while moving causes continuous trailer & cargo wear (isolated from obstacle collisions)
 const jackknifeWear = await page.evaluate(() => {
   const rig = window.__rig;
   rig.spawnVehicleRig('standard');
   rig.truck.setElevation(0, 0);
   rig.trailer.setElevation(0, 0);
-  // Orient truck at ~80 deg relative to trailer (jackknife >= 55 deg) and reverse slowly so articulation locks/sustains
+  // Orient truck at ~80 deg relative to trailer on open road and reverse slowly so articulation locks/sustains
   rig.trailer.setPosition(5620, 4700, 0);
   rig.truck.setPosition(5620, 4630, Math.PI * 0.45);
   rig.truck.setTouchGear('R');
@@ -233,18 +259,71 @@ const jackknifeWear = await page.evaluate(() => {
   return {
     trailerHealth: rig.trailer.trailerHealth,
     cargoHealth: rig.trailer.cargoHealth,
+    impactCount: rig.trailer.impactCount,
   };
 });
 check(
-  'jackknife sustentado desgasta estrutura do atrelado e carga',
-  jackknifeWear.trailerHealth < 100 && jackknifeWear.cargoHealth < 100,
-  `trailer=${jackknifeWear.trailerHealth.toFixed(1)}%, cargo=${jackknifeWear.cargoHealth.toFixed(1)}%`,
+  'jackknife sustentado desgasta estrutura do atrelado e carga sem colisão externa',
+  jackknifeWear.impactCount === 0 && jackknifeWear.trailerHealth < 100 && jackknifeWear.cargoHealth < 100,
+  `impacts=${jackknifeWear.impactCount}, trailer=${jackknifeWear.trailerHealth.toFixed(1)}%, cargo=${jackknifeWear.cargoHealth.toFixed(1)}%`,
 );
 
-// 7. Garage repair bay + E key repairs truck & trailerHealth to 100%, keeping cargoHealth damaged
-await page.evaluate(() => {
+// 7a. Atomic tryRepair guards: moving truck is NOT braked & NOT repaired; elevated layer 1 & far distance are rejected
+const atomicRepairGuards = await page.evaluate(() => {
   const rig = window.__rig;
   rig.spawnVehicleRig('standard');
+  const bay = rig.world.repairBays[0];
+  rig.truck.setElevation(0, 0);
+  rig.trailer.setElevation(0, 0);
+  rig.truck.setPosition(bay.x, bay.y, Math.PI / 2);
+  rig.trailer.setPosition(bay.x - 131, bay.y, Math.PI / 2);
+  rig.truck.damage.engine = 40;
+  rig.truck.damage.overall = 60;
+  rig.trailer.trailerHealth = 64;
+  rig.trailer.cargoHealth = 72;
+
+  // Moving truck at bay -> must NOT repair AND must NOT zero vLong
+  rig.truck.vLong = 45;
+  rig.truck.currentSpeed = 45;
+  const whileMovingOk = rig.tryRepair();
+  const vAfterMovingCall = rig.truck.vLong;
+  const healthAfterMoving = rig.truck.health;
+
+  // Stopped on elevated layer 1 above bay -> must NOT repair even with explicit bay coords
+  rig.truck.vLong = 0;
+  rig.truck.currentSpeed = 0;
+  rig.matter.body.setVelocity(rig.truck.body, { x: 0, y: 0 });
+  rig.truck.setElevation(1, 1);
+  const onLayer1Ok = rig.tryRepair(bay.x, bay.y);
+
+  // Stopped on ground layer 0 but 210px away (> 160px radius) -> must NOT repair even with explicit bay coords
+  rig.truck.setElevation(0, 0);
+  rig.truck.setPosition(bay.x + 210, bay.y, Math.PI / 2);
+  const tooFarOk = rig.tryRepair(bay.x, bay.y);
+
+  return {
+    whileMovingOk,
+    vAfterMovingCall,
+    healthAfterMoving,
+    onLayer1Ok,
+    tooFarOk,
+    finalHealth: rig.truck.health,
+  };
+});
+check(
+  'tryRepair atómico valida piso, distância e velocidade sem travar camião em andamento',
+  atomicRepairGuards.whileMovingOk === false &&
+    atomicRepairGuards.vAfterMovingCall === 45 &&
+    atomicRepairGuards.healthAfterMoving === 60 &&
+    atomicRepairGuards.onLayer1Ok === false &&
+    atomicRepairGuards.tooFarOk === false &&
+    atomicRepairGuards.finalHealth === 60,
+  JSON.stringify(atomicRepairGuards),
+);
+
+// 7b. Garage repair bay + E key repairs truck & trailerHealth to 100%, keeping cargoHealth damaged
+await page.evaluate(() => {
+  const rig = window.__rig;
   const bay = rig.world.repairBays[0];
   rig.truck.setElevation(0, 0);
   rig.trailer.setElevation(0, 0);
@@ -253,7 +332,6 @@ await page.evaluate(() => {
   rig.truck.vLong = 0;
   rig.truck.currentSpeed = 0;
   rig.matter.body.setVelocity(rig.truck.body, { x: 0, y: 0 });
-  // Inflict damage on truck, trailer structure, and cargo
   rig.truck.damage.engine = 32;
   rig.truck.damage.chassis = 48;
   rig.truck.damage.lights = 50;

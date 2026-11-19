@@ -54,15 +54,52 @@ export class TrailerManager {
 
   /**
    * Full rebuild from the world's parking pads: destroys every loose trailer
-   * and spawns new ones on every pad. Called by MainScene when the world is
-   * (re)seeded or a world JSON is imported.
+   * and spawns new ones on every pad. When `preserveDamage` is true (e.g. exiting
+   * the editor), existing structural/cargo/rear-light health is carried over to
+   * matching trailers at the same pad or world-object id.
    */
-  public rebuild(pads: Array<{ x: number; y: number; angle: number; type: TrailerType }>) {
+  public rebuild(
+    pads: Array<{ x: number; y: number; angle: number; type: TrailerType }>,
+    preserveDamage: boolean = false,
+  ) {
+    type SavedHealth = {
+      trailerHealth: number;
+      cargoHealth: number;
+      rearLights: { brakeLeft: number; brakeRight: number; reverseLeft: number; reverseRight: number };
+    };
+    const saved = new Map<string, SavedHealth>();
+    if (preserveDamage) {
+      for (const t of this.loose) {
+        const key = t.wobjId
+          ? `obj:${t.wobjId}`
+          : `pos:${Math.round(t.body.position.x / 4) * 4},${Math.round(t.body.position.y / 4) * 4},${t.type}`;
+        saved.set(key, {
+          trailerHealth: t.trailerHealth,
+          cargoHealth: t.cargoHealth,
+          rearLights: { ...t.rearLights },
+        });
+      }
+    }
+
     this.destroyAll();
     for (const pad of pads) this.spawnAt(pad.x, pad.y, pad.type, pad.angle);
     // Editor-placed trailers live as data-only 'trailer' world objects — respawn them
     for (const o of (this.scene.world.objects.objects as WorldObject[])) {
       if (o.type === 'trailer' && !o.temp) this.spawnObjectTrailer(o);
+    }
+
+    if (preserveDamage && saved.size > 0) {
+      for (const t of this.loose) {
+        const key = t.wobjId
+          ? `obj:${t.wobjId}`
+          : `pos:${Math.round(t.body.position.x / 4) * 4},${Math.round(t.body.position.y / 4) * 4},${t.type}`;
+        const snap = saved.get(key);
+        if (snap) {
+          t.trailerHealth = snap.trailerHealth;
+          t.cargoHealth = snap.cargoHealth;
+          t.rearLights = { ...snap.rearLights };
+        }
+      }
     }
   }
 

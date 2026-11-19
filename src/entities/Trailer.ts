@@ -11,6 +11,7 @@ import {
   getEffectiveRearLightStates,
   applyTrailerAndCargoImpact,
   computeNormalImpactSpeedPxS,
+  impactSpeedPxSToG,
   localizeImpact,
 } from '../systems/DamageSystem';
 
@@ -84,6 +85,7 @@ export class Trailer {
   public cargoHealth: number = 100;
   public rearLights: RearLightsDamageState = createCleanRearLightsDamage();
   public maxGForce: number = 0;
+  public lastImpactG: number = 0;
   public impactCount: number = 0;
   public lastImpactEvent: ImpactEvent | null = null;
   private lastDamageAt: number = -1000;
@@ -102,11 +104,22 @@ export class Trailer {
     return 1 + Math.max(0, (70 - this.trailerHealth) / 70) * 0.45;
   }
 
+  /** Resets collision/G telemetry counters cleanly. */
+  public resetTelemetry(): void {
+    this.impactCount = 0;
+    this.maxGForce = 0;
+    this.lastImpactG = 0;
+    this.lastDamageAt = -1000;
+    this.lastImpactEvent = null;
+  }
+
   /** Repairs structural trailer damage (garages fix structure, not damaged cargo in transit). */
   public repairStructure(): void {
     this.trailerHealth = 100;
     this.rearLights = createCleanRearLightsDamage();
     this.lastTrailerLightsKey = '';
+    this.maxGForce = 0;
+    this.lastImpactG = 0;
     this.lastImpactEvent = null;
   }
 
@@ -116,8 +129,7 @@ export class Trailer {
     this.cargoHealth = 100;
     this.rearLights = createCleanRearLightsDamage();
     this.lastTrailerLightsKey = '';
-    this.maxGForce = 0;
-    this.lastImpactEvent = null;
+    this.resetTelemetry();
   }
 
   /** Applies gradual structural/cargo wear from jackknife, lateral G, or rough off-road speed. */
@@ -331,7 +343,6 @@ export class Trailer {
               other === sc.pupTrailer?.body));
         if (isOwnRigBody) continue;
 
-        this.impactCount++;
         const speedPxS = computeNormalImpactSpeedPxS(
           this.vx,
           this.vy,
@@ -343,9 +354,16 @@ export class Trailer {
           other.velocity?.y ?? 0,
           pair.collision?.normal,
         );
-        this.maxGForce = Math.max(this.maxGForce, speedPxS / 60);
+        const impactG = impactSpeedPxSToG(speedPxS);
+        this.maxGForce = Math.max(this.maxGForce, impactG);
 
-        if (now - this.lastDamageAt >= DAMAGE_COOLDOWN_MS) {
+        const profile = CARGO_PROFILES[this.type] || CARGO_PROFILES.standard;
+        const minReportSpeed = Math.min(MIN_TRAILER_DAMAGE_SPEED_PXS, profile.minImpactPxS);
+
+        if (now - this.lastDamageAt >= DAMAGE_COOLDOWN_MS && speedPxS >= minReportSpeed) {
+          this.impactCount++;
+          this.lastImpactG = Math.max(this.lastImpactG, impactG);
+
           const support = pair.collision?.supports?.[0];
           const contactPt = support
             ? { x: support.x, y: support.y }
@@ -362,7 +380,6 @@ export class Trailer {
             contactPt,
           );
 
-          const profile = CARGO_PROFILES[this.type] || CARGO_PROFILES.standard;
           const res = applyTrailerAndCargoImpact(this.trailerHealth, this.cargoHealth, profile, speedPxS);
           this.trailerHealth = res.trailerHealth;
           this.cargoHealth = res.cargoHealth;
@@ -372,19 +389,17 @@ export class Trailer {
             this.lastTrailerLightsKey = '';
           }
 
-          if (res.trailerLoss > 0 || res.cargoLoss > 0 || speedPxS >= MIN_TRAILER_DAMAGE_SPEED_PXS) {
-            this.lastDamageAt = now;
-            this.lastImpactEvent = {
-              x: contactPt.x,
-              y: contactPt.y,
-              speedPxS,
-              zone,
-              sideSign,
-              target: 'trailer',
-              damageDealt: res.trailerLoss,
-              cargoDamageDealt: res.cargoLoss,
-            };
-          }
+          this.lastDamageAt = now;
+          this.lastImpactEvent = {
+            x: contactPt.x,
+            y: contactPt.y,
+            speedPxS,
+            zone,
+            sideSign,
+            target: 'trailer',
+            damageDealt: res.trailerLoss,
+            cargoDamageDealt: res.cargoLoss,
+          };
         }
 
         // If coupled trailer impacts obstacle or another trailer meaningfully, rebound truck motion slightly

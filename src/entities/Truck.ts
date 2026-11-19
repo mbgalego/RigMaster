@@ -4,6 +4,7 @@ import {
   RearLightsDamageState,
   TruckDamageState,
   ImpactEvent,
+  MIN_TRUCK_DAMAGE_SPEED_PXS,
   DAMAGE_COOLDOWN_MS,
   createCleanTruckDamage,
   computeNormalImpactSpeedPxS,
@@ -69,7 +70,6 @@ export class Truck {
   public isReversing: boolean = false;
   public isBraking: boolean = false;
   public isAccelerating: boolean = false;
-  public impactDetected: boolean = false;
   public peakImpactSpeed: number = 0;
   public collisionCount: number = 0;
   public headlightMode: HeadlightMode = 'low';
@@ -96,10 +96,17 @@ export class Truck {
     return this.damage.rearLights;
   }
 
+  /** Resets collision/impact telemetry counters cleanly (spawn, respawn, exam start). */
+  public resetTelemetry(): void {
+    this.collisionCount = 0;
+    this.peakImpactSpeed = 0;
+    this.lastDamageAt = -1000;
+    this.lastImpactEvent = null;
+  }
+
   /** Restores all mechanical and structural subsystems to 100%. */
   public repairToFull(): void {
     this.damage = createCleanTruckDamage();
-    this.impactDetected = false;
     this.lastImpactEvent = null;
     this.lastLightsKey = '';
     if (this.lastChassisVisualTier !== 3) {
@@ -285,10 +292,6 @@ export class Truck {
           };
           if (other === sc.trailer?.body || other === sc.pupTrailer?.body) continue;
 
-          this.collisionCount++;
-          this.impactDetected = true;
-
-          const isBodyA = pair.bodyA === this.body;
           const normal = pair.collision?.normal;
           const speedPxS = Math.max(
             computeNormalImpactSpeedPxS(
@@ -306,7 +309,8 @@ export class Truck {
           );
           this.peakImpactSpeed = Math.max(this.peakImpactSpeed, Math.abs(this.vLong), speedPxS);
 
-          if (now - this.lastDamageAt >= DAMAGE_COOLDOWN_MS) {
+          if (now - this.lastDamageAt >= DAMAGE_COOLDOWN_MS && speedPxS >= MIN_TRUCK_DAMAGE_SPEED_PXS) {
+            this.collisionCount++;
             const support = pair.collision?.supports?.[0];
             const contactPt = support
               ? { x: support.x, y: support.y }
@@ -323,30 +327,27 @@ export class Truck {
               contactPt,
             );
             const dealt = applyTruckImpactDamage(this.damage, speedPxS, zone, sideSign);
-            if (dealt > 0 || speedPxS >= 22) {
-              this.lastDamageAt = now;
-              this.lastImpactEvent = {
-                x: contactPt.x,
-                y: contactPt.y,
-                speedPxS,
-                zone,
-                sideSign,
-                target: 'truck',
-                damageDealt: dealt,
-                cargoDamageDealt: 0,
-              };
-              const tier = this.damage.chassis >= 80 ? 3 : this.damage.chassis >= 45 ? 2 : this.damage.chassis >= 20 ? 1 : 0;
-              if (tier !== this.lastChassisVisualTier) {
-                this.lastChassisVisualTier = tier;
-                this.drawTruck();
-              }
+            this.lastDamageAt = now;
+            this.lastImpactEvent = {
+              x: contactPt.x,
+              y: contactPt.y,
+              speedPxS,
+              zone,
+              sideSign,
+              target: 'truck',
+              damageDealt: dealt,
+              cargoDamageDealt: 0,
+            };
+            const tier = this.damage.chassis >= 80 ? 3 : this.damage.chassis >= 45 ? 2 : this.damage.chassis >= 20 ? 1 : 0;
+            if (tier !== this.lastChassisVisualTier) {
+              this.lastChassisVisualTier = tier;
+              this.drawTruck();
             }
           }
 
           // Physical rebound against obstacles
           this.vLong = -this.vLong * 0.2;
           this.currentSpeed = this.vLong;
-          void isBodyA;
         }
       }
     };
@@ -442,9 +443,10 @@ export class Truck {
 
     // Clamped delta time for rock-solid stability
     const dt = Math.max(Math.min(delta / 1000, 0.033), 0.001);
-    this.impactDetected = false;
 
     // 1. Steering Input (Analog Touch direct; Keyboard speed-sensitive & progressive)
+    // Steering system damage slows steering response (heavier rack) in addition to lateral pull.
+    const steerResponseScale = Phaser.Math.Linear(0.55, 1.0, Phaser.Math.Clamp(this.damage.steering / 100, 0, 1));
     const keyUp = (this.cursors && this.cursors.up.isDown) || (this.keyW && this.keyW.isDown);
     const keyDown = (this.cursors && this.cursors.down.isDown) || (this.keyS && this.keyS.isDown);
     const keyLeft = (this.cursors && this.cursors.left.isDown) || (this.keyA && this.keyA.isDown);
@@ -457,7 +459,7 @@ export class Truck {
       this.currentSteerAngle = Phaser.Math.Linear(
         this.currentSteerAngle,
         targetSteer,
-        this.steerSpeed * dt * 3.5
+        Math.min(1, this.steerSpeed * dt * 3.5 * steerResponseScale)
       );
     } else {
       const kbDir = (keyRight ? 1 : 0) - (keyLeft ? 1 : 0);
@@ -467,7 +469,7 @@ export class Truck {
       if (kbDir !== 0) {
         if (kbDir * this.keyboardSteer < -0.02) {
           // Brisk counter-steering back toward center so corrections never feel sluggish
-          const counterRate = Phaser.Math.Linear(4.8, 3.6, speedNorm);
+          const counterRate = Phaser.Math.Linear(4.8, 3.6, speedNorm) * steerResponseScale;
           const step = counterRate * dt;
           if (Math.abs(this.keyboardSteer) <= step) {
             this.keyboardSteer = 0;
@@ -480,13 +482,13 @@ export class Truck {
           const absKb = Math.abs(this.keyboardSteer);
           const minRate = Phaser.Math.Linear(1.9, 1.05, speedNorm);
           const maxRate = Phaser.Math.Linear(3.8, 2.3, speedNorm);
-          const rate = Phaser.Math.Linear(minRate, maxRate, absKb);
+          const rate = Phaser.Math.Linear(minRate, maxRate, absKb) * steerResponseScale;
           this.keyboardSteer = Phaser.Math.Clamp(this.keyboardSteer + kbDir * rate * dt, -1, 1);
         }
       } else {
         // Self-aligning centering torque when keys are released
         const rollFactor = Phaser.Math.Clamp(Math.abs(this.vLong) / 80, 0, 1);
-        const centerRate = Phaser.Math.Linear(2.2, 4.2, rollFactor);
+        const centerRate = Phaser.Math.Linear(2.2, 4.2, rollFactor) * steerResponseScale;
         const step = centerRate * dt;
         if (Math.abs(this.keyboardSteer) <= step) {
           this.keyboardSteer = 0;
@@ -501,11 +503,11 @@ export class Truck {
       const curvedNorm =
         Math.sign(this.keyboardSteer) * (linearWeight * absKb + (1 - linearWeight) * absKb * absKb);
 
-      // Speed-dependent max keyboard angle (100% at maneuvers/reverse, ~52% at top forward speed)
-      const maxKbAngleScale = Phaser.Math.Linear(1.0, 0.52, speedNorm);
+      // Speed-dependent max keyboard angle (100% at maneuvers/reverse, ~68% at top forward speed)
+      const maxKbAngleScale = Phaser.Math.Linear(1.0, 0.68, speedNorm);
       const targetSteer = curvedNorm * this.maxSteerAngle * maxKbAngleScale;
 
-      const wheelTrackRate = Phaser.Math.Linear(14, 11, speedNorm);
+      const wheelTrackRate = Phaser.Math.Linear(14, 11, speedNorm) * steerResponseScale;
       this.currentSteerAngle = Phaser.Math.Linear(
         this.currentSteerAngle,
         targetSteer,
@@ -540,10 +542,14 @@ export class Truck {
           : Phaser.Math.Linear(0.55, 1.0, (engineHp - 15) / 70);
 
     const surfaceLoss = Math.max(0, 1 - this.roadGrip);
+    const trailerDragLoss = Math.max(0, this.trailerRollingDragFactor - 1);
     const rollingMult = (1 + surfaceLoss * 2.2) * this.trailerRollingDragFactor;
-    const effectiveMaxFwd = this.maxForwardSpeed * (1 - surfaceLoss * 0.5) * engineMaxSpeedScale;
-    const effectiveMaxRev = this.maxReverseSpeed * Math.max(0.45, engineMaxSpeedScale);
-    const surfaceAccelScale = (1 - surfaceLoss * 0.35) * enginePowerScale;
+    const effectiveMaxFwd =
+      this.maxForwardSpeed * (1 - surfaceLoss * 0.5) * Math.max(0.65, 1 - trailerDragLoss * 0.35) * engineMaxSpeedScale;
+    const effectiveMaxRev =
+      this.maxReverseSpeed * Math.max(0.75, 1 - trailerDragLoss * 0.25) * Math.max(0.45, engineMaxSpeedScale);
+    const surfaceAccelScale =
+      (1 - surfaceLoss * 0.35) * Math.max(0.55, 1 - trailerDragLoss * 0.45) * enginePowerScale;
     const coastDecel = 18 * rollingMult * dt;
 
     this.isBraking = false;

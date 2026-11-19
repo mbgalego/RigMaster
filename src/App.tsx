@@ -355,6 +355,8 @@ export default function App() {
     truckDamage: createCleanTruckDamage(),
     trailerHealth: 100,
     cargoHealth: 100,
+    currentGForce: 0,
+    peakGForce: 0,
     weather: 'clear',
     headlightMode: 'low',
     timePeriod: 'day',
@@ -515,7 +517,8 @@ export default function App() {
           `${t.truckDamage.engine},${t.truckDamage.steering},${t.truckDamage.chassis},${t.truckDamage.lights},${Math.round(t.truckDamage.leftLight)},${Math.round(t.truckDamage.rightLight)},` +
           `${Math.round(t.truckDamage.rearLights.brakeLeft)},${Math.round(t.truckDamage.rearLights.brakeRight)},${Math.round(t.truckDamage.rearLights.reverseLeft)},${Math.round(t.truckDamage.rearLights.reverseRight)}|` +
           `${Math.round(t.fuelPercent * 10)}|${Math.round(t.fuelLevel * 10)}|${t.isOutOfFuel ? 1 : 0}|` +
-          `${t.isRefuelling ? 1 : 0}|${t.isRepairing ? 1 : 0}|${t.isJackknifed ? 1 : 0}|` +
+          `${t.isRefuelling ? 1 : 0}|${t.isRepairing ? 1 : 0}|${t.isJackknifed ? 1 : 0}|${t.isMechanicalLocked ? 1 : 0}|` +
+          `${t.articulationDeg}|${t.collisions}|${t.weather}|${t.currentGForce.toFixed(2)}|${t.peakGForce.toFixed(2)}|` +
           `${t.headlightMode}|${t.timePeriod}|${t.timeClock}|${t.autoTimeCycle ? 1 : 0}|${t.timeRealTime ? 1 : 0}|` +
           `${t.nearbyPump ? `${t.nearbyPump.x},${t.nearbyPump.y}` : ''}|` +
           `${t.nearbyRepairBay ? `${t.nearbyRepairBay.x},${t.nearbyRepairBay.y}` : ''}|` +
@@ -531,7 +534,7 @@ export default function App() {
         const ex = licSys.getActiveExam();
         const examKey =
           ex.active || ex.isPassed || ex.isFailed
-            ? `${ex.active}|${ex.isPassed}|${ex.isFailed}|${Math.ceil(ex.remainingTime)}|${ex.collisionCount}|${ex.inDockZone}|${Math.round(ex.dockAlignmentDeg)}|${ex.dockHoldSec.toFixed(1)}`
+            ? `${ex.active}|${ex.isPassed}|${ex.isFailed}|${Math.ceil(ex.remainingTime)}|${ex.collisionCount}|${ex.inDockZone}|${Math.round(ex.dockAlignmentDeg)}|${ex.dockHoldSec.toFixed(1)}|${ex.jackknifeSec.toFixed(1)}|${ex.currentGForce.toFixed(2)}|${ex.peakGForce.toFixed(2)}|${ex.reversedDuringExam ? 1 : 0}`
             : 'idle';
         if (examKey !== lastExamKey) {
           lastExamKey = examKey;
@@ -600,17 +603,19 @@ export default function App() {
   };
 
   // Change Vehicle Rig
-  // `force` bypasses license gates — used when an exam assigns its own vehicle.
+  // `force` bypasses license & active-exam gates — used exclusively when an exam assigns its own vehicle.
   const handleSelectVehicle = (type: VehicleConfigType, force: boolean = false) => {
     const licSys = LicenseSystem.getInstance();
-
-    // During an active exam the exam's own vehicle is always allowed
     const exam = licSys.getActiveExam();
-    const examVehicle = exam.active && exam.licenseId ? licSys.getLicense(exam.licenseId).exam.vehicleType : null;
-    const allowedByExam = exam.active && examVehicle === type;
+
+    // Never allow manual vehicle swaps (or free repairs by re-selecting) during an active exam
+    if (!force && exam.active) {
+      addToast('Não pode trocar de veículo durante um exame ativo', 'blocked');
+      return;
+    }
 
     // Check license requirement
-    if (!force && !allowedByExam) {
+    if (!force) {
       const reqLic = getRequiredLicenseForConfig(type);
       if (reqLic !== 'C' && !licSys.isUnlocked(reqLic)) {
         setShowLicenseModal(true);
@@ -626,9 +631,9 @@ export default function App() {
   };
 
   // Reset Truck
-  const handleReset = () => {
+  const handleReset = (allowDuringExam: boolean = false) => {
     const scene = getMainScene();
-    if (scene) scene.resetVehicleToSpawn();
+    if (scene) scene.resetVehicleToSpawn(allowDuringExam);
   };
 
   // Toggle Wireframe Debug
@@ -657,8 +662,13 @@ export default function App() {
     }
   };
 
-  // Weather Modifier (gated by hub dominance)
+  // Weather Modifier (gated by hub dominance; locked to rain during Exam X)
   const handleSetWeather = (weather: WeatherModifier) => {
+    const exam = LicenseSystem.getInstance().getActiveExam();
+    if (exam.active && exam.licenseId === 'X') {
+      addToast('Clima fixo em chuva durante o Exame X', 'blocked');
+      return;
+    }
     const garSys = GarageSystem.getInstance();
     if (!garSys.getUnlockedModifiers().includes(weather)) return;
     garSys.setActiveModifier(weather);
@@ -674,7 +684,7 @@ export default function App() {
     const lic = licSys.getLicense(licenseId);
     if (lic) {
       handleSelectVehicle(lic.exam.vehicleType, true);
-      handleReset();
+      handleReset(true);
     }
   };
 
@@ -873,11 +883,16 @@ export default function App() {
             {isFullscreen ? <Minimize className="w-3.5 h-3.5" /> : <Maximize className="w-3.5 h-3.5" />}
           </button>
 
-          {/* Quick Reset Spawn Button */}
+          {/* Quick Reset Spawn Button (disabled during active exam) */}
           <button
-            onClick={handleReset}
-            className="p-1.5 rounded bg-slate-900 border border-slate-700 hover:border-amber-400 text-amber-400"
-            title="Repor Camião (Tecla R)"
+            onClick={() => handleReset(false)}
+            disabled={Boolean(activeExam?.active)}
+            className={`p-1.5 rounded bg-slate-900 border transition ${
+              activeExam?.active
+                ? 'border-slate-800 text-slate-600 cursor-not-allowed opacity-50'
+                : 'border-slate-700 hover:border-amber-400 text-amber-400'
+            }`}
+            title={activeExam?.active ? 'Reposição (R) bloqueada durante exame ativo' : 'Repor Camião (Tecla R)'}
           >
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
@@ -921,6 +936,7 @@ export default function App() {
                       { id: 'tanker_hazmat', name: 'Cisterna Líquidos Perigosos ADR', badge: 'X', req: 'X' },
                     ] as Array<{ id: VehicleConfigType; name: string; badge: string; req: LicenseId }>).map((v) => {
                       const unlocked = v.req === 'C' || (licenses.find((l) => l.id === v.req)?.unlocked ?? false);
+                      const lockedByExam = Boolean(activeExam?.active);
                       return (
                         <button
                           key={v.id}
@@ -928,17 +944,27 @@ export default function App() {
                             handleSelectVehicle(v.id);
                             setIsMenuOpen(false);
                           }}
+                          title={lockedByExam ? 'Troca de veículo bloqueada durante exame ativo' : undefined}
                           className={`text-left px-2 py-1.5 rounded flex items-center justify-between transition ${
                             vehicleConfig === v.id
                               ? 'bg-cyan-500 text-black font-bold'
-                              : unlocked
-                                ? 'text-slate-300 hover:bg-slate-900'
-                                : 'text-slate-500 hover:bg-slate-900/70'
+                              : lockedByExam
+                                ? 'text-slate-600 opacity-60 cursor-not-allowed'
+                                : unlocked
+                                  ? 'text-slate-300 hover:bg-slate-900'
+                                  : 'text-slate-500 hover:bg-slate-900/70'
                           }`}
                         >
                           <span className="truncate">{v.name}</span>
                           <span className="flex items-center gap-1 ml-2 shrink-0">
-                            {!unlocked && <span className="text-[9px]" title={`Requer licença ${v.badge}`}>🔒</span>}
+                            {(!unlocked || lockedByExam) && (
+                              <span
+                                className="text-[9px]"
+                                title={lockedByExam ? 'Bloqueado durante exame ativo' : `Requer licença ${v.badge}`}
+                              >
+                                🔒
+                              </span>
+                            )}
                             <span className="text-[9px] font-mono px-1 rounded bg-black/40 text-white">{v.badge}</span>
                           </span>
                         </button>
@@ -1190,7 +1216,7 @@ export default function App() {
 
       {/* ACTIVE LICENSE EXAM STATUS BANNER */}
       {activeExam && activeExam.active && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 bg-slate-950/95 border border-cyan-400 px-5 py-2.5 rounded-lg shadow-2xl shadow-cyan-500/30 z-30 flex items-center gap-6 backdrop-blur">
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 bg-slate-950/95 border border-cyan-400 px-5 py-2.5 rounded-lg shadow-2xl shadow-cyan-500/30 z-30 flex items-center gap-5 backdrop-blur">
           <div>
             <div className="text-[10px] uppercase font-mono tracking-widest text-cyan-400">EXAME EM CURSO</div>
             <div className="text-sm font-bold text-white">Classe {activeExam.licenseId}</div>
@@ -1207,6 +1233,22 @@ export default function App() {
                 {activeExam.collisionCount}
               </span>
             </div>
+            {activeExam.maxGForce !== null && (
+              <div data-testid="exam-g-meter">
+                <span className="text-slate-400">G-Meter:</span>{' '}
+                <span
+                  className={
+                    activeExam.currentGForce > activeExam.maxGForce
+                      ? 'text-red-400 font-bold'
+                      : activeExam.currentGForce > activeExam.maxGForce * 0.75
+                        ? 'text-amber-300 font-bold'
+                        : 'text-emerald-400 font-bold'
+                  }
+                >
+                  {activeExam.currentGForce.toFixed(2)}g / {activeExam.maxGForce.toFixed(1)}g
+                </span>
+              </div>
+            )}
             <div>
               <span className="text-slate-400">Doca:</span>{' '}
               {activeExam.inDockZone ? (

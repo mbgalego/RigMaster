@@ -1,5 +1,13 @@
 export type LicenseId = 'C' | 'CE' | 'H' | 'X';
 
+/** Shared hex color palette per license class (used by UI badges and parking pads). */
+export const LICENSE_COLORS_HEX: Record<LicenseId, number> = {
+  C: 0x00f0ff,
+  CE: 0xf97316,
+  H: 0xa855f7,
+  X: 0x10b981,
+};
+
 export interface LicenseExam {
   title: string;
   subtitle: string;
@@ -38,7 +46,14 @@ export interface ExamStatus {
   elapsedTime: number;
   remainingTime: number;
   collisionCount: number;
+  /** Accumulated seconds spent in jackknife (FPS-independent; H exam fails at >= 2.0s). */
+  jackknifeSec: number;
+  /** Legacy numeric mirror (tenths/rounded seconds) kept for compatibility. */
   jackknifeCount: number;
+  /** Live G-force reading (g) and peak recorded during this exam. */
+  currentGForce: number;
+  peakGForce: number;
+  maxGForce: number | null;
   inDockZone: boolean;
   dockAlignmentDeg: number;
   // Seconds held aligned inside the target dock (exam passes at 1.5s)
@@ -59,7 +74,11 @@ export class LicenseSystem {
     elapsedTime: 0,
     remainingTime: 0,
     collisionCount: 0,
+    jackknifeSec: 0,
     jackknifeCount: 0,
+    currentGForce: 0,
+    peakGForce: 0,
+    maxGForce: null,
     inDockZone: false,
     dockAlignmentDeg: 0,
     dockHoldSec: 0,
@@ -74,6 +93,8 @@ export class LicenseSystem {
 
   // Exam pass requirement: stay aligned inside the dock for this long
   private static readonly DOCK_HOLD_REQUIRED_SEC = 1.5;
+  // Maximum cumulative seconds allowed in jackknife during H exam
+  private static readonly MAX_JACKKNIFE_SEC = 2.0;
 
   private listeners: Array<() => void> = [];
 
@@ -230,7 +251,11 @@ export class LicenseSystem {
       elapsedTime: 0,
       remainingTime: lic.exam.timeLimitSec,
       collisionCount: 0,
+      jackknifeSec: 0,
       jackknifeCount: 0,
+      currentGForce: 0,
+      peakGForce: 0,
+      maxGForce: lic.exam.maxGForce ?? null,
       inDockZone: false,
       dockAlignmentDeg: 999,
       dockHoldSec: 0,
@@ -263,7 +288,10 @@ export class LicenseSystem {
     inDock: boolean,
     alignmentDeg: number,
     fragileHealth: number = 100,
-    isReversing: boolean = false
+    isReversing: boolean = false,
+    currentGForce: number = 0,
+    peakImpactG: number = 0,
+    vehicleConfig?: string,
   ) {
     if (!this.activeExamStatus.active || !this.activeExamStatus.licenseId) return;
 
@@ -271,12 +299,24 @@ export class LicenseSystem {
     this.activeExamStatus.elapsedTime += deltaSec;
     this.activeExamStatus.remainingTime = Math.max(0, lic.exam.timeLimitSec - this.activeExamStatus.elapsedTime);
     this.activeExamStatus.collisionCount = collisions;
-    if (isJackknifed) this.activeExamStatus.jackknifeCount++;
+    if (isJackknifed) {
+      this.activeExamStatus.jackknifeSec += deltaSec;
+      this.activeExamStatus.jackknifeCount = Math.round(this.activeExamStatus.jackknifeSec * 10) / 10;
+    }
     if (isReversing) this.activeExamStatus.reversedDuringExam = true;
     this.activeExamStatus.inDockZone = inDock;
     this.activeExamStatus.dockAlignmentDeg = alignmentDeg;
 
+    const liveG = Math.max(currentGForce, peakImpactG);
+    this.activeExamStatus.currentGForce = Math.round(currentGForce * 100) / 100;
+    this.activeExamStatus.peakGForce = Math.round(Math.max(this.activeExamStatus.peakGForce, liveG) * 100) / 100;
+
     // Fail conditions
+    if (vehicleConfig && vehicleConfig !== lic.exam.vehicleType) {
+      this.failExam('Configuração de veículo alterada durante o exame!');
+      return;
+    }
+
     if (this.activeExamStatus.remainingTime <= 0) {
       this.failExam('Tempo limite esgotado!');
       return;
@@ -287,12 +327,17 @@ export class LicenseSystem {
       return;
     }
 
+    if (lic.exam.maxGForce !== undefined && liveG > lic.exam.maxGForce) {
+      this.failExam(`Força G excessiva (${liveG.toFixed(2)}g > ${lic.exam.maxGForce.toFixed(1)}g)!`);
+      return;
+    }
+
     if (lic.id === 'X' && fragileHealth < 99) {
       this.failExam('Carga sensível danificada! Tolerância zero violada.');
       return;
     }
 
-    if (lic.id === 'H' && this.activeExamStatus.jackknifeCount > 120) {
+    if (lic.id === 'H' && this.activeExamStatus.jackknifeSec >= LicenseSystem.MAX_JACKKNIFE_SEC) {
       this.failExam('Travamento crítico por Jackknife!');
       return;
     }
