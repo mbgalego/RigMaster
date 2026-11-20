@@ -13,6 +13,21 @@ import {
   getEffectiveHeadlightStates,
   getTruckEffectiveRearLightStates,
 } from '../systems/DamageSystem';
+import {
+  DEFAULT_TRUCK_UPGRADES,
+  TRUCK_CATALOG,
+  computeEffectiveTruckStats,
+  type EffectiveTruckStats,
+  type TruckType,
+  type TruckUpgrades,
+} from '../systems/TruckCatalog';
+import {
+  createCleanTruckWear,
+  type ActiveTruckSnapshot,
+  type FleetTruckState,
+  type TruckWearState,
+} from '../systems/ReputationSystem';
+import type { HubId } from '../systems/GarageSystem';
 
 export type HeadlightMode = 'off' | 'low' | 'high';
 
@@ -25,6 +40,8 @@ export interface TruckConfig {
   steerSpeed?: number;
   maxSteerAngle?: number;
   surfaceGrip?: number;
+  truckType?: TruckType;
+  upgrades?: TruckUpgrades;
 }
 
 export class Truck {
@@ -75,6 +92,19 @@ export class Truck {
   public headlightMode: HeadlightMode = 'low';
   public ambientDarkness: number = 0; // 0 = day, 1 = night (drives volumetric beam scatter)
 
+  // Truck Model, Sidegrade Upgrades & Operational Wear
+  public truckType: TruckType = 'iveco_daily_4x2';
+  public upgrades: TruckUpgrades = { ...DEFAULT_TRUCK_UPGRADES };
+  public effectiveStats: EffectiveTruckStats = computeEffectiveTruckStats(
+    'iveco_daily_4x2',
+    DEFAULT_TRUCK_UPGRADES,
+  );
+  public wear: TruckWearState = createCleanTruckWear();
+  /** Thermal brake load 0..1 (above 0.55 triggers progressive brake fade). */
+  public brakeHeat: number = 0;
+  public hasCoupledTrailer: boolean = false;
+  public isWeatherWet: boolean = false;
+
   // Damage & Mechanical Integrity
   public damage: TruckDamageState = createCleanTruckDamage();
   public lastImpactEvent: ImpactEvent | null = null;
@@ -96,6 +126,126 @@ export class Truck {
     return this.damage.rearLights;
   }
 
+  /** Applies a truck model + sidegrades, updating live physics and cab/axle rendering. */
+  public setTruckSpec(
+    type: TruckType,
+    upgrades?: TruckUpgrades,
+    resetFuel: boolean = false,
+  ): void {
+    this.truckType = type;
+    if (upgrades) {
+      this.upgrades = { ...upgrades };
+    }
+    this.recomputeEffectiveSpecs(resetFuel);
+    this.lastWheelsKey = '';
+    this.drawTruck();
+    this.drawWheels();
+    this.drawLights();
+  }
+
+  /** Updates installed sidegrade upgrades immediately (workshop tuning). */
+  public setUpgrades(upgrades: TruckUpgrades): void {
+    this.upgrades = { ...upgrades };
+    this.recomputeEffectiveSpecs(false);
+  }
+
+  private recomputeEffectiveSpecs(resetFuel: boolean): void {
+    const spec = TRUCK_CATALOG[this.truckType] ?? TRUCK_CATALOG.iveco_daily_4x2;
+    this.effectiveStats = computeEffectiveTruckStats(this.truckType, this.upgrades);
+    this.maxForwardSpeed = this.effectiveStats.maxForwardSpeed;
+    this.maxReverseSpeed = this.effectiveStats.maxReverseSpeed;
+    this.engineAccel = this.effectiveStats.engineAccel;
+    this.brakeForce = this.effectiveStats.brakeForce;
+    this.maxSteerAngle = Phaser.Math.DegToRad(Math.min(38, spec.maxSteerAngleDeg)) * (32 / 38);
+    const prevCap = this.fuelCapacity || 500;
+    this.fuelCapacity = this.effectiveStats.fuelCapacityL;
+    this.fuelWarningThreshold = Math.round(this.fuelCapacity * 0.2);
+    if (resetFuel) {
+      this.fuelLevel = this.fuelCapacity;
+    } else if (prevCap !== this.fuelCapacity) {
+      const ratio = Phaser.Math.Clamp(this.fuelLevel / prevCap, 0, 1);
+      this.fuelLevel = ratio * this.fuelCapacity;
+    } else {
+      this.fuelLevel = Math.min(this.fuelLevel, this.fuelCapacity);
+    }
+    this.isOutOfFuel = this.fuelLevel <= 0;
+  }
+
+  /** Restores exact state from a persisted FleetTruckState (boot or physical swap). */
+  public applyFleetState(fleet: FleetTruckState): void {
+    this.setTruckSpec(fleet.type, fleet.upgrades, false);
+    this.damage = {
+      ...fleet.damage,
+      rearLights: { ...fleet.damage.rearLights },
+    };
+    this.wear = { ...fleet.wear };
+    this.brakeHeat = 0;
+    this.fuelLevel = Phaser.Math.Clamp(fleet.fuel, 0, this.fuelCapacity);
+    this.isOutOfFuel = this.fuelLevel <= 0;
+    this.setPosition(fleet.x, fleet.y, fleet.angle);
+    this.setElevation(fleet.layer, fleet.layer === 1 ? 1 : 0);
+    this.lastChassisVisualTier =
+      this.damage.chassis >= 80 ? 3 : this.damage.chassis >= 45 ? 2 : this.damage.chassis >= 20 ? 1 : 0;
+    this.lastLightsKey = '';
+    this.drawTruck();
+    this.drawLights();
+  }
+
+  /** Captures live position, wear, damage, and fuel to persist back into ReputationSystem. */
+  public exportFleetSnapshot(locationHub: HubId): ActiveTruckSnapshot {
+    return {
+      x: this.body.position.x,
+      y: this.body.position.y,
+      angle: this.body.angle,
+      layer: this.layer,
+      locationHub,
+      damage: {
+        ...this.damage,
+        rearLights: { ...this.damage.rearLights },
+      },
+      wear: { ...this.wear },
+      fuel: this.fuelLevel,
+    };
+  }
+
+  /** Computes effective braking deceleration (px/s^2) accounting for thermal fade, cold ceramic & pad wear. */
+  public getEffectiveBrakeForce(): number {
+    const fadeStart = 0.55;
+    const fadeNorm = Phaser.Math.Clamp((this.brakeHeat - fadeStart) / (1 - fadeStart), 0, 1);
+    const thermalMult = 1 - fadeNorm * 0.45;
+    const coldBlend = Phaser.Math.Clamp(this.brakeHeat / 0.25, 0, 1);
+    const coldMult = Phaser.Math.Linear(this.effectiveStats.coldBrakeMult, 1.0, coldBlend);
+    const wearMult = Phaser.Math.Linear(0.72, 1.0, Phaser.Math.Clamp(this.wear.brakes / 100, 0, 1));
+    return this.brakeForce * thermalMult * coldMult * wearMult;
+  }
+
+  /**
+   * Computes surface-, tire-, weather-, suspension-, and wear-adjusted total lateral/traction grip.
+   * For stock Iveco on dry asphalt (100% tires), returns 1.0 (preserving baseline calibration).
+   */
+  public getEffectiveTotalGrip(): number {
+    const stats = this.effectiveStats;
+    let surfaceFactor: number;
+    if (this.roadGrip >= 0.92) {
+      surfaceFactor = this.roadGrip * stats.asphaltGrip;
+    } else if (this.roadGrip >= 0.62) {
+      // Dirt road (base ~0.68): scaled by tire dirtGrip (highway 0.5 -> ~0.62, all_terrain 0.85 -> ~0.85, mud 1.0 -> ~0.95+)
+      surfaceFactor = Phaser.Math.Clamp(this.roadGrip * (0.62 + 0.76 * stats.dirtGrip), 0.35, 1.0);
+    } else {
+      // Off-road grass/verge (base ~0.55)
+      surfaceFactor = Phaser.Math.Clamp(this.roadGrip * (0.64 + 0.72 * stats.offroadGrip), 0.3, 0.98);
+    }
+
+    const weatherFactor = this.isWeatherWet
+      ? Phaser.Math.Clamp(this.surfaceGrip * stats.wetWinterGrip, 0.25, 0.98)
+      : this.surfaceGrip;
+
+    const emptyFactor = this.hasCoupledTrailer ? 1.0 : stats.emptyGripMult;
+    const tireWearFactor = Phaser.Math.Linear(0.78, 1.0, Phaser.Math.Clamp(this.wear.tires / 100, 0, 1));
+
+    return Phaser.Math.Clamp(surfaceFactor * weatherFactor * emptyFactor * tireWearFactor, 0.24, 1.05);
+  }
+
   /** Resets collision/impact telemetry counters cleanly (spawn, respawn, exam start). */
   public resetTelemetry(): void {
     this.collisionCount = 0;
@@ -104,9 +254,11 @@ export class Truck {
     this.lastImpactEvent = null;
   }
 
-  /** Restores all mechanical and structural subsystems to 100%. */
+  /** Restores all mechanical, structural, and wear subsystems to 100% (keeps upgrades & fuel). */
   public repairToFull(): void {
     this.damage = createCleanTruckDamage();
+    this.wear = createCleanTruckWear();
+    this.brakeHeat = 0;
     this.lastImpactEvent = null;
     this.lastLightsKey = '';
     if (this.lastChassisVisualTier !== 3) {
@@ -151,10 +303,10 @@ export class Truck {
     return this.refuel(this.fuelCapacity);
   }
 
-  /** Consumes fuel based on distance driven this frame. Call once per update. */
+  /** Consumes fuel based on distance driven this frame (scaled by truck model + engine upgrade). */
   private consumeFuel(distancePx: number) {
     if (distancePx <= 0 || this.fuelLevel <= 0) return;
-    const burnt = distancePx * this.fuelConsumptionPerPx;
+    const burnt = distancePx * this.fuelConsumptionPerPx * this.effectiveStats.fuelConsumptionScale;
     this.fuelLevel = Math.max(0, this.fuelLevel - burnt);
     if (this.fuelLevel <= 0) {
       this.fuelLevel = 0;
@@ -188,12 +340,11 @@ export class Truck {
     this.scene = scene;
     this.width = config.width || 48;
     this.length = config.length || 96;
-    this.maxForwardSpeed = 160; // ~36 km/h yard maneuver
-    this.maxReverseSpeed = 54;  // ~12 km/h
-    this.engineAccel = 48;      // Heavy diesel torque
-    this.brakeForce = 130;      // Pneumatic braking
+    this.truckType = config.truckType ?? 'iveco_daily_4x2';
+    this.upgrades = config.upgrades ? { ...config.upgrades } : { ...DEFAULT_TRUCK_UPGRADES };
+    this.recomputeEffectiveSpecs(true);
     this.steerSpeed = config.steerSpeed || 2.4;
-    this.maxSteerAngle = config.maxSteerAngle || 0.56; // ~32 degrees
+    if (config.maxSteerAngle) this.maxSteerAngle = config.maxSteerAngle;
     this.surfaceGrip = config.surfaceGrip !== undefined ? config.surfaceGrip : 1.0;
     this._lastBodyX = config.x;
     this._lastBodyY = config.y;
@@ -524,39 +675,44 @@ export class Truck {
     const isBrakeActive = keyDown || this.touchInput.brake > 0.05;
     const isHandbrake = keyHandbrake || this.touchInput.handbrake;
 
-    // Surface rolling resistance & longitudinal traction + mechanical wear scaling:
-    // Asphalt roads and paved asphalt pads share roadGrip = 1.0 (zero extra resistance).
-    // Cobble (0.88), dirt (0.68), and off-road grass (0.55) add rolling drag and trim top speed.
+    // Surface rolling resistance & longitudinal traction + mechanical wear + upgrade scaling:
     const engineHp = this.damage.engine;
+    const engineWearScale = Phaser.Math.Linear(0.76, 1.0, Phaser.Math.Clamp(this.wear.engine / 100, 0, 1));
     const enginePowerScale =
-      engineHp <= 15
+      (engineHp <= 15
         ? 0.34
         : engineHp >= 85
           ? 1.0
-          : Phaser.Math.Linear(0.48, 1.0, (engineHp - 15) / 70);
+          : Phaser.Math.Linear(0.48, 1.0, (engineHp - 15) / 70)) * engineWearScale;
     const engineMaxSpeedScale =
-      engineHp <= 15
+      (engineHp <= 15
         ? 0.35
         : engineHp >= 85
           ? 1.0
-          : Phaser.Math.Linear(0.55, 1.0, (engineHp - 15) / 70);
+          : Phaser.Math.Linear(0.55, 1.0, (engineHp - 15) / 70)) *
+      Phaser.Math.Linear(0.86, 1.0, Phaser.Math.Clamp(this.wear.engine / 100, 0, 1));
 
-    const surfaceLoss = Math.max(0, 1 - this.roadGrip);
-    const trailerDragLoss = Math.max(0, this.trailerRollingDragFactor - 1);
-    const rollingMult = (1 + surfaceLoss * 2.2) * this.trailerRollingDragFactor;
+    const effectiveGrip = this.getEffectiveTotalGrip();
+    const surfaceLoss = Math.max(0, 1 - Math.min(1, effectiveGrip));
+    const rawTrailerDragLoss = Math.max(0, this.trailerRollingDragFactor - 1);
+    const trailerDragLoss = rawTrailerDragLoss * this.effectiveStats.heavyLoadDragScale;
+    const rollingMult = (1 + surfaceLoss * 2.2) * (1 + trailerDragLoss);
     const effectiveMaxFwd =
-      this.maxForwardSpeed * (1 - surfaceLoss * 0.5) * Math.max(0.65, 1 - trailerDragLoss * 0.35) * engineMaxSpeedScale;
+      this.maxForwardSpeed * (1 - surfaceLoss * 0.45) * Math.max(0.65, 1 - trailerDragLoss * 0.35) * engineMaxSpeedScale;
     const effectiveMaxRev =
       this.maxReverseSpeed * Math.max(0.75, 1 - trailerDragLoss * 0.25) * Math.max(0.45, engineMaxSpeedScale);
     const surfaceAccelScale =
-      (1 - surfaceLoss * 0.35) * Math.max(0.55, 1 - trailerDragLoss * 0.45) * enginePowerScale;
+      (1 - surfaceLoss * 0.32) * Math.max(0.55, 1 - trailerDragLoss * 0.45) * enginePowerScale;
     const coastDecel = 18 * rollingMult * dt;
+    const effectiveBrake = this.getEffectiveBrakeForce();
 
     this.isBraking = false;
     this.isAccelerating = false;
+    let serviceBrakeLoad = 0;
 
     if (isHandbrake) {
       this.isBraking = true;
+      serviceBrakeLoad = Math.abs(this.vLong) > 8 ? 0.8 : 0;
       if (this.vLong > 0) {
         this.vLong = Math.max(0, this.vLong - 300 * dt);
       } else if (this.vLong < 0) {
@@ -570,8 +726,9 @@ export class Truck {
         // Forward drive: progressive diesel torque curve (highest at start, smoothly tapering)
         if (this.vLong < -2) {
           // Rolling backward: apply service brake to bring to standstill first
-          this.vLong += this.brakeForce * dt;
+          this.vLong += effectiveBrake * dt;
           this.isBraking = true;
+          serviceBrakeLoad = 0.85;
         } else if (this.vLong > effectiveMaxFwd) {
           // Entered a higher-resistance surface above its cruising speed: bleed excess smoothly
           this.vLong = Math.max(effectiveMaxFwd, this.vLong - coastDecel * 1.5);
@@ -584,8 +741,9 @@ export class Truck {
       } else {
         // Reverse drive in R gear
         if (this.vLong > 2) {
-          this.vLong -= this.brakeForce * dt;
+          this.vLong -= effectiveBrake * dt;
           this.isBraking = true;
+          serviceBrakeLoad = 0.85;
         } else {
           const revRatio = Math.min(Math.max(0, -this.vLong) / effectiveMaxRev, 1.0);
           const revTorqueFactor = Math.max(0.4, 1.0 - revRatio * 0.5);
@@ -599,18 +757,20 @@ export class Truck {
 
       if (!keyDown || this.isOutOfFuel) {
         // Service foot brake pedal (Touch) OR S key when out of fuel:
-        // always decelerates truck to a complete stop (no reverse drive without fuel)
         if (this.vLong > 1.5) {
-          this.vLong = Math.max(0, this.vLong - this.brakeForce * brakeMult * dt);
+          this.vLong = Math.max(0, this.vLong - effectiveBrake * brakeMult * dt);
+          serviceBrakeLoad = brakeMult;
         } else if (this.vLong < -1.5) {
-          this.vLong = Math.min(0, this.vLong + this.brakeForce * brakeMult * dt);
+          this.vLong = Math.min(0, this.vLong + effectiveBrake * brakeMult * dt);
+          serviceBrakeLoad = brakeMult;
         } else {
           this.vLong = 0;
         }
       } else {
         // S key on keyboard (brakes forward first, or slowly backs up if stopped)
         if (this.vLong > 2.0) {
-          this.vLong = Math.max(0, this.vLong - this.brakeForce * dt);
+          this.vLong = Math.max(0, this.vLong - effectiveBrake * dt);
+          serviceBrakeLoad = 1.0;
         } else {
           // Slow reverse on S key
           const revRatio = Math.min(Math.max(0, -this.vLong) / effectiveMaxRev, 1.0);
@@ -631,14 +791,45 @@ export class Truck {
       }
     }
 
+    // ---- Brake thermal model (fade & cooling) & operational wear ----
+    const absSpeedNorm = Phaser.Math.Clamp(Math.abs(this.vLong) / Math.max(1, this.maxForwardSpeed), 0, 1);
+    const loadHeatFactor = this.hasCoupledTrailer ? 1.35 : 0.85;
+    if (serviceBrakeLoad > 0.05 && absSpeedNorm > 0.08) {
+      const heatGain =
+        0.24 * serviceBrakeLoad * absSpeedNorm * loadHeatFactor * this.effectiveStats.brakeFadeRateMult * dt;
+      this.brakeHeat = Phaser.Math.Clamp(this.brakeHeat + heatGain, 0, 1);
+      // Gentle brake pad wear during active braking
+      this.wear.brakes = Math.max(
+        0,
+        this.wear.brakes - 0.12 * serviceBrakeLoad * absSpeedNorm * this.effectiveStats.brakeWearMult * dt,
+      );
+    } else {
+      const airflowCool = 0.08 + 0.1 * absSpeedNorm;
+      this.brakeHeat = Math.max(0, this.brakeHeat - airflowCool * this.effectiveStats.brakeCoolRateMult * dt);
+    }
+    if (this.isAccelerating && absSpeedNorm > 0.05) {
+      this.wear.engine = Math.max(
+        0,
+        this.wear.engine - 0.025 * absSpeedNorm * this.effectiveStats.engineWearMult * dt,
+      );
+    }
+    if (absSpeedNorm > 0.05) {
+      const turnStress = 1 + Math.abs(this.currentSteerAngle) * 1.4;
+      this.wear.tires = Math.max(
+        0,
+        this.wear.tires - 0.03 * absSpeedNorm * turnStress * this.effectiveStats.tireWearMult * dt,
+      );
+    }
+
     this.isReversing = this.vLong < -2;
     // Scale: standard 13.6m semi-trailer is 220px -> ~16.2 px/m. 1 km/h = 0.278 m/s = 4.5 px/s.
     this.speedKmh = Math.round(Math.abs(this.vLong) / 4.5);
     this.currentSpeed = this.vLong;
 
-    // 3. Realistic Lateral Tire Grip (Eliminating 97% of sideways slip)
-    const totalGrip = this.surfaceGrip * this.roadGrip;
-    const lateralGripFactor = 0.97 * totalGrip;
+    // 3. Realistic Lateral Tire Grip (surface + tires + weather + suspension empty stability)
+    const totalGrip = Math.min(1.0, effectiveGrip);
+    const emptyStab = this.hasCoupledTrailer ? 1.0 : this.effectiveStats.emptyStabilityMult;
+    const lateralGripFactor = Phaser.Math.Clamp(0.97 * totalGrip * emptyStab, 0.2, 0.99);
     this.vLat *= (1.0 - lateralGripFactor);
     if (Math.abs(this.vLat) < 0.1) this.vLat = 0;
 
@@ -731,6 +922,10 @@ export class Truck {
     const g = this.cabGraphics;
     g.clear();
 
+    const spec = TRUCK_CATALOG[this.truckType] ?? TRUCK_CATALOG.iveco_daily_4x2;
+    const cabAccent = spec.cabColor;
+    const trimAccent = spec.accentColor;
+
     const w = this.width;
     const l = this.length;
     const hw = w / 2;
@@ -738,28 +933,46 @@ export class Truck {
 
     // Chassis frame
     g.fillStyle(0x131a29, 1);
-    g.lineStyle(2, 0x00f0ff, 0.9);
+    g.lineStyle(2, cabAccent, 0.92);
     g.fillRoundedRect(-hw, -hl, w, l, 6);
     g.strokeRoundedRect(-hw, -hl, w, l, 6);
 
-    // Front Bumper
+    // Heavy-duty bullbar / front bumper (reinforced on 6x4 and 8x4)
     g.fillStyle(0x0a0e17, 1);
-    g.fillRect(-hw + 2, -hl, w - 4, 10);
-    g.lineStyle(1, 0x00f0ff, 0.6);
-    g.strokeRect(-hw + 2, -hl, w - 4, 10);
+    g.fillRect(-hw + 2, -hl, w - 4, spec.axleRank >= 2 ? 12 : 10);
+    g.lineStyle(1.4, trimAccent, 0.75);
+    g.strokeRect(-hw + 2, -hl, w - 4, spec.axleRank >= 2 ? 12 : 10);
 
-    // Cab roof
-    g.fillStyle(0x1a2942, 1);
-    g.fillRoundedRect(-hw + 4, -hl + 8, w - 8, 44, 4);
-    g.lineStyle(2, 0x38bdf8, 0.8);
-    g.strokeRoundedRect(-hw + 4, -hl + 8, w - 8, 44, 4);
+    // Cab roof colored by truck model
+    const cabH = spec.axleRank === 3 ? 48 : spec.axleRank === 2 ? 46 : 42;
+    g.fillStyle(cabAccent, 0.38);
+    g.fillRoundedRect(-hw + 4, -hl + 8, w - 8, cabH, 4);
+    g.lineStyle(2, trimAccent, 0.88);
+    g.strokeRoundedRect(-hw + 4, -hl + 8, w - 8, cabH, 4);
+
+    // Roof racing / fleet stripe (differentiates 6x4 / 8x4 heavy tractors)
+    g.fillStyle(trimAccent, 0.55);
+    if (spec.axleRank >= 2) {
+      g.fillRect(-5, -hl + 27, 10, cabH - 22);
+    } else {
+      g.fillRect(-3, -hl + 28, 6, cabH - 24);
+    }
+
+    // Heavy air-intake / beacon bar behind cab on 8x4 models
+    if (spec.axleRank === 3) {
+      g.fillStyle(0x1e293b, 1);
+      g.fillRect(-hw + 6, -hl + cabH + 9, w - 12, 7);
+      g.fillStyle(0xf59e0b, 0.95);
+      g.fillCircle(-hw + 12, -hl + cabH + 12, 2.5);
+      g.fillCircle(hw - 12, -hl + cabH + 12, 2.5);
+    }
 
     // Windshield
     g.fillStyle(0x0284c7, 0.85);
-    g.fillRoundedRect(-hw + 8, -hl + 12, w - 16, 14, 2);
+    g.fillRoundedRect(-hw + 8, -hl + 12, w - 16, 13, 2);
 
     // Side Mirrors
-    g.fillStyle(0x0284c7, 1);
+    g.fillStyle(trimAccent, 0.95);
     g.fillRect(-hw - 5, -hl + 12, 4, 12);
     g.fillRect(hw + 1, -hl + 12, 4, 12);
 
@@ -791,8 +1004,9 @@ export class Truck {
   }
 
   private drawWheels() {
+    const spec = TRUCK_CATALOG[this.truckType] ?? TRUCK_CATALOG.iveco_daily_4x2;
     const steerQ = Math.round(this.currentSteerAngle * 200);
-    const key = `${steerQ}`;
+    const key = `${spec.axleConfig}|${steerQ}`;
     if (key === this.lastWheelsKey) return;
     this.lastWheelsKey = key;
 
@@ -802,15 +1016,9 @@ export class Truck {
     gRear.clear();
 
     const hw = this.width / 2;
-    const frontY = -this.length / 2 + 20;
+    const frontY = -this.length / 2 + 18;
     const rearY = this.length / 2 - 20;
 
-    /**
-     * Draws a tire centered at (x,y) rotated by `angle` rad around its center.
-     * Corners are rotated manually with trigonometry — no canvas transform state
-     * (save/translateCanvas/rotateCanvas), which proved unreliable for per-frame
-     * redraws under the Phaser 4 renderer.
-     */
     const drawTire = (
       ctx: Phaser.GameObjects.Graphics,
       x: number, y: number, angle: number,
@@ -842,16 +1050,30 @@ export class Truck {
       }
     };
 
-    // Steered front axle (single tires) — partially hidden under the chassis, as before
-    drawTire(g, -hw - 1, frontY, this.currentSteerAngle, 8, 20, 0x00f0ff, false);
-    drawTire(g, hw + 1, frontY, this.currentSteerAngle, 8, 20, 0x00f0ff, false);
+    // Steered front axle #1
+    drawTire(g, -hw - 1, frontY, this.currentSteerAngle, 8, 19, spec.accentColor, false);
+    drawTire(g, hw + 1, frontY, this.currentSteerAngle, 8, 19, spec.accentColor, false);
 
-    // Rear drive axle (4x2): dual tires per side, drawn ABOVE the chassis edge so
-    // both tires of each pair stay visible
-    drawTire(gRear, -hw - 3, rearY, 0, 8, 24, 0x64748b, true);
-    drawTire(gRear, hw - 3, rearY, 0, 8, 24, 0x64748b, true);
-    drawTire(gRear, -hw + 5, rearY, 0, 8, 24, 0x64748b, true);
-    drawTire(gRear, hw + 5, rearY, 0, 8, 24, 0x64748b, true);
+    // Second steered front axle on 8x4 heavy haulers
+    if (spec.axleConfig === '8x4') {
+      drawTire(g, -hw - 1, frontY + 20, this.currentSteerAngle * 0.72, 8, 18, spec.accentColor, false);
+      drawTire(g, hw + 1, frontY + 20, this.currentSteerAngle * 0.72, 8, 18, spec.accentColor, false);
+    }
+
+    const drawRearDualAxle = (ay: number, th: number) => {
+      drawTire(gRear, -hw - 3, ay, 0, 8, th, 0x64748b, true);
+      drawTire(gRear, hw - 3, ay, 0, 8, th, 0x64748b, true);
+      drawTire(gRear, -hw + 5, ay, 0, 8, th, 0x64748b, true);
+      drawTire(gRear, hw + 5, ay, 0, 8, th, 0x64748b, true);
+    };
+
+    if (spec.axleConfig === '4x2') {
+      drawRearDualAxle(rearY, 24);
+    } else {
+      // Tandem rear drive axles for 6x4 and 8x4
+      drawRearDualAxle(rearY - 12, 18);
+      drawRearDualAxle(rearY + 8, 18);
+    }
   }
 
   private drawLights() {

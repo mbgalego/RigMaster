@@ -43,6 +43,7 @@ export type WObjType =
   | 'sign'            // traffic sign (variant: 'stop'|'yield'|'speed'|'no_parking'|'pedestrian') (solid small)
   | 'traffic_light'   // signal head (params: dir 'n'|'s'|'e'|'w', group 0|1)
   | 'exam_dock'       // TEMP exam target platform (never serialized)
+  | 'truck_parked'    // parked fleet tractor (params: { truckId, type, upgrades, wear })
   | 'compound';       // composto: agrupa vários sub-objetos com posições relativas (params.parts)
 
 export interface WorldObject {
@@ -137,7 +138,7 @@ const CHUNK_PX = 2048;
 const SOLID_TYPES = new Set<WObjType>([
   'wall', 'jersey_barrier', 'building', 'container_stack', 'silo',
   'gas_pump', 'air_water', 'price_sign', 'lamp', 'sign', 'traffic_light', 'roundabout',
-  'dock_wall', 'compound',
+  'dock_wall', 'truck_parked', 'compound',
 ]);
 
 /** Tipos desenhados na camada FLATS (sob os sólidos) — ver render(). */
@@ -2637,6 +2638,26 @@ export class WorldObjects {
           g.strokeRect(spX - 16, boomY - 12, 32, boomH + 24);
           g.fillStyle(0xdc2626, 1);
           g.fillCircle(spX, o.y, 3);
+          break;
+        }
+        case 'truck_parked': {
+          const w = o.w || 48;
+          const h = o.h || 96;
+          const colorHex = typeof o.params?.cabColor === 'number' ? o.params.cabColor : 0x38bdf8;
+          g.fillStyle(0x000000, 0.3);
+          g.fillRoundedRect(x0 + 3, y0 + 4, w, h, 5);
+          g.fillStyle(0x131a29, 1);
+          g.fillRoundedRect(x0, y0, w, h, 5);
+          g.lineStyle(2, colorHex, 0.9);
+          g.strokeRoundedRect(x0, y0, w, h, 5);
+          // Cabina frontal
+          g.fillStyle(colorHex, 0.55);
+          g.fillRoundedRect(x0 + 4, y0 + 6, w - 8, Math.min(40, h * 0.44), 4);
+          g.lineStyle(1.5, 0xe2e8f0, 0.8);
+          g.strokeRoundedRect(x0 + 4, y0 + 6, w - 8, Math.min(40, h * 0.44), 4);
+          // Para-brisas
+          g.fillStyle(0x0f172a, 0.85);
+          g.fillRect(x0 + 7, y0 + 10, w - 14, 10);
           break;
         }
         case 'silo': {

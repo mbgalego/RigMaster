@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { World } from '../world/World';
 import { TrailerManager } from '../systems/TrailerManager';
+import { TRUCK_CATALOG } from '../systems/TruckCatalog';
 import type { MainScene } from './MainScene';
 
 /**
@@ -10,9 +11,14 @@ import type { MainScene } from './MainScene';
  */
 export class MinimapScene extends Phaser.Scene {
   public static readonly DISPLAY_SIZE = 150;
+  public static readonly MOBILE_DISPLAY_SIZE = 116;
   public static readonly MARGIN_RIGHT = 10;
   public static readonly TOP = 58;
   private static readonly PX_PER_TILE = 2;
+
+  public static getDisplaySize(viewportWidth: number): number {
+    return viewportWidth < 640 ? MinimapScene.MOBILE_DISPLAY_SIZE : MinimapScene.DISPLAY_SIZE;
+  }
 
   private minimapImage: Phaser.GameObjects.Image | null = null;
   private minimapOverlay: Phaser.GameObjects.Graphics | null = null;
@@ -33,12 +39,13 @@ export class MinimapScene extends Phaser.Scene {
     const texture = this.textures.createCanvas('minimap_base', mmW, mmH);
     if (!texture) return;
 
+    const disp = MinimapScene.getDisplaySize(this.scale.width);
     this.minimapImage = this.add.image(0, 0, 'minimap_base')
       .setOrigin(0, 0)
       .setScrollFactor(0)
       .setDepth(120)
       .setAlpha(0.92)
-      .setDisplaySize(MinimapScene.DISPLAY_SIZE, MinimapScene.DISPLAY_SIZE);
+      .setDisplaySize(disp, disp);
 
     this.minimapOverlay = this.add.graphics().setScrollFactor(0).setDepth(121);
 
@@ -50,21 +57,23 @@ export class MinimapScene extends Phaser.Scene {
 
   private reposition() {
     if (!this.minimapImage) return;
+    const disp = MinimapScene.getDisplaySize(this.scale.width);
     this.cameras.main.setZoom(1);
     this.cameras.main.setScroll(0, 0);
-    this.minimapImage.setDisplaySize(MinimapScene.DISPLAY_SIZE, MinimapScene.DISPLAY_SIZE);
+    this.minimapImage.setDisplaySize(disp, disp);
     this.minimapImage.setPosition(
-      this.scale.width - MinimapScene.DISPLAY_SIZE - MinimapScene.MARGIN_RIGHT,
+      this.scale.width - disp - MinimapScene.MARGIN_RIGHT,
       MinimapScene.TOP,
     );
   }
 
   public getRect(): { x: number; y: number; width: number; height: number } {
+    const disp = MinimapScene.getDisplaySize(this.scale.width);
     return {
-      x: this.scale.width - MinimapScene.DISPLAY_SIZE - MinimapScene.MARGIN_RIGHT,
+      x: this.scale.width - disp - MinimapScene.MARGIN_RIGHT,
       y: MinimapScene.TOP,
-      width: MinimapScene.DISPLAY_SIZE,
-      height: MinimapScene.DISPLAY_SIZE,
+      width: disp,
+      height: disp,
     };
   }
 
@@ -161,8 +170,8 @@ export class MinimapScene extends Phaser.Scene {
 
     const worldW = World.WORLD_W;
     const worldH = World.WORLD_H;
-    const w = MinimapScene.DISPLAY_SIZE;
-    const h = MinimapScene.DISPLAY_SIZE;
+    const w = MinimapScene.getDisplaySize(this.scale.width);
+    const h = w;
     const toMapX = (wx: number) => img.x + (wx / worldW) * w;
     const toMapY = (wy: number) => img.y + (wy / worldH) * h;
 
@@ -200,6 +209,62 @@ export class MinimapScene extends Phaser.Scene {
     for (const t of TrailerManager.getInstance(mainScene).loose) {
       g.fillStyle(0xe2e8f0, 0.95);
       g.fillRect(toMapX(t.body.position.x) - 1.5, toMapY(t.body.position.y) - 1.5, 3, 3);
+    }
+
+    // Unlocked parked fleet trucks: color = hub, shape = axle class (4x2 circle, 6x4 square, 8x4 diamond)
+    const parkedFleet = mainScene.reputationSystem?.getParkedTrucks() ?? [];
+    for (const ft of parkedFleet) {
+      const fx = toMapX(ft.x);
+      const fy = toMapY(ft.y);
+      const hubColor = mainScene.garageSystem.getHub(ft.locationHub)?.neonColorHex ?? 0x38bdf8;
+      const spec = TRUCK_CATALOG[ft.type];
+      g.fillStyle(hubColor, 1);
+      g.lineStyle(1, 0x0f172a, 0.95);
+      if (spec.axleConfig === '4x2') {
+        g.fillCircle(fx, fy, 3.2);
+        g.strokeCircle(fx, fy, 3.2);
+      } else if (spec.axleConfig === '6x4') {
+        g.fillRect(fx - 3.2, fy - 3.2, 6.4, 6.4);
+        g.strokeRect(fx - 3.2, fy - 3.2, 6.4, 6.4);
+      } else {
+        g.beginPath();
+        g.moveTo(fx, fy - 4.2);
+        g.lineTo(fx + 4.2, fy);
+        g.lineTo(fx, fy + 4.2);
+        g.lineTo(fx - 4.2, fy);
+        g.closePath();
+        g.fillPath();
+        g.strokePath();
+      }
+    }
+
+    // Active mission objective marker (amber = pickup trailer, emerald = delivery dock)
+    const nav = mainScene.getActiveMissionNavTarget();
+    if (nav) {
+      const pulse = 0.55 + Math.sin(time * 0.006) * 0.35;
+      if (nav.phase === 'pickup') {
+        // Subtle secondary ring showing final delivery dock
+        const dx = toMapX(nav.deliveryPos.x);
+        const dy = toMapY(nav.deliveryPos.y);
+        g.lineStyle(1.2, 0x10b981, 0.45);
+        g.strokeCircle(dx, dy, 4);
+
+        // Primary pulsing amber beacon at the actual pickup trailer
+        const px = toMapX(nav.x);
+        const py = toMapY(nav.y);
+        g.lineStyle(2.2, 0xf59e0b, pulse);
+        g.strokeCircle(px, py, 6);
+        g.fillStyle(0xf59e0b, 0.95);
+        g.fillCircle(px, py, 2.8);
+      } else {
+        // Primary pulsing emerald beacon at delivery dock
+        const mx = toMapX(nav.x);
+        const my = toMapY(nav.y);
+        g.lineStyle(2.2, 0x10b981, pulse);
+        g.strokeCircle(mx, my, 6);
+        g.fillStyle(0x10b981, 0.95);
+        g.fillCircle(mx, my, 2.8);
+      }
     }
 
     // Truck arrow marker

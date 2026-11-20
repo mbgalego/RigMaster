@@ -5,11 +5,37 @@ import { Kingpin, ArticulationTelemetry } from '../physics/Kingpin';
 import { World } from '../world/World';
 import { WorldObjects, RepairBay } from '../world/WorldObjects';
 import { LicenseSystem, LicenseExam, LicenseId } from '../systems/LicenseSystem';
-import { GarageSystem, WeatherModifier } from '../systems/GarageSystem';
+import { GarageSystem, HubDockSpec, HubId, WeatherModifier } from '../systems/GarageSystem';
 import { TimeOfDaySystem, TimePeriod, TimeOfDaySnapshot } from '../systems/TimeOfDaySystem';
 import { TrailerManager, TRAILER_TYPE_TO_LICENSE, CouplingCandidate } from '../systems/TrailerManager';
 import { RoadNetwork, RoadData, RoadSample, BridgeRoadCache } from '../systems/RoadNetwork';
 import { IntersectionSystem } from '../systems/IntersectionSystem';
+import {
+  ReputationSystem,
+  createCleanTruckWear,
+  type GameMode,
+  type TruckWearState,
+} from '../systems/ReputationSystem';
+import {
+  MissionSystem,
+  TRAILER_TYPE_LABELS,
+  type ActiveMissionState,
+  type MissionCompletionResult,
+  type MissionNavTarget,
+  type MissionOffer,
+} from '../systems/MissionSystem';
+import {
+  DEFAULT_TRUCK_UPGRADES,
+  TRUCK_CATALOG,
+  type BrakesUpgradeId,
+  type EngineUpgradeId,
+  type SuspensionUpgradeId,
+  type TiresUpgradeId,
+  type TruckType,
+  type TruckUpgrades,
+  type UpgradeSlot,
+} from '../systems/TruckCatalog';
+import { ParkedTruckManager } from '../systems/ParkedTruckManager';
 import { COLLISION_CAT, COLLISION_MASK } from '../physics/CollisionLayers';
 import {
   TruckDamageState,
@@ -48,6 +74,9 @@ export class MainScene extends Phaser.Scene {
   public licenseSystem!: LicenseSystem;
   public garageSystem!: GarageSystem;
   public timeOfDaySystem!: TimeOfDaySystem;
+  public reputationSystem!: ReputationSystem;
+  public missionSystem!: MissionSystem;
+  public parkedTruckManager!: ParkedTruckManager;
 
   // WebGL Lights (Phaser 4 LightsPlugin: 2 headlights + brake + reverse + 4 world emitters = 8)
   private static readonly MAX_WORLD_LIGHTS = 4;
@@ -85,8 +114,8 @@ export class MainScene extends Phaser.Scene {
   private roadCamZoom: number = Number.NaN;
 
   public isEditorMode: boolean = false;
-  public debugMatter: boolean = true;
-  public currentVehicleConfig: VehicleConfigType = 'standard';
+  public debugMatter: boolean = false;
+  public currentVehicleConfig: VehicleConfigType = 'solo';
   private preEditorZoom: number = 1.0;
   /** Refuelling in progress (set by tryRefuel, cleared after a toast delay). */
   private isRefuelling: boolean = false;
@@ -98,6 +127,7 @@ export class MainScene extends Phaser.Scene {
   private couplingNoticeUntil: number = 0;
   private couplingNoticeSeq: number = 0;
   private couplingNoticeKind: 'info' | 'blocked' | 'success' = 'info';
+  private couplingNoticeDurationMs: number = 3500;
 
   // Auto-coupling: debounces the "failed attempt" toast to one per zone entry
   private autoCoupleErrorKey: string | null = null;
@@ -118,7 +148,42 @@ export class MainScene extends Phaser.Scene {
   /** Highlight pulse phase for the nearby pump/repair bay (0..1). */
   private static readonly REPAIR_BAY_RADIUS = 160;
   private static readonly REPAIR_MAX_SPEED_KMH = 3;
+  private static readonly TRUCK_SWAP_RADIUS = 160;
+  /** OBB/SAT-verified, bitrem-safe pickup bays per hub for guaranteed mission trailer spawning. */
+  private static readonly HUB_MISSION_PICKUP_BAYS: Record<
+    HubId,
+    Array<{ x: number; y: number; angle: number }>
+  > = {
+    harbor: [
+      { x: 2560, y: 2050, angle: Math.PI },
+      { x: 1790, y: 2050, angle: Math.PI },
+      { x: 2720, y: 2050, angle: Math.PI },
+    ],
+    shipyard: [
+      { x: 10720, y: 1650, angle: Math.PI },
+      { x: 11640, y: 1650, angle: Math.PI },
+      { x: 10540, y: 1650, angle: Math.PI },
+    ],
+    industrial: [
+      { x: 12490, y: 7680, angle: Math.PI },
+      { x: 11370, y: 9400, angle: Math.PI },
+    ],
+    historic: [
+      { x: 1810, y: 8300, angle: Math.PI },
+      { x: 1970, y: 8300, angle: Math.PI },
+      { x: 1340, y: 8300, angle: Math.PI },
+    ],
+  };
   private pumpPulsePhase: number = 0;
+  /** Nearest unlocked parked fleet truck within physical swap range. */
+  private nearbySwapTruck: { id: string; type: TruckType; name: string; dist: number } | null = null;
+  private missionMarkerGraphics: Phaser.GameObjects.Graphics | null = null;
+  private missionCollisionTracker: number = 0;
+  /** Dedicated pickup trailer(s) linked/spawned for the active mission so the amber beacon always sits on a live trailer. */
+  private missionPickupLead: Trailer | null = null;
+  private missionPickupPup: Trailer | null = null;
+  private missionSpawnedTrailers: Trailer[] = [];
+  private unsubReputation: (() => void) | null = null;
 
   // Damage, G-Force & Impact FX
   private impactGraphics: Phaser.GameObjects.Graphics | null = null;
@@ -207,6 +272,19 @@ export class MainScene extends Phaser.Scene {
     fuelPrice: number;
     nearbyPump: { x: number; y: number } | null;
     nearbyRepairBay: { x: number; y: number } | null;
+    gameMode: GameMode;
+    activeTruckId: string;
+    activeTruckType: TruckType;
+    activeTruckName: string;
+    activeTruckUpgrades: TruckUpgrades;
+    truckWear: TruckWearState;
+    brakeHeat: number;
+    nearbySwapTruck: { id: string; type: TruckType; name: string; dist: number } | null;
+    currentHubId: HubId;
+    hubReputation: Record<HubId, number>;
+    activeMission: ActiveMissionState | null;
+    missionNavTarget: MissionNavTarget | null;
+    lastMissionCompletion: MissionCompletionResult | null;
     coupling: {
       decoupleReady: boolean;      // coupled && stopped — the red decouple button is live
       coupledName: string | null;  // cargo of the trailer currently coupled
@@ -214,6 +292,7 @@ export class MainScene extends Phaser.Scene {
       notice: string | null;       // transient toast from coupling actions
       noticeKind: 'info' | 'blocked' | 'success'; // toast styling
       noticeSeq: number;           // increments on every notice (toast trigger)
+      noticeDurationMs: number;    // toast display duration in ms
     };
   } = {
     speedKmh: 0,
@@ -236,9 +315,9 @@ export class MainScene extends Phaser.Scene {
     weather: 'clear',
     headlightMode: 'low',
     timePeriod: 'day',
-    timeClock: '12:28',
-    autoTimeCycle: false,
-    timeRealTime: true,
+    timeClock: '09:07',
+    autoTimeCycle: true,
+    timeRealTime: false,
     activeLicenseExam: null,
     fuelLevel: 500,
     fuelCapacity: 500,
@@ -249,7 +328,20 @@ export class MainScene extends Phaser.Scene {
     fuelPrice: 1.749,
     nearbyPump: null,
     nearbyRepairBay: null,
-    coupling: { decoupleReady: false, coupledName: null, blocked: null, notice: null, noticeKind: 'info', noticeSeq: 0 },
+    gameMode: 'career',
+    activeTruckId: 'truck_iveco_daily_4x2',
+    activeTruckType: 'iveco_daily_4x2',
+    activeTruckName: 'Iveco Daily 4×2',
+    activeTruckUpgrades: { ...DEFAULT_TRUCK_UPGRADES },
+    truckWear: createCleanTruckWear(),
+    brakeHeat: 0,
+    nearbySwapTruck: null,
+    currentHubId: 'harbor',
+    hubReputation: { harbor: 0, shipyard: 0, industrial: 0, historic: 0 },
+    activeMission: null,
+    missionNavTarget: null,
+    lastMissionCompletion: null,
+    coupling: { decoupleReady: false, coupledName: null, blocked: null, notice: null, noticeKind: 'info', noticeSeq: 0, noticeDurationMs: 3500 },
   };
 
   constructor() {
@@ -260,6 +352,8 @@ export class MainScene extends Phaser.Scene {
     this.licenseSystem = LicenseSystem.getInstance();
     this.garageSystem = GarageSystem.getInstance();
     this.timeOfDaySystem = TimeOfDaySystem.getInstance();
+    this.reputationSystem = ReputationSystem.getInstance();
+    this.missionSystem = MissionSystem.getInstance();
     // Debug hook para testes headless (scripts/smoke-test.mjs usa window.__rig)
     (window as any).__rig = this;
 
@@ -293,6 +387,8 @@ export class MainScene extends Phaser.Scene {
     this.syncBridgeBarriers();
     // Gas pump & garage bay highlight layer (above vehicles, depth 11)
     this.pumpGraphics = this.add.graphics().setDepth(11).setLighting(false);
+    // Mission pickup/delivery GPS marker layer (above vehicles, depth 12)
+    this.missionMarkerGraphics = this.add.graphics().setDepth(12).setLighting(false);
     // Impact sparks & hood smoke (above vehicles/bridges, depth 23)
     this.impactGraphics = this.add.graphics().setDepth(23).setLighting(false);
 
@@ -300,10 +396,27 @@ export class MainScene extends Phaser.Scene {
     const worldW = World.WORLD_W;
     const worldH = World.WORLD_H;
     this.matter.world.setBounds(0, 0, worldW, worldH, 64, true, true, true, true);
+    if (this.matter.world.debugGraphic) {
+      this.matter.world.debugGraphic.setVisible(this.debugMatter);
+    }
 
-    // 2. Spawn parked trailers on the world's parking pads, then the rig
+    // 2. Spawn parked trailers on the world's parking pads, parked fleet trucks, then active rig
     TrailerManager.getInstance(this).rebuild(this.world.parkingPads);
+    this.parkedTruckManager = new ParkedTruckManager(this);
     this.spawnVehicleRig(this.currentVehicleConfig);
+    const activeFleet = this.reputationSystem.getActiveTruck();
+    this.truck.setTruckSpec(activeFleet.type, activeFleet.upgrades, false);
+    this.parkedTruckManager.syncWithFleet();
+    this.unsubReputation?.();
+    this.unsubReputation = this.reputationSystem.subscribe(() => {
+      this.parkedTruckManager?.syncWithFleet();
+    });
+    this.events.once('shutdown', () => {
+      this.unsubReputation?.();
+      this.unsubReputation = null;
+      this.parkedTruckManager?.destroyAll();
+      TrailerManager.resetInstance();
+    });
 
     // 3. Camera Setup
     this.cameras.main.setBounds(0, 0, worldW, worldH);
@@ -398,6 +511,13 @@ export class MainScene extends Phaser.Scene {
           return;
         }
       }
+
+      // Tap / click on an unlocked parked fleet truck to take control
+      const tappedTruck = this.parkedTruckManager?.findAtPoint(worldPt.x, worldPt.y, 64);
+      if (tappedTruck) {
+        this.trySwapTruck(tappedTruck.id);
+        return;
+      }
     });
 
     // 4. Weather Overlay
@@ -434,6 +554,9 @@ export class MainScene extends Phaser.Scene {
 
       // Repair at a garage service bay with E
       this.input.keyboard.on('keydown-E', () => this.tryRepair());
+
+      // Swap into nearby parked fleet truck with T
+      this.input.keyboard.on('keydown-T', () => this.trySwapTruck());
 
       // Cycle headlights (Off -> Low -> High -> Off) with L
       this.input.keyboard.on('keydown-L', () => {
@@ -752,11 +875,16 @@ export class MainScene extends Phaser.Scene {
     };
   }
 
-  private setCouplingNotice(msg: string, kind: 'info' | 'blocked' | 'success' = 'info') {
+  private setCouplingNotice(
+    msg: string,
+    kind: 'info' | 'blocked' | 'success' = 'info',
+    durationMs: number = 3500,
+  ) {
     this.couplingNotice = msg;
     this.couplingNoticeKind = kind;
+    this.couplingNoticeDurationMs = durationMs;
     this.couplingNoticeSeq++;
-    this.couplingNoticeUntil = this.time.now + 2600;
+    this.couplingNoticeUntil = this.time.now + durationMs;
   }
 
   /**
@@ -984,7 +1112,11 @@ export class MainScene extends Phaser.Scene {
       return false;
     }
 
-    const truckDamaged = this.truck.health < 100;
+    const truckDamaged =
+      this.truck.health < 100 ||
+      this.truck.wear.engine < 99.5 ||
+      this.truck.wear.brakes < 99.5 ||
+      this.truck.wear.tires < 99.5;
     const trailerDamaged =
       (this.trailer ? this.trailer.trailerHealth < 100 : false) ||
       (this.pupTrailer ? this.pupTrailer.trailerHealth < 100 : false);
@@ -1007,6 +1139,13 @@ export class MainScene extends Phaser.Scene {
     this.pupTrailer?.repairStructure();
     this.peakGForce = 0;
 
+    // Sync repair to persistent fleet record & flag mission repair (affects ADR_Basic)
+    const activeFleet = this.reputationSystem?.getActiveTruck();
+    if (activeFleet) {
+      this.reputationSystem.repairTruckWearAndDamage(activeFleet.id);
+    }
+    this.missionSystem?.markRepairedDuringMission();
+
     this.isRepairing = true;
     this.repairingBay = { x: bay.x, y: bay.y };
     this.setCouplingNotice(
@@ -1023,6 +1162,316 @@ export class MainScene extends Phaser.Scene {
       this.playRefuelEndSound();
     });
     return true;
+  }
+
+  /**
+   * Physical truck swap: assumes control of an unlocked parked truck within 160px
+   * on the same layer while stopped (or remotely when Sandbox mode allows it).
+   * Preserves previous truck's exact position, upgrades, damage, wear, and fuel.
+   */
+  public trySwapTruck(targetTruckId?: string, allowRemoteInSandbox: boolean = false): boolean {
+    if (!this.truck || this.isEditorMode) return false;
+    if (this.licenseSystem?.getActiveExam().active) {
+      this.setCouplingNotice('Não é possível trocar de camião durante um exame', 'blocked');
+      return false;
+    }
+
+    const sandboxRemote = allowRemoteInSandbox && this.reputationSystem.isSandbox();
+    const bodySpeedPxS = Math.hypot(this.truck.body.velocity.x, this.truck.body.velocity.y) * 60;
+    const liveSpeedKmh = Math.max(Math.abs(this.truck.vLong), bodySpeedPxS) / 4.5;
+    if (!sandboxRemote && liveSpeedKmh > MainScene.REPAIR_MAX_SPEED_KMH) {
+      this.setCouplingNotice('Pare totalmente para assumir controlo de outro camião', 'info');
+      return false;
+    }
+
+    const tx = this.truck.body.position.x;
+    const ty = this.truck.body.position.y;
+    let resolvedTargetId = targetTruckId;
+    if (!resolvedTargetId) {
+      const nearby = this.parkedTruckManager?.findNearby(
+        tx,
+        ty,
+        this.truck.layer,
+        MainScene.TRUCK_SWAP_RADIUS,
+      );
+      if (!nearby) {
+        this.setCouplingNotice('Nenhum camião da frota por perto (< 160 px)', 'info');
+        return false;
+      }
+      resolvedTargetId = nearby.fleet.id;
+    }
+
+    const currentHub = this.garageSystem.findHubForPosition(tx, ty);
+    const snapshot = this.truck.exportFleetSnapshot(currentHub);
+    const res = this.reputationSystem.swapActiveTruck(resolvedTargetId, snapshot, {
+      maxDistancePx: MainScene.TRUCK_SWAP_RADIUS,
+      allowRemoteInSandbox: sandboxRemote,
+    });
+    if (!res.ok || !res.newTruck) {
+      this.setCouplingNotice(res.reason || 'Não foi possível trocar de camião', 'blocked');
+      return false;
+    }
+
+    // Decouple any attached trailers cleanly in place so their state & cargo health remain intact
+    if (this.pupTrailer) this.decoupleTrailer(true);
+    if (this.trailer) this.decoupleTrailer(false);
+
+    // Apply the newly assumed truck's exact fleet state (model, upgrades, damage, wear, fuel, pose)
+    this.truck.applyFleetState(res.newTruck);
+    this.truck.setLightingEnabled(this.webglLightingActive);
+    this.currentVehicleConfig = 'solo';
+    this.parkedTruckManager?.syncWithFleet();
+
+    const spec = TRUCK_CATALOG[res.newTruck.type];
+    this.setCouplingNotice(`Assumiste controlo do ${spec.name}`, 'success');
+    this.playRepairSound();
+    return true;
+  }
+
+  /**
+   * Installs a free physical sidegrade upgrade on the active truck.
+   * In Career mode, requires being stopped inside a workshop repair bay (layer 0).
+   */
+  public installTruckUpgrade(
+    slot: UpgradeSlot,
+    value: EngineUpgradeId | BrakesUpgradeId | SuspensionUpgradeId | TiresUpgradeId,
+  ): boolean {
+    if (!this.truck || this.isEditorMode) return false;
+    if (this.licenseSystem?.getActiveExam().active) {
+      this.setCouplingNotice('Upgrades indisponíveis durante exame ativo', 'blocked');
+      return false;
+    }
+
+    const isSandbox = this.reputationSystem.isSandbox();
+    if (!isSandbox) {
+      if (this.truck.layer !== 0 || !this.findReachableRepairBay()) {
+        this.setCouplingNotice('Conduz até uma oficina para instalar upgrades', 'info');
+        return false;
+      }
+      const bodySpeedPxS = Math.hypot(this.truck.body.velocity.x, this.truck.body.velocity.y) * 60;
+      const liveSpeedKmh = Math.max(Math.abs(this.truck.vLong), bodySpeedPxS) / 4.5;
+      if (liveSpeedKmh > MainScene.REPAIR_MAX_SPEED_KMH) {
+        this.setCouplingNotice('Pare totalmente na oficina para instalar upgrades', 'info');
+        return false;
+      }
+    }
+
+    const active = this.reputationSystem.getActiveTruck();
+    const ok = this.reputationSystem.installUpgrade(active.id, slot, value);
+    if (!ok) return false;
+
+    const updated = this.reputationSystem.getActiveTruck();
+    this.truck.setUpgrades(updated.upgrades);
+    this.setCouplingNotice(`Upgrade instalado: ${slot} → ${value}`, 'success');
+    this.playRepairSound();
+    return true;
+  }
+
+  /** Exposes current WebGL dynamic lighting toggle for TrailerManager dynamic spawns. */
+  public isWebGLLightingActive(): boolean {
+    return this.webglLightingActive;
+  }
+
+  /** Destroys any uncoupled trailers dynamically spawned for a previous/cancelled mission. */
+  private cleanupMissionSpawnedTrailers(): void {
+    const mgr = TrailerManager.getInstance(this);
+    for (const tr of this.missionSpawnedTrailers) {
+      if (tr !== this.trailer && tr !== this.pupTrailer && mgr.isLoose(tr)) {
+        mgr.removeLoose(tr);
+      }
+    }
+    this.missionSpawnedTrailers = [];
+    this.missionPickupLead = null;
+    this.missionPickupPup = null;
+  }
+
+  /**
+   * Guarantees a physical, visible, 100%-cargo trailer of `mission.trailerType` (plus pup
+   * for bitrens) exists right at `mission.originHub` so the amber pickup ring ALWAYS sits on
+   * a real couplable trailer — reusing an existing pad trailer at that hub if present, or
+   * spawning a fresh one in a clear verified hub pickup bay otherwise.
+   */
+  private ensureMissionPickupTrailer(mission: MissionOffer): void {
+    this.cleanupMissionSpawnedTrailers();
+
+    const mgr = TrailerManager.getInstance(this);
+    const originPos = this.garageSystem.getHub(mission.originHub).locationWorld;
+    const isBitrem = isBitremLeadType(mission.trailerType);
+    const expectedPupType: TrailerType | null =
+      mission.trailerType === 'bitrem_tanker_lead'
+        ? 'bitrem_tanker_pup'
+        : mission.trailerType === 'bitrem_lead'
+          ? 'bitrem_pup'
+          : null;
+
+    // 1. Reuse an existing loose matching trailer already parked cleanly inside originHub
+    let bestLead: Trailer | null = null;
+    let bestPup: Trailer | null = null;
+    let bestDist = Infinity;
+
+    for (const tr of mgr.loose) {
+      if (tr.type !== mission.trailerType || tr.layer !== 0) continue;
+      const dHub = Phaser.Math.Distance.Between(originPos.x, originPos.y, tr.body.position.x, tr.body.position.y);
+      if (dHub > 1600) continue;
+
+      let matchedPup: Trailer | null = null;
+      if (isBitrem && expectedPupType) {
+        for (const p of mgr.loose) {
+          if (p.type !== expectedPupType || p.layer !== 0) continue;
+          const dPup = Phaser.Math.Distance.Between(
+            tr.body.position.x,
+            tr.body.position.y,
+            p.body.position.x,
+            p.body.position.y,
+          );
+          if (dPup <= 280) {
+            matchedPup = p;
+            break;
+          }
+        }
+        if (!matchedPup) continue;
+      }
+
+      if (dHub < bestDist) {
+        bestDist = dHub;
+        bestLead = tr;
+        bestPup = matchedPup;
+      }
+    }
+
+    if (bestLead) {
+      bestLead.repairStructure();
+      bestLead.cargoHealth = 100;
+      bestLead.resetTelemetry();
+      if (bestPup) {
+        bestPup.repairStructure();
+        bestPup.cargoHealth = 100;
+        bestPup.resetTelemetry();
+      }
+      this.missionPickupLead = bestLead;
+      this.missionPickupPup = bestPup;
+      return;
+    }
+
+    // 2. Otherwise spawn a fresh mission trailer (and rear pup if bitrem) in a clear hub bay
+    const bays = MainScene.HUB_MISSION_PICKUP_BAYS[mission.originHub] ?? [
+      { x: originPos.x, y: originPos.y, angle: Math.PI },
+    ];
+
+    const isBayClear = (bx: number, by: number): boolean => {
+      const checkY = isBitrem ? by - 80 : by;
+      const minClear = isBitrem ? 150 : 105;
+      if (this.truck && Phaser.Math.Distance.Between(this.truck.body.position.x, this.truck.body.position.y, bx, checkY) < minClear) {
+        return false;
+      }
+      if (this.trailer && Phaser.Math.Distance.Between(this.trailer.body.position.x, this.trailer.body.position.y, bx, checkY) < minClear) {
+        return false;
+      }
+      for (const tr of mgr.loose) {
+        if (Phaser.Math.Distance.Between(tr.body.position.x, tr.body.position.y, bx, by) < 95) {
+          return false;
+        }
+        if (isBitrem && Phaser.Math.Distance.Between(tr.body.position.x, tr.body.position.y, bx, by - 165) < 95) {
+          return false;
+        }
+      }
+      return true;
+    };
+
+    const chosenBay = bays.find((b) => isBayClear(b.x, b.y)) ?? bays[0];
+    const looseBefore = mgr.loose.length;
+    const spawnedLead = mgr.spawnAt(chosenBay.x, chosenBay.y, mission.trailerType, chosenBay.angle, true);
+    const newlySpawned = mgr.loose.slice(looseBefore);
+    const spawnedPup =
+      isBitrem && expectedPupType
+        ? newlySpawned.find((tr) => tr.type === expectedPupType) ?? null
+        : null;
+
+    this.missionPickupLead = spawnedLead;
+    this.missionPickupPup = spawnedPup;
+    this.missionSpawnedTrailers = newlySpawned;
+  }
+
+  /** Cancels any active hub mission and despawns uncoupled trailers dynamically spawned for it. */
+  public cancelActiveMission(): void {
+    this.cleanupMissionSpawnedTrailers();
+    this.missionSystem.cancelActiveMission();
+  }
+
+  /** Starts a hub mission, ensures its pickup trailer exists at the origin hub, and syncs state. */
+  public acceptMission(missionId: string): boolean {
+    if (!this.truck || this.isEditorMode) return false;
+    if (this.licenseSystem?.getActiveExam().active) {
+      this.setCouplingNotice('Termina ou cancela o exame antes de aceitar uma missão', 'blocked');
+      return false;
+    }
+    const timeSnap = this.timeOfDaySystem.getSnapshot();
+    const hour = timeSnap.dayProgress * 24;
+    const isNightNow = hour >= 22 || hour < 6 || timeSnap.period === 'night';
+    const res = this.missionSystem.acceptMission(missionId, {
+      coupledTrailerType: this.trailer?.type ?? null,
+      hasPupTrailer: this.pupTrailer !== null,
+      isNightNow,
+    });
+    if (!res.ok || !res.state) {
+      this.setCouplingNotice(res.reason || 'Missão indisponível', 'blocked');
+      return false;
+    }
+    this.missionCollisionTracker = this.getTotalRigCollisions();
+
+    if (res.state.phase === 'pickup') {
+      this.ensureMissionPickupTrailer(res.state.mission);
+    } else {
+      this.cleanupMissionSpawnedTrailers();
+    }
+
+    const nav = this.getActiveMissionNavTarget();
+    if (res.state.phase === 'pickup' && nav) {
+      const decoupleHint = nav.hasWrongTrailerCoupled ? ' (desengate o atrelado atual com C)' : '';
+      this.setCouplingNotice(
+        `Passo 1/2: recolha ${nav.trailerLabel} em ${nav.pickupHubName}${decoupleHint}`,
+        'info',
+        8000,
+      );
+    } else {
+      this.setCouplingNotice(
+        `Passo 2/2: entregue em ${res.state.mission.targetHubName} · ${res.state.mission.targetDock.label}`,
+        'success',
+        8000,
+      );
+    }
+    return true;
+  }
+
+  /** Switches between Career and Sandbox modes cleanly, syncing the active & parked fleet. */
+  public setGameMode(mode: GameMode): void {
+    if (this.licenseSystem?.getActiveExam().active) {
+      this.setCouplingNotice('Não é possível mudar de modo durante exame', 'blocked');
+      return;
+    }
+    if (this.reputationSystem.getGameMode() === mode) return;
+    if (this.truck) {
+      const tx = this.truck.body.position.x;
+      const ty = this.truck.body.position.y;
+      const hub = this.garageSystem.findHubForPosition(tx, ty);
+      this.reputationSystem.syncActiveTruckState(this.truck.exportFleetSnapshot(hub), true);
+    }
+    this.cancelActiveMission();
+    this.reputationSystem.setGameMode(mode);
+    // Fixed time-of-day presets are Sandbox-only: returning to Career restores the 24h game cycle
+    if (mode === 'career' && !this.timeOfDaySystem.isAutoCycle() && !this.timeOfDaySystem.isRealTime()) {
+      this.timeOfDaySystem.setAutoCycle(true);
+    }
+    const active = this.reputationSystem.getActiveTruck();
+    this.truck?.applyFleetState(active);
+    this.parkedTruckManager?.syncWithFleet();
+    this.setCouplingNotice(
+      mode === 'sandbox'
+        ? 'Modo Sandbox ativo — frota, upgrades e missões desbloqueados (Carreira preservada)'
+        : 'Modo Carreira restaurado',
+      'info',
+      5000,
+    );
   }
 
   /** Synthesized pneumatic wrench / garage repair sound. */
@@ -1486,6 +1935,7 @@ export class MainScene extends Phaser.Scene {
     const notice = time < this.couplingNoticeUntil ? this.couplingNotice : null;
     const noticeKind = this.couplingNoticeKind;
     const seq = this.couplingNoticeSeq;
+    const noticeDurationMs = this.couplingNoticeDurationMs;
 
     if (this.pupTrailer) {
       return {
@@ -1495,6 +1945,7 @@ export class MainScene extends Phaser.Scene {
         notice,
         noticeKind,
         noticeSeq: seq,
+        noticeDurationMs,
       };
     }
 
@@ -1506,6 +1957,7 @@ export class MainScene extends Phaser.Scene {
         notice,
         noticeKind,
         noticeSeq: seq,
+        noticeDurationMs,
       };
     }
 
@@ -1523,6 +1975,7 @@ export class MainScene extends Phaser.Scene {
           notice,
           noticeKind,
           noticeSeq: seq,
+          noticeDurationMs,
         };
       }
     }
@@ -1533,6 +1986,7 @@ export class MainScene extends Phaser.Scene {
       notice,
       noticeKind,
       noticeSeq: seq,
+      noticeDurationMs,
     };
   }
 
@@ -1888,6 +2342,10 @@ export class MainScene extends Phaser.Scene {
       );
       const totalRigCollisions = this.getTotalRigCollisions();
 
+      // Sync live towing/weather flags into Truck physics (suspension empty grip, brake heat, wet tires)
+      this.truck.hasCoupledTrailer = this.trailer !== null;
+      this.truck.isWeatherWet = this.garageSystem.getActiveModifier() === 'rain';
+
       // Update Active License Exam
       const activeExam = this.licenseSystem.getActiveExam();
       if (activeExam.active) {
@@ -1905,11 +2363,13 @@ export class MainScene extends Phaser.Scene {
         );
       }
 
-      // Gas pump & garage repair bay proximity detection (unified helper for repair bays)
+      // Gas pump, garage repair bay & parked fleet truck proximity detection
       this.nearbyPump = null;
       this.nearbyRepairBay = null;
+      this.nearbySwapTruck = null;
       const tx = this.truck.body.position.x;
       const ty = this.truck.body.position.y;
+      const currentHubId = this.garageSystem.findHubForPosition(tx, ty);
       let nearestDist = 110; // highlight distance
       for (const o of this.world.objects.objects) {
         if (o.type !== 'gas_pump') continue;
@@ -1923,8 +2383,90 @@ export class MainScene extends Phaser.Scene {
       if (reachableBay) {
         this.nearbyRepairBay = { x: reachableBay.x, y: reachableBay.y, garageId: reachableBay.garageId };
       }
+      const nearbyFleet = this.parkedTruckManager?.findNearby(
+        tx,
+        ty,
+        this.truck.layer,
+        MainScene.TRUCK_SWAP_RADIUS,
+      );
+      if (nearbyFleet) {
+        const spec = TRUCK_CATALOG[nearbyFleet.fleet.type];
+        this.nearbySwapTruck = {
+          id: nearbyFleet.fleet.id,
+          type: nearbyFleet.fleet.type,
+          name: spec.name,
+          dist: Math.round(nearbyFleet.dist),
+        };
+      }
+      this.parkedTruckManager?.updateHighlights(this.nearbySwapTruck?.id ?? null, time);
+
+      // Update Active Hub Mission & render world GPS marker
+      const activeMissionBefore = this.missionSystem.getActiveMission();
+      if (activeMissionBefore) {
+        const td = activeMissionBefore.mission.targetDock;
+        const mDock = this.checkSpecificDockAlignment(td);
+        const distToDock = Phaser.Math.Distance.Between(tx, ty, td.x, td.y);
+        const colDelta = Math.max(0, totalRigCollisions - this.missionCollisionTracker);
+        this.missionCollisionTracker = totalRigCollisions;
+        const curHour = timeSnap.dayProgress * 24;
+        const isNightNow = curHour >= 22 || curHour < 6 || timeSnap.period === 'night';
+        const prevPhase = activeMissionBefore.phase;
+        const completed = this.missionSystem.updateActiveMission({
+          dt,
+          coupledTrailerType: this.trailer?.type ?? null,
+          hasPupTrailer: this.pupTrailer !== null,
+          cargoHealth: minCargoHealth,
+          currentGForce: this.currentGForce,
+          isJackknifed: anyJackknife,
+          onDirtOrOffroad: this.truck.roadGrip <= 0.7,
+          speedPxS: Math.abs(this.truck.vLong),
+          speedKmh: this.truck.speedKmh,
+          inTargetDock: mDock.inZone,
+          dockAlignDeg: Math.abs(mDock.alignmentDeg),
+          distToTargetDockPx: distToDock,
+          newCollisionsDelta: colDelta,
+          isNightNow,
+        });
+        if (completed) {
+          this.missionPickupLead = null;
+          this.missionPickupPup = null;
+          this.missionSpawnedTrailers = [];
+          this.parkedTruckManager?.syncWithFleet();
+          const unlockMsg =
+            completed.newlyUnlockedTrucks.length > 0
+              ? ` · Novo camião: ${completed.newlyUnlockedTrucks.map((k) => TRUCK_CATALOG[k].name).join(', ')}`
+              : '';
+          this.setCouplingNotice(
+            `Entrega Rating ${completed.rating}! +${completed.reputationAwarded} rep${unlockMsg}`,
+            'success',
+            7000,
+          );
+          this.playRefuelEndSound();
+        } else {
+          const activeAfter = this.missionSystem.getActiveMission();
+          if (activeAfter && prevPhase === 'pickup' && activeAfter.phase === 'transit') {
+            this.setCouplingNotice(
+              `Atrelado engatado! Siga para ${activeAfter.mission.targetHubName} · ${activeAfter.mission.targetDock.label}`,
+              'success',
+              7000,
+            );
+          } else if (activeAfter && prevPhase === 'transit' && activeAfter.phase === 'pickup') {
+            this.setCouplingNotice(
+              'Atrelado da missão desengatado — volte a acoplar para retomar a entrega',
+              'info',
+              6500,
+            );
+          }
+        }
+      }
+      const missionNavTarget = this.getActiveMissionNavTarget();
+      this.renderMissionWorldMarker(time, missionNavTarget);
+
       // Pulse animation for the highlight
       this.pumpPulsePhase = (this.pumpPulsePhase + dt * 2) % 1;
+
+      const activeFleetRec = this.reputationSystem.getActiveTruck();
+      const activeTruckSpec = TRUCK_CATALOG[this.truck.truckType] ?? TRUCK_CATALOG.iveco_daily_4x2;
 
       // Update Telemetry Cache
       this.telemetry = {
@@ -1964,6 +2506,23 @@ export class MainScene extends Phaser.Scene {
         fuelPrice: 1.749,
         nearbyPump: this.nearbyPump,
         nearbyRepairBay: this.nearbyRepairBay ? { x: this.nearbyRepairBay.x, y: this.nearbyRepairBay.y } : null,
+        gameMode: this.reputationSystem.getGameMode(),
+        activeTruckId: activeFleetRec.id,
+        activeTruckType: this.truck.truckType,
+        activeTruckName: activeTruckSpec.name,
+        activeTruckUpgrades: { ...this.truck.upgrades },
+        truckWear: {
+          engine: Math.round(this.truck.wear.engine),
+          brakes: Math.round(this.truck.wear.brakes),
+          tires: Math.round(this.truck.wear.tires),
+        },
+        brakeHeat: Math.round(this.truck.brakeHeat * 100) / 100,
+        nearbySwapTruck: this.nearbySwapTruck,
+        currentHubId,
+        hubReputation: this.reputationSystem.getAllHubReputation(),
+        activeMission: this.missionSystem.getActiveMission(),
+        missionNavTarget,
+        lastMissionCompletion: this.missionSystem.getLastCompletion(),
         coupling: this.computeCouplingState(time),
       };
 
@@ -2037,6 +2596,186 @@ export class MainScene extends Phaser.Scene {
       }
     }
     return { inZone: false, alignmentDeg: 999 };
+  }
+
+  /** Evaluates rig alignment against a specific hub delivery dock (supports single trailers & bitrens). */
+  private checkSpecificDockAlignment(td: HubDockSpec): { inZone: boolean; alignmentDeg: number } {
+    const checkBody = this.trailer?.body || this.truck.body;
+    const radius = Math.max(td.width, td.height) / 2 + 30;
+    const dist = Phaser.Math.Distance.Between(checkBody.position.x, checkBody.position.y, td.x, td.y);
+    if (dist >= radius) return { inZone: false, alignmentDeg: 999 };
+    const leadDiff = this.normalizeAngleDiffDeg(checkBody.angle, td.requiredAngleDeg);
+    if (this.trailer && this.pupTrailer) {
+      const pupDist = Phaser.Math.Distance.Between(
+        this.pupTrailer.body.position.x,
+        this.pupTrailer.body.position.y,
+        td.x,
+        td.y,
+      );
+      if (pupDist >= radius) return { inZone: false, alignmentDeg: 999 };
+      const pupDiff = this.normalizeAngleDiffDeg(this.pupTrailer.body.angle, td.requiredAngleDeg);
+      const worstDiff = Math.abs(leadDiff) >= Math.abs(pupDiff) ? leadDiff : pupDiff;
+      return { inZone: true, alignmentDeg: Math.round(worstDiff) };
+    }
+    return { inZone: true, alignmentDeg: Math.round(leadDiff) };
+  }
+
+  /**
+   * Single source of truth for active mission navigation (world GPS arrow, MinimapScene,
+   * WorldMapModal, and HUD banner).
+   * - During 'pickup': ALWAYS resolves to the pickup trailer (preferring the matching trailer
+   *   closest to `originHub`, or closest to the truck when re-coupling / fetching a bitrem pup)
+   *   and NEVER falls back to the delivery dock.
+   * - During 'transit': resolves directly to `mission.targetDock`.
+   */
+  public getActiveMissionNavTarget(): MissionNavTarget | null {
+    const active = this.missionSystem?.getActiveMission();
+    if (!active || !this.truck || this.isEditorMode) return null;
+
+    const tx = this.truck.body.position.x;
+    const ty = this.truck.body.position.y;
+    const deliveryPos = {
+      x: active.mission.targetDock.x,
+      y: active.mission.targetDock.y,
+    };
+
+    const isBitremMission =
+      active.mission.trailerType === 'bitrem_lead' ||
+      active.mission.trailerType === 'bitrem_tanker_lead';
+
+    if (active.phase === 'pickup') {
+      const needsPupOnly =
+        isBitremMission &&
+        this.trailer?.type === active.mission.trailerType &&
+        this.pupTrailer === null;
+
+      const searchType: TrailerType = needsPupOnly
+        ? active.mission.trailerType === 'bitrem_tanker_lead'
+          ? 'bitrem_tanker_pup'
+          : 'bitrem_pup'
+        : active.mission.trailerType;
+
+      const hasWrongTrailerCoupled =
+        !needsPupOnly &&
+        this.trailer !== null &&
+        this.trailer.type !== active.mission.trailerType;
+
+      const originHubPos = this.garageSystem.getHub(active.mission.originHub).locationWorld;
+      const mgr = TrailerManager.getInstance(this);
+
+      // 1. If we already have a dedicated live pickup trailer for this mission, lock onto it directly.
+      let targetTrailer: Trailer | null = null;
+      if (needsPupOnly && mgr.isLoose(this.missionPickupPup)) {
+        targetTrailer = this.missionPickupPup;
+      } else if (!needsPupOnly && !active.hasPickedUpOnce && mgr.isLoose(this.missionPickupLead)) {
+        targetTrailer = this.missionPickupLead;
+      }
+
+      // 2. Otherwise find the best matching loose trailer (nearest to truck when re-coupling
+      //    a dropped trailer or fetching a pup; nearest to originHub on initial pickup).
+      if (!targetTrailer) {
+        const refX = needsPupOnly || active.hasPickedUpOnce ? tx : originHubPos.x;
+        const refY = needsPupOnly || active.hasPickedUpOnce ? ty : originHubPos.y;
+        let bestDist = Infinity;
+        for (const tr of mgr.loose) {
+          if (tr.type !== searchType) continue;
+          const d = Phaser.Math.Distance.Between(refX, refY, tr.body.position.x, tr.body.position.y);
+          if (d < bestDist) {
+            bestDist = d;
+            targetTrailer = tr;
+          }
+        }
+      }
+
+      // 3. Safety net: if ZERO matching loose trailers exist (e.g. after world rebuild),
+      //    spawn one right now at originHub so the amber beacon NEVER sits on empty asphalt.
+      if (!targetTrailer && !needsPupOnly) {
+        this.ensureMissionPickupTrailer(active.mission);
+        targetTrailer = this.missionPickupLead;
+      }
+
+      const bestX = targetTrailer ? targetTrailer.body.position.x : originHubPos.x;
+      const bestY = targetTrailer ? targetTrailer.body.position.y : originHubPos.y;
+
+      const pickupHubId = this.garageSystem.findHubForPosition(bestX, bestY);
+      const pickupHubName = this.garageSystem.getHub(pickupHubId).name;
+
+      return {
+        phase: 'pickup',
+        x: bestX,
+        y: bestY,
+        distPx: Phaser.Math.Distance.Between(tx, ty, bestX, bestY),
+        trailerType: searchType,
+        trailerLabel: TRAILER_TYPE_LABELS[searchType] ?? searchType,
+        needsPupOnly,
+        pickupHubName,
+        targetHubName: active.mission.targetHubName,
+        targetDockLabel: active.mission.targetDock.label,
+        pickupPos: { x: bestX, y: bestY },
+        deliveryPos,
+        hasWrongTrailerCoupled,
+      };
+    }
+
+    return {
+      phase: 'transit',
+      x: deliveryPos.x,
+      y: deliveryPos.y,
+      distPx: Phaser.Math.Distance.Between(tx, ty, deliveryPos.x, deliveryPos.y),
+      trailerType: active.mission.trailerType,
+      trailerLabel: TRAILER_TYPE_LABELS[active.mission.trailerType] ?? active.mission.trailerType,
+      needsPupOnly: false,
+      pickupHubName: active.mission.originHubName,
+      targetHubName: active.mission.targetHubName,
+      targetDockLabel: active.mission.targetDock.label,
+      pickupPos: null,
+      deliveryPos,
+      hasWrongTrailerCoupled: false,
+    };
+  }
+
+  /** Draws active mission target highlight (pickup trailer in amber, delivery dock in emerald) & directional GPS chevron. */
+  private renderMissionWorldMarker(time: number, nav?: MissionNavTarget | null): void {
+    const g = this.missionMarkerGraphics;
+    if (!g) return;
+    g.clear();
+    const target = nav ?? this.getActiveMissionNavTarget();
+    const active = this.missionSystem?.getActiveMission();
+    if (!target || !active || this.isEditorMode || !this.truck) return;
+
+    const pulse = 0.5 + 0.5 * Math.sin(time * 0.006);
+    const tx = this.truck.body.position.x;
+    const ty = this.truck.body.position.y;
+    const color = target.phase === 'pickup' ? 0xf59e0b : 0x10b981;
+
+    if (target.phase === 'pickup') {
+      g.lineStyle(3.5, color, 0.65 + 0.35 * pulse);
+      g.strokeCircle(target.x, target.y, 56 + 10 * pulse);
+      g.lineStyle(2, 0xfef3c7, 0.5 + 0.3 * pulse);
+      g.strokeCircle(target.x, target.y, 38 + 4 * pulse);
+    } else {
+      const td = active.mission.targetDock;
+      g.lineStyle(3, color, 0.55 + 0.4 * pulse);
+      g.strokeRoundedRect(td.x - td.width / 2, td.y - td.height / 2, td.width, td.height, 8);
+      g.fillStyle(color, 0.08 + 0.08 * pulse);
+      g.fillRoundedRect(td.x - td.width / 2, td.y - td.height / 2, td.width, td.height, 8);
+    }
+
+    // Crisp directional GPS chevron around truck pointing toward the current step's objective
+    if (target.distPx > 180) {
+      const ang = Math.atan2(target.y - ty, target.x - tx);
+      const r = 82;
+      const px = tx + Math.cos(ang) * r;
+      const py = ty + Math.sin(ang) * r;
+      const tipX = tx + Math.cos(ang) * (r + 16);
+      const tipY = ty + Math.sin(ang) * (r + 16);
+      const perpX = -Math.sin(ang) * 8;
+      const perpY = Math.cos(ang) * 8;
+      g.lineStyle(2, 0x0f172a, 0.9);
+      g.fillStyle(color, 0.92);
+      g.fillTriangle(tipX, tipY, px + perpX, py + perpY, px - perpX, py - perpY);
+      g.strokeTriangle(tipX, tipY, px + perpX, py + perpY, px - perpX, py - perpY);
+    }
   }
 
   // ==========================================
@@ -2741,9 +3480,11 @@ export class MainScene extends Phaser.Scene {
     this.scene.launch('MinimapScene');
     this.scene.bringToTop('MinimapScene');
 
-    // Toggle with M (desktop)
+    // Toggle minimap with M only in Editor mode (in Drive mode, M opens the Strategic World Map)
     if (this.input.keyboard) {
-      this.input.keyboard.on('keydown-M', () => this.toggleMinimap());
+      this.input.keyboard.on('keydown-M', () => {
+        if (this.isEditorMode) this.toggleMinimap();
+      });
     }
   }
 
@@ -2760,7 +3501,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   public getMinimapRect(): { x: number; y: number; width: number; height: number } {
-    const size = 150;
+    const size = this.scale.width < 640 ? 116 : 150;
     return {
       x: this.scale.width - size - 10,
       y: 58,
@@ -2822,6 +3563,7 @@ export class MainScene extends Phaser.Scene {
     this.truck?.setLightingEnabled(enabled);
     this.trailer?.setLightingEnabled(enabled);
     this.pupTrailer?.setLightingEnabled(enabled);
+    this.parkedTruckManager?.setLightingEnabled(enabled);
     for (const t of TrailerManager.getInstance(this).loose) {
       t.setLightingEnabled(enabled);
     }

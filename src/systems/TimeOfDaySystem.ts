@@ -42,11 +42,11 @@ export interface TimeOfDaySnapshot {
 export class TimeOfDaySystem {
   private static instance: TimeOfDaySystem;
 
-  private dayProgress: number = TimeOfDaySystem.getRealTimeProgress();
+  private dayProgress: number = 0.38;
   private targetProgress: number | null = null;
-  private autoCycle: boolean = false;
-  // Real-time mode: the in-game clock follows the device/browser clock (default).
-  private realTime: boolean = true;
+  // In-game 24h day/night cycle is the default mode.
+  private autoCycle: boolean = true;
+  private realTime: boolean = false;
   // 1 full 24h cycle in ~180s when autoCycle is enabled
   private cycleSpeedPerSec: number = 1 / 180;
   private listeners: Array<() => void> = [];

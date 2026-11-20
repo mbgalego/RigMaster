@@ -4,8 +4,8 @@
  *
  * Verifica, sem interacção humana:
  *  1. Estradas renderizadas no primeiro frame (bug: worldView stale do Phaser).
- *  2. Atrelado default (carta C) acoplado no spawn.
- *  3. Respawn (R) mantém estradas + atrelado, mesmo após conduzir para longe.
+ *  2. Camião nasce solo (sem atrelado), hitboxes desligadas e ciclo dia/noite 24h ativo por defeito.
+ *  3. Respawn (R) mantém estradas + estado solo, mesmo após conduzir para longe.
  */
 import fs from 'node:fs';
 import { chromium } from 'playwright';
@@ -29,15 +29,25 @@ await page.waitForTimeout(2500);
 
 const cmds = await page.evaluate(() => window.__rig.roadGraphics.commandBuffer.length);
 check('estradas no load (commandBuffer > ' + MIN_CMDS + ')', cmds > MIN_CMDS, `${cmds} cmds`);
-const trailer = await page.evaluate(() => !!window.__rig.trailer);
-check('atrelado default acoplado no load', trailer);
+
+const defaults = await page.evaluate(() => ({
+  hasTrailer: !!window.__rig.trailer,
+  config: window.__rig.currentVehicleConfig,
+  debugMatter: window.__rig.debugMatter,
+  debugGraphicVisible: !!window.__rig.matter.world.debugGraphic?.visible,
+  autoTimeCycle: window.__rig.telemetry.autoTimeCycle,
+  timeRealTime: window.__rig.telemetry.timeRealTime,
+}));
+check('camião nasce solo (sem atrelado) por defeito', !defaults.hasTrailer && defaults.config === 'solo', JSON.stringify(defaults));
+check('hitboxes desabilitadas por defeito', defaults.debugMatter === false && !defaults.debugGraphicVisible, JSON.stringify(defaults));
+check('ciclo dia/noite 24h do jogo ativo por defeito', defaults.autoTimeCycle === true && defaults.timeRealTime === false, JSON.stringify(defaults));
 
 await page.keyboard.press('r');
 await page.waitForTimeout(2000);
 const cmdsR = await page.evaluate(() => window.__rig.roadGraphics.commandBuffer.length);
-const trailerR = await page.evaluate(() => !!window.__rig.trailer);
+const soloR = await page.evaluate(() => !window.__rig.trailer && window.__rig.currentVehicleConfig === 'solo');
 check('estradas após respawn', cmdsR > MIN_CMDS, `${cmdsR} cmds`);
-check('atrelado após respawn', trailerR);
+check('solo mantido após respawn', soloR);
 
 await page.keyboard.down('w');
 await page.waitForTimeout(6000);
@@ -46,9 +56,9 @@ await page.waitForTimeout(400);
 await page.keyboard.press('r');
 await page.waitForTimeout(2000);
 const cmdsFar = await page.evaluate(() => window.__rig.roadGraphics.commandBuffer.length);
-const trailerFar = await page.evaluate(() => !!window.__rig.trailer);
+const soloFar = await page.evaluate(() => !window.__rig.trailer && window.__rig.currentVehicleConfig === 'solo');
 check('estradas após respawn longe', cmdsFar > MIN_CMDS, `${cmdsFar} cmds`);
-check('atrelado após respawn longe', trailerFar);
+check('solo mantido após respawn longe', soloFar);
 
 await browser.close();
 console.log(failures === 0 ? '\nTODOS OS TESTES PASSARAM' : `\n${failures} TESTE(S) FALHARAM`);

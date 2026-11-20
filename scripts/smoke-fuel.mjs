@@ -124,6 +124,7 @@ check('isOutOfFuel = true quando vazio', emptyState.isOutOfFuel === true);
 // 3b. Coasting & trailer coupling stability when running out of fuel at speed
 await page.evaluate(() => {
   const rig = window.__rig;
+  if (!rig.trailer) rig.spawnVehicleRig('standard');
   const truck = rig.truck;
   truck.vLong = 140; // ~31 km/h moving forward
   truck.currentSpeed = 140;

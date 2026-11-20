@@ -1,5 +1,20 @@
+import type { TrailerType } from '../entities/Trailer';
+import { ReputationSystem } from './ReputationSystem';
+
 export type HubId = 'harbor' | 'shipyard' | 'industrial' | 'historic';
+/** Prepared for future biome expansion (Serra / Pedreira). */
+export type FutureHubId = HubId | 'serra';
 export type WeatherModifier = 'clear' | 'rain' | 'fog' | 'night';
+
+export interface HubDockSpec {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  requiredAngleDeg: number;
+}
 
 export interface RegionalContract {
   id: string;
@@ -20,6 +35,11 @@ export interface HubData {
   color: string;
   neonColorHex: number;
   locationWorld: { x: number; y: number };
+  regionRadius: number;
+  specialization: string;
+  exclusiveTrailers: TrailerType[];
+  garageIds: string[];
+  docks: HubDockSpec[];
   progress: number; // 0 to 100
   isDominant: boolean; // true when progress == 100
   unlockedBiomeTiles: string[];
@@ -42,12 +62,21 @@ export class GarageSystem {
         badge: 'PORT',
         color: '#06b6d4',
         neonColorHex: 0x06b6d4,
-        locationWorld: { x: 400, y: 400 },
+        locationWorld: { x: 1470, y: 1450 },
+        regionRadius: 2400,
+        specialization: 'Urbano / Portuário (Curto Curso)',
+        exclusiveTrailers: ['standard', 'container', 'reefer', 'tanker_milk'],
+        garageIds: ['wo_73'],
+        docks: [
+          { id: 'wo_1', label: 'Cais Porto 1', x: 512, y: 704, width: 92, height: 260, requiredAngleDeg: 0 },
+          { id: 'wo_3', label: 'Cais Porto 3', x: 768, y: 704, width: 92, height: 260, requiredAngleDeg: 0 },
+          { id: 'wo_5', label: 'Cais Porto 5', x: 1024, y: 704, width: 92, height: 260, requiredAngleDeg: 0 },
+        ],
         progress: 100, // Starting dominant hub
         isDominant: true,
         unlockedBiomeTiles: ['port_crane', 'shipping_container_blue', 'shipping_container_red', 'dock_water_edge'],
         unlockedModifier: 'rain',
-        description: 'Terminais de contentores oceânicos, gruas de carga e cais de acostagem.',
+        description: 'Terminais de contentores oceânicos, distribuição urbana, frigoríficos e cisternas alimentares.',
         contracts: [
           {
             id: 'harbor_01',
@@ -57,8 +86,8 @@ export class GarageSystem {
             cargoDescription: 'Contentor marítimo refrigerado.',
             rewardProgress: 50,
             completed: true,
-            targetX: 2300,
-            targetY: 500,
+            targetX: 10880,
+            targetY: 620,
           },
           {
             id: 'harbor_02',
@@ -68,8 +97,8 @@ export class GarageSystem {
             cargoDescription: 'Gerador a diesel naval de 28 toneladas.',
             rewardProgress: 50,
             completed: true,
-            targetX: 2200,
-            targetY: 1800,
+            targetX: 12288,
+            targetY: 8560,
           },
         ],
       },
@@ -79,12 +108,21 @@ export class GarageSystem {
         badge: 'SHIP',
         color: '#f97316',
         neonColorHex: 0xf97316,
-        locationWorld: { x: 2300, y: 500 },
+        locationWorld: { x: 11400, y: 1200 },
+        regionRadius: 2400,
+        specialization: 'Industrial / Pesado (Médio Curso)',
+        exclusiveTrailers: ['long_cargo', 'flatbed_heavy', 'timber', 'tanker_fuel', 'bitrem_lead'],
+        garageIds: ['wo_20', 'wo_77', 'wo_81'],
+        docks: [
+          { id: 'wo_17', label: 'Doca Estaleiro A', x: 10752, y: 620, width: 96, height: 300, requiredAngleDeg: 0 },
+          { id: 'wo_18', label: 'Doca Estaleiro B', x: 10880, y: 620, width: 96, height: 300, requiredAngleDeg: 0 },
+          { id: 'wo_19', label: 'Doca Estaleiro C', x: 11008, y: 620, width: 96, height: 300, requiredAngleDeg: 0 },
+        ],
         progress: 40,
         isDominant: false,
         unlockedBiomeTiles: ['container_stack_high', 'gantry_rail', 'industrial_hazard_stripes'],
         unlockedModifier: 'fog',
-        description: 'Pátio de reparação naval com pórticos rolantes e corredores de manobra densos.',
+        description: 'Pátio industrial de cargas indivisíveis, pás eólicas, pranchas pesadas, madeira e combustível.',
         contracts: [
           {
             id: 'shipyard_01',
@@ -94,8 +132,8 @@ export class GarageSystem {
             cargoDescription: 'Perfis de aço carbono reforçado.',
             rewardProgress: 60,
             completed: false,
-            targetX: 500,
-            targetY: 1700,
+            targetX: 704,
+            targetY: 9450,
           },
         ],
       },
@@ -105,12 +143,21 @@ export class GarageSystem {
         badge: 'IND',
         color: '#eab308',
         neonColorHex: 0xeab308,
-        locationWorld: { x: 2200, y: 1800 },
+        locationWorld: { x: 11600, y: 8200 },
+        regionRadius: 2600,
+        specialization: 'Petroquímico / Bitrem & ADR',
+        exclusiveTrailers: ['bitrem_lead', 'bitrem_tanker_lead', 'tanker_fuel', 'tanker_hazmat', 'container'],
+        garageIds: ['wo_97', 'wo_103', 'wo_94'],
+        docks: [
+          { id: 'wo_24', label: 'Terminal Sul 1', x: 12160, y: 8560, width: 96, height: 340, requiredAngleDeg: 0 },
+          { id: 'wo_25', label: 'Terminal Sul 2', x: 12288, y: 8560, width: 96, height: 340, requiredAngleDeg: 0 },
+          { id: 'wo_26', label: 'Terminal Sul 3', x: 12416, y: 8560, width: 96, height: 340, requiredAngleDeg: 0 },
+        ],
         progress: 25,
         isDominant: false,
         unlockedBiomeTiles: ['chemical_silo', 'factory_dock', 'overhead_pipe'],
         unlockedModifier: 'night',
-        description: 'Complexo petroquímico e silos de distribuição com docas hidráulicas automatizadas.',
+        description: 'Complexo petroquímico e silos com bitrens duplos, cisternas ADR e acessos pesados a sul.',
         contracts: [
           {
             id: 'ind_01',
@@ -120,8 +167,8 @@ export class GarageSystem {
             cargoDescription: 'Cisterna isotérmica pressurizada.',
             rewardProgress: 75,
             completed: false,
-            targetX: 400,
-            targetY: 400,
+            targetX: 768,
+            targetY: 704,
           },
         ],
       },
@@ -131,23 +178,32 @@ export class GarageSystem {
         badge: 'HIST',
         color: '#ec4899',
         neonColorHex: 0xec4899,
-        locationWorld: { x: 500, y: 1700 },
+        locationWorld: { x: 1600, y: 8900 },
+        regionRadius: 2600,
+        specialization: 'Sensível / Noturno & Transversal',
+        exclusiveTrailers: ['fragile_glass', 'tanker_hazmat', 'reefer', 'bitrem_tanker_lead', 'timber'],
+        garageIds: ['wo_99', 'wo_100', 'wo_82'],
+        docks: [
+          { id: 'wo_31', label: 'Doca Histórica 1', x: 576, y: 9450, width: 92, height: 280, requiredAngleDeg: 0 },
+          { id: 'wo_32', label: 'Doca Histórica 2', x: 704, y: 9450, width: 92, height: 280, requiredAngleDeg: 0 },
+          { id: 'wo_33', label: 'Doca Histórica 3', x: 832, y: 9450, width: 92, height: 280, requiredAngleDeg: 0 },
+        ],
         progress: 0,
         isDominant: false,
         unlockedBiomeTiles: ['cobblestone_narrow', 'granite_bollard', 'ancient_archway'],
         unlockedModifier: 'clear',
-        description: 'Arruamentos medievais estreitos em calçada, curvas de 90° e restrições de gabarito.',
+        description: 'Cais de alta precisão, operações noturnas, vidro óptico sensível e ligação à estrada de terra.',
         contracts: [
           {
             id: 'hist_01',
             title: 'Abastecimento Comercial Noturno',
             sourceHub: 'historic',
             targetHub: 'industrial',
-            cargoDescription: 'Paletes mistas em camião rígido.',
+            cargoDescription: 'Paletes mistas e carga sensível em entrega noturna.',
             rewardProgress: 100,
             completed: false,
-            targetX: 2200,
-            targetY: 1800,
+            targetX: 12160,
+            targetY: 8560,
           },
         ],
       },
@@ -169,6 +225,31 @@ export class GarageSystem {
 
   public getHub(id: HubId): HubData {
     return this.hubs[id];
+  }
+
+  /** Resolves the nearest hub to any world position (used by workshops, parked trucks, and telemetry). */
+  public findHubForPosition(x: number, y: number): HubId {
+    let bestId: HubId = 'harbor';
+    let bestDist = Infinity;
+    for (const hub of Object.values(this.hubs)) {
+      const d = Math.hypot(x - hub.locationWorld.x, y - hub.locationWorld.y);
+      if (d < bestDist) {
+        bestDist = d;
+        bestId = hub.id;
+      }
+    }
+    return bestId;
+  }
+
+  /** Returns the primary delivery dock spec for a hub (or index modulo available docks). */
+  public getHubDock(id: HubId, index: number = 0): HubDockSpec {
+    const docks = this.hubs[id].docks;
+    return docks[Math.abs(index) % docks.length];
+  }
+
+  /** Convenience delegate to ReputationSystem for current reputation in a hub. */
+  public getHubReputation(id: HubId): number {
+    return ReputationSystem.getInstance().getHubReputation(id);
   }
 
   public completeContract(contractId: string) {
@@ -195,9 +276,14 @@ export class GarageSystem {
   }
 
   public getUnlockedModifiers(): WeatherModifier[] {
+    if (ReputationSystem.getInstance().isSandbox()) {
+      return ['clear', 'rain', 'fog', 'night'];
+    }
     const modifiers: WeatherModifier[] = ['clear'];
+    const repSys = ReputationSystem.getInstance();
     for (const hub of Object.values(this.hubs)) {
-      if (hub.isDominant && hub.unlockedModifier !== 'clear') {
+      const dominantByRep = repSys.getHubReputation(hub.id) >= 1000;
+      if ((hub.isDominant || dominantByRep) && hub.unlockedModifier !== 'clear') {
         if (!modifiers.includes(hub.unlockedModifier)) {
           modifiers.push(hub.unlockedModifier);
         }
@@ -264,15 +350,17 @@ export class GarageSystem {
           ])
         ),
       };
-      localStorage.setItem('rigmaster_garages', JSON.stringify(state));
-    } catch (e) {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('rigmaster_garages', JSON.stringify(state));
+      }
+    } catch {
       // Ignore
     }
   }
 
   private loadProgress() {
     try {
-      const raw = localStorage.getItem('rigmaster_garages');
+      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('rigmaster_garages') : null;
       if (raw) {
         const state = JSON.parse(raw);
         if (state.hubs) {
@@ -290,8 +378,9 @@ export class GarageSystem {
           }
         }
       }
-    } catch (e) {
+    } catch {
       // Ignore
     }
   }
 }
+

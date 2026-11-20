@@ -38,10 +38,14 @@ export class TrailerManager {
   private static instance: TrailerManager | null = null;
 
   public static getInstance(scene?: MainScene): TrailerManager {
-    if (!TrailerManager.instance && scene) {
+    if (scene && (!TrailerManager.instance || TrailerManager.instance.scene !== scene)) {
       TrailerManager.instance = new TrailerManager(scene);
     }
     return TrailerManager.instance!;
+  }
+
+  public static resetInstance(): void {
+    TrailerManager.instance = null;
   }
 
   public scene: MainScene;
@@ -118,6 +122,7 @@ export class TrailerManager {
     // Sync the drawn container with the body angle (constructor only sets the body)
     lead.setPosition(x, y, noseAngle);
     lead.setElevation(elevLead.layer, elevLead.z);
+    lead.setLightingEnabled(this.scene.isWebGLLightingActive());
     this.applyParkedFilter(lead);
     this.loose.push(lead);
 
@@ -131,6 +136,7 @@ export class TrailerManager {
       const pup = new Trailer(this.scene, { x: px, y: py, angle: noseAngle, type: pupType });
       pup.setPosition(px, py, noseAngle);
       pup.setElevation(elevPup.layer, elevPup.z);
+      pup.setLightingEnabled(this.scene.isWebGLLightingActive());
       this.applyParkedFilter(pup);
       this.loose.push(pup);
     }
@@ -250,6 +256,17 @@ export class TrailerManager {
   private applyParkedFilter(t: Trailer) {
     t.setCoupledState(false);
     this.scene.matter.body.setStatic(t.body, true);
+  }
+
+  public isLoose(trailer: Trailer | null | undefined): boolean {
+    return !!trailer && this.loose.includes(trailer);
+  }
+
+  /** Destroys a single uncoupled trailer (used to clean up mission-spawned trailers on cancel). */
+  public removeLoose(trailer: Trailer): void {
+    if (!this.loose.includes(trailer)) return;
+    this.loose = this.loose.filter((t) => t !== trailer);
+    trailer.destroy();
   }
 
   public destroyAll() {
