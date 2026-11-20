@@ -689,6 +689,13 @@ export default function App() {
       return;
     }
 
+    // H3 (Option A): Direct trailer/rig spawning from Menu is exclusive to Sandbox mode.
+    // In Career mode, trailers are coupled physically in parks or via accepted missions.
+    if (!force && !ReputationSystem.getInstance().isSandbox()) {
+      addToast('Seleção direta de atrelado disponível apenas no modo Sandbox — acople fisicamente nos parques ou missões', 'blocked');
+      return;
+    }
+
     // Check license requirement
     if (!force) {
       const reqLic = getRequiredLicenseForConfig(type);
@@ -701,7 +708,7 @@ export default function App() {
     setVehicleConfig(type);
     const scene = getMainScene();
     if (scene) {
-      scene.spawnVehicleRig(type);
+      scene.spawnVehicleRig(type, { repair: force });
     }
   };
 
@@ -1026,19 +1033,33 @@ export default function App() {
             {isFullscreen ? <Minimize className="w-3.5 h-3.5" /> : <Maximize className="w-3.5 h-3.5" />}
           </button>
 
-          {/* Quick Reset Spawn Button (disabled during active exam) */}
-          <button
-            onClick={() => handleReset(false)}
-            disabled={Boolean(activeExam?.active)}
-            className={`p-1.5 rounded bg-slate-900 border transition ${
-              activeExam?.active
-                ? 'border-slate-800 text-slate-600 cursor-not-allowed opacity-50'
-                : 'border-slate-700 hover:border-amber-400 text-amber-400'
-            }`}
-            title={activeExam?.active ? 'Reposição (R) bloqueada durante exame ativo' : 'Repor Camião (Tecla R)'}
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </button>
+          {/* Quick Reset / Emergency Tow Button (disabled during active exam or active Career mission) */}
+          {(() => {
+            const resetBlocked =
+              Boolean(activeExam?.active) ||
+              (telemetry.gameMode !== 'sandbox' && Boolean(telemetry.activeMission));
+            const resetTitle = activeExam?.active
+              ? 'Reposição (R) bloqueada durante exame ativo'
+              : telemetry.gameMode !== 'sandbox' && telemetry.activeMission
+                ? 'Reboque (R) bloqueado durante missão ativa — cancele a missão primeiro'
+                : telemetry.gameMode === 'sandbox'
+                  ? 'Repor Camião no Spawn (Tecla R)'
+                  : 'Reboque de Emergência / Desencravar na Estrada Mais Próxima (Tecla R)';
+            return (
+              <button
+                onClick={() => handleReset(false)}
+                disabled={resetBlocked}
+                className={`p-1.5 rounded bg-slate-900 border transition ${
+                  resetBlocked
+                    ? 'border-slate-800 text-slate-600 cursor-not-allowed opacity-50'
+                    : 'border-slate-700 hover:border-amber-400 text-amber-400'
+                }`}
+                title={resetTitle}
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+            );
+          })()}
 
           {/* THE CONSOLIDATED DROPDOWN MENU */}
           <div className="relative">
@@ -1057,68 +1078,7 @@ export default function App() {
                 data-testid="hud-menu-dropdown"
                 className="absolute right-0 top-full mt-2 w-72 max-w-[calc(100vw-1rem)] max-h-[calc(100dvh-4.25rem)] overflow-y-auto overscroll-contain touch-pan-y bg-slate-950 border border-cyan-500/50 rounded-xl shadow-2xl p-2.5 z-50 text-xs flex flex-col gap-2.5 backdrop-blur-xl"
               >
-                {/* 1. Vehicles */}
-                <div>
-                  <div className="text-[10px] font-mono uppercase tracking-wider text-cyan-400 px-2 py-0.5 font-bold">
-                    Tipologia de Veículo & Carga
-                  </div>
-                  <div className="flex flex-col gap-0.5 mt-1">
-                    {([
-                      { id: 'solo', name: 'Solo 4x2 (Camião Rígido)', badge: 'SOLO', req: 'C' },
-                      { id: 'standard', name: 'Standard 13.6m', badge: 'C', req: 'C' },
-                      { id: 'reefer', name: 'Frigorífico 13.6m', badge: 'C', req: 'C' },
-                      { id: 'container', name: 'Porta-Contentores ISO 40ft', badge: 'C', req: 'C' },
-                      { id: 'tanker_milk', name: 'Cisterna Leite / Alimentar', badge: 'C', req: 'C' },
-                      { id: 'long_cargo', name: 'Pá Eólica 62m', badge: 'C+E', req: 'CE' },
-                      { id: 'flatbed_heavy', name: 'Prancha Pesada / Escavadora', badge: 'C+E', req: 'CE' },
-                      { id: 'timber', name: 'Florestal / Toros de Madeira', badge: 'C+E', req: 'CE' },
-                      { id: 'tanker_fuel', name: 'Cisterna Petróleo / Combustível', badge: 'C+E', req: 'CE' },
-                      { id: 'bitrem', name: 'Bitrem B-Double Standard', badge: 'H', req: 'H' },
-                      { id: 'bitrem_tanker', name: 'Bitrem Cisterna Combustível', badge: 'H', req: 'H' },
-                      { id: 'fragile_glass', name: 'Vidro Óptico Especial', badge: 'X', req: 'X' },
-                      { id: 'tanker_hazmat', name: 'Cisterna Líquidos Perigosos ADR', badge: 'X', req: 'X' },
-                    ] as Array<{ id: VehicleConfigType; name: string; badge: string; req: LicenseId }>).map((v) => {
-                      const unlocked = v.req === 'C' || (licenses.find((l) => l.id === v.req)?.unlocked ?? false);
-                      const lockedByExam = Boolean(activeExam?.active);
-                      return (
-                        <button
-                          key={v.id}
-                          onClick={() => {
-                            handleSelectVehicle(v.id);
-                            setIsMenuOpen(false);
-                          }}
-                          title={lockedByExam ? 'Troca de veículo bloqueada durante exame ativo' : undefined}
-                          className={`text-left px-2 py-1.5 rounded flex items-center justify-between transition ${
-                            vehicleConfig === v.id
-                              ? 'bg-cyan-500 text-black font-bold'
-                              : lockedByExam
-                                ? 'text-slate-600 opacity-60 cursor-not-allowed'
-                                : unlocked
-                                  ? 'text-slate-300 hover:bg-slate-900'
-                                  : 'text-slate-500 hover:bg-slate-900/70'
-                          }`}
-                        >
-                          <span className="truncate">{v.name}</span>
-                          <span className="flex items-center gap-1 ml-2 shrink-0">
-                            {(!unlocked || lockedByExam) && (
-                              <span
-                                className="text-[9px]"
-                                title={lockedByExam ? 'Bloqueado durante exame ativo' : `Requer licença ${v.badge}`}
-                              >
-                                🔒
-                              </span>
-                            )}
-                            <span className="text-[9px] font-mono px-1 rounded bg-black/40 text-white">{v.badge}</span>
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="h-px bg-slate-800" />
-
-                {/* 2. Mode & Progression Systems */}
+                {/* 1. Mode Selector (Career vs Sandbox) */}
                 <div>
                   <div className="text-[10px] font-mono uppercase tracking-wider text-amber-400 px-2 py-0.5 font-bold">
                     Modo de Jogo
@@ -1150,6 +1110,79 @@ export default function App() {
                       Sandbox
                     </button>
                   </div>
+                </div>
+
+                <div className="h-px bg-slate-800" />
+
+                {/* 2. Vehicles (Direct spawn available in Sandbox only) */}
+                <div>
+                  <div className="text-[10px] font-mono uppercase tracking-wider text-cyan-400 px-2 py-0.5 font-bold flex items-center justify-between">
+                    <span>Tipologia de Veículo & Carga</span>
+                    {telemetry.gameMode !== 'sandbox' && (
+                      <span className="text-[9px] text-amber-400/90 font-normal">SANDBOX</span>
+                    )}
+                  </div>
+                  {telemetry.gameMode === 'sandbox' ? (
+                    <div className="flex flex-col gap-0.5 mt-1">
+                      {([
+                        { id: 'solo', name: 'Solo 4x2 (Camião Rígido)', badge: 'SOLO', req: 'C' },
+                        { id: 'standard', name: 'Standard 13.6m', badge: 'C', req: 'C' },
+                        { id: 'reefer', name: 'Frigorífico 13.6m', badge: 'C', req: 'C' },
+                        { id: 'container', name: 'Porta-Contentores ISO 40ft', badge: 'C', req: 'C' },
+                        { id: 'tanker_milk', name: 'Cisterna Leite / Alimentar', badge: 'C', req: 'C' },
+                        { id: 'long_cargo', name: 'Pá Eólica 62m', badge: 'C+E', req: 'CE' },
+                        { id: 'flatbed_heavy', name: 'Prancha Pesada / Escavadora', badge: 'C+E', req: 'CE' },
+                        { id: 'timber', name: 'Florestal / Toros de Madeira', badge: 'C+E', req: 'CE' },
+                        { id: 'tanker_fuel', name: 'Cisterna Petróleo / Combustível', badge: 'C+E', req: 'CE' },
+                        { id: 'bitrem', name: 'Bitrem B-Double Standard', badge: 'H', req: 'H' },
+                        { id: 'bitrem_tanker', name: 'Bitrem Cisterna Combustível', badge: 'H', req: 'H' },
+                        { id: 'fragile_glass', name: 'Vidro Óptico Especial', badge: 'X', req: 'X' },
+                        { id: 'tanker_hazmat', name: 'Cisterna Líquidos Perigosos ADR', badge: 'X', req: 'X' },
+                      ] as Array<{ id: VehicleConfigType; name: string; badge: string; req: LicenseId }>).map((v) => {
+                        const unlocked = v.req === 'C' || (licenses.find((l) => l.id === v.req)?.unlocked ?? false);
+                        const lockedByExam = Boolean(activeExam?.active);
+                        return (
+                          <button
+                            key={v.id}
+                            onClick={() => {
+                              handleSelectVehicle(v.id);
+                              setIsMenuOpen(false);
+                            }}
+                            title={lockedByExam ? 'Troca de veículo bloqueada durante exame ativo' : undefined}
+                            className={`text-left px-2 py-1.5 rounded flex items-center justify-between transition ${
+                              vehicleConfig === v.id
+                                ? 'bg-cyan-500 text-black font-bold'
+                                : lockedByExam
+                                  ? 'text-slate-600 opacity-60 cursor-not-allowed'
+                                  : unlocked
+                                    ? 'text-slate-300 hover:bg-slate-900'
+                                    : 'text-slate-500 hover:bg-slate-900/70'
+                            }`}
+                          >
+                            <span className="truncate">{v.name}</span>
+                            <span className="flex items-center gap-1 ml-2 shrink-0">
+                              {(!unlocked || lockedByExam) && (
+                                <span
+                                  className="text-[9px]"
+                                  title={lockedByExam ? 'Bloqueado durante exame ativo' : `Requer licença ${v.badge}`}
+                                >
+                                  🔒
+                                </span>
+                              )}
+                              <span className="text-[9px] font-mono px-1 rounded bg-black/40 text-white">{v.badge}</span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div
+                      data-testid="career-tipologia-notice"
+                      className="mt-1 mx-1 px-2.5 py-2 rounded-lg bg-slate-900/80 border border-slate-800 text-[11px] text-slate-400 leading-snug"
+                    >
+                      Na Carreira os atrelados são acoplados fisicamente nos parques ou missões. Troca direta disponível no modo <span className="text-amber-300 font-semibold">Sandbox</span>.
+                    </div>
+                  )}
                 </div>
 
                 <div className="h-px bg-slate-800" />

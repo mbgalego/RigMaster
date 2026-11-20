@@ -57,12 +57,15 @@ export class Truck {
 
   public width: number;
   public length: number;
+  public wheelbase: number = 56;
+  /** Longitudinal offset (+Y behind cab center) of the fifth-wheel hitch plate. */
+  public hitchOffsetY: number = 25;
   // Front-solid zone proxy: covers the tractor EXCEPT the rear fifth-wheel
   // strip. Pairs ONLY with trailer bodies so the cab cannot pass through a
   // trailer's kingpin nose zone, while the rear strip stays open to slide
   // under the nose plate (allowed intersection: trailer nose x truck rear).
   public frontBody: MatterJS.BodyType;
-  private frontDepth: number = 45;
+  private frontDepth: number = 36;
   private frontDesired: { x: number; y: number } | null = null;
   public maxForwardSpeed: number = 160; // in px/s (~36 km/h yard maneuver)
   public maxReverseSpeed: number = 54;  // in px/s (~12 km/h slow maneuvering reverse)
@@ -126,7 +129,7 @@ export class Truck {
     return this.damage.rearLights;
   }
 
-  /** Applies a truck model + sidegrades, updating live physics and cab/axle rendering. */
+  /** Applies a truck model + sidegrades, updating live physics, dimensions, and cab/axle rendering. */
   public setTruckSpec(
     type: TruckType,
     upgrades?: TruckUpgrades,
@@ -136,11 +139,73 @@ export class Truck {
     if (upgrades) {
       this.upgrades = { ...upgrades };
     }
+    const spec = TRUCK_CATALOG[this.truckType] ?? TRUCK_CATALOG.iveco_daily_4x2;
+    const dimsChanged = this.width !== spec.width || this.length !== spec.length;
+    this.width = spec.width;
+    this.length = spec.length;
+    this.wheelbase = spec.wheelbase;
+    this.frontDepth = Math.round(this.length * 0.47);
+    this.hitchOffsetY = Math.round(this.length / 2 - 13);
+
     this.recomputeEffectiveSpecs(resetFuel);
+    if (dimsChanged && this.body && this.frontBody) {
+      this.rebuildPhysicsBodies();
+    }
     this.lastWheelsKey = '';
+    this.lastLightsKey = '';
     this.drawTruck();
     this.drawWheels();
     this.drawLights();
+  }
+
+  /** Rebuilds main and front-solid Matter bodies when switching between tractors of different physical size. */
+  private rebuildPhysicsBodies(): void {
+    const x = this.body.position.x;
+    const y = this.body.position.y;
+    const angle = this.body.angle;
+    const prevLayer = this.layer;
+
+    if (this.scene.matter?.world) {
+      this.scene.matter.world.remove(this.body);
+      this.scene.matter.world.remove(this.frontBody);
+    }
+
+    const matter = this.scene.matter;
+    this.body = matter.add.rectangle(x, y, this.width, this.length, {
+      mass: 65,
+      frictionAir: 0.05,
+      friction: 0.8,
+      restitution: 0.0,
+      angle,
+      label: 'truck_cab',
+      collisionFilter: {
+        category: prevLayer === 1 ? COLLISION_CAT.TRUCK_L1 : COLLISION_CAT.TRUCK_L0,
+        mask: prevLayer === 1 ? COLLISION_MASK.TRUCK_L1 : COLLISION_MASK.TRUCK_L0,
+        group: -1,
+      },
+      render: { visible: false },
+    }) as unknown as MatterJS.BodyType;
+    this.scene.matter.body.setInertia(this.body, Infinity);
+
+    const fzOffX = (this.frontDepth / 2) * Math.sin(angle);
+    const fzOffY = -(this.frontDepth / 2) * Math.cos(angle);
+    this.frontBody = matter.add.rectangle(x + fzOffX, y + fzOffY, this.width, this.length - this.frontDepth, {
+      mass: 5,
+      frictionAir: 1,
+      friction: 0,
+      restitution: 0,
+      angle,
+      label: 'truck_front_zone',
+      collisionFilter: {
+        category: prevLayer === 1 ? COLLISION_CAT.FRONT_L1 : COLLISION_CAT.FRONT_L0,
+        mask: prevLayer === 1 ? COLLISION_MASK.FRONT_L1 : COLLISION_MASK.FRONT_L0,
+        group: 0,
+      },
+      render: { visible: false },
+    }) as unknown as MatterJS.BodyType;
+
+    this.frontDesired = null;
+    this.syncFrontBody();
   }
 
   /** Updates installed sidegrade upgrades immediately (workshop tuning). */
@@ -173,6 +238,7 @@ export class Truck {
 
   /** Restores exact state from a persisted FleetTruckState (boot or physical swap). */
   public applyFleetState(fleet: FleetTruckState): void {
+    this.resetTelemetry();
     this.setTruckSpec(fleet.type, fleet.upgrades, false);
     this.damage = {
       ...fleet.damage,
@@ -338,9 +404,13 @@ export class Truck {
 
   constructor(scene: Phaser.Scene, config: TruckConfig) {
     this.scene = scene;
-    this.width = config.width || 48;
-    this.length = config.length || 96;
     this.truckType = config.truckType ?? 'iveco_daily_4x2';
+    const spec = TRUCK_CATALOG[this.truckType] ?? TRUCK_CATALOG.iveco_daily_4x2;
+    this.width = config.width || spec.width;
+    this.length = config.length || spec.length;
+    this.wheelbase = spec.wheelbase;
+    this.frontDepth = Math.round(this.length * 0.47);
+    this.hitchOffsetY = Math.round(this.length / 2 - 13);
     this.upgrades = config.upgrades ? { ...config.upgrades } : { ...DEFAULT_TRUCK_UPGRADES };
     this.recomputeEffectiveSpecs(true);
     this.steerSpeed = config.steerSpeed || 2.4;
@@ -833,8 +903,8 @@ export class Truck {
     this.vLat *= (1.0 - lateralGripFactor);
     if (Math.abs(this.vLat) < 0.1) this.vLat = 0;
 
-    // 4. Ackermann Steering & Angular Velocity (rad/s) with steering wear pull
-    const wheelbase = 56;
+    // 4. Ackermann Steering & Angular Velocity (rad/s) with model wheelbase & steering wear pull
+    const wheelbase = this.wheelbase;
     const steerWear = Math.max(0, (80 - this.damage.steering) / 80);
     const speedRollWeight = Phaser.Math.Clamp(Math.abs(this.vLong) / 35, 0, 1);
     const pullBias = this.damage.steerPull * steerWear * 0.065 * speedRollWeight;
@@ -853,7 +923,7 @@ export class Truck {
     const latY = Math.sin(angle);
 
     // Lateral velocity at center of mass due to rear axle pivot
-    const rearAxleDist = 28;
+    const rearAxleDist = wheelbase * 0.5;
     const pivotLatV = this.vLong * (rearAxleDist / wheelbase) * Math.tan(effectiveSteer);
 
     const targetVx = fwdX * this.vLong + latX * (this.vLat + pivotLatV);
@@ -943,8 +1013,8 @@ export class Truck {
     g.lineStyle(1.4, trimAccent, 0.75);
     g.strokeRect(-hw + 2, -hl, w - 4, spec.axleRank >= 2 ? 12 : 10);
 
-    // Cab roof colored by truck model
-    const cabH = spec.axleRank === 3 ? 48 : spec.axleRank === 2 ? 46 : 42;
+    // Cab roof colored by truck model (scaled to chassis length)
+    const cabH = Math.min(spec.axleRank === 3 ? 46 : spec.axleRank === 2 ? 43 : 35, l * 0.48);
     g.fillStyle(cabAccent, 0.38);
     g.fillRoundedRect(-hw + 4, -hl + 8, w - 8, cabH, 4);
     g.lineStyle(2, trimAccent, 0.88);
@@ -953,9 +1023,9 @@ export class Truck {
     // Roof racing / fleet stripe (differentiates 6x4 / 8x4 heavy tractors)
     g.fillStyle(trimAccent, 0.55);
     if (spec.axleRank >= 2) {
-      g.fillRect(-5, -hl + 27, 10, cabH - 22);
+      g.fillRect(-5, -hl + 24, 10, Math.max(8, cabH - 20));
     } else {
-      g.fillRect(-3, -hl + 28, 6, cabH - 24);
+      g.fillRect(-3, -hl + 24, 6, Math.max(6, cabH - 20));
     }
 
     // Heavy air-intake / beacon bar behind cab on 8x4 models
@@ -969,23 +1039,25 @@ export class Truck {
 
     // Windshield
     g.fillStyle(0x0284c7, 0.85);
-    g.fillRoundedRect(-hw + 8, -hl + 12, w - 16, 13, 2);
+    g.fillRoundedRect(-hw + 7, -hl + 11, w - 14, 12, 2);
 
     // Side Mirrors
     g.fillStyle(trimAccent, 0.95);
-    g.fillRect(-hw - 5, -hl + 12, 4, 12);
-    g.fillRect(hw + 1, -hl + 12, 4, 12);
+    g.fillRect(-hw - 4, -hl + 12, 3.5, 11);
+    g.fillRect(hw + 0.5, -hl + 12, 3.5, 11);
 
-    // Fifth Wheel Plate
+    // Fifth Wheel Plate (positioned at dynamic hitchOffsetY)
+    const hitchY = this.hitchOffsetY;
+    const plateR = Math.min(13, hw - 4);
     g.fillStyle(0x0f172a, 1);
     g.lineStyle(2, 0xfacc15, 0.95);
-    g.fillCircle(0, 35, 14);
-    g.strokeCircle(0, 35, 14);
+    g.fillCircle(0, hitchY, plateR);
+    g.strokeCircle(0, hitchY, plateR);
 
     g.lineStyle(3, 0xfacc15, 1);
     g.beginPath();
-    g.moveTo(0, 35);
-    g.lineTo(0, 49);
+    g.moveTo(0, hitchY);
+    g.lineTo(0, Math.min(hl - 1, hitchY + plateR));
     g.strokePath();
 
     // Subtle visual wear marks when chassis is damaged
@@ -1016,8 +1088,8 @@ export class Truck {
     gRear.clear();
 
     const hw = this.width / 2;
-    const frontY = -this.length / 2 + 18;
-    const rearY = this.length / 2 - 20;
+    const frontY = -this.length / 2 + Math.min(18, this.length * 0.21);
+    const rearY = this.length / 2 - Math.min(20, this.length * 0.22);
 
     const drawTire = (
       ctx: Phaser.GameObjects.Graphics,
@@ -1158,8 +1230,8 @@ export class Truck {
         g.fillCircle(x, hl - 2, 3);
       }
     };
-    drawRearBrakeLamp(-hw + 8, rearOut.brakeLeft);
-    drawRearBrakeLamp(hw - 8, rearOut.brakeRight);
+    drawRearBrakeLamp(-hw + 6, rearOut.brakeLeft);
+    drawRearBrakeLamp(hw - 6, rearOut.brakeRight);
 
     const drawRearReverseLamp = (x: number, out: { active: boolean; factor: number }) => {
       if (!out.active) {
@@ -1174,8 +1246,8 @@ export class Truck {
         g.fillCircle(x, hl - 2, 3);
       }
     };
-    drawRearReverseLamp(-hw + 16, rearOut.reverseLeft);
-    drawRearReverseLamp(hw - 16, rearOut.reverseRight);
+    drawRearReverseLamp(-hw + 12, rearOut.reverseLeft);
+    drawRearReverseLamp(hw - 12, rearOut.reverseRight);
   }
 
   public setPosition(x: number, y: number, angle: number = 0) {

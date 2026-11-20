@@ -137,8 +137,9 @@ const coastMid = await page.evaluate(() => {
   const t = rig.truck;
   const tr = rig.trailer;
   const ta = t.body.angle;
-  const hx = t.body.position.x - Math.sin(ta) * 35;
-  const hy = t.body.position.y + Math.cos(ta) * 35;
+  const hitchOff = t.hitchOffsetY ?? 35;
+  const hx = t.body.position.x - Math.sin(ta) * hitchOff;
+  const hy = t.body.position.y + Math.cos(ta) * hitchOff;
   const tra = tr.body.angle;
   const px = tr.body.position.x + Math.sin(tra) * tr.kingpinDist;
   const py = tr.body.position.y - Math.cos(tra) * tr.kingpinDist;
@@ -258,11 +259,54 @@ const afterRefuel = await page.evaluate(() => {
 check('tanque cheio após abastecer (F)', afterRefuel.fuelLevel >= 499, `${afterRefuel.fuelLevel}L`);
 check('isOutOfFuel = false após abastecer', afterRefuel.isOutOfFuel === false);
 
-// 6. Respawn (R) refills tank to 100%
+// 6a. Career R (free drive): preserves fuel minus small tow cost (~5L), never refills to 100%; when dry, tows to nearest gas pump
 await page.evaluate(() => {
-  const truck = window.__rig.truck;
-  truck.fuelLevel = 50;
-  truck.isOutOfFuel = false;
+  const rig = window.__rig;
+  rig.setGameMode('career');
+  rig.truck.fuelLevel = 50;
+  rig.truck.isOutOfFuel = false;
+});
+await page.keyboard.press('r');
+await page.waitForTimeout(350);
+const afterCareerR = await page.evaluate(() => ({
+  fuelLevel: window.__rig.truck.fuelLevel,
+  fuelPercent: window.__rig.truck.fuelPercent,
+}));
+check(
+  'Carreira (R): reboque preserva combustível (com pequeno custo ~5L) sem atestar grátis',
+  afterCareerR.fuelLevel >= 44 && afterCareerR.fuelLevel <= 46,
+  `${afterCareerR.fuelLevel.toFixed(1)}L`,
+);
+
+// Dry truck in Career -> R tows right beside nearest gas pump (fuel stays 0 so player presses F)
+await page.evaluate(() => {
+  const rig = window.__rig;
+  rig.truck.setPosition(6200, 4800, 0);
+  rig.truck.fuelLevel = 0;
+  rig.truck.isOutOfFuel = true;
+});
+await page.keyboard.press('r');
+await page.waitForTimeout(350);
+const afterDryTow = await page.evaluate(() => {
+  const rig = window.__rig;
+  const pumps = rig.world.objects.objects.filter((o) => o.type === 'gas_pump');
+  const minPumpDist = Math.min(
+    ...pumps.map((p) => Math.hypot(rig.truck.body.position.x - p.x, rig.truck.body.position.y - p.y)),
+  );
+  return { fuelLevel: rig.truck.fuelLevel, isOutOfFuel: rig.truck.isOutOfFuel, minPumpDist: Math.round(minPumpDist) };
+});
+check(
+  'Carreira (R) sem combustível: reboca até à bomba mais próxima mantendo depósito vazio',
+  afterDryTow.fuelLevel === 0 && afterDryTow.isOutOfFuel === true && afterDryTow.minPumpDist <= 130,
+  JSON.stringify(afterDryTow),
+);
+
+// 6b. Sandbox R refills tank to 100%
+await page.evaluate(() => {
+  const rig = window.__rig;
+  rig.setGameMode('sandbox');
+  rig.truck.fuelLevel = 50;
+  rig.truck.isOutOfFuel = false;
 });
 await page.keyboard.press('r');
 await page.waitForTimeout(400);
@@ -271,7 +315,7 @@ const afterRespawn = await page.evaluate(() => ({
   fuelPercent: window.__rig.truck.fuelPercent,
   isOutOfFuel: window.__rig.truck.isOutOfFuel,
 }));
-check('respawn (R) coloca combustível a 100%', afterRespawn.fuelPercent >= 99.9 && afterRespawn.isOutOfFuel === false, `${afterRespawn.fuelPercent.toFixed(1)}%`);
+check('Sandbox: respawn (R) coloca combustível a 100%', afterRespawn.fuelPercent >= 99.9 && afterRespawn.isOutOfFuel === false, `${afterRespawn.fuelPercent.toFixed(1)}%`);
 
 await page.screenshot({ path: '/tmp/opencode/fuel-end.png' });
 await browser.close();

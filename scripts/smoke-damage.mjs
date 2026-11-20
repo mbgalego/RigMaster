@@ -69,9 +69,10 @@ const stepSim = (opts) =>
     };
   }, opts);
 
-// 1. Clean initial integrity & repair bays loaded
+// 1. Clean initial integrity & repair bays loaded (explicitly spawn standard rig since default boot is solo)
 const initState = await page.evaluate(() => {
   const rig = window.__rig;
+  rig.spawnVehicleRig('standard');
   return {
     truckHealth: rig.truck.health,
     trailerHealth: rig.trailer?.trailerHealth ?? null,
@@ -92,8 +93,9 @@ await page.evaluate(() => {
   const bay = rig.world.repairBays[0];
   rig.spawnVehicleRig('solo');
   rig.truck.setElevation(0, 0);
-  // Bay center is ~67px south of garage wall bottom; truck half-length is 44px -> at bay.y - 10, nose is ~13px south of wall
-  rig.truck.setPosition(bay.x, bay.y - 10, 0); // facing North toward garage building
+  // Bay center is ~67px south of garage wall bottom; place nose ~13px south of wall dynamically for any truck length
+  const halfLen = rig.truck.length / 2;
+  rig.truck.setPosition(bay.x, bay.y - (54 - halfLen), 0); // facing North toward garage building
   rig.truck.vLong = 14;
   rig.truck.vx = 0;
   rig.truck.vy = -14;
@@ -138,7 +140,7 @@ await page.evaluate(() => {
   rig.truck.repairToFull();
   rig.truck.resetTelemetry();
   rig.truck.setElevation(0, 0);
-  rig.truck.setPosition(bay.x, bay.y + 30, 0); // facing North straight into garage solid body
+  rig.truck.setPosition(bay.x, bay.y + 18, 0); // facing North straight into garage solid body
   rig.truck.vLong = 155;
   rig.truck.vx = 0;
   rig.truck.vy = -155;
@@ -155,7 +157,7 @@ check(
 // 4. Engine limp mode (engine <= 15%) caps top speed compared to healthy truck
 const speedComparison = await page.evaluate(() => {
   const rig = window.__rig;
-  rig.spawnVehicleRig('solo');
+  rig.spawnVehicleRig('solo', { repair: true });
   rig.truck.setElevation(0, 0);
   rig.truck.setPosition(5760, 4700, Math.PI / 2);
   rig.truck.setTouchGear('D');
@@ -198,12 +200,13 @@ check(
 const cargoProfileCheck = await page.evaluate(() => {
   const rig = window.__rig;
   const runImpact = (rigType) => {
-    rig.spawnVehicleRig(rigType);
+    rig.spawnVehicleRig(rigType, { repair: true });
     const bay = rig.world.repairBays[0];
+    const off = rig.truck.hitchOffsetY + rig.trailer.kingpinDist;
     // Position trailer back squarely approaching the solid garage body
     rig.truck.setElevation(0, 0);
     rig.trailer.setElevation(0, 0);
-    rig.truck.setPosition(bay.x, bay.y + 185, 0);
+    rig.truck.setPosition(bay.x, bay.y + 55 + off, 0);
     rig.trailer.setPosition(bay.x, bay.y + 55, 0);
     rig.trailer.vx = 0;
     rig.trailer.vy = -95;
@@ -238,7 +241,7 @@ check(
 // 6. Sustained jackknife (> 0.6s) while moving causes continuous trailer & cargo wear (isolated from obstacle collisions)
 const jackknifeWear = await page.evaluate(() => {
   const rig = window.__rig;
-  rig.spawnVehicleRig('standard');
+  rig.spawnVehicleRig('standard', { repair: true });
   rig.truck.setElevation(0, 0);
   rig.trailer.setElevation(0, 0);
   // Orient truck at ~80 deg relative to trailer on open road and reverse slowly so articulation locks/sustains
@@ -275,8 +278,9 @@ const atomicRepairGuards = await page.evaluate(() => {
   const bay = rig.world.repairBays[0];
   rig.truck.setElevation(0, 0);
   rig.trailer.setElevation(0, 0);
+  const dist = rig.truck.hitchOffsetY + rig.trailer.kingpinDist;
   rig.truck.setPosition(bay.x, bay.y, Math.PI / 2);
-  rig.trailer.setPosition(bay.x - 131, bay.y, Math.PI / 2);
+  rig.trailer.setPosition(bay.x - dist, bay.y, Math.PI / 2);
   rig.truck.damage.engine = 40;
   rig.truck.damage.overall = 60;
   rig.trailer.trailerHealth = 64;
@@ -327,8 +331,9 @@ await page.evaluate(() => {
   const bay = rig.world.repairBays[0];
   rig.truck.setElevation(0, 0);
   rig.trailer.setElevation(0, 0);
+  const dist = rig.truck.hitchOffsetY + rig.trailer.kingpinDist;
   rig.truck.setPosition(bay.x, bay.y, Math.PI / 2);
-  rig.trailer.setPosition(bay.x - 131, bay.y, Math.PI / 2);
+  rig.trailer.setPosition(bay.x - dist, bay.y, Math.PI / 2);
   rig.truck.vLong = 0;
   rig.truck.currentSpeed = 0;
   rig.matter.body.setVelocity(rig.truck.body, { x: 0, y: 0 });
@@ -366,21 +371,50 @@ check(
   JSON.stringify(postRepair),
 );
 
-// 8. Respawn (R) resets truck, trailer, and cargo integrity all back to 100%
+// 8a. Career free-drive R preserves truck damage, wear & cargoHealth (no free repair)
+await page.evaluate(() => {
+  const rig = window.__rig;
+  rig.setGameMode('career');
+  rig.truck.damage.engine = 60;
+  rig.truck.damage.overall = 76;
+});
+await page.keyboard.press('r');
+await page.waitForTimeout(250);
+const postCareerRecovery = await page.evaluate(() => {
+  const rig = window.__rig;
+  rig.update(performance.now() + 16.6667, 16.6667);
+  return {
+    truckHealth: rig.truck.health,
+    engine: Math.round(rig.truck.damage.engine),
+    cargoHealth: rig.trailer ? Math.round(rig.trailer.cargoHealth) : 100,
+  };
+});
+check(
+  'Carreira (R) fora de missão desencrava mantendo danos do camião e da carga (sem cura grátis)',
+  postCareerRecovery.engine === 60 && postCareerRecovery.cargoHealth === 72,
+  JSON.stringify(postCareerRecovery),
+);
+
+// 8b. Sandbox respawn (R) resets truck, trailer, and cargo integrity all back to 100%
+await page.evaluate(() => {
+  window.__rig.setGameMode('sandbox');
+});
 await page.keyboard.press('r');
 await page.waitForTimeout(250);
 const postRespawn = await page.evaluate(() => {
   const rig = window.__rig;
   rig.update(performance.now() + 16.6667, 16.6667);
-  return {
+  const res = {
     truckHealth: rig.truck.health,
     trailerHealth: rig.trailer?.trailerHealth ?? 100,
     cargoHealth: rig.trailer?.cargoHealth ?? 100,
     fuelPercent: rig.telemetry.fuelPercent,
   };
+  rig.setGameMode('career');
+  return res;
 });
 check(
-  'respawn (R) repõe integridade de camião, atrelado, carga e combustível a 100%',
+  'Sandbox: respawn (R) repõe integridade de camião, atrelado, carga e combustível a 100%',
   postRespawn.truckHealth === 100 && postRespawn.trailerHealth === 100 && postRespawn.cargoHealth === 100 && postRespawn.fuelPercent === 100,
   JSON.stringify(postRespawn),
 );
@@ -465,7 +499,8 @@ const rearLightCheck = await page.evaluate(() => {
   const bay = rig.world.repairBays[0];
   rig.truck.setElevation(0, 0);
   rig.truck.setHeadlightMode('low');
-  rig.truck.setPosition(bay.x, bay.y + 4, Math.PI); // rear at bay.y - 44, ~23.5px south of garage wall
+  // Place rear bumper ~23px south of garage wall dynamically for current truck length
+  rig.truck.setPosition(bay.x, bay.y - (44 - rig.truck.length / 2), Math.PI);
   rig.truck.vLong = -54;
   rig.truck.vx = 0;
   rig.truck.vy = -54;
@@ -485,6 +520,7 @@ const rearLightCheck = await page.evaluate(() => {
   // Burn out completely with second rear hit, then verify brakeLight and reverseLight stay OFF
   rig.truck.damage.rearLights = { brakeLeft: 0, brakeRight: 0, reverseLeft: 0, reverseRight: 0 };
   rig.truck.damage.lights = 65;
+  rig.truck.vLong = -20;
   rig.truck.isBraking = true;
   rig.truck.isReversing = true;
   rig.update(t + 16.6667, 16.6667);
@@ -497,12 +533,13 @@ const rearLightCheck = await page.evaluate(() => {
   rig.truck.setTouchThrottle(0);
 
   // Part B: Coupled standard trailer reversing straight into the same wall
-  rig.spawnVehicleRig('standard');
+  rig.spawnVehicleRig('standard', { repair: true });
+  const off = rig.truck.hitchOffsetY + rig.trailer.kingpinDist;
   rig.truck.setElevation(0, 0);
   rig.trailer.setElevation(0, 0);
   rig.truck.setHeadlightMode('low');
   // Orient whole rig tail-north so trailer's rear bumper hits wall
-  rig.truck.setPosition(bay.x, bay.y + 185, Math.PI);
+  rig.truck.setPosition(bay.x, bay.y + 60 + off, Math.PI);
   rig.trailer.setPosition(bay.x, bay.y + 60, Math.PI);
   rig.trailer.vx = 0;
   rig.trailer.vy = -54;
@@ -523,6 +560,7 @@ const rearLightCheck = await page.evaluate(() => {
 
   // Burn out trailer rear lamps and check projected brake/reverse lights stay OFF
   rig.trailer.rearLights = { brakeLeft: 0, brakeRight: 0, reverseLeft: 0, reverseRight: 0 };
+  rig.truck.vLong = -20;
   rig.truck.isBraking = true;
   rig.truck.isReversing = true;
   rig.update(t + 33.3334, 16.6667);
@@ -536,6 +574,7 @@ const rearLightCheck = await page.evaluate(() => {
   // Repair structure restores trailer rear lamps
   rig.trailer.repairStructure();
   rig.truck.repairToFull();
+  rig.truck.vLong = -20;
   rig.truck.isBraking = true;
   rig.truck.isReversing = true;
   rig.update(t + 50, 16.6667);

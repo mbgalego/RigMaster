@@ -279,10 +279,17 @@ export class ReputationSystem {
   private sandboxActiveTruckId: string = 'truck_iveco_daily_4x2';
 
   private listeners: Array<() => void> = [];
+  /** True when Career fleet state has been loaded from or saved to localStorage. */
+  private hasPersistedFleet: boolean = false;
 
   constructor() {
     this.loadFromStorage();
+    // Always evaluate Career unlocks strictly against Career progress (never Sandbox bypass)
     this.evaluateTruckUnlocks();
+  }
+
+  public hasSavedFleetState(): boolean {
+    return this.hasPersistedFleet;
   }
 
   public static getInstance(): ReputationSystem {
@@ -489,17 +496,18 @@ export class ReputationSystem {
     }
   }
 
-  public meetsTruckUnlockRequirements(type: TruckType): boolean {
-    if (this.gameMode === 'sandbox') return true;
+  /** Evaluates truck unlock requirements strictly against Career reputation & certificates. */
+  private meetsCareerTruckUnlockRequirements(type: TruckType): boolean {
     const spec = TRUCK_CATALOG[type];
     if (!spec) return false;
     const req = spec.unlockReq;
 
     if (req.minHubRep) {
       if (req.minHubRep.hubId === 'any') {
-        if (this.getMaxSingleHubReputation() < req.minHubRep.amount) return false;
+        const maxCareerRep = HUB_IDS.reduce((m, id) => Math.max(m, this.careerReputation[id] ?? 0), 0);
+        if (maxCareerRep < req.minHubRep.amount) return false;
       } else {
-        if (this.careerReputation[req.minHubRep.hubId] < req.minHubRep.amount) return false;
+        if ((this.careerReputation[req.minHubRep.hubId] ?? 0) < req.minHubRep.amount) return false;
       }
     }
 
@@ -510,10 +518,15 @@ export class ReputationSystem {
     return true;
   }
 
+  public meetsTruckUnlockRequirements(type: TruckType): boolean {
+    if (this.gameMode === 'sandbox') return true;
+    return this.meetsCareerTruckUnlockRequirements(type);
+  }
+
   public evaluateTruckUnlocks(): TruckType[] {
     const newlyUnlocked: TruckType[] = [];
     for (const truck of this.careerFleet) {
-      if (!truck.unlocked && this.meetsTruckUnlockRequirements(truck.type)) {
+      if (!truck.unlocked && this.meetsCareerTruckUnlockRequirements(truck.type)) {
         truck.unlocked = true;
         newlyUnlocked.push(truck.type);
       }
@@ -664,10 +677,18 @@ export class ReputationSystem {
     return true;
   }
 
-  /** Resets truck wear and structural damage to 100% while preserving upgrades and fuel. */
-  public repairTruckWearAndDamage(truckId: string): boolean {
+  /** Resets truck wear and structural damage to 100% while preserving upgrades and live pose/fuel. */
+  public repairTruckWearAndDamage(truckId: string, liveSnapshot?: ActiveTruckSnapshot): boolean {
     const truck = this.getMutableFleet().find((t) => t.id === truckId);
     if (!truck) return false;
+    if (liveSnapshot) {
+      truck.x = liveSnapshot.x;
+      truck.y = liveSnapshot.y;
+      truck.angle = liveSnapshot.angle;
+      truck.layer = liveSnapshot.layer;
+      truck.locationHub = liveSnapshot.locationHub;
+      truck.fuel = liveSnapshot.fuel;
+    }
     truck.damage = createCleanTruckDamage();
     truck.wear = createCleanTruckWear();
     if (this.gameMode === 'career') {
@@ -692,6 +713,7 @@ export class ReputationSystem {
     this.careerCertificates = createInitialCertificates();
     this.careerFleet = createInitialFleet(false);
     this.careerActiveTruckId = 'truck_iveco_daily_4x2';
+    this.hasPersistedFleet = false;
     safeRemoveStorage(STORAGE_KEYS.hubReputation);
     safeRemoveStorage(STORAGE_KEYS.certificates);
     safeRemoveStorage(STORAGE_KEYS.certificateProgress);
@@ -714,6 +736,7 @@ export class ReputationSystem {
   // ---- Persistence ----
 
   public saveToStorage(): void {
+    this.hasPersistedFleet = true;
     safeSetStorage(STORAGE_KEYS.hubReputation, JSON.stringify(this.careerReputation));
     safeSetStorage(
       STORAGE_KEYS.certificates,
@@ -802,6 +825,7 @@ export class ReputationSystem {
       try {
         const parsed = JSON.parse(rawFleet);
         if (Array.isArray(parsed)) {
+          this.hasPersistedFleet = true;
           const byId = new Map<string, Partial<FleetTruckState>>();
           for (const item of parsed) {
             if (item && typeof item === 'object' && typeof item.id === 'string') {

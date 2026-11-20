@@ -43,7 +43,6 @@ export type WObjType =
   | 'sign'            // traffic sign (variant: 'stop'|'yield'|'speed'|'no_parking'|'pedestrian') (solid small)
   | 'traffic_light'   // signal head (params: dir 'n'|'s'|'e'|'w', group 0|1)
   | 'exam_dock'       // TEMP exam target platform (never serialized)
-  | 'truck_parked'    // parked fleet tractor (params: { truckId, type, upgrades, wear })
   | 'compound';       // composto: agrupa vários sub-objetos com posições relativas (params.parts)
 
 export interface WorldObject {
@@ -138,7 +137,7 @@ const CHUNK_PX = 2048;
 const SOLID_TYPES = new Set<WObjType>([
   'wall', 'jersey_barrier', 'building', 'container_stack', 'silo',
   'gas_pump', 'air_water', 'price_sign', 'lamp', 'sign', 'traffic_light', 'roundabout',
-  'dock_wall', 'truck_parked', 'compound',
+  'dock_wall', 'compound',
 ]);
 
 /** Tipos desenhados na camada FLATS (sob os sólidos) — ver render(). */
@@ -1051,21 +1050,59 @@ export class WorldObjects {
     }
   }
 
-  /**
-   * Traffic lights + glowing streetlamp bulbs — unlit emissive layer.
-   * Actual ground/building illumination is handled by Phaser 4 WebGL Lights.
-   */
-  public renderLights(
+  /** Short key describing the current traffic-light phase (changes only every few seconds). */
+  public getTrafficLightPhaseKey(): string {
+    const s0 = this.lightState(0);
+    const s1 = this.lightState(1);
+    const c0 = s0.red ? 'R' : s0.amber ? 'A' : 'G';
+    const c1 = s1.red ? 'R' : s1.amber ? 'A' : 'G';
+    return `${c0}_${c1}`;
+  }
+
+  /** Renders only overhead cantilevered streetlamp arms/luminaires intersecting `view + margin`. */
+  public renderOverhead(
+    overhead: Phaser.GameObjects.Graphics,
+    view: Phaser.Geom.Rectangle,
+    margin = 420,
+  ) {
+    const x0 = Math.floor((view.x - margin) / OBJ_CELL), x1 = Math.floor((view.x + view.width + margin) / OBJ_CELL);
+    const y0 = Math.floor((view.y - margin) / OBJ_CELL), y1 = Math.floor((view.y + view.height + margin) / OBJ_CELL);
+    const drawn = new Set<string>();
+    for (let cy = y0; cy <= y1; cy++) {
+      for (let cx = x0; cx <= x1; cx++) {
+        const list = this.grid.get(`${cx}_${cy}`);
+        if (!list) continue;
+        for (const o of list) {
+          if (drawn.has(o.id)) continue;
+          if (o.type === 'lamp') {
+            drawn.add(o.id);
+            this.drawOverhead(overhead, o);
+          } else if (o.type === 'compound') {
+            drawn.add(o.id);
+            const parts = compoundParts(o);
+            for (let i = 0; i < parts.length; i++) {
+              if (parts[i].type !== 'lamp') continue;
+              const p = compoundPartWorldObject(o, i);
+              if (!p) continue;
+              if (p.x + p.w / 2 < view.x - margin || p.x - p.w / 2 > view.x + view.width + margin) continue;
+              if (p.y + p.h / 2 < view.y - margin || p.y - p.h / 2 > view.y + view.height + margin) continue;
+              this.drawOverhead(overhead, p);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /** Renders only animated traffic-light LEDs intersecting `view + margin`. */
+  public renderTrafficLights(
     lights: Phaser.GameObjects.Graphics,
     view: Phaser.Geom.Rectangle,
-    lampFactor = 0,
-    overheadLights?: Phaser.GameObjects.Graphics,
+    margin = 360,
   ) {
     lights.clear();
-    overheadLights?.clear();
-    const M = 160;
-    const x0 = Math.floor((view.x - M) / OBJ_CELL), x1 = Math.floor((view.x + view.width + M) / OBJ_CELL);
-    const y0 = Math.floor((view.y - M) / OBJ_CELL), y1 = Math.floor((view.y + view.height + M) / OBJ_CELL);
+    const x0 = Math.floor((view.x - margin) / OBJ_CELL), x1 = Math.floor((view.x + view.width + margin) / OBJ_CELL);
+    const y0 = Math.floor((view.y - margin) / OBJ_CELL), y1 = Math.floor((view.y + view.height + margin) / OBJ_CELL);
     const drawn = new Set<string>();
     for (let cy = y0; cy <= y1; cy++) {
       for (let cx = x0; cx <= x1; cx++) {
@@ -1076,35 +1113,119 @@ export class WorldObjects {
           if (o.type === 'traffic_light') {
             drawn.add(o.id);
             this.drawSolid(lights, o);
-          } else if (o.type === 'lamp' && lampFactor > 0.05) {
+          } else if (o.type === 'compound') {
             drawn.add(o.id);
-            const target = overheadLights ?? lights;
-            const bulb = WorldObjects.getLampBulbPos(o);
-            target.fillStyle(0xffe7a8, 0.38 * lampFactor);
-            target.fillCircle(bulb.x, bulb.y, 9);
-            target.fillStyle(0xfff6d6, 0.96 * lampFactor);
-            target.fillCircle(bulb.x, bulb.y, 4);
+            const parts = compoundParts(o);
+            for (let i = 0; i < parts.length; i++) {
+              if (parts[i].type !== 'traffic_light') continue;
+              const p = compoundPartWorldObject(o, i);
+              if (!p) continue;
+              if (p.x + p.w / 2 < view.x - margin || p.x - p.w / 2 > view.x + view.width + margin) continue;
+              if (p.y + p.h / 2 < view.y - margin || p.y - p.h / 2 > view.y + view.height + margin) continue;
+              this.drawSolid(lights, p);
+            }
           }
         }
       }
     }
   }
 
-  /** Fast spatial-grid lookup of light-emitting prefabs intersecting the view. */
-  public getEmittersInView(view: Phaser.Geom.Rectangle, margin = 380): WorldObject[] {
+  /**
+   * Renders glowing streetlamp bulb cores at base opacity (1.0) so callers can
+   * modulate brightness via `overheadLights.setAlpha(lampFactor)` without
+   * clearing and redrawing every frame.
+   */
+  public renderLampBulbs(
+    overheadLights: Phaser.GameObjects.Graphics,
+    view: Phaser.Geom.Rectangle,
+    margin = 420,
+  ) {
+    overheadLights.clear();
+    const x0 = Math.floor((view.x - margin) / OBJ_CELL), x1 = Math.floor((view.x + view.width + margin) / OBJ_CELL);
+    const y0 = Math.floor((view.y - margin) / OBJ_CELL), y1 = Math.floor((view.y + view.height + margin) / OBJ_CELL);
+    const drawn = new Set<string>();
+    const drawBulb = (o: WorldObject) => {
+      const bulb = WorldObjects.getLampBulbPos(o);
+      overheadLights.fillStyle(0xffe7a8, 0.38);
+      overheadLights.fillCircle(bulb.x, bulb.y, 9);
+      overheadLights.fillStyle(0xfff6d6, 0.96);
+      overheadLights.fillCircle(bulb.x, bulb.y, 4);
+    };
+    for (let cy = y0; cy <= y1; cy++) {
+      for (let cx = x0; cx <= x1; cx++) {
+        const list = this.grid.get(`${cx}_${cy}`);
+        if (!list) continue;
+        for (const o of list) {
+          if (drawn.has(o.id)) continue;
+          if (o.type === 'lamp') {
+            drawn.add(o.id);
+            drawBulb(o);
+          } else if (o.type === 'compound') {
+            drawn.add(o.id);
+            const parts = compoundParts(o);
+            for (let i = 0; i < parts.length; i++) {
+              if (parts[i].type !== 'lamp') continue;
+              const p = compoundPartWorldObject(o, i);
+              if (!p) continue;
+              if (p.x + p.w / 2 < view.x - margin || p.x - p.w / 2 > view.x + view.width + margin) continue;
+              if (p.y + p.h / 2 < view.y - margin || p.y - p.h / 2 > view.y + view.height + margin) continue;
+              drawBulb(p);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Traffic lights + glowing streetlamp bulbs — unlit emissive layer.
+   * Actual ground/building illumination is handled by WorldLightPools + Phaser 4 WebGL Lights.
+   */
+  public renderLights(
+    lights: Phaser.GameObjects.Graphics,
+    view: Phaser.Geom.Rectangle,
+    lampFactor = 0,
+    overheadLights?: Phaser.GameObjects.Graphics,
+  ) {
+    this.renderTrafficLights(lights, view, 160);
+    if (overheadLights) {
+      if (lampFactor > 0.04) {
+        this.renderLampBulbs(overheadLights, view, 160);
+        overheadLights.setAlpha(lampFactor);
+      } else {
+        overheadLights.clear();
+      }
+    }
+  }
+
+  /** Fast spatial-grid lookup of light-emitting prefabs intersecting the view (including compound parts). */
+  public getEmittersInView(view: Phaser.Geom.Rectangle, margin = 400): WorldObject[] {
     const x0 = Math.floor((view.x - margin) / OBJ_CELL), x1 = Math.floor((view.x + view.width + margin) / OBJ_CELL);
     const y0 = Math.floor((view.y - margin) / OBJ_CELL), y1 = Math.floor((view.y + view.height + margin) / OBJ_CELL);
     const seen = new Set<string>();
     const out: WorldObject[] = [];
+    const isEmitter = (t: WorldObject['type']) =>
+      t === 'lamp' || t === 'traffic_light' || t === 'gas_canopy' || t === 'gas_pump';
     for (let cy = y0; cy <= y1; cy++) {
       for (let cx = x0; cx <= x1; cx++) {
         const list = this.grid.get(`${cx}_${cy}`);
         if (!list) continue;
         for (const o of list) {
           if (seen.has(o.id)) continue;
-          if (o.type === 'lamp' || o.type === 'traffic_light' || o.type === 'gas_canopy' || o.type === 'gas_pump') {
+          if (isEmitter(o.type)) {
             seen.add(o.id);
             out.push(o);
+          } else if (o.type === 'compound') {
+            seen.add(o.id);
+            const parts = compoundParts(o);
+            for (let i = 0; i < parts.length; i++) {
+              if (!isEmitter(parts[i].type)) continue;
+              const p = compoundPartWorldObject(o, i);
+              if (!p) continue;
+              if (p.x < view.x - margin || p.x > view.x + view.width + margin) continue;
+              if (p.y < view.y - margin || p.y > view.y + view.height + margin) continue;
+              out.push(p);
+            }
           }
         }
       }
@@ -2638,26 +2759,6 @@ export class WorldObjects {
           g.strokeRect(spX - 16, boomY - 12, 32, boomH + 24);
           g.fillStyle(0xdc2626, 1);
           g.fillCircle(spX, o.y, 3);
-          break;
-        }
-        case 'truck_parked': {
-          const w = o.w || 48;
-          const h = o.h || 96;
-          const colorHex = typeof o.params?.cabColor === 'number' ? o.params.cabColor : 0x38bdf8;
-          g.fillStyle(0x000000, 0.3);
-          g.fillRoundedRect(x0 + 3, y0 + 4, w, h, 5);
-          g.fillStyle(0x131a29, 1);
-          g.fillRoundedRect(x0, y0, w, h, 5);
-          g.lineStyle(2, colorHex, 0.9);
-          g.strokeRoundedRect(x0, y0, w, h, 5);
-          // Cabina frontal
-          g.fillStyle(colorHex, 0.55);
-          g.fillRoundedRect(x0 + 4, y0 + 6, w - 8, Math.min(40, h * 0.44), 4);
-          g.lineStyle(1.5, 0xe2e8f0, 0.8);
-          g.strokeRoundedRect(x0 + 4, y0 + 6, w - 8, Math.min(40, h * 0.44), 4);
-          // Para-brisas
-          g.fillStyle(0x0f172a, 0.85);
-          g.fillRect(x0 + 7, y0 + 10, w - 14, 10);
           break;
         }
         case 'silo': {

@@ -4,6 +4,8 @@ import { Trailer, TrailerType, isBitremLeadType } from '../entities/Trailer';
 import { Kingpin, ArticulationTelemetry } from '../physics/Kingpin';
 import { World } from '../world/World';
 import { WorldObjects, RepairBay } from '../world/WorldObjects';
+import { StaticWorldChunks, type StaticChunkStats } from '../world/StaticWorldChunks';
+import { WorldLightPools, type HubGlowSpot, type LightPoolStats } from '../world/WorldLightPools';
 import { LicenseSystem, LicenseExam, LicenseId } from '../systems/LicenseSystem';
 import { GarageSystem, HubDockSpec, HubId, WeatherModifier } from '../systems/GarageSystem';
 import { TimeOfDaySystem, TimePeriod, TimeOfDaySnapshot } from '../systems/TimeOfDaySystem';
@@ -78,27 +80,30 @@ export class MainScene extends Phaser.Scene {
   public missionSystem!: MissionSystem;
   public parkedTruckManager!: ParkedTruckManager;
 
-  // WebGL Lights (Phaser 4 LightsPlugin: 2 headlights + brake + reverse + 4 world emitters = 8)
-  private static readonly MAX_WORLD_LIGHTS = 4;
+  // WebGL Lights (Phaser 4 LightsPlugin: 2 headlights + brake + reverse = 4 dynamic vehicle lights;
+  // world streetlamps / canopies / traffic lights / hub neons use seamless batched WorldLightPools)
   private webglLightingActive: boolean = false;
   private headlightLeft: Phaser.GameObjects.Light | null = null;
   private headlightRight: Phaser.GameObjects.Light | null = null;
   private brakeLight: Phaser.GameObjects.Light | null = null;
   private reverseLight: Phaser.GameObjects.Light | null = null;
-  private worldLightPool: Phaser.GameObjects.Light[] = [];
+  private worldLightPools: WorldLightPools | null = null;
 
   // The single procedural island world (no tiles)
   public world!: World;
+  private staticWorldChunks: StaticWorldChunks | null = null;
   private flatsGraphics: Phaser.GameObjects.Graphics | null = null;
   private roadFlatsGraphics: Phaser.GameObjects.Graphics | null = null;
   private solidsGraphics: Phaser.GameObjects.Graphics | null = null;
   private lightsGraphics: Phaser.GameObjects.Graphics | null = null;
   private overheadGraphics: Phaser.GameObjects.Graphics | null = null;
   private overheadLightsGraphics: Phaser.GameObjects.Graphics | null = null;
-  // Static object layers are redrawn only when the camera or the world changed
+  // Cached redraw thresholds for lightweight overhead & traffic-light layers
   private lastObjRender = { x: NaN, y: NaN, zoom: NaN, version: -1 };
+  private lastTrafficRender = { x: NaN, y: NaN, zoom: NaN, version: -1, phase: '' };
+  private lastLampBulbRender = { x: NaN, y: NaN, zoom: NaN, version: -1 };
 
-  // Vector road network (Phase 1: spline roads over the tile ground + Layer 1 bridges/viaducts)
+  // Vector road network (Phase 1: spline roads baked into chunks + Layer 1 bridges/viaducts)
   public roadNetwork!: RoadNetwork;
   private roadGraphics: Phaser.GameObjects.Graphics | null = null;
   private rampBaseGraphics: Phaser.GameObjects.Graphics | null = null;
@@ -106,6 +111,7 @@ export class MainScene extends Phaser.Scene {
   private bridgeRoadGraphics: Phaser.GameObjects.Graphics | null = null;
   private bridgeBarrierBodies: MatterJS.BodyType[] = [];
   private bridgeBarrierVersion: number = -1;
+  private bridgeRenderVersion: number = -1;
   private bridgeUnderpassAlpha: number = 1;
   private pumpGraphics: Phaser.GameObjects.Graphics | null = null;
   private roadRenderVersion: number = -1;
@@ -184,6 +190,9 @@ export class MainScene extends Phaser.Scene {
   private missionPickupPup: Trailer | null = null;
   private missionSpawnedTrailers: Trailer[] = [];
   private unsubReputation: (() => void) | null = null;
+  private lastFleetAutosaveAt: number = 0;
+  private pageHideFlushHandler: (() => void) | null = null;
+  private visibilityFlushHandler: (() => void) | null = null;
 
   // Damage, G-Force & Impact FX
   private impactGraphics: Phaser.GameObjects.Graphics | null = null;
@@ -367,20 +376,40 @@ export class MainScene extends Phaser.Scene {
     this.world = new World(this);
     this.roadNetwork = RoadNetwork.getInstance();
 
-    // Ground layers: flats (docks/pads) under the roads, road-coloured junctions just above roads (2.4), solids above
+    // Legacy fallback layers (empty during normal play; populated only on extreme Editor whole-island overview)
     this.flatsGraphics = this.add.graphics().setDepth(1).setLighting(false);
     this.roadFlatsGraphics = this.add.graphics().setDepth(2.4).setLighting(false);
-    this.solidsGraphics = this.add.graphics().setDepth(3).setLighting(false);
+    this.solidsGraphics = this.add.graphics().setDepth(2.8).setLighting(false);
+    // Chunked GPU RenderTexture cache for static flats + ground roads + roadFlats + solids (depth 3)
+    this.staticWorldChunks = new StaticWorldChunks(this, (chunkRect, scratches) => {
+      this.world.objects.render(
+        scratches.flats,
+        scratches.solids,
+        chunkRect,
+        undefined,
+        scratches.roadFlats,
+      );
+      this.drawGroundRoadsInto(scratches.roads, chunkRect, 220);
+      return {
+        roadCmds: scratches.roads.commandBuffer.length,
+        objCmds:
+          scratches.flats.commandBuffer.length +
+          scratches.roadFlats.commandBuffer.length +
+          scratches.solids.commandBuffer.length,
+      };
+    });
     // Traffic light LEDs stay emissive (unlit) at depth 4
     this.lightsGraphics = this.add.graphics().setDepth(4).setLighting(false);
+    // Seamless batched additive light pools (ground at 4.2 + overhead luminaire spill at 14.2)
+    this.worldLightPools = new WorldLightPools(this);
     // Overhead streetlamp arms & luminaires render above trucks/trailers (depth 10..12)
     this.overheadGraphics = this.add.graphics().setDepth(14).setLighting(false);
     this.overheadLightsGraphics = this.add.graphics().setDepth(14.5).setLighting(false);
 
-    // Vector road ribbon renderer (above flats, below solids/vehicles)
+    // Fallback road ribbon renderer (used only on extreme Editor overview zoom-out)
     this.roadGraphics = this.add.graphics().setDepth(2).setLighting(false);
-    // Low ramp apron (z < 0.28) stays below ground vehicles (depth 10..12) so cabs entering a ramp never clip underneath
-    this.rampBaseGraphics = this.add.graphics().setDepth(2.6).setLighting(false);
+    // Low ramp apron (z < 0.28) stays above static ground chunks (3) and below ground vehicles (9..10)
+    this.rampBaseGraphics = this.add.graphics().setDepth(3.5).setLighting(false);
     // Elevated viaduct shadow (above ground lamps/vehicles) & bridge deck/rails (below layer-1 vehicles at depth 20..22)
     this.bridgeShadowGraphics = this.add.graphics().setDepth(15).setLighting(false);
     this.bridgeRoadGraphics = this.add.graphics().setDepth(16).setLighting(false);
@@ -405,15 +434,46 @@ export class MainScene extends Phaser.Scene {
     this.parkedTruckManager = new ParkedTruckManager(this);
     this.spawnVehicleRig(this.currentVehicleConfig);
     const activeFleet = this.reputationSystem.getActiveTruck();
-    this.truck.setTruckSpec(activeFleet.type, activeFleet.upgrades, false);
+    if (this.reputationSystem.hasSavedFleetState()) {
+      // H1: restore persisted active truck pose, fuel, wear, damage, upgrades, and model
+      this.truck.applyFleetState(activeFleet);
+    } else {
+      this.truck.setTruckSpec(activeFleet.type, activeFleet.upgrades, false);
+    }
     this.parkedTruckManager.syncWithFleet();
     this.unsubReputation?.();
     this.unsubReputation = this.reputationSystem.subscribe(() => {
       this.parkedTruckManager?.syncWithFleet();
     });
+
+    // H1: flush live active truck state on pagehide / tab hide
+    this.pageHideFlushHandler = () => {
+      this.syncActiveTruckStateToFleet(true);
+    };
+    this.visibilityFlushHandler = () => {
+      if (document.visibilityState === 'hidden') {
+        this.syncActiveTruckStateToFleet(true);
+      }
+    };
+    window.addEventListener('pagehide', this.pageHideFlushHandler);
+    document.addEventListener('visibilitychange', this.visibilityFlushHandler);
+
     this.events.once('shutdown', () => {
+      this.syncActiveTruckStateToFleet(true);
+      if (this.pageHideFlushHandler) {
+        window.removeEventListener('pagehide', this.pageHideFlushHandler);
+        this.pageHideFlushHandler = null;
+      }
+      if (this.visibilityFlushHandler) {
+        document.removeEventListener('visibilitychange', this.visibilityFlushHandler);
+        this.visibilityFlushHandler = null;
+      }
       this.unsubReputation?.();
       this.unsubReputation = null;
+      this.staticWorldChunks?.destroy();
+      this.staticWorldChunks = null;
+      this.worldLightPools?.destroy();
+      this.worldLightPools = null;
       this.parkedTruckManager?.destroyAll();
       TrailerManager.resetInstance();
     });
@@ -636,20 +696,33 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
-  private getSingleRigOffset(configType: VehicleConfigType): number {
-    switch (configType) {
-      case 'long_cargo': return 155;
-      case 'flatbed_heavy': return 140;
-      case 'timber': return 131;
-      case 'tanker_fuel': return 128;
-      case 'tanker_hazmat': return 117;
-      case 'bitrem':
-      case 'bitrem_tanker': return 87.5;
-      default: return 115;
-    }
+  /** Single source of truth for syncing live active truck state (pose, fuel, damage, wear) into ReputationSystem. */
+  public syncActiveTruckStateToFleet(persist: boolean = false): void {
+    if (!this.truck || !this.reputationSystem || !this.garageSystem) return;
+    if (this.licenseSystem?.getActiveExam().active) return;
+    const tx = this.truck.body.position.x;
+    const ty = this.truck.body.position.y;
+    const hub = this.garageSystem.findHubForPosition(tx, ty);
+    this.reputationSystem.syncActiveTruckState(this.truck.exportFleetSnapshot(hub), persist);
   }
 
-  public spawnVehicleRig(configType: VehicleConfigType) {
+  private getSingleRigOffset(configType: VehicleConfigType): number {
+    const hitchDelta = (this.truck?.hitchOffsetY ?? 35) - 35;
+    let base: number;
+    switch (configType) {
+      case 'long_cargo': base = 155; break;
+      case 'flatbed_heavy': base = 140; break;
+      case 'timber': base = 131; break;
+      case 'tanker_fuel': base = 128; break;
+      case 'tanker_hazmat': base = 117; break;
+      case 'bitrem':
+      case 'bitrem_tanker': base = 87.5; break;
+      default: base = 115; break;
+    }
+    return base + hitchDelta;
+  }
+
+  public spawnVehicleRig(configType: VehicleConfigType, options: { repair?: boolean } = {}) {
     this.currentVehicleConfig = configType;
 
     // Destroy existing trailers and joints
@@ -683,7 +756,10 @@ export class MainScene extends Phaser.Scene {
     } else {
       this.truck.setPosition(spawn.x, spawn.y, spawnAngleRad);
     }
-    this.truck.repairToFull();
+    // H3: never grant free repair during normal rig switches (only when explicitly requested, e.g. exam start)
+    if (options.repair) {
+      this.truck.repairToFull();
+    }
     this.truck.resetTelemetry();
     this.truck.trailerRollingDragFactor = 1.0;
     this.jackknifeWearTimer = 0;
@@ -691,6 +767,7 @@ export class MainScene extends Phaser.Scene {
     this.peakGForce = 0;
 
     if (configType === 'solo') {
+      this.missionCollisionTracker = this.getTotalRigCollisions();
       if (this.licenseSystem?.getActiveExam().active) {
         this.examCollisionBaseline = this.getTotalRigCollisions();
       }
@@ -701,7 +778,7 @@ export class MainScene extends Phaser.Scene {
     const backwardY = Math.cos(spawnAngleRad);
 
     if (configType === 'bitrem' || configType === 'bitrem_tanker') {
-      const leadOffset = 87.5;
+      const leadOffset = this.getSingleRigOffset(configType);
       const lx = spawn.x + backwardX * leadOffset;
       const ly = spawn.y + backwardY * leadOffset;
       const leadType: TrailerType = configType === 'bitrem_tanker' ? 'bitrem_tanker_lead' : 'bitrem_lead';
@@ -715,7 +792,7 @@ export class MainScene extends Phaser.Scene {
       });
 
       this.kingpin = new Kingpin(this, this.truck.body, this.trailer.body, this.trailer.length, {
-        parentOffset: { x: 0, y: 35 },
+        parentOffset: { x: 0, y: this.truck.hitchOffsetY },
         trailerOffset: { x: 0, y: -this.trailer.length / 2 + 14 },
         jackknifeLimitDeg: 65,
         mechanicalLockDeg: 95,
@@ -760,7 +837,7 @@ export class MainScene extends Phaser.Scene {
         (trailerType === 'timber' || trailerType === 'tanker_fuel') ? 74 : 75;
 
       this.kingpin = new Kingpin(this, this.truck.body, this.trailer.body, this.trailer.length, {
-        parentOffset: { x: 0, y: 35 },
+        parentOffset: { x: 0, y: this.truck.hitchOffsetY },
         trailerOffset: { x: 0, y: -this.trailer.length / 2 + noseInset },
         jackknifeLimitDeg: jackknifeDeg,
         mechanicalLockDeg: 95,
@@ -794,9 +871,146 @@ export class MainScene extends Phaser.Scene {
     this.trailer?.setLightingEnabled(this.webglLightingActive);
     this.pupTrailer?.setLightingEnabled(this.webglLightingActive);
 
+    this.missionCollisionTracker = this.getTotalRigCollisions();
     if (this.licenseSystem?.getActiveExam().active) {
       this.examCollisionBaseline = this.getTotalRigCollisions();
     }
+  }
+
+  private static readonly RECOVERY_SOLID_TYPES = new Set([
+    'building', 'wall', 'jersey_barrier', 'container_stack',
+    'silo', 'crane', 'dock_wall', 'gas_pump', 'air_water',
+    'price_sign', 'lamp', 'sign', 'traffic_light', 'roundabout',
+  ]);
+
+  /** Checks whether a candidate recovery point is clear of all static ground-level world solids. */
+  private isRecoveryPointClear(px: number, py: number, clearanceRadius: number): boolean {
+    const objs = this.world?.objects?.objects;
+    if (!objs) return true;
+    for (const o of objs) {
+      if (!MainScene.RECOVERY_SOLID_TYPES.has(o.type)) continue;
+      const hw = (o.w || 40) / 2 + clearanceRadius;
+      const hh = (o.h || 40) / 2 + clearanceRadius;
+      const dx = px - o.x;
+      const dy = py - o.y;
+      const ang = -(o.angle || 0);
+      const lx = dx * Math.cos(ang) - dy * Math.sin(ang);
+      const ly = dx * Math.sin(ang) + dy * Math.cos(ang);
+      if (Math.abs(lx) < hw && Math.abs(ly) < hh) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** Verifies that placing the current rig (truck + optional coupled trailer/pup) at (x, y, angle) clears solids. */
+  private isRecoveryRigClear(x: number, y: number, angle: number): boolean {
+    if (!this.isRecoveryPointClear(x, y, 36)) return false;
+    if (this.trailer) {
+      const bx = -Math.sin(angle);
+      const by = Math.cos(angle);
+      const offset = this.getSingleRigOffset(this.currentVehicleConfig);
+      const tx = x + bx * offset;
+      const ty = y + by * offset;
+      if (!this.isRecoveryPointClear(tx, ty, 34)) return false;
+      const tailX = tx + bx * (this.trailer.length * 0.4);
+      const tailY = ty + by * (this.trailer.length * 0.4);
+      if (!this.isRecoveryPointClear(tailX, tailY, 26)) return false;
+      if (this.pupTrailer) {
+        const px = tx + bx * 112;
+        const py = ty + by * 112;
+        if (!this.isRecoveryPointClear(px, py, 32)) return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Finds the nearest safe recovery point for Career free-drive `R`:
+   * - If out of fuel: nearest clear lane beside a gas pump (so the player can refuel with F without soft-lock).
+   * - Otherwise: nearest clear ground-level road centerline sample (fallback: nearest workshop repair bay).
+   */
+  private findCareerRecoverySpot(outOfFuel: boolean): {
+    x: number;
+    y: number;
+    angle: number;
+    kind: 'pump' | 'road' | 'bay' | 'spawn';
+  } {
+    const curX = this.truck.body.position.x;
+    const curY = this.truck.body.position.y;
+    const curAngle = this.truck.body.angle;
+
+    if (outOfFuel && this.world?.objects?.objects) {
+      const pumps = this.world.objects.objects
+        .filter((o) => o.type === 'gas_pump')
+        .sort(
+          (a, b) =>
+            Phaser.Math.Distance.Between(curX, curY, a.x, a.y) -
+            Phaser.Math.Distance.Between(curX, curY, b.x, b.y),
+        );
+      const laneOffsets: Array<{ dx: number; dy: number; angle: number }> = [
+        { dx: -80, dy: 0, angle: 0 },
+        { dx: 80, dy: 0, angle: 0 },
+        { dx: -80, dy: 0, angle: Math.PI },
+        { dx: 80, dy: 0, angle: Math.PI },
+        { dx: 0, dy: -96, angle: Math.PI / 2 },
+        { dx: 0, dy: 96, angle: Math.PI / 2 },
+      ];
+      for (const pump of pumps) {
+        for (const cand of laneOffsets) {
+          const cx = pump.x + cand.dx;
+          const cy = pump.y + cand.dy;
+          if (this.isRecoveryRigClear(cx, cy, cand.angle)) {
+            return { x: cx, y: cy, angle: cand.angle, kind: 'pump' };
+          }
+        }
+      }
+    }
+
+    // Nearest clear ground-level road centerline point, aligned to the road heading closest to current facing
+    let bestRoad: { x: number; y: number; angle: number; dist: number } | null = null;
+    for (const road of this.roadNetwork.roads) {
+      if ((road.layer ?? 0) !== 0) continue;
+      const samples = RoadNetwork.sampleRoad(road, 72);
+      const margin = this.trailer ? 2 : 0;
+      const startIdx = Math.min(margin, Math.max(0, samples.length - 1));
+      const endIdx = Math.max(startIdx, samples.length - 1 - margin);
+      for (let i = startIdx; i <= endIdx; i++) {
+        const s = samples[i];
+        const dist = Phaser.Math.Distance.Between(curX, curY, s.x, s.y);
+        if (bestRoad && dist >= bestRoad.dist) continue;
+        const baseAngle = Math.atan2(s.tx, -s.ty);
+        const oppAngle = baseAngle + Math.PI;
+        const diffBase = Math.abs(Phaser.Math.Angle.Wrap(baseAngle - curAngle));
+        const diffOpp = Math.abs(Phaser.Math.Angle.Wrap(oppAngle - curAngle));
+        const primary = diffBase <= diffOpp ? baseAngle : oppAngle;
+        const secondary = primary === baseAngle ? oppAngle : baseAngle;
+        if (this.isRecoveryRigClear(s.x, s.y, primary)) {
+          bestRoad = { x: s.x, y: s.y, angle: primary, dist };
+        } else if (this.isRecoveryRigClear(s.x, s.y, secondary)) {
+          bestRoad = { x: s.x, y: s.y, angle: secondary, dist };
+        }
+      }
+    }
+    if (bestRoad) {
+      return { x: bestRoad.x, y: bestRoad.y, angle: bestRoad.angle, kind: 'road' };
+    }
+
+    // Fallback: nearest workshop repair bay
+    const bays = this.world?.repairBays ?? [];
+    let bestBay: { x: number; y: number; angle: number; dist: number } | null = null;
+    for (const bay of bays) {
+      const dist = Phaser.Math.Distance.Between(curX, curY, bay.x, bay.y);
+      if (!bestBay || dist < bestBay.dist) {
+        bestBay = { x: bay.x, y: bay.y, angle: (bay.angle ?? 0) + Math.PI / 2, dist };
+      }
+    }
+    if (bestBay) {
+      return { x: bestBay.x, y: bestBay.y, angle: bestBay.angle, kind: 'bay' };
+    }
+
+    const sp = this.world.spawnPoint;
+    return { x: sp.x, y: sp.y, angle: Phaser.Math.DegToRad(sp.angle || 0), kind: 'spawn' };
   }
 
   public resetVehicleToSpawn(allowDuringExam: boolean = false) {
@@ -804,40 +1018,81 @@ export class MainScene extends Phaser.Scene {
       this.setCouplingNotice('Reposição (R) bloqueada durante exame ativo', 'blocked');
       return;
     }
+    const isSandbox = this.reputationSystem?.isSandbox() === true;
+    // H4: Block R during an active Career mission so it cannot heal/reposition mid-delivery
+    if (!allowDuringExam && !isSandbox && this.missionSystem?.getActiveMission()) {
+      this.setCouplingNotice('Reposição (R) bloqueada durante missão ativa — cancele a missão primeiro', 'blocked', 5000);
+      return;
+    }
 
-    const spawn = this.world.spawnPoint;
-    const spawnAngleRad = Phaser.Math.DegToRad(spawn.angle || 0);
-    const backwardX = -Math.sin(spawnAngleRad);
-    const backwardY = Math.cos(spawnAngleRad);
+    const isFullReset = allowDuringExam || isSandbox;
+    const wasOutOfFuel = this.truck.isOutOfFuel || this.truck.fuelLevel <= 1;
 
-    this.truck.setPosition(spawn.x, spawn.y, spawnAngleRad);
-    this.truck.refuelToFull();
-    this.truck.repairToFull();
-    this.truck.resetTelemetry();
-    this.truck.trailerRollingDragFactor = 1.0;
+    let targetX: number;
+    let targetY: number;
+    let targetAngleRad: number;
+    let recoveryKind: 'pump' | 'road' | 'bay' | 'spawn' = 'spawn';
+
+    if (isFullReset) {
+      const spawn = this.world.spawnPoint;
+      targetX = spawn.x;
+      targetY = spawn.y;
+      targetAngleRad = Phaser.Math.DegToRad(spawn.angle || 0);
+    } else {
+      // H4 (Option A): Career free-drive emergency recovery to nearest road or gas pump (when dry),
+      // strictly preserving truck damage, wear, trailer structure & cargoHealth.
+      const spot = this.findCareerRecoverySpot(wasOutOfFuel);
+      targetX = spot.x;
+      targetY = spot.y;
+      targetAngleRad = spot.angle;
+      recoveryKind = spot.kind;
+    }
+
+    const backwardX = -Math.sin(targetAngleRad);
+    const backwardY = Math.cos(targetAngleRad);
+
+    this.truck.setPosition(targetX, targetY, targetAngleRad);
+
+    let towFuelUsed = 0;
+    if (isFullReset) {
+      this.truck.refuelToFull();
+      this.truck.repairToFull();
+      this.truck.resetTelemetry();
+      this.truck.trailerRollingDragFactor = 1.0;
+      this.trailer?.resetIntegrity();
+      this.trailer?.resetTelemetry();
+      this.pupTrailer?.resetIntegrity();
+      this.pupTrailer?.resetTelemetry();
+    } else if (!wasOutOfFuel) {
+      // Small tow/unstick fuel consumption while preserving damage, wear, and cargo state
+      towFuelUsed = Math.min(this.truck.fuelLevel, 5);
+      this.truck.fuelLevel = Math.max(0, this.truck.fuelLevel - towFuelUsed);
+      if (this.truck.fuelLevel <= 0.01) {
+        this.truck.fuelLevel = 0;
+        this.truck.isOutOfFuel = true;
+      }
+    }
+
     this.jackknifeWearTimer = 0;
     this.currentGForce = 0;
     this.peakGForce = 0;
-    this.trailer?.resetIntegrity();
-    this.trailer?.resetTelemetry();
-    this.pupTrailer?.resetIntegrity();
-    this.pupTrailer?.resetTelemetry();
-    const truckElev = this.roadNetwork.initialLayerAt(spawn.x, spawn.y);
+
+    const truckElev = this.roadNetwork.initialLayerAt(targetX, targetY);
     let leadElev: { layer: 0 | 1; z: number } | null = null;
     let pupElev: { layer: 0 | 1; z: number } | null = null;
 
     if (this.trailer) {
       const offset = this.getSingleRigOffset(this.currentVehicleConfig);
 
-      const tx = spawn.x + backwardX * offset;
-      const ty = spawn.y + backwardY * offset;
-      this.trailer.setPosition(tx, ty, spawnAngleRad);
+      const tx = targetX + backwardX * offset;
+      const ty = targetY + backwardY * offset;
+      this.trailer.setPosition(tx, ty, targetAngleRad);
       leadElev = this.roadNetwork.initialLayerAt(tx, ty);
 
       if (this.pupTrailer) {
         const px = tx + backwardX * 112;
         const py = ty + backwardY * 112;
-        this.pupTrailer.setPosition(px, py, spawnAngleRad);
+        this.pupTrailer.setPosition(px, py, targetAngleRad);
         pupElev = this.roadNetwork.initialLayerAt(px, py);
       }
     }
@@ -854,24 +1109,38 @@ export class MainScene extends Phaser.Scene {
       this.pupTrailer.setElevation(pupElev.layer, pupElev.z, rigElevatedVisual);
     }
 
+    this.missionCollisionTracker = this.getTotalRigCollisions();
     if (this.licenseSystem?.getActiveExam().active) {
       this.examCollisionBaseline = this.getTotalRigCollisions();
     }
 
     this.bridgeUnderpassAlpha = 1;
+    this.syncActiveTruckStateToFleet(true);
     this.playAirBrakeHiss();
+
+    if (!isFullReset) {
+      if (wasOutOfFuel && recoveryKind === 'pump') {
+        this.setCouplingNotice('Reboque de emergência até à bomba mais próxima — abasteça (F)', 'info', 5500);
+      } else if (recoveryKind === 'bay') {
+        this.setCouplingNotice('Reboque de emergência: reposicionado na oficina mais próxima (danos e combustível mantidos)', 'info', 5000);
+      } else {
+        const fuelNote = towFuelUsed > 0 ? `-${Math.round(towFuelUsed)} L combustível; ` : '';
+        this.setCouplingNotice(`Reboque de emergência: desencravado na estrada mais próxima (${fuelNote}danos mantidos)`, 'info', 5000);
+      }
+    }
   }
 
   // ==========================================
   // TRAILER COUPLING (free-drive fifth wheel)
   // ==========================================
 
-  /** World position of the tractor's fifth-wheel hitch (35px behind the cab center). */
+  /** World position of the tractor's fifth-wheel hitch (dynamic hitchOffsetY behind cab center). */
   private getTruckHitch(): { x: number; y: number } {
     const a = this.truck.body.angle;
+    const h = this.truck.hitchOffsetY;
     return {
-      x: this.truck.body.position.x - Math.sin(a) * 35,
-      y: this.truck.body.position.y + Math.cos(a) * 35,
+      x: this.truck.body.position.x - Math.sin(a) * h,
+      y: this.truck.body.position.y + Math.cos(a) * h,
     };
   }
 
@@ -995,6 +1264,7 @@ export class MainScene extends Phaser.Scene {
     const pricePerLiter = 1.749;
     const added = this.truck.refuelToFull();
     const cost = added * pricePerLiter;
+    this.syncActiveTruckStateToFleet(true);
 
     this.isRefuelling = true;
     this.refuellingPump = nearest;
@@ -1139,10 +1409,11 @@ export class MainScene extends Phaser.Scene {
     this.pupTrailer?.repairStructure();
     this.peakGForce = 0;
 
-    // Sync repair to persistent fleet record & flag mission repair (affects ADR_Basic)
+    // M3: sync live pose & fuel alongside repair so persistent fleet record is never stale
     const activeFleet = this.reputationSystem?.getActiveTruck();
     if (activeFleet) {
-      this.reputationSystem.repairTruckWearAndDamage(activeFleet.id);
+      const hub = this.garageSystem.findHubForPosition(this.truck.body.position.x, this.truck.body.position.y);
+      this.reputationSystem.repairTruckWearAndDamage(activeFleet.id, this.truck.exportFleetSnapshot(hub));
     }
     this.missionSystem?.markRepairedDuringMission();
 
@@ -1219,6 +1490,9 @@ export class MainScene extends Phaser.Scene {
     // Apply the newly assumed truck's exact fleet state (model, upgrades, damage, wear, fuel, pose)
     this.truck.applyFleetState(res.newTruck);
     this.truck.setLightingEnabled(this.webglLightingActive);
+    this.currentGForce = 0;
+    this.peakGForce = 0;
+    this.missionCollisionTracker = this.getTotalRigCollisions();
     this.currentVehicleConfig = 'solo';
     this.parkedTruckManager?.syncWithFleet();
 
@@ -1304,13 +1578,15 @@ export class MainScene extends Phaser.Scene {
           ? 'bitrem_pup'
           : null;
 
-    // 1. Reuse an existing loose matching trailer already parked cleanly inside originHub
+    // 1. Reuse an existing UNDAMAGED loose matching trailer parked cleanly inside originHub.
+    // H5: never heal a damaged loose trailer on mission accept (leave damaged ones untouched and spawn a fresh mission trailer instead).
     let bestLead: Trailer | null = null;
     let bestPup: Trailer | null = null;
     let bestDist = Infinity;
 
     for (const tr of mgr.loose) {
       if (tr.type !== mission.trailerType || tr.layer !== 0) continue;
+      if (tr.trailerHealth < 99.5 || tr.cargoHealth < 99.5) continue;
       const dHub = Phaser.Math.Distance.Between(originPos.x, originPos.y, tr.body.position.x, tr.body.position.y);
       if (dHub > 1600) continue;
 
@@ -1318,6 +1594,7 @@ export class MainScene extends Phaser.Scene {
       if (isBitrem && expectedPupType) {
         for (const p of mgr.loose) {
           if (p.type !== expectedPupType || p.layer !== 0) continue;
+          if (p.trailerHealth < 99.5 || p.cargoHealth < 99.5) continue;
           const dPup = Phaser.Math.Distance.Between(
             tr.body.position.x,
             tr.body.position.y,
@@ -1340,14 +1617,6 @@ export class MainScene extends Phaser.Scene {
     }
 
     if (bestLead) {
-      bestLead.repairStructure();
-      bestLead.cargoHealth = 100;
-      bestLead.resetTelemetry();
-      if (bestPup) {
-        bestPup.repairStructure();
-        bestPup.cargoHealth = 100;
-        bestPup.resetTelemetry();
-      }
       this.missionPickupLead = bestLead;
       this.missionPickupPup = bestPup;
       return;
@@ -1806,7 +2075,7 @@ export class MainScene extends Phaser.Scene {
     this.trailer = t;
     this.decoupleLockout = null;
     this.kingpin = new Kingpin(this, this.truck.body, t.body, t.length, {
-      parentOffset: { x: 0, y: 35 },
+      parentOffset: { x: 0, y: this.truck.hitchOffsetY },
       trailerOffset: { x: 0, y: trailerOffY },
       jackknifeLimitDeg: jackknife,
       mechanicalLockDeg: 95,
@@ -2050,52 +2319,93 @@ export class MainScene extends Phaser.Scene {
     // Keep Matter bridge ramp walls / deck guardrails synced with roadNetwork edits
     this.syncBridgeBarriers();
 
-    // Vector road ribbons (also visible in editor mode)
-    this.renderRoads();
+    // Static world chunks (flats + ground roads + roadFlats + solids) & elevated bridges
+    const cam = this.cameras.main;
+    const liveView = this.getCameraView(cam);
+    this.renderStaticWorldAndRoads(cam, liveView);
     // Gas pump highlight (nearby / refuelling)
     this.renderPumps();
 
-    // Prefab objects: the animated traffic lights redraw every frame (few, cheap);
-    // the heavy static layers only redraw when the camera moved/zoomed or the
-    // world was edited — otherwise the Graphics command buffer is reused as-is.
-    const cam = this.cameras.main;
-    if (this.flatsGraphics && this.solidsGraphics && this.lightsGraphics && cam.zoom >= 0.12) {
-      // `cam.worldView` is stale before the first preRender — deriving the view
-      // from scroll/zoom guarantees the first static draw actually draws.
-      const liveView = this.getCameraView(cam);
-      this.world.objects.renderLights(
-        this.lightsGraphics,
-        liveView,
-        this.isEditorMode ? 0 : timeSnap.lampFactor,
-        this.overheadLightsGraphics ?? undefined,
-      );
-      const last = this.lastObjRender;
-      const needsFull =
-        Number.isNaN(last.x) ||
-        Math.hypot(cam.midPoint.x - last.x, cam.midPoint.y - last.y) > 24 ||
-        cam.zoom !== last.zoom ||
-        this.world.objects.version !== last.version;
-      if (needsFull) {
-        this.flatsGraphics.clear();
-        this.roadFlatsGraphics?.clear();
-        this.solidsGraphics.clear();
-        this.overheadGraphics?.clear();
-        this.world.objects.render(
-          this.flatsGraphics,
-          this.solidsGraphics,
-          liveView,
-          this.overheadGraphics ?? undefined,
-          this.roadFlatsGraphics ?? undefined,
-        );
-        this.lastObjRender = { x: cam.midPoint.x, y: cam.midPoint.y, zoom: cam.zoom, version: this.world.objects.version };
+    // Lightweight animated traffic lights, streetlamp arms, bulb cores & seamless light pools
+    if (this.lightsGraphics && this.overheadGraphics && this.overheadLightsGraphics && cam.zoom >= 0.12) {
+      const lampFactor = this.isEditorMode ? 0 : timeSnap.lampFactor;
+      const midX = liveView.x + liveView.width * 0.5;
+      const midY = liveView.y + liveView.height * 0.5;
+
+      // 1. Traffic lights: redraw ONLY on phase flip, >200px move, zoom change, or world edit
+      const phaseKey = this.world.objects.getTrafficLightPhaseKey();
+      const lastT = this.lastTrafficRender;
+      if (
+        Number.isNaN(lastT.x) ||
+        phaseKey !== lastT.phase ||
+        Math.hypot(midX - lastT.x, midY - lastT.y) > 200 ||
+        Math.abs(cam.zoom - lastT.zoom) > 0.02 ||
+        this.world.objects.version !== lastT.version
+      ) {
+        this.world.objects.renderTrafficLights(this.lightsGraphics, liveView, 380);
+        this.lastTrafficRender = { x: midX, y: midY, zoom: cam.zoom, version: this.world.objects.version, phase: phaseKey };
       }
-    } else if (this.flatsGraphics && this.solidsGraphics && this.lightsGraphics) {
-      this.flatsGraphics.clear();
-      this.roadFlatsGraphics?.clear();
-      this.solidsGraphics.clear();
-      this.lightsGraphics.clear();
+
+      // 2. Overhead streetlamp arms (depth 14): redraw ONLY on >200px move, zoom change, or world edit
+      const lastO = this.lastObjRender;
+      if (
+        Number.isNaN(lastO.x) ||
+        Math.hypot(midX - lastO.x, midY - lastO.y) > 200 ||
+        Math.abs(cam.zoom - lastO.zoom) > 0.02 ||
+        this.world.objects.version !== lastO.version
+      ) {
+        this.overheadGraphics.clear();
+        this.world.objects.renderOverhead(this.overheadGraphics, liveView, 420);
+        this.lastObjRender = { x: midX, y: midY, zoom: cam.zoom, version: this.world.objects.version };
+      }
+
+      // 3. Glowing streetlamp bulb cores (depth 14.5): redraw geometry only on >200px move; modulate alpha cheaply
+      if (lampFactor > 0.03) {
+        const lastB = this.lastLampBulbRender;
+        if (
+          Number.isNaN(lastB.x) ||
+          Math.hypot(midX - lastB.x, midY - lastB.y) > 200 ||
+          Math.abs(cam.zoom - lastB.zoom) > 0.02 ||
+          this.world.objects.version !== lastB.version
+        ) {
+          this.world.objects.renderLampBulbs(this.overheadLightsGraphics, liveView, 420);
+          this.lastLampBulbRender = { x: midX, y: midY, zoom: cam.zoom, version: this.world.objects.version };
+        }
+        this.overheadLightsGraphics.setVisible(true).setAlpha(lampFactor);
+      } else {
+        this.overheadLightsGraphics.setVisible(false);
+      }
+
+      // 4. Seamless additive radial light pools across 100% of the viewport (zero pop-in at any zoom)
+      const hubGlowSpots: HubGlowSpot[] = [];
+      if (lampFactor > 0.03) {
+        const ts = 128;
+        for (const spot of MainScene.HUB_SIGN_TILES) {
+          const hub = this.garageSystem.getHub(spot.id as any);
+          if (!hub || !hub.isDominant) continue;
+          hubGlowSpots.push({
+            x: spot.c * ts + ts / 2,
+            y: spot.r * ts + ts / 2,
+            color: hub.neonColorHex,
+          });
+        }
+      }
+      this.worldLightPools?.update(
+        this.world.objects,
+        liveView,
+        cam.zoom,
+        lampFactor,
+        hubGlowSpots,
+        this.isEditorMode,
+      );
+    } else {
+      this.lightsGraphics?.clear();
       this.overheadGraphics?.clear();
-      this.overheadLightsGraphics?.clear();
+      this.overheadLightsGraphics?.setVisible(false);
+      this.worldLightPools?.hideAll();
+      this.lastObjRender.x = Number.NaN;
+      this.lastTrafficRender.x = Number.NaN;
+      this.lastLampBulbRender.x = Number.NaN;
     }
 
     // Stream physics + terrain chunks around the player; cycle the traffic lights
@@ -2205,13 +2515,14 @@ export class MainScene extends Phaser.Scene {
 
       if (this.trailer && this.kingpin) {
         const truckAngle = this.truck.body.angle;
-        const truckHitchX = this.truck.body.position.x - Math.sin(truckAngle) * 35;
-        const truckHitchY = this.truck.body.position.y + Math.cos(truckAngle) * 35;
+        const hitchOff = this.truck.hitchOffsetY;
+        const truckHitchX = this.truck.body.position.x - Math.sin(truckAngle) * hitchOff;
+        const truckHitchY = this.truck.body.position.y + Math.cos(truckAngle) * hitchOff;
         const truckVx = this.truck.vx;
         const truckVy = this.truck.vy;
         const truckOmega = this.truck.omega;
-        const hitchVx = truckVx - truckOmega * (Math.cos(truckAngle) * 35);
-        const hitchVy = truckVy - truckOmega * (Math.sin(truckAngle) * 35);
+        const hitchVx = truckVx - truckOmega * (Math.cos(truckAngle) * hitchOff);
+        const hitchVy = truckVy - truckOmega * (Math.sin(truckAngle) * hitchOff);
 
         this.trailer.followHitch(truckHitchX, truckHitchY, hitchVx, hitchVy, truckAngle, delta, this.truck.isBraking);
         artTelemetry = this.kingpin.update(this.truck.isReversing, this.truck.speedKmh);
@@ -2431,6 +2742,7 @@ export class MainScene extends Phaser.Scene {
           this.missionPickupLead = null;
           this.missionPickupPup = null;
           this.missionSpawnedTrailers = [];
+          this.syncActiveTruckStateToFleet(true);
           this.parkedTruckManager?.syncWithFleet();
           const unlockMsg =
             completed.newlyUnlockedTrucks.length > 0
@@ -2461,6 +2773,12 @@ export class MainScene extends Phaser.Scene {
       }
       const missionNavTarget = this.getActiveMissionNavTarget();
       this.renderMissionWorldMarker(time, missionNavTarget);
+
+      // H1: Throttled autosave of active truck pose, fuel, damage & wear every 5 seconds
+      if (time - this.lastFleetAutosaveAt >= 5000) {
+        this.lastFleetAutosaveAt = time;
+        this.syncActiveTruckStateToFleet(true);
+      }
 
       // Pulse animation for the highlight
       this.pumpPulsePhase = (this.pumpPulsePhase + dt * 2) % 1;
@@ -2916,65 +3234,97 @@ export class MainScene extends Phaser.Scene {
     );
   }
 
+  /** Diagnostic stats for chunked static rendering & seamless light pools (used by smoke tests). */
+  public getStaticChunkStats(): StaticChunkStats | null {
+    return this.staticWorldChunks?.getStats() ?? null;
+  }
+
+  public getLightPoolStats(): LightPoolStats | null {
+    return this.worldLightPools?.getStats() ?? null;
+  }
+
   /**
-   * Draws the visible road ribbons into a retained Graphics. Redraws only when
-   * the network changed or the camera moved/zoomed enough to matter.
+   * Streams chunked GPU RenderTextures for all static ground layers (flats, ground
+   * roads, roadFlats, solids) and keeps elevated bridges cached per `roadNetwork.version`.
+   * Only falls back to direct roadGraphics drawing on extreme Editor whole-island zoom-outs.
    */
-  private renderRoads() {
+  private renderStaticWorldAndRoads(cam: Phaser.Cameras.Scene2D.Camera, view: Phaser.Geom.Rectangle) {
+    // 1. Elevated viaducts & low ramp aprons: static on the map — rebuild ONLY on roadNetwork.version change
+    if (this.bridgeRenderVersion !== this.roadNetwork.version) {
+      this.bridgeRenderVersion = this.roadNetwork.version;
+      this.rampBaseGraphics?.clear();
+      this.bridgeShadowGraphics?.clear();
+      this.bridgeRoadGraphics?.clear();
+      const INF = 1e6;
+      for (const cache of this.roadNetwork.getBridgeCaches()) {
+        this.renderBridgeCache(cache, -INF, -INF, INF, INF);
+      }
+    }
+
+    // 2. Chunked static world textures (flats + ground roads + roadFlats + solids)
+    const res = this.staticWorldChunks?.update(
+      view,
+      this.roadNetwork.version,
+      this.world.objects.version,
+    );
+
+    if (res && !res.fallbackActive) {
+      // Clear fallback direct Graphics if we just left extreme Editor overview zoom-out
+      if (this.roadGraphics && this.roadGraphics.commandBuffer.length > 0) {
+        this.roadGraphics.clear();
+        this.flatsGraphics?.clear();
+        this.roadFlatsGraphics?.clear();
+        this.solidsGraphics?.clear();
+      }
+      return;
+    }
+
+    // 3. Extreme Editor overview zoom-out fallback (>56 chunks visible): draw roads directly
     if (!this.roadGraphics) return;
-    const cam = this.cameras.main;
     const moved =
-      Math.abs(cam.scrollX - this.roadCamX) > 4 ||
-      Math.abs(cam.scrollY - this.roadCamY) > 4 ||
-      Math.abs(cam.zoom - this.roadCamZoom) > 0.005;
+      Math.abs(cam.scrollX - this.roadCamX) > 40 ||
+      Math.abs(cam.scrollY - this.roadCamY) > 40 ||
+      Math.abs(cam.zoom - this.roadCamZoom) > 0.01;
     if (!moved && this.roadRenderVersion === this.roadNetwork.version) return;
     this.roadCamX = cam.scrollX;
     this.roadCamY = cam.scrollY;
     this.roadCamZoom = cam.zoom;
     this.roadRenderVersion = this.roadNetwork.version;
 
-    const g = this.roadGraphics;
-    g.clear();
-    this.rampBaseGraphics?.clear();
-    this.bridgeShadowGraphics?.clear();
-    this.bridgeRoadGraphics?.clear();
+    this.roadGraphics.clear();
+    this.drawGroundRoadsInto(this.roadGraphics, view, 220);
+  }
 
-    // `cam.worldView` is stale until the first preRender — use the live view
-    const view = this.getCameraView(cam);
-    const M = 220; // margin so ribbons don't pop in at the screen edge
-    const vx0 = view.x - M, vy0 = view.y - M, vx1 = view.x + view.width + M, vy1 = view.y + view.height + M;
+  /** Draws all layer-0 (ground) vector road ribbons intersecting `view + margin` into `g`. */
+  private drawGroundRoadsInto(
+    g: Phaser.GameObjects.Graphics,
+    view: Phaser.Geom.Rectangle,
+    margin = 220,
+  ) {
+    const vx0 = view.x - margin, vy0 = view.y - margin;
+    const vx1 = view.x + view.width + margin, vy1 = view.y + view.height + margin;
 
     for (const road of this.roadNetwork.roads) {
       if ((road.layer ?? 0) > 0) continue; // elevated bridges render above ground vehicles
-      // Cheap per-road bounds reject
-      let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
-      let maxHalf = 0;
-      for (const p of road.points) {
-        if (p.x < bx0) bx0 = p.x;
-        if (p.y < by0) by0 = p.y;
-        if (p.x > bx1) bx1 = p.x;
-        if (p.y > by1) by1 = p.y;
-        if (p.w > maxHalf) maxHalf = p.w;
-      }
-      maxHalf /= 2;
-      if (bx1 + maxHalf + 80 < vx0 || bx0 - maxHalf - 80 > vx1 || by1 + maxHalf + 80 < vy0 || by0 - maxHalf - 80 > vy1) continue;
+      // O(1) cached bounds reject
+      const b = this.roadNetwork.getRoadBounds(road);
+      if (b.maxX < vx0 || b.minX > vx1 || b.maxY < vy0 || b.minY > vy1) continue;
 
       const style = MainScene.ROAD_STYLE[road.surface] || MainScene.ROAD_STYLE.asphalt;
-      const samples = RoadNetwork.sampleRoad(road, 26);
+      const samples = this.roadNetwork.getRoadSamples(road, 26);
       if (samples.length === 0) continue;
 
       // 1. Carriageway ribbon (quads perpendicular to the tangent)
       const inView = (s: RoadSample) => s.x >= vx0 - 200 && s.x <= vx1 + 200 && s.y >= vy0 - 200 && s.y <= vy1 + 200;
       let altIdx = 0;
       for (let i = 0; i < samples.length - 1; i++) {
-        const a = samples[i], b = samples[i + 1];
-        // Cusp guard: at near-reversals the perpendicular quad folds into a
-        // bowtie spike — skip it (the Hermite curve itself never overshoots).
-        if (a.tx * b.tx + a.ty * b.ty < 0.2) { altIdx++; continue; }
-        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        const a = samples[i], bS = samples[i + 1];
+        // Cusp guard: at near-reversals the perpendicular quad folds into a bowtie spike
+        if (a.tx * bS.tx + a.ty * bS.ty < 0.2) { altIdx++; continue; }
+        const mx = (a.x + bS.x) / 2, my = (a.y + bS.y) / 2;
         if (mx < vx0 || mx > vx1 || my < vy0 || my > vy1) { altIdx++; continue; }
         const fill = road.surface === 'asphalt' ? style.fill : (altIdx % 6 < 3 ? style.fill : style.fillAlt);
-        this.fillRibbonQuad(g, a, b, fill);
+        this.fillRibbonQuad(g, a, bS, fill);
         altIdx++;
       }
 
@@ -2982,17 +3332,25 @@ export class MainScene extends Phaser.Scene {
       if (road.surface !== 'dirt') {
         for (const side of [-1, 1]) {
           g.lineStyle(3, style.edge, 0.85);
-          g.beginPath();
           let started = false;
           for (let i = 0; i < samples.length; i++) {
             const s = samples[i];
-            if (!inView(s)) continue;
+            if (!inView(s)) {
+              if (started) { g.strokePath(); started = false; }
+              continue;
+            }
             const off = s.w / 2 - 5;
             const px = s.x - s.ty * off * side;
             const py = s.y + s.tx * off * side;
-            if (!started) { g.moveTo(px, py); started = true; } else g.lineTo(px, py);
+            if (!started) {
+              g.beginPath();
+              g.moveTo(px, py);
+              started = true;
+            } else {
+              g.lineTo(px, py);
+            }
           }
-          g.strokePath();
+          if (started) g.strokePath();
         }
       }
 
@@ -3003,23 +3361,23 @@ export class MainScene extends Phaser.Scene {
       } else if (style.dash !== null) {
         const ON = MainScene.ROAD_DASH_LEN, OFF = MainScene.ROAD_DASH_GAP, PERIOD = ON + OFF;
         g.lineStyle(5, style.dash, 0.9);
-        let s = 0; // arc-length position along the whole centreline
+        let s = 0; // arc-length position along the whole centreline (deterministic across chunks)
         for (let i = 0; i < samples.length - 1; i++) {
-          const a = samples[i], b = samples[i + 1];
-          const len = Math.hypot(b.x - a.x, b.y - a.y);
+          const a = samples[i], bS = samples[i + 1];
+          const len = Math.hypot(bS.x - a.x, bS.y - a.y);
           if (len < 0.001) continue;
-          if (a.tx * b.tx + a.ty * b.ty < 0.2) { s += len; continue; } // cusp guard
+          if (a.tx * bS.tx + a.ty * bS.ty < 0.2) { s += len; continue; } // cusp guard
           let t = 0;
           while (t < len) {
             const phase = s % PERIOD;
             if (phase < ON) {
               const run = Math.min(len - t, ON - phase); // exact dash length
               const t1 = t + run;
-              const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+              const mx = (a.x + bS.x) / 2, my = (a.y + bS.y) / 2;
               if (mx >= vx0 && mx <= vx1 && my >= vy0 && my <= vy1) {
                 g.beginPath();
-                g.moveTo(Phaser.Math.Linear(a.x, b.x, t / len), Phaser.Math.Linear(a.y, b.y, t / len));
-                g.lineTo(Phaser.Math.Linear(a.x, b.x, t1 / len), Phaser.Math.Linear(a.y, b.y, t1 / len));
+                g.moveTo(Phaser.Math.Linear(a.x, bS.x, t / len), Phaser.Math.Linear(a.y, bS.y, t / len));
+                g.lineTo(Phaser.Math.Linear(a.x, bS.x, t1 / len), Phaser.Math.Linear(a.y, bS.y, t1 / len));
                 g.strokePath();
               }
               s += run; t = t1;
@@ -3030,12 +3388,6 @@ export class MainScene extends Phaser.Scene {
           }
         }
       }
-    }
-
-    // Elevated viaducts & ramps (rendered above ground vehicles/objects)
-    for (const cache of this.roadNetwork.getBridgeCaches()) {
-      if (cache.maxX + 80 < vx0 || cache.minX - 80 > vx1 || cache.maxY + 80 < vy0 || cache.minY - 80 > vy1) continue;
-      this.renderBridgeCache(cache, vx0, vy0, vx1, vy1);
     }
   }
 
@@ -3535,11 +3887,6 @@ export class MainScene extends Phaser.Scene {
     this.headlightRight = this.lights.addConeLight(0, 0, 360, 0xfff3d1, 0, 0, 0.44, 0.90, 120).setVisible(false);
     this.brakeLight = this.lights.addLight(0, 0, 155, 0xff1e4d, 0, 55).setVisible(false);
     this.reverseLight = this.lights.addLight(0, 0, 185, 0xf8fafc, 0, 62).setVisible(false);
-
-    this.worldLightPool = [];
-    for (let i = 0; i < MainScene.MAX_WORLD_LIGHTS; i++) {
-      this.worldLightPool.push(this.lights.addLight(0, 0, 220, 0xffcf70, 0, 85).setVisible(false));
-    }
   }
 
   private setWebGLLightingActive(enabled: boolean) {
@@ -3553,6 +3900,7 @@ export class MainScene extends Phaser.Scene {
     }
 
     this.world?.terrain?.setLightingEnabled(enabled);
+    this.staticWorldChunks?.setLightingEnabled(enabled);
     this.flatsGraphics?.setLighting(enabled);
     this.roadGraphics?.setLighting(enabled);
     this.rampBaseGraphics?.setLighting(enabled);
@@ -3578,7 +3926,6 @@ export class MainScene extends Phaser.Scene {
       this.headlightRight?.setVisible(false);
       this.brakeLight?.setVisible(false);
       this.reverseLight?.setVisible(false);
-      for (const l of this.worldLightPool) l.setVisible(false);
       return;
     }
 
@@ -3611,7 +3958,6 @@ export class MainScene extends Phaser.Scene {
       this.headlightRight?.setVisible(false);
       this.brakeLight?.setVisible(false);
       this.reverseLight?.setVisible(false);
-      for (const l of this.worldLightPool) l.setVisible(false);
       return;
     }
 
@@ -3752,117 +4098,9 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
-    // 3. World Emitters Pool (streetlamps, traffic lights, gas forecourts, dominated hub neon signs)
-    const emitters = this.world.objects.getEmittersInView(cam.worldView, 400);
-    const cx = cam.midPoint.x;
-    const cy = cam.midPoint.y;
-
-    interface LightCandidate {
-      x: number;
-      y: number;
-      radius: number;
-      color: number;
-      intensity: number;
-      z: number;
-      distSq: number;
-    }
-
-    const candidates: LightCandidate[] = [];
-    for (const o of emitters) {
-      const dx = o.x - cx;
-      const dy = o.y - cy;
-      const distSq = dx * dx + dy * dy;
-
-      if (o.type === 'lamp') {
-        if (lampFactor <= 0.04) continue;
-        const bulb = WorldObjects.getLampBulbPos(o);
-        candidates.push({
-          x: bulb.x,
-          y: bulb.y,
-          radius: 270,
-          color: 0xffcf70,
-          intensity: lampFactor * 1.65,
-          z: 95,
-          distSq,
-        });
-      } else if (o.type === 'gas_canopy') {
-        if (lampFactor <= 0.04) continue;
-        candidates.push({
-          x: o.x,
-          y: o.y,
-          radius: 300,
-          color: 0xfff0cc,
-          intensity: lampFactor * 1.55,
-          z: 115,
-          distSq,
-        });
-      } else if (o.type === 'gas_pump') {
-        if (lampFactor <= 0.04) continue;
-        candidates.push({
-          x: o.x,
-          y: o.y,
-          radius: 145,
-          color: 0x4ade80,
-          intensity: lampFactor * 0.9,
-          z: 55,
-          distSq,
-        });
-      } else if (o.type === 'traffic_light') {
-        const st = this.world.objects.lightState((o.params?.group ?? 0) as 0 | 1);
-        const col = st.red ? 0xff3b30 : st.amber ? 0xffb020 : 0x34d058;
-        const tlInt = 0.20 + lampFactor * 1.0;
-        candidates.push({
-          x: o.x,
-          y: o.y,
-          radius: 135,
-          color: col,
-          intensity: tlInt,
-          z: 55,
-          distSq,
-        });
-      }
-    }
-
-    if (lampFactor > 0.05) {
-      const ts = 128;
-      for (const spot of MainScene.HUB_SIGN_TILES) {
-        const hub = this.garageSystem.getHub(spot.id as any);
-        if (!hub || !hub.isDominant) continue;
-        const hx = spot.c * ts + ts / 2;
-        const hy = spot.r * ts + ts / 2;
-        const dx = hx - cx;
-        const dy = hy - cy;
-        if (Math.abs(dx) > cam.worldView.width + 320 || Math.abs(dy) > cam.worldView.height + 320) continue;
-        candidates.push({
-          x: hx,
-          y: hy,
-          radius: 220,
-          color: hub.neonColorHex,
-          intensity: lampFactor * 1.25,
-          z: 80,
-          distSq: dx * dx + dy * dy,
-        });
-      }
-    }
-
-    candidates.sort((c1, c2) => c1.distSq - c2.distSq);
-
-    const limit = Math.min(candidates.length, this.worldLightPool.length);
-    for (let i = 0; i < this.worldLightPool.length; i++) {
-      const light = this.worldLightPool[i];
-      if (i < limit) {
-        const c = candidates[i];
-        light
-          .setVisible(true)
-          .setPosition(c.x, c.y)
-          .setRadius(c.radius)
-          .setColor(c.color)
-          .setIntensity(c.intensity)
-          .setZ(c.z);
-      } else {
-        light.setVisible(false);
-      }
-    }
+    // World streetlamps, gas canopies/pumps, traffic lights & dominated hub neons
+    // are illuminated uniformly across the entire viewport by WorldLightPools
+    // (eliminating the 4-light slot pop-in at low zoom and halving Light2D shader cost).
   }
 
   private renderWeather(time: number, delta: number, snap: TimeOfDaySnapshot) {

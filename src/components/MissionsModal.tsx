@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Award, CheckCircle, ClipboardList, Compass, X } from 'lucide-react';
 import { GarageSystem, type HubId } from '../systems/GarageSystem';
 import {
@@ -61,6 +61,13 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
   const [section, setSection] = useState<'missions' | 'certificates'>('missions');
   const [selectedHub, setSelectedHub] = useState<HubId>(currentHubId);
   const [showLocked, setShowLocked] = useState<boolean>(false);
+
+  // M6: Always open on the player's current hub
+  useEffect(() => {
+    if (open) {
+      setSelectedHub(currentHubId);
+    }
+  }, [open, currentHubId]);
 
   const hubs = useMemo(() => GarageSystem.getInstance().getHubs(), [open]);
   const repSys = ReputationSystem.getInstance();
@@ -349,18 +356,20 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
                         ) : (
                           <button
                             type="button"
-                            disabled={!isAvailable}
+                            disabled={!isAvailable || Boolean(activeMission)}
+                            title={activeMission ? 'Cancele a missão ativa antes de aceitar outra' : undefined}
                             onClick={() => {
+                              if (activeMission) return;
                               onAcceptMission(offer.id);
                               onClose();
                             }}
                             className={`px-4 py-2 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
-                              isAvailable
+                              isAvailable && !activeMission
                                 ? 'bg-cyan-500 hover:bg-cyan-400 text-slate-950'
                                 : 'bg-slate-900 text-slate-500 border border-slate-800 cursor-not-allowed'
                             }`}
                           >
-                            {isAvailable ? 'Aceitar Missão' : 'Bloqueada'}
+                            {!isAvailable ? 'Bloqueada' : activeMission ? 'Missão ativa' : 'Aceitar Missão'}
                           </button>
                         )}
                       </div>

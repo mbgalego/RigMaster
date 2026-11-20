@@ -138,6 +138,8 @@ export class RoadNetwork {
   private grid: Map<string, RoadSegment[]> = new Map();
   private bridgeCaches: BridgeRoadCache[] = [];
   private bridgeBarriers: BridgeBarrierSegment[] = [];
+  private sampleCache: Map<string, RoadSample[]> = new Map();
+  private roadBoundsCache: Map<string, { minX: number; minY: number; maxX: number; maxY: number }> = new Map();
   private nextId: number = 1;
 
   public static readonly BRIDGE_DEFAULT_RAMP_LEN = 180;
@@ -753,6 +755,8 @@ export class RoadNetwork {
         }
       }
     }
+    this.sampleCache.clear();
+    this.roadBoundsCache.clear();
     // Build elevated bridge caches (used for rendering, vehicle elevation & intersections)
     this.rebuildBridgeCaches();
     this.version++;
@@ -762,6 +766,42 @@ export class RoadNetwork {
     // Build ramp walls & deck guardrails after intersections so ramp portals
     // clear any perpendicular ground road carriageway they connect to
     this.rebuildBridgeBarriers();
+  }
+
+  /** Cached Hermite spline samples for a road (invalidated automatically on rebuildIndex). */
+  public getRoadSamples(road: RoadData, stepPx = 26): RoadSample[] {
+    const key = `${road.id}:${stepPx}`;
+    let cached = this.sampleCache.get(key);
+    if (!cached) {
+      cached = RoadNetwork.sampleRoad(road, stepPx);
+      this.sampleCache.set(key, cached);
+    }
+    return cached;
+  }
+
+  /** Cached padded axis-aligned bounds for a road (includes half-width + spline slack). */
+  public getRoadBounds(road: RoadData): { minX: number; minY: number; maxX: number; maxY: number } {
+    let cached = this.roadBoundsCache.get(road.id);
+    if (!cached) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      let maxHalf = 0;
+      for (const p of road.points) {
+        if (p.x < minX) minX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y > maxY) maxY = p.y;
+        if (p.w > maxHalf) maxHalf = p.w;
+      }
+      const pad = maxHalf * 0.5 + 80;
+      cached = {
+        minX: minX - pad,
+        minY: minY - pad,
+        maxX: maxX + pad,
+        maxY: maxY + pad,
+      };
+      this.roadBoundsCache.set(road.id, cached);
+    }
+    return cached;
   }
 
   /** Manually trigger intersection-node recomputation (useful after batch edits). */

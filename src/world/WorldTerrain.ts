@@ -32,7 +32,7 @@ export class WorldTerrain {
       img.setLighting(enabled);
     }
     if (this.overviewImg) {
-      this.overviewImg.setLighting(enabled && this.chunks.size < 2);
+      this.overviewImg.setLighting(enabled);
     }
   }
 
@@ -159,8 +159,8 @@ export class WorldTerrain {
       if (this.overviewImg) this.overviewImg.setLighting(this.lightingEnabled);
       return;
     }
-    if (this.overviewImg && this.chunks.size >= 2) {
-      this.overviewImg.setLighting(false);
+    if (this.overviewImg) {
+      this.overviewImg.setLighting(this.lightingEnabled);
     }
 
     for (let cy = c0y; cy <= c1y; cy++) {

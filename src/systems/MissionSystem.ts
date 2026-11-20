@@ -621,6 +621,12 @@ export class MissionSystem {
       isNightNow?: boolean;
     } = {},
   ): { ok: boolean; reason?: string; state?: ActiveMissionState } {
+    if (this.activeMission) {
+      return {
+        ok: false,
+        reason: 'Já existe uma missão ativa — cancele-a primeiro antes de aceitar outra.',
+      };
+    }
     const template = MISSION_TEMPLATES.find((t) => t.id === missionId);
     if (!template) return { ok: false, reason: 'Missão não encontrada.' };
     if (!this.canAccessMission(template)) {
@@ -728,6 +734,8 @@ export class MissionSystem {
       m.phase = 'pickup';
       m.dockHoldSec = 0;
       m.inTargetDock = false;
+      m.dockApproachStarted = false;
+      m.dockDurationSec = 0;
       this.notify();
       return null;
     }
@@ -748,12 +756,14 @@ export class MissionSystem {
       m.dirtDistancePx += Math.abs(frame.speedPxS) * dt;
     }
 
-    // Start Precision_Dock timer once entering dock apron (< 520px from target dock)
+    // Precision_Dock apron timer: runs only while inside the target dock approach apron (<= 520 px)
+    // and resets cleanly if the rig leaves the apron (> 600 px hysteresis).
     if (frame.distToTargetDockPx <= 520) {
       m.dockApproachStarted = true;
-    }
-    if (m.dockApproachStarted) {
       m.dockDurationSec += dt;
+    } else if (frame.distToTargetDockPx > 600 && m.dockApproachStarted) {
+      m.dockApproachStarted = false;
+      m.dockDurationSec = 0;
     }
 
     m.inTargetDock = frame.inTargetDock;
@@ -796,7 +806,7 @@ export class MissionSystem {
       alignmentDeg: overrideMetrics?.alignmentDeg ?? finalAlignmentDeg,
       dockDurationSec:
         overrideMetrics?.dockDurationSec ??
-        (active.dockApproachStarted ? active.dockDurationSec : Math.min(active.elapsedSec, 30)),
+        (active.dockApproachStarted ? active.dockDurationSec : Infinity),
       peakGForce: overrideMetrics?.peakGForce ?? active.peakGForce,
       repairedDuringMission:
         overrideMetrics?.repairedDuringMission ?? active.repairedDuringMission,

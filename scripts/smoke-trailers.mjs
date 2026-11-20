@@ -144,10 +144,21 @@ check(
   `pads=${clearanceReport.totalPads}, solids=${clearanceReport.totalSolids}, overlaps=${clearanceReport.overlaps.length}${clearanceReport.overlaps.length ? ' -> ' + clearanceReport.overlaps.slice(0, 3).join('; ') : ''}`,
 );
 
-// 3. Test UI license gating on fresh session (only C unlocked — negative gates for CE, H, and X)
-// Open Menu and select Classe C 'Cisterna Leite / Alimentar'
-await page.getByRole('button', { name: /Menu/i }).click();
-await page.getByRole('button', { name: /Cisterna Leite \/ Alimentar/i }).click();
+// 3. Test Career locks Menu -> Tipologia to Sandbox only, then verify UI license gating in Sandbox
+await page.getByRole('button', { name: /Menu/i }).first().dispatchEvent('click');
+await page.waitForSelector('[data-testid="career-tipologia-notice"]', { timeout: 4000 });
+const careerNoticeVisible = await page.getByTestId('career-tipologia-notice').isVisible();
+const noDirectSpawnInCareer = (await page.getByRole('button', { name: /Cisterna Leite \/ Alimentar/i }).count()) === 0;
+check(
+  'Carreira bloqueia seleção direta em Menu → Tipologia (exclusiva de Sandbox)',
+  careerNoticeVisible && noDirectSpawnInCareer,
+  JSON.stringify({ careerNoticeVisible, noDirectSpawnInCareer }),
+);
+
+// Switch to Sandbox to test direct Menu -> Tipologia selection & license gates (only C unlocked)
+await page.getByTestId('btn-mode-sandbox').dispatchEvent('click');
+await page.getByRole('button', { name: /Cisterna Leite \/ Alimentar/i }).first().waitFor({ state: 'visible', timeout: 4000 });
+await page.getByRole('button', { name: /Cisterna Leite \/ Alimentar/i }).first().dispatchEvent('click');
 await page.waitForTimeout(200);
 const afterMilk = await page.evaluate(() => ({
   cfg: window.__rig.currentVehicleConfig,
@@ -155,14 +166,15 @@ const afterMilk = await page.evaluate(() => ({
   len: window.__rig.trailer?.length,
 }));
 check(
-  'Classe C desbloqueada de origem permite Cisterna Leite / Alimentar',
+  'Sandbox: Classe C desbloqueada de origem permite Cisterna Leite / Alimentar',
   afterMilk.cfg === 'tanker_milk' && afterMilk.type === 'tanker_milk' && afterMilk.len === 220,
   JSON.stringify(afterMilk),
 );
 
 const testBlockedVehicle = async (buttonRegex, expectedLicLabel) => {
-  await page.getByRole('button', { name: /Menu/i }).click();
-  await page.getByRole('button', { name: buttonRegex }).click();
+  await page.getByRole('button', { name: /Menu/i }).first().dispatchEvent('click');
+  await page.getByRole('button', { name: buttonRegex }).first().waitFor({ state: 'visible', timeout: 4000 });
+  await page.getByRole('button', { name: buttonRegex }).first().dispatchEvent('click');
   await page.waitForTimeout(180);
   const res = await page.evaluate(() => ({
     cfg: window.__rig.currentVehicleConfig,
@@ -171,7 +183,7 @@ const testBlockedVehicle = async (buttonRegex, expectedLicLabel) => {
   // Dismiss modal for next test
   const closeBtn = page.locator('button', { hasText: /✕|Fechar/i }).first();
   if (await closeBtn.isVisible().catch(() => false)) {
-    await closeBtn.click();
+    await closeBtn.dispatchEvent('click');
     await page.waitForTimeout(120);
   }
   return { ...res, expectedLicLabel };
@@ -456,11 +468,12 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(200);
 
-// Attempt R key & Menu switch during active Exam X -> both must be blocked while exam stays active
+// Attempt R key & Menu switch during active Exam X (even in Sandbox) -> both must be blocked while exam stays active
 await page.keyboard.press('r');
 await page.waitForTimeout(100);
-await page.getByRole('button', { name: /Menu/i }).click();
-await page.getByRole('button', { name: /Standard 13\.6m/i }).click();
+await page.getByRole('button', { name: /Menu/i }).first().dispatchEvent('click');
+await page.getByRole('button', { name: /Standard 13\.6m/i }).first().waitFor({ state: 'visible', timeout: 4000 });
+await page.getByRole('button', { name: /Standard 13\.6m/i }).first().dispatchEvent('click');
 await page.waitForTimeout(150);
 
 const examXChecks = await page.evaluate(() => {

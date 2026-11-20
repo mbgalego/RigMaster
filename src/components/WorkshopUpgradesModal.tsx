@@ -215,16 +215,20 @@ export const WorkshopUpgradesModal: React.FC<WorkshopUpgradesModalProps> = ({
             <div className="space-y-2.5">
               {options.map((opt) => {
                 const isInstalled = installedForSlot === opt.id;
+                const isPreviewed = previewValue === opt.id;
                 return (
                   <div
                     key={opt.id}
                     data-testid={`upgrade-opt-${activeSlot}-${opt.id}`}
                     onMouseEnter={() => setPreviewValue(opt.id)}
-                    onMouseLeave={() => setPreviewValue(null)}
-                    className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors ${
+                    onMouseLeave={() => setPreviewValue((cur) => (cur === opt.id ? null : cur))}
+                    onClick={() => setPreviewValue((cur) => (cur === opt.id ? null : opt.id))}
+                    className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors cursor-pointer ${
                       isInstalled
                         ? 'bg-slate-900/80 border-cyan-500/50'
-                        : 'bg-slate-900/35 border-slate-800 hover:border-slate-700'
+                        : isPreviewed
+                          ? 'bg-slate-900/70 border-amber-400/50'
+                          : 'bg-slate-900/35 border-slate-800 hover:border-slate-700'
                     }`}
                   >
                     <div className="space-y-1 min-w-0">
@@ -243,7 +247,10 @@ export const WorkshopUpgradesModal: React.FC<WorkshopUpgradesModalProps> = ({
                     <button
                       type="button"
                       disabled={isInstalled || !canModify}
-                      onClick={() => onInstallUpgrade(activeSlot, opt.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onInstallUpgrade(activeSlot, opt.id);
+                      }}
                       className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
                         isInstalled
                           ? 'bg-slate-800 text-slate-400 cursor-default'
@@ -267,7 +274,7 @@ export const WorkshopUpgradesModal: React.FC<WorkshopUpgradesModalProps> = ({
                 Comparador Físico Efetivo
               </h3>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                Passe o rato por uma opção à esquerda para pré-visualizar o impacto real na física.
+                Toque ou passe o rato numa opção à esquerda para pré-visualizar o impacto real na física.
               </p>
             </div>
 

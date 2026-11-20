@@ -818,6 +818,132 @@ check(
   JSON.stringify({ mapOpenedByMinimapTap, toastDur, mobileLayout, careerNightDisabled, sandboxNightEnabled, sandboxFixedNight, careerRestoredAuto }),
 );
 
+// 17. Code-review regression checks: H1 (active truck reload persistence), H2 (sandbox boot isolation),
+//     H3 (spawnVehicleRig preserves wear/damage), H4 (R blocked during active Career mission),
+//     H5 (damaged loose trailer NOT healed on mission accept), M4 (distinct real dimensions per truck)
+const reviewChecks = await page.evaluate(() => {
+  const rig = window.__rig;
+  rig.setGameMode('career');
+  rig.cancelActiveMission();
+
+  // M4: Real physical dimensions & wheelbase differ across catalog specs
+  const manDims = { w: rig.truck.width, l: rig.truck.length, wb: rig.truck.wheelbase, hitch: rig.truck.hitchOffsetY };
+  rig.setGameMode('sandbox');
+  rig.trySwapTruck('truck_iveco_daily_4x2', true);
+  const ivecoDims = { w: rig.truck.width, l: rig.truck.length, wb: rig.truck.wheelbase, hitch: rig.truck.hitchOffsetY };
+  rig.trySwapTruck('truck_volvo_fh16_8x4', true);
+  const volvoDims = { w: rig.truck.width, l: rig.truck.length, wb: rig.truck.wheelbase, hitch: rig.truck.hitchOffsetY };
+  rig.setGameMode('career');
+
+  // H3: spawnVehicleRig() without repair:true preserves truck damage & wear
+  rig.truck.damage.engine = 55;
+  rig.truck.damage.overall = 72;
+  rig.truck.wear.tires = 61;
+  rig.spawnVehicleRig('standard');
+  const h3Preserved = rig.truck.damage.engine === 55 && rig.truck.wear.tires === 61;
+
+  // H5: Damaged loose trailer at harbor must NOT be healed when accepting harbor_city_dist
+  const harborHub = rig.garageSystem.getHub('harbor').locationWorld;
+  rig.truck.setPosition(harborHub.x, harborHub.y, 0);
+  rig.trailer.setPosition(harborHub.x, harborHub.y + 125, 0);
+  rig.trailer.trailerHealth = 55;
+  rig.trailer.cargoHealth = 40;
+  const damagedTrailerRef = rig.trailer;
+  rig.decoupleAction();
+  rig.acceptMission('harbor_city_dist');
+  const h5NotHealed =
+    Math.round(damagedTrailerRef.cargoHealth) === 40 &&
+    Math.round(damagedTrailerRef.trailerHealth) === 55;
+
+  // H4: Reset (R) is blocked during an active Career mission
+  rig.truck.setPosition(7000, 5000, 0.3);
+  rig.truck.fuelLevel = 123;
+  rig.truck.damage.engine = 52;
+  rig.truck.wear.tires = 64;
+  rig.resetVehicleToSpawn();
+  const h4Blocked =
+    Math.hypot(rig.truck.body.position.x - 7000, rig.truck.body.position.y - 5000) < 20 &&
+    Math.round(rig.truck.fuelLevel) === 123 &&
+    rig.truck.damage.engine === 52;
+
+  // H1 prep: cancel mission so clean active truck state at (7000, 5000) persists across reload via pagehide
+  rig.cancelActiveMission();
+  rig.truck.setPosition(7000, 5000, 0.3);
+  rig.truck.fuelLevel = 123;
+  rig.truck.damage.engine = 52;
+  rig.truck.wear.engine = 44;
+  rig.truck.wear.tires = 64;
+  rig.syncActiveTruckStateToFleet(true);
+
+  return { ivecoDims, manDims, volvoDims, h3Preserved, h5NotHealed, h4Blocked };
+});
+
+// Reload page and verify H1 persisted active truck position, fuel, damage & wear
+await page.reload({ waitUntil: 'load', timeout: 30000 });
+await page.waitForFunction(() => !!window.__rig, null, { timeout: 30000 });
+await page.waitForTimeout(800);
+const h1AfterReload = await page.evaluate(() => {
+  const tr = window.__rig.truck;
+  return {
+    x: Math.round(tr.body.position.x),
+    y: Math.round(tr.body.position.y),
+    fuel: Math.round(tr.fuelLevel),
+    dmgEngine: Math.round(tr.damage.engine),
+    wearEngine: Math.round(tr.wear.engine),
+    wearTires: Math.round(tr.wear.tires),
+  };
+});
+
+// H2 browser check: boot fresh in sandbox -> switch to career -> repair -> reload -> Career still clean
+await page.evaluate(() => {
+  window.__rig.reputationSystem.resetCareerProgress();
+  const keys = [
+    'rigmaster_licenses',
+    'rigmaster_hubReputation',
+    'rigmaster_certificates',
+    'rigmaster_certificateProgress',
+    'rigmaster_truckFleet',
+    'rigmaster_activeTruckId',
+    'rigmaster_gameMode',
+  ];
+  for (const k of keys) localStorage.removeItem(k);
+  localStorage.setItem('rigmaster_gameMode', 'sandbox');
+});
+await page.reload({ waitUntil: 'load', timeout: 30000 });
+await page.waitForFunction(() => !!window.__rig, null, { timeout: 30000 });
+await page.waitForTimeout(500);
+await page.evaluate(() => {
+  const rig = window.__rig;
+  rig.setGameMode('career');
+  rig.reputationSystem.repairTruckWearAndDamage(rig.reputationSystem.getActiveTruck().id);
+});
+await page.reload({ waitUntil: 'load', timeout: 30000 });
+await page.waitForFunction(() => !!window.__rig, null, { timeout: 30000 });
+await page.waitForTimeout(500);
+const h2UnlockedCount = await page.evaluate(() =>
+  window.__rig.reputationSystem.getFleet().filter((t) => t.unlocked).length,
+);
+
+check(
+  'Regressões v2.12.1 (H1/H2/H3/H4/H5/M4): persistência de camião ativo, isolamento Sandbox no boot, sem cura/R grátis e dimensões reais por modelo',
+  reviewChecks.ivecoDims.l === 76 &&
+    reviewChecks.manDims.l === 88 &&
+    reviewChecks.volvoDims.l === 98 &&
+    reviewChecks.ivecoDims.wb < reviewChecks.manDims.wb &&
+    reviewChecks.manDims.wb < reviewChecks.volvoDims.wb &&
+    reviewChecks.h3Preserved &&
+    reviewChecks.h5NotHealed &&
+    reviewChecks.h4Blocked &&
+    Math.hypot(h1AfterReload.x - 7000, h1AfterReload.y - 5000) < 30 &&
+    Math.abs(h1AfterReload.fuel - 123) <= 2 &&
+    h1AfterReload.dmgEngine === 52 &&
+    h1AfterReload.wearEngine === 44 &&
+    h1AfterReload.wearTires === 64 &&
+    h2UnlockedCount === 1,
+  JSON.stringify({ reviewChecks, h1AfterReload, h2UnlockedCount }),
+);
+
+
 check('zero erros JS durante todo o teste de progressão', pageErrors.length === 0, pageErrors.join('; '));
 
 await browser.close();

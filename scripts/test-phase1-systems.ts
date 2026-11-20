@@ -323,6 +323,99 @@ check(
   `reloadedActive=${repReloaded.getActiveTruck().type}, certs=${repReloaded.getUnlockedCertificateIds().join(',')}`,
 );
 
+// 9. Regression H2: Booting in Sandbox mode, switching to Career, saving & reloading NEVER unlocks Career fleet
+{
+  ReputationSystem.resetInstanceForTests();
+  store.clear();
+  store.set('rigmaster_gameMode', 'sandbox');
+  const repBootSandbox = ReputationSystem.getInstance();
+  repBootSandbox.setGameMode('career');
+  repBootSandbox.repairTruckWearAndDamage(repBootSandbox.getActiveTruck().id);
+  ReputationSystem.resetInstanceForTests();
+  const repAfter = ReputationSystem.getInstance();
+  const unlockedCount = repAfter.getFleet().filter((t) => t.unlocked).length;
+  check(
+    'Regressão H2: arrancar em Sandbox → mudar para Carreira → gravar não desbloqueia frota da Carreira',
+    unlockedCount === 1 && repAfter.getTruckByType('volvo_fh16_8x4')?.unlocked === false,
+    `unlockedCount=${unlockedCount}`,
+  );
+}
+
+// 10. Regression H6: Accepting a second mission while one is active is rejected
+{
+  const repH6 = ReputationSystem.getInstance();
+  repH6.resetCareerProgress();
+  const mSys = MissionSystem.getInstance();
+  mSys.cancelActiveMission();
+  const firstAcc = mSys.acceptMission('harbor_city_dist', { coupledTrailerType: 'standard' });
+  const secondAcc = mSys.acceptMission('harbor_container_40', { coupledTrailerType: 'container' });
+  const stillFirst = mSys.getActiveMission()?.mission.id === 'harbor_city_dist';
+  mSys.cancelActiveMission();
+  check(
+    'Regressão H6: aceitar segunda missão enquanto há uma ativa é bloqueado sem substituir progresso',
+    firstAcc.ok === true && secondAcc.ok === false && stillFirst,
+    secondAcc.reason ?? '',
+  );
+}
+
+// 11. Regression M1: Precision_Dock apron timer accumulates only <= 520px, resets > 600px, and never uses 30s fallback
+{
+  const repM1 = ReputationSystem.getInstance();
+  repM1.resetCareerProgress();
+  const mSys = MissionSystem.getInstance();
+  mSys.cancelActiveMission();
+
+  const stepFrames = (totalSec: number, distToTargetDockPx: number) => {
+    const steps = Math.round(totalSec / 0.1);
+    for (let i = 0; i < steps; i++) {
+      mSys.updateActiveMission({
+        dt: 0.1,
+        coupledTrailerType: 'standard',
+        hasPupTrailer: false,
+        cargoHealth: 100,
+        currentGForce: 0.2,
+        isJackknifed: false,
+        onDirtOrOffroad: false,
+        speedPxS: 50,
+        speedKmh: 11,
+        inTargetDock: false,
+        dockAlignDeg: 1.0,
+        distToTargetDockPx,
+        newCollisionsDelta: 0,
+        isNightNow: false,
+      });
+    }
+  };
+
+  mSys.acceptMission('harbor_city_dist', { coupledTrailerType: 'standard' });
+  // Simulate 50s far away (no apron entry): dockDurationSec must remain 0 -> completion without override fails Precision_Dock
+  stepFrames(50, 1200);
+  const withoutApron = mSys.completeActiveMission(0.5, false);
+  const streakAfterNoApron = repM1.getCertificate('Precision_Dock').current;
+
+  // Enter apron for 20s, leave > 600px (must reset to 0), then re-enter for 15s -> dockDurationSec = 15s (<= 45s)
+  mSys.acceptMission('harbor_city_dist', { coupledTrailerType: 'standard' });
+  stepFrames(20, 300);
+  const durBeforeLeave = mSys.getActiveMission()?.dockDurationSec ?? 0;
+  stepFrames(1, 750);
+  const resetAfterLeave = mSys.getActiveMission()?.dockDurationSec === 0;
+  stepFrames(15, 250);
+  const withApron = mSys.completeActiveMission(1.0, false);
+  const streakAfterApron = repM1.getCertificate('Precision_Dock').current;
+  check(
+    'Regressão M1: Precision_Dock mede tempo real na zona da doca, reinicia ao sair >600px e não usa fallback 30s',
+    withoutApron !== null &&
+      streakAfterNoApron === 0 &&
+      Math.abs(durBeforeLeave - 20) < 0.2 &&
+      resetAfterLeave &&
+      withApron !== null &&
+      Math.abs(withApron.metrics.dockDurationSec - 15) < 0.2 &&
+      streakAfterApron === 1,
+    `noApronStreak=${streakAfterNoApron}, beforeLeave=${durBeforeLeave.toFixed(1)}, reset=${resetAfterLeave}, dockSec=${withApron?.metrics.dockDurationSec.toFixed(1)}, streak=${streakAfterApron}`,
+  );
+}
+
+
 if (failures > 0) {
   console.error(`\n❌ ${failures} falha(s) na Fase 1`);
   process.exit(1);

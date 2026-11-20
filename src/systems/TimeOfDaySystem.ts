@@ -47,8 +47,8 @@ export class TimeOfDaySystem {
   // In-game 24h day/night cycle is the default mode.
   private autoCycle: boolean = true;
   private realTime: boolean = false;
-  // 1 full 24h cycle in ~180s when autoCycle is enabled
-  private cycleSpeedPerSec: number = 1 / 180;
+  // 1 full 24h in-game cycle in 24 real minutes (1440s -> 1 real min = 1 in-game hour)
+  private cycleSpeedPerSec: number = 1 / 1440;
   private listeners: Array<() => void> = [];
   private lastNotifiedPeriod: TimePeriod = 'day';
   private lastNotifiedMinute: number = -1;

@@ -32,6 +32,10 @@ page.on('pageerror', (e) => pageErrors.push(String(e)));
 await page.goto(URL, { waitUntil: 'domcontentloaded' });
 await page.waitForFunction(() => !!window.__rig, { timeout: 30000 });
 await page.waitForTimeout(1500);
+// Game defaults to solo tractor; bridge ramp test explicitly verifies coupled truck + trailer
+await page.evaluate(() => {
+  window.__rig.spawnVehicleRig('standard');
+});
 
 // Pause auto rAF physics interference while we step deterministic 60Hz frames
 // through the real MainScene.update + Matter.world.step loop.
@@ -90,8 +94,9 @@ await page.evaluate(() => {
   const rig = window.__rig;
   rig.truck.setElevation(0, 0);
   rig.truck.setPosition(8064, 2220, 0); // facing North
+  const dist = rig.truck.hitchOffsetY + (rig.trailer?.kingpinDist ?? 96);
   rig.trailer?.setElevation(0, 0);
-  rig.trailer?.setPosition(8064, 2351, 0);
+  rig.trailer?.setPosition(8064, 2220 + dist, 0);
   rig.truck.vLong = 140;
   rig.truck.currentSpeed = 140;
 });
@@ -122,8 +127,9 @@ await page.evaluate(() => {
   const rig = window.__rig;
   rig.truck.setElevation(0, 0);
   rig.truck.setPosition(5780, 2048, Math.PI / 2); // facing East on west ramp portal
+  const dist = rig.truck.hitchOffsetY + (rig.trailer?.kingpinDist ?? 96);
   rig.trailer?.setElevation(0, 0);
-  rig.trailer?.setPosition(5649, 2048, Math.PI / 2);
+  rig.trailer?.setPosition(5780 - dist, 2048, Math.PI / 2);
   rig.truck.vLong = 140;
   rig.truck.currentSpeed = 140;
 });
@@ -141,8 +147,9 @@ await page.evaluate(() => {
   const rig = window.__rig;
   rig.truck.setElevation(1, 1);
   rig.truck.setPosition(10120, 2048, Math.PI / 2);
+  const dist = rig.truck.hitchOffsetY + (rig.trailer?.kingpinDist ?? 96);
   rig.trailer?.setElevation(1, 1);
-  rig.trailer?.setPosition(9989, 2048, Math.PI / 2);
+  rig.trailer?.setPosition(10120 - dist, 2048, Math.PI / 2);
   rig.truck.vLong = 140;
   rig.truck.currentSpeed = 140;
 });
@@ -170,8 +177,9 @@ await page.evaluate(() => {
   const rig = window.__rig;
   rig.truck.setElevation(1, 1);
   rig.truck.setPosition(8064, 2055, Math.PI * 0.85);
+  const dist = rig.truck.hitchOffsetY + (rig.trailer?.kingpinDist ?? 96);
   rig.trailer?.setElevation(1, 1);
-  rig.trailer?.setPosition(8064 - Math.sin(Math.PI * 0.85) * 131, 2055 + Math.cos(Math.PI * 0.85) * 131, Math.PI * 0.85);
+  rig.trailer?.setPosition(8064 - Math.sin(Math.PI * 0.85) * dist, 2055 + Math.cos(Math.PI * 0.85) * dist, Math.PI * 0.85);
   rig.truck.vLong = 140;
   rig.truck.currentSpeed = 140;
 });

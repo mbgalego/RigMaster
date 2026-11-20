@@ -108,10 +108,12 @@ export class ParkedTruckManager {
       g.clear();
       if (entry.fleet.id !== nearbyTruckId) continue;
       const spec = TRUCK_CATALOG[entry.fleet.type];
+      const hw = spec.width / 2 + 6;
+      const hl = spec.length / 2 + 6;
       g.lineStyle(2.5, spec.accentColor, 0.55 + 0.4 * pulse);
-      g.strokeRoundedRect(-30, -54, 60, 108, 10);
+      g.strokeRoundedRect(-hw, -hl, hw * 2, hl * 2, 10);
       g.fillStyle(spec.cabColor, 0.08 + 0.08 * pulse);
-      g.fillRoundedRect(-30, -54, 60, 108, 10);
+      g.fillRoundedRect(-hw, -hl, hw * 2, hl * 2, 10);
     }
   }
 
@@ -124,8 +126,8 @@ export class ParkedTruckManager {
 
   private createEntry(fleet: FleetTruckState): ParkedTruckVisual {
     const spec = TRUCK_CATALOG[fleet.type];
-    const w = 48;
-    const l = 96;
+    const w = spec.width;
+    const l = spec.length;
     const hw = w / 2;
     const hl = l / 2;
 
@@ -161,7 +163,7 @@ export class ParkedTruckManager {
     gfx.fillRoundedRect(-hw, -hl, w, l, 6);
     gfx.strokeRoundedRect(-hw, -hl, w, l, 6);
 
-    const cabH = spec.axleRank === 3 ? 48 : spec.axleRank === 2 ? 46 : 42;
+    const cabH = Math.min(spec.axleRank === 3 ? 46 : spec.axleRank === 2 ? 43 : 35, l * 0.48);
     gfx.fillStyle(spec.cabColor, 0.42);
     gfx.fillRoundedRect(-hw + 4, -hl + 8, w - 8, cabH, 4);
     gfx.lineStyle(1.8, spec.accentColor, 0.85);
@@ -169,21 +171,23 @@ export class ParkedTruckManager {
 
     // Windshield & stripe
     gfx.fillStyle(0x0284c7, 0.8);
-    gfx.fillRoundedRect(-hw + 8, -hl + 12, w - 16, 13, 2);
+    gfx.fillRoundedRect(-hw + 7, -hl + 11, w - 14, 12, 2);
     gfx.fillStyle(spec.accentColor, 0.55);
-    gfx.fillRect(spec.axleRank >= 2 ? -5 : -3, -hl + 27, spec.axleRank >= 2 ? 10 : 6, cabH - 22);
+    gfx.fillRect(spec.axleRank >= 2 ? -5 : -3, -hl + 24, spec.axleRank >= 2 ? 10 : 6, Math.max(6, cabH - 20));
 
     // Fifth wheel plate
+    const hitchY = Math.round(l / 2 - 13);
+    const plateR = Math.min(12, hw - 4);
     gfx.fillStyle(0x0f172a, 1);
     gfx.lineStyle(1.8, 0xfacc15, 0.85);
-    gfx.fillCircle(0, 35, 13);
-    gfx.strokeCircle(0, 35, 13);
+    gfx.fillCircle(0, hitchY, plateR);
+    gfx.strokeCircle(0, hitchY, plateR);
 
     // Tires (4x2 vs 6x4 vs 8x4)
     gfx.fillStyle(0x0f172a, 1);
     gfx.lineStyle(1.2, 0x64748b, 0.85);
-    const frontY = -hl + 18;
-    const rearY = hl - 20;
+    const frontY = -hl + Math.min(18, l * 0.21);
+    const rearY = hl - Math.min(20, l * 0.22);
     const drawAxle = (ay: number, h: number) => {
       gfx.fillRect(-hw - 4, ay - h / 2, 7, h);
       gfx.strokeRect(-hw - 4, ay - h / 2, 7, h);
@@ -201,8 +205,8 @@ export class ParkedTruckManager {
 
     // Small dim parking marker lamps
     gfx.fillStyle(0xf59e0b, 0.75);
-    gfx.fillCircle(-hw + 8, -hl + 2, 2.5);
-    gfx.fillCircle(hw - 8, -hl + 2, 2.5);
+    gfx.fillCircle(-hw + 6, -hl + 2, 2.5);
+    gfx.fillCircle(hw - 6, -hl + 2, 2.5);
 
     container.add([highlightGfx, gfx]);
 

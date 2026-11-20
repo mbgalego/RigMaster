@@ -20,7 +20,7 @@ export function createGameConfig(options: GameConfigOptions): Phaser.Types.Core.
     height: options.height || 720,
     backgroundColor: '#0c0f17',
     render: {
-      maxLights: 8,
+      maxLights: 4,
     },
     scale: {
       mode: Phaser.Scale.RESIZE,
