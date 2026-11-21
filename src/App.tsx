@@ -902,9 +902,19 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `rigmaster_world_${Date.now()}.json`;
+    a.download = `rigworld_${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleCopyJSON = async () => {
+    try {
+      await navigator.clipboard.writeText(jsonContent);
+      const scene = getMainScene();
+      if (scene) scene.events.emit('toast', { text: 'JSON do mapa copiado para a área de transferência.', color: '#22d3ee' });
+    } catch {
+      setJsonError('Não foi possível copiar automaticamente — selecione e copie o texto da caixa.');
+    }
   };
 
   // Reseed the island back to its default content
@@ -1269,7 +1279,7 @@ export default function App() {
                       }}
                       className="text-left px-2 py-1.5 rounded text-slate-300 hover:bg-slate-900"
                     >
-                      Restaurar Ilha Original
+                      Restaurar RigWorld Original
                     </button>
                   </div>
                 </div>
@@ -1681,20 +1691,20 @@ export default function App() {
       {telemetry.lastMissionCompletion && (
         <div
           data-testid="mission-completion-modal"
-          className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[65] flex items-center justify-center p-4"
+          className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[65] flex items-center justify-center p-2.5 sm:p-4"
         >
-          <div className="bg-slate-950 border border-emerald-500/50 max-w-md w-full p-6 rounded-xl shadow-2xl space-y-4">
+          <div className="bg-slate-950 border border-emerald-500/50 max-w-md w-full max-h-[92dvh] overflow-y-auto overscroll-contain p-4 sm:p-6 rounded-xl shadow-2xl space-y-3.5 sm:space-y-4">
             <div className="flex items-start justify-between gap-3">
-              <div>
+              <div className="min-w-0">
                 <div className="text-xs font-medium text-emerald-400">Missão Concluída</div>
-                <h3 className="text-lg font-bold text-white mt-0.5">
+                <h3 className="text-base sm:text-lg font-bold text-white mt-0.5 leading-snug">
                   {telemetry.lastMissionCompletion.mission.title}
                 </h3>
                 <div className="text-xs text-slate-400">
                   {telemetry.lastMissionCompletion.mission.originHubName} → {telemetry.lastMissionCompletion.mission.targetHubName}
                 </div>
               </div>
-              <div className="text-3xl font-black font-mono tabular-nums text-emerald-300 leading-none px-3 py-2 rounded-lg bg-slate-900 border border-slate-800">
+              <div className="text-2xl sm:text-3xl font-black font-mono tabular-nums text-emerald-300 leading-none px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg bg-slate-900 border border-slate-800 shrink-0">
                 {telemetry.lastMissionCompletion.rating}
               </div>
             </div>
@@ -2426,29 +2436,36 @@ export default function App() {
 
       {/* LICENSE SYSTEM MODAL */}
       {showLicenseModal && (
-        <div className="absolute inset-0 bg-black/75 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-          <div className="bg-slate-950 border border-cyan-500/50 max-w-3xl w-full rounded-2xl shadow-2xl p-6 flex flex-col max-h-[90vh] overflow-hidden">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-cyan-500/20 text-cyan-400 rounded-lg border border-cyan-500/40">
-                  <Award className="w-6 h-6" />
+        <div
+          className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[60] flex items-center justify-center p-2 sm:p-4"
+          onClick={() => setShowLicenseModal(false)}
+        >
+          <div
+            className="bg-slate-950 border border-cyan-500/50 max-w-3xl w-full rounded-xl sm:rounded-2xl shadow-2xl p-3.5 sm:p-6 flex flex-col max-h-[92dvh] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start sm:items-center justify-between gap-2.5 border-b border-slate-800 pb-3 sm:pb-4 mb-3 sm:mb-4 shrink-0">
+              <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                <div className="p-1.5 sm:p-2 bg-cyan-500/20 text-cyan-400 rounded-lg border border-cyan-500/40 shrink-0">
+                  <Award className="w-5 h-5 sm:w-6 sm:h-6" />
                 </div>
-                <div>
-                  <h2 className="text-xl font-black text-white">SISTEMA HÍBRIDO DE LICENÇAS</h2>
-                  <p className="text-xs text-slate-400">
-                    Provas práticas de manobra e geometria para desbloqueio de tipologias de veículos.
+                <div className="min-w-0">
+                  <h2 className="text-base sm:text-xl font-black text-white leading-snug">SISTEMA DE LICENÇAS</h2>
+                  <p className="text-[11px] sm:text-xs text-slate-400">
+                    Provas práticas de manobra para desbloqueio de veículos.
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setShowLicenseModal(false)}
-                className="text-slate-400 hover:text-white text-sm px-2 py-1 bg-slate-900 rounded"
+                aria-label="Fechar"
+                className="text-slate-400 hover:text-white text-sm px-2 py-1 bg-slate-900 rounded shrink-0"
               >
                 ✕
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 overflow-y-auto pr-1">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 overflow-y-auto overscroll-contain flex-1 min-h-0 pr-0.5 sm:pr-1">
               {licenses.map((lic) => {
                 const isPassed = lic.unlocked;
 
@@ -2509,13 +2526,13 @@ export default function App() {
               })}
             </div>
 
-            <div className="mt-4 pt-3 border-t border-slate-800 flex justify-between items-center text-xs">
-              <span className="text-slate-400">Sandbox sem economia monetária • Progressão por mestria pura.</span>
+            <div className="mt-3 sm:mt-4 pt-3 border-t border-slate-800 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 text-[11px] sm:text-xs shrink-0">
+              <span className="text-slate-400">Progressão por mestria pura, sem economia monetária.</span>
               <button
                 onClick={() => LicenseSystem.getInstance().unlockAllLicenses()}
-                className="text-cyan-400 hover:underline"
+                className="text-cyan-400 hover:underline text-left sm:text-right font-medium"
               >
-                Desbloquear Todas as Licenças (Modo Sandbox)
+                Desbloquear Todas (Sandbox)
               </button>
             </div>
           </div>
@@ -2524,35 +2541,42 @@ export default function App() {
 
       {/* GARAGE & REGIONAL HUBS MODAL */}
       {showGarageModal && (
-        <div className="absolute inset-0 bg-black/75 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-          <div className="bg-slate-950 border border-amber-500/50 max-w-3xl w-full rounded-2xl shadow-2xl p-6 flex flex-col max-h-[90vh] overflow-hidden">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-amber-500/20 text-amber-400 rounded-lg border border-amber-500/40">
-                  <MapPin className="w-6 h-6" />
+        <div
+          className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[60] flex items-center justify-center p-2 sm:p-4"
+          onClick={() => setShowGarageModal(false)}
+        >
+          <div
+            className="bg-slate-950 border border-amber-500/50 max-w-3xl w-full rounded-xl sm:rounded-2xl shadow-2xl p-3.5 sm:p-6 flex flex-col max-h-[92dvh] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start sm:items-center justify-between gap-2.5 border-b border-slate-800 pb-3 sm:pb-4 mb-3 sm:mb-4 shrink-0">
+              <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                <div className="p-1.5 sm:p-2 bg-amber-500/20 text-amber-400 rounded-lg border border-amber-500/40 shrink-0">
+                  <MapPin className="w-5 h-5 sm:w-6 sm:h-6" />
                 </div>
-                <div>
-                  <h2 className="text-xl font-black text-white">CONQUISTA DE HUBS & GARAGENS</h2>
-                  <p className="text-xs text-slate-400">
-                    Domina os 4 biomas regionais para desbloquear peças de Tilemap e modificadores globais de clima.
+                <div className="min-w-0">
+                  <h2 className="text-base sm:text-xl font-black text-white leading-snug">HUBS & GARAGENS</h2>
+                  <p className="text-[11px] sm:text-xs text-slate-400">
+                    Domina os 4 hubs regionais para desbloquear modificadores de clima.
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setShowGarageModal(false)}
-                className="text-slate-400 hover:text-white text-sm px-2 py-1 bg-slate-900 rounded"
+                aria-label="Fechar"
+                className="text-slate-400 hover:text-white text-sm px-2 py-1 bg-slate-900 rounded shrink-0"
               >
                 ✕
               </button>
             </div>
 
-            {/* Weather Modifier Quick Bar */}
-            <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800 mb-4 flex items-center justify-between">
-              <div>
-                <div className="text-xs font-bold text-white">Modificadores Globais de Ambiente</div>
-                <div className="text-[11px] text-slate-400">Ativa condições meteorológicas desbloqueadas pelos hubs dominados.</div>
+            {/* Weather Modifier Quick Bar — wraps cleanly on narrow mobile screens */}
+            <div className="bg-slate-900/80 p-2.5 sm:p-3 rounded-xl border border-slate-800 mb-3 sm:mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shrink-0">
+              <div className="min-w-0">
+                <div className="text-xs font-bold text-white">Modificadores de Ambiente</div>
+                <div className="text-[11px] text-slate-400">Condições meteorológicas desbloqueadas pelos hubs.</div>
               </div>
-              <div className="flex items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
                 {(['clear', 'rain', 'fog', 'night'] as const).map((weather) => {
                   const unlocked = GarageSystem.getInstance().getUnlockedModifiers().includes(weather);
                   return (
@@ -2561,7 +2585,7 @@ export default function App() {
                       onClick={() => handleSetWeather(weather)}
                       disabled={!unlocked}
                       title={unlocked ? undefined : 'Bloqueado: domina o Hub correspondente a 100%'}
-                      className={`px-3 py-1 rounded text-xs font-semibold capitalize transition ${
+                      className={`px-2.5 sm:px-3 py-1 rounded text-[11px] sm:text-xs font-semibold capitalize transition whitespace-nowrap ${
                         activeWeather === weather
                           ? 'bg-cyan-500 text-black font-bold shadow-md shadow-cyan-500/30'
                           : unlocked
@@ -2569,7 +2593,7 @@ export default function App() {
                             : 'bg-slate-950 text-slate-600 border border-slate-900 cursor-not-allowed'
                       }`}
                     >
-                      {weather === 'rain' ? 'Chuva / Escorregadio' : weather === 'fog' ? 'Nevoeiro' : weather === 'night' ? 'Noturno' : 'Limpo'}
+                      {weather === 'rain' ? 'Chuva' : weather === 'fog' ? 'Nevoeiro' : weather === 'night' ? 'Noturno' : 'Limpo'}
                       {!unlocked && ' 🔒'}
                     </button>
                   );
@@ -2577,7 +2601,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 overflow-y-auto pr-1">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 overflow-y-auto overscroll-contain flex-1 min-h-0 pr-0.5 sm:pr-1">
               {hubs.map((hub) => (
                 <div
                   key={hub.id}
@@ -2661,8 +2685,8 @@ export default function App() {
               ))}
             </div>
 
-            <div className="mt-4 pt-3 border-t border-slate-800 flex justify-between items-center text-xs">
-              <span className="text-slate-400">Dominar a 100% ativa sinais néon no mapa e liberta peças no Tilemap.</span>
+            <div className="mt-3 sm:mt-4 pt-3 border-t border-slate-800 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 text-[11px] sm:text-xs shrink-0">
+              <span className="text-slate-400">Dominar a 100% ativa sinais néon no mapa e clima regional.</span>
               <button
                 onClick={() => {
                   GarageSystem.getInstance().dominateAllHubs();
@@ -2670,9 +2694,9 @@ export default function App() {
                   setToasts((t) => [...t.slice(-2), { id, text: 'Todos os hubs dominados — sinais néon, biomas e meteorologia desbloqueados', kind: 'success' }]);
                   setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2800);
                 }}
-                className="text-amber-400 hover:underline"
+                className="text-amber-400 hover:underline text-left sm:text-right font-medium"
               >
-                Dominar Todos os Hubs (100% Instantâneo)
+                Dominar Todos (100% Instantâneo)
               </button>
             </div>
           </div>
@@ -2681,57 +2705,72 @@ export default function App() {
 
       {/* JSON EXPORT & IMPORT MODAL */}
       {showJsonModal && (
-        <div className="absolute inset-0 bg-black/75 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-          <div className="bg-slate-950 border border-slate-700 max-w-2xl w-full rounded-2xl shadow-2xl p-6 flex flex-col max-h-[90vh]">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
-              <div className="flex items-center gap-2">
-                <FileCode className="w-5 h-5 text-cyan-400" />
-                <h3 className="font-bold text-white text-base">Exportar / Importar Mapa em JSON Limpo</h3>
+        <div
+          className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[60] flex items-center justify-center p-2 sm:p-4"
+          onClick={() => setShowJsonModal(false)}
+        >
+          <div
+            className="bg-slate-950 border border-slate-700 max-w-2xl w-full rounded-xl sm:rounded-2xl shadow-2xl p-3.5 sm:p-6 flex flex-col max-h-[92dvh] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-3 mb-2.5 sm:mb-3 shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <FileCode className="w-5 h-5 text-cyan-400 shrink-0" />
+                <h3 className="font-bold text-white text-sm sm:text-base truncate">Exportar / Importar Mapa JSON</h3>
               </div>
               <button
                 onClick={() => setShowJsonModal(false)}
-                className="text-slate-400 hover:text-white text-sm px-2 py-1 bg-slate-900 rounded"
+                aria-label="Fechar"
+                className="text-slate-400 hover:text-white text-sm px-2 py-1 bg-slate-900 rounded shrink-0"
               >
                 ✕
               </button>
             </div>
 
             {jsonError && (
-              <div className="bg-red-950/80 border border-red-500 text-red-200 p-2 rounded text-xs mb-3">
+              <div className="bg-red-950/80 border border-red-500 text-red-200 p-2 rounded text-xs mb-2.5 shrink-0">
                 {jsonError}
               </div>
             )}
 
-            <p className="text-xs text-slate-400 mb-2">
-              Edita diretamente ou cola a matriz de dados do mapa. Podes descarregar o ficheiro para partilha.
+            <p className="text-[11px] sm:text-xs text-slate-400 mb-2 shrink-0">
+              Edita diretamente ou cola os dados JSON do mapa. Podes descarregar ou copiar para partilha.
             </p>
 
             <textarea
               value={jsonContent}
               onChange={(e) => setJsonContent(e.target.value)}
-              className="w-full flex-1 min-h-[300px] bg-slate-900 text-cyan-300 font-mono text-xs p-3 rounded border border-slate-800 focus:border-cyan-400 outline-none resize-none"
+              className="w-full flex-1 min-h-[180px] sm:min-h-[300px] bg-slate-900 text-cyan-300 font-mono text-xs p-2.5 sm:p-3 rounded border border-slate-800 focus:border-cyan-400 outline-none resize-none"
             />
 
-            <div className="mt-4 pt-3 border-t border-slate-800 flex justify-between items-center gap-2">
-              <button
-                onClick={handleDownloadJSON}
-                className="px-3 py-2 rounded bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white flex items-center gap-1.5"
-              >
-                <Download className="w-4 h-4" /> Descarregar .json
-              </button>
+            <div className="mt-3 sm:mt-4 pt-3 border-t border-slate-800 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 shrink-0">
+              <div className="flex gap-2">
+                <button
+                  onClick={handleDownloadJSON}
+                  className="flex-1 sm:flex-initial justify-center px-3 py-2 rounded bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white flex items-center gap-1.5"
+                >
+                  <Download className="w-4 h-4" /> .json
+                </button>
+                <button
+                  onClick={handleCopyJSON}
+                  className="flex-1 sm:flex-initial justify-center px-3 py-2 rounded bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-cyan-300 flex items-center gap-1.5"
+                >
+                  <Copy className="w-4 h-4" /> Copiar JSON
+                </button>
+              </div>
 
               <div className="flex gap-2">
                 <button
                   onClick={() => setShowJsonModal(false)}
-                  className="px-4 py-2 rounded bg-slate-900 hover:bg-slate-800 text-xs text-slate-300"
+                  className="flex-1 sm:flex-initial px-4 py-2 rounded bg-slate-900 hover:bg-slate-800 text-xs text-slate-300"
                 >
                   Fechar
                 </button>
                 <button
                   onClick={handleApplyImport}
-                  className="px-4 py-2 rounded bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-cyan-500/20"
+                  className="flex-1 sm:flex-initial justify-center px-4 py-2 rounded bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-cyan-500/20"
                 >
-                  <Upload className="w-4 h-4" /> Aplicar ao Simulador
+                  <Upload className="w-4 h-4" /> Aplicar
                 </button>
               </div>
             </div>

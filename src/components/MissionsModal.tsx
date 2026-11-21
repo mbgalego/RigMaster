@@ -122,37 +122,51 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
   return (
     <div
       data-testid="missions-modal"
-      className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+      className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[60] flex items-center justify-center p-2 sm:p-4"
       onClick={onClose}
     >
       <div
-        className="bg-slate-950 border border-slate-700/80 max-w-4xl w-full rounded-xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden"
+        className="bg-slate-950 border border-slate-700/80 max-w-4xl w-full rounded-xl shadow-2xl flex flex-col max-h-[92dvh] overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between gap-4">
-          <div className="min-w-0">
-            <h2 className="text-lg font-bold text-white tracking-tight">
-              Missões Regionais & Certificados
-            </h2>
-            <p className="text-xs text-slate-400 mt-0.5 flex flex-wrap items-center gap-x-2">
-              <span>Camião ativo: <strong className="text-slate-200">{activeSpec.name}</strong> ({activeSpec.axleConfig})</span>
-              <span aria-hidden="true">·</span>
-              <span>
-                Modo: <strong className={isSandbox ? 'text-amber-300' : 'text-cyan-300'}>{isSandbox ? 'Sandbox (Livre)' : 'Carreira'}</strong>
-              </span>
-              <span aria-hidden="true">·</span>
-              <span className="font-mono tabular-nums">
-                Reputação total: {repSys.getTotalReputation().toLocaleString('pt-PT')}
-              </span>
-            </p>
+        {/* Header — stacks cleanly on small screens so title never collapses vertically */}
+        <div className="px-3.5 sm:px-6 py-3 sm:py-4 border-b border-slate-800 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 shrink-0">
+          <div className="min-w-0 flex items-start justify-between gap-2 sm:block">
+            <div className="min-w-0">
+              <h2 className="text-base sm:text-lg font-bold text-white tracking-tight leading-snug">
+                Missões Regionais & Certificados
+              </h2>
+              <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                <span className="whitespace-nowrap">
+                  <strong className="text-slate-200">{activeSpec.name}</strong> ({activeSpec.axleConfig})
+                </span>
+                <span aria-hidden="true">·</span>
+                <span className="whitespace-nowrap">
+                  <strong className={isSandbox ? 'text-amber-300' : 'text-cyan-300'}>
+                    {isSandbox ? 'Sandbox' : 'Carreira'}
+                  </strong>
+                </span>
+                <span aria-hidden="true">·</span>
+                <span className="font-mono tabular-nums whitespace-nowrap">
+                  {repSys.getTotalReputation().toLocaleString('pt-PT')} rep
+                </span>
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Fechar"
+              className="sm:hidden p-1.5 -mr-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-900 transition-colors shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <div className="flex items-center gap-1 p-1 bg-slate-900 rounded-lg border border-slate-800">
+            <div className="flex items-center gap-1 p-1 bg-slate-900 rounded-lg border border-slate-800 w-full sm:w-auto">
               <button
                 type="button"
                 onClick={() => setSection('missions')}
-                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+                className={`flex-1 sm:flex-initial justify-center px-3 py-1.5 rounded-md text-xs font-semibold transition-colors whitespace-nowrap flex items-center gap-1.5 ${
                   section === 'missions'
                     ? 'bg-cyan-500 text-slate-950'
                     : 'text-slate-300 hover:text-white'
@@ -164,7 +178,7 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
               <button
                 type="button"
                 onClick={() => setSection('certificates')}
-                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+                className={`flex-1 sm:flex-initial justify-center px-3 py-1.5 rounded-md text-xs font-semibold transition-colors whitespace-nowrap flex items-center gap-1.5 ${
                   section === 'certificates'
                     ? 'bg-cyan-500 text-slate-950'
                     : 'text-slate-300 hover:text-white'
@@ -178,7 +192,7 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
               type="button"
               onClick={onClose}
               aria-label="Fechar"
-              className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-900 transition-colors"
+              className="hidden sm:inline-flex p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-900 transition-colors"
             >
               <X className="w-4 h-4" />
             </button>
@@ -187,9 +201,9 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
 
         {section === 'missions' ? (
           <div className="flex flex-col flex-1 min-h-0">
-            {/* Hub Filter Bar */}
-            <div className="px-6 py-3 border-b border-slate-800/80 bg-slate-900/40 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-1.5">
+            {/* Hub Filter Bar — horizontal scroll strip on mobile (1 compact row instead of 4 stacked rows) */}
+            <div className="px-3.5 sm:px-6 py-2 sm:py-3 border-b border-slate-800/80 bg-slate-900/40 flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-2 shrink-0">
+              <div className="flex flex-nowrap sm:flex-wrap items-center gap-1.5 overflow-x-auto pb-0.5 sm:pb-0 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {hubs.map((hub) => {
                   const active = hub.id === selectedHub;
                   const rep = hubReputation[hub.id] ?? 0;
@@ -198,15 +212,15 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
                       key={hub.id}
                       type="button"
                       onClick={() => setSelectedHub(hub.id)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap flex items-center gap-2 ${
+                      className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 sm:gap-2 ${
                         active
                           ? 'bg-slate-100 text-slate-950'
                           : 'bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-white border border-slate-800'
                       }`}
                     >
                       <span>{hub.name}</span>
-                      <span className={`font-mono tabular-nums text-[11px] ${active ? 'text-slate-700' : 'text-slate-400'}`}>
-                        {rep.toLocaleString('pt-PT')} rep
+                      <span className={`font-mono tabular-nums text-[10px] sm:text-[11px] ${active ? 'text-slate-700' : 'text-slate-400'}`}>
+                        {rep.toLocaleString('pt-PT')}
                       </span>
                     </button>
                   );
@@ -217,7 +231,7 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowLocked((v) => !v)}
-                  className="text-xs text-slate-400 hover:text-slate-200 transition-colors whitespace-nowrap"
+                  className="hidden sm:inline-block text-xs text-slate-400 hover:text-slate-200 transition-colors whitespace-nowrap"
                 >
                   {showLocked ? 'Ocultar bloqueadas' : `Ver +${lockedCount} bloqueada${lockedCount > 1 ? 's' : ''}`}
                 </button>
@@ -226,30 +240,44 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
 
             {/* Hub Context Strip */}
             {selectedHubObj && (
-              <div className="px-6 py-2.5 border-b border-slate-800/60 flex items-center justify-between gap-4 text-xs text-slate-400">
-                <div className="truncate">
+              <div className="px-3.5 sm:px-6 py-2 border-b border-slate-800/60 flex items-center justify-between gap-2 sm:gap-4 text-[11px] sm:text-xs text-slate-400 shrink-0">
+                <div className="truncate min-w-0">
                   <span className="text-slate-200 font-medium">{selectedHubObj.specialization}</span>
-                  <span className="mx-2" aria-hidden="true">·</span>
-                  <span>{selectedHubObj.description}</span>
+                  <span className="hidden sm:inline">
+                    <span className="mx-2" aria-hidden="true">·</span>
+                    <span>{selectedHubObj.description}</span>
+                  </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onClose();
-                    onOpenWorldMap();
-                  }}
-                  className="text-cyan-400 hover:text-cyan-300 font-medium whitespace-nowrap flex items-center gap-1 shrink-0"
-                >
-                  <Compass className="w-3.5 h-3.5" />
-                  Ver rotas no mapa
-                </button>
+                <div className="flex items-center gap-3 shrink-0">
+                  {!isSandbox && lockedCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowLocked((v) => !v)}
+                      className="sm:hidden text-[11px] text-slate-400 hover:text-slate-200 transition-colors whitespace-nowrap"
+                    >
+                      {showLocked ? 'Ocultar' : `+${lockedCount} bloq.`}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenWorldMap();
+                    }}
+                    className="text-cyan-400 hover:text-cyan-300 font-medium whitespace-nowrap flex items-center gap-1"
+                  >
+                    <Compass className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Ver rotas no mapa</span>
+                    <span className="sm:hidden">Mapa</span>
+                  </button>
+                </div>
               </div>
             )}
 
             {/* Mission List */}
-            <div className="flex-1 overflow-y-auto px-6 py-4 divide-y divide-slate-800/80">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3.5 sm:px-6 py-3 sm:py-4 divide-y divide-slate-800/80">
               {displayedMissions.length === 0 ? (
-                <div className="py-12 text-center text-sm text-slate-400">
+                <div className="py-10 text-center text-sm text-slate-400">
                   Nenhuma missão disponível neste hub para o camião e licenças atuais.
                   {lockedCount > 0 && (
                     <div className="mt-2">
@@ -274,16 +302,16 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
                     <div
                       key={offer.id}
                       data-testid={`mission-row-${offer.id}`}
-                      className={`py-4 first:pt-1 last:pb-1 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                      className={`py-3.5 sm:py-4 first:pt-1 last:pb-1 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 ${
                         !isAvailable ? 'opacity-60' : ''
                       }`}
                     >
                       <div className="min-w-0 flex-1 space-y-1">
-                        <div className="flex items-baseline gap-2.5 flex-wrap">
+                        <div className="flex items-baseline gap-x-2 gap-y-0.5 flex-wrap">
                           <h3 className="text-sm font-semibold text-white">
                             {offer.title}
                           </h3>
-                          <span className="text-xs text-slate-400 font-mono tabular-nums">
+                          <span className="text-[11px] sm:text-xs text-slate-400 font-mono tabular-nums">
                             {offer.originHubName} → {offer.targetHubName} ({distKm} km)
                           </span>
                         </div>
@@ -327,7 +355,7 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
 
                         {/* Estimated Reputation Breakdown */}
                         <div className="text-[11px] font-mono tabular-nums text-slate-400 pt-0.5">
-                          Reputação estimada:{' '}
+                          Reputação:{' '}
                           <span className="text-emerald-300 font-semibold">S +{offer.estimatedRepByRating.S}</span>
                           {' / '}
                           <span className="text-cyan-300">A +{offer.estimatedRepByRating.A}</span>
@@ -349,7 +377,7 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
                           <button
                             type="button"
                             onClick={onCancelMission}
-                            className="px-4 py-2 rounded-lg text-xs font-semibold bg-red-950/90 text-red-200 border border-red-800 hover:bg-red-900 transition-colors whitespace-nowrap"
+                            className="w-full sm:w-auto px-4 py-2 rounded-lg text-xs font-semibold bg-red-950/90 text-red-200 border border-red-800 hover:bg-red-900 transition-colors whitespace-nowrap"
                           >
                             Cancelar Missão
                           </button>
@@ -363,7 +391,7 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
                               onAcceptMission(offer.id);
                               onClose();
                             }}
-                            className={`px-4 py-2 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                            className={`w-full sm:w-auto px-4 py-2 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
                               isAvailable && !activeMission
                                 ? 'bg-cyan-500 hover:bg-cyan-400 text-slate-950'
                                 : 'bg-slate-900 text-slate-500 border border-slate-800 cursor-not-allowed'
@@ -381,11 +409,11 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
           </div>
         ) : (
           /* Certificates Tab */
-          <div className="flex-1 overflow-y-auto px-6 py-5">
-            <p className="text-xs text-slate-400 mb-4">
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3.5 sm:px-6 py-4 sm:py-5">
+            <p className="text-xs text-slate-400 mb-3.5 sm:mb-4">
               Conquistas baseadas em mestria real durante missões. Cada certificado desbloqueia camiões e contratos especializados sem qualquer custo monetário.
             </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
               {CERTIFICATE_IDS.map((id) => {
                 const def = CERTIFICATE_CATALOG[id];
                 const st = certificates.find((c) => c.id === id) ?? {

@@ -114,38 +114,38 @@ export const WorkshopUpgradesModal: React.FC<WorkshopUpgradesModalProps> = ({
   return (
     <div
       data-testid="workshop-modal"
-      className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+      className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[60] flex items-center justify-center p-2 sm:p-4"
       onClick={onClose}
     >
       <div
-        className="bg-slate-950 border border-slate-700/80 max-w-4xl w-full rounded-xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden"
+        className="bg-slate-950 border border-slate-700/80 max-w-4xl w-full rounded-xl shadow-2xl flex flex-col max-h-[92dvh] overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between gap-4">
-          <div>
-            <h2 className="text-lg font-bold text-white tracking-tight">
-              Oficina Mecânica & Sidegrades Físicos
+        <div className="px-3.5 sm:px-6 py-3 sm:py-4 border-b border-slate-800 flex items-start sm:items-center justify-between gap-3 shrink-0">
+          <div className="min-w-0">
+            <h2 className="text-base sm:text-lg font-bold text-white tracking-tight leading-snug">
+              Oficina Mecânica & Sidegrades
             </h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {spec.name} ({spec.axleConfig}) · Sem dinheiro nem espera — cada componente tem compromissos físicos reais.
+            <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5 leading-relaxed">
+              {spec.name} ({spec.axleConfig}) · Cada componente tem compromissos físicos reais.
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="Fechar"
-            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-900 transition-colors"
+            className="p-1.5 sm:p-2 -mr-1 sm:mr-0 rounded-lg text-slate-400 hover:text-white hover:bg-slate-900 transition-colors shrink-0"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Mechanical Health & Workshop Gate Banner */}
-        <div className="px-6 py-3 border-b border-slate-800/80 bg-slate-900/50 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-mono tabular-nums">
+        <div className="px-3.5 sm:px-6 py-2.5 sm:py-3 border-b border-slate-800/80 bg-slate-900/50 flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-2 sm:gap-3 shrink-0">
+          <div className="flex flex-wrap items-center gap-x-3 sm:gap-x-4 gap-y-1 text-[11px] sm:text-xs font-mono tabular-nums">
             <span className="text-slate-300">
-              Integridade: <strong className={truckHealth < 70 ? 'text-amber-300' : 'text-emerald-400'}>{truckHealth}%</strong>
+              Integ.: <strong className={truckHealth < 70 ? 'text-amber-300' : 'text-emerald-400'}>{truckHealth}%</strong>
             </span>
             <span className="text-slate-400">
               Motor: <strong className="text-slate-200">{Math.round(truckWear.engine)}%</strong>
@@ -157,17 +157,17 @@ export const WorkshopUpgradesModal: React.FC<WorkshopUpgradesModalProps> = ({
               Pneus: <strong className="text-slate-200">{Math.round(truckWear.tires)}%</strong>
             </span>
             <span className="text-slate-400">
-              Temp. Travões:{' '}
+              Temp.:{' '}
               <strong className={brakeHeat > 0.55 ? 'text-red-400' : brakeHeat > 0.3 ? 'text-amber-300' : 'text-slate-200'}>
                 {Math.round(brakeHeat * 100)}%
               </strong>
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {!canModify && (
-              <span className="text-xs text-amber-300 font-medium">
-                {inRepairBay ? 'Pare totalmente para alterar peças' : 'Estacione numa baia de oficina (🔧) para instalar'}
+              <span className="text-[11px] sm:text-xs text-amber-300 font-medium">
+                {inRepairBay ? 'Pare totalmente para alterar peças' : 'Estacione numa oficina (🔧) para instalar'}
               </span>
             )}
             {needsRepair && (
@@ -182,17 +182,17 @@ export const WorkshopUpgradesModal: React.FC<WorkshopUpgradesModalProps> = ({
                 }`}
               >
                 <Wrench className="w-3.5 h-3.5" />
-                Reparar & Rever Desgaste
+                Reparar & Rever
               </button>
             )}
           </div>
         </div>
 
         {/* Main 2-column Body */}
-        <div className="flex-1 overflow-y-auto px-6 py-5 grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3.5 sm:px-6 py-3.5 sm:py-5 grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
           {/* Left: Slot Selector & Options */}
-          <div className="lg:col-span-7 space-y-4">
-            <div className="flex items-center gap-1 p-1 bg-slate-900 rounded-lg border border-slate-800">
+          <div className="lg:col-span-7 space-y-3 sm:space-y-4">
+            <div className="grid grid-cols-4 gap-1 p-1 bg-slate-900 rounded-lg border border-slate-800">
               {SLOT_TABS.map((tab) => (
                 <button
                   key={tab.id}
@@ -201,7 +201,7 @@ export const WorkshopUpgradesModal: React.FC<WorkshopUpgradesModalProps> = ({
                     setActiveSlot(tab.id);
                     setPreviewValue(null);
                   }}
-                  className={`flex-1 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors whitespace-nowrap ${
+                  className={`px-1.5 sm:px-3 py-1.5 rounded-md text-[11px] sm:text-xs font-semibold transition-colors whitespace-nowrap text-center ${
                     activeSlot === tab.id
                       ? 'bg-cyan-500 text-slate-950'
                       : 'text-slate-300 hover:text-white'
@@ -223,7 +223,7 @@ export const WorkshopUpgradesModal: React.FC<WorkshopUpgradesModalProps> = ({
                     onMouseEnter={() => setPreviewValue(opt.id)}
                     onMouseLeave={() => setPreviewValue((cur) => (cur === opt.id ? null : cur))}
                     onClick={() => setPreviewValue((cur) => (cur === opt.id ? null : opt.id))}
-                    className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors cursor-pointer ${
+                    className={`p-3 sm:p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 transition-colors cursor-pointer ${
                       isInstalled
                         ? 'bg-slate-900/80 border-cyan-500/50'
                         : isPreviewed
@@ -232,7 +232,7 @@ export const WorkshopUpgradesModal: React.FC<WorkshopUpgradesModalProps> = ({
                     }`}
                   >
                     <div className="space-y-1 min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-sm font-semibold text-white">{opt.name}</span>
                         {isInstalled && (
                           <span className="text-[11px] font-semibold text-cyan-300 flex items-center gap-0.5">
@@ -251,7 +251,7 @@ export const WorkshopUpgradesModal: React.FC<WorkshopUpgradesModalProps> = ({
                         e.stopPropagation();
                         onInstallUpgrade(activeSlot, opt.id);
                       }}
-                      className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                      className={`w-full sm:w-auto px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
                         isInstalled
                           ? 'bg-slate-800 text-slate-400 cursor-default'
                           : canModify

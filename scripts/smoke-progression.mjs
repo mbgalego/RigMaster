@@ -606,7 +606,7 @@ const navCheck = await page.evaluate(() => {
     pickupPhase: pickupNav?.phase,
     pickupX: Math.round(pickupNav?.x ?? 0),
     pickupY: Math.round(pickupNav?.y ?? 0),
-    pickupNearHarborContainer: Math.hypot((pickupNav?.x ?? 0) - 2250, (pickupNav?.y ?? 0) - 2050) < 80,
+    pickupNearHarborContainer: Math.hypot((pickupNav?.x ?? 0) - 2052, (pickupNav?.y ?? 0) - 1637) < 80,
     pickupNotAtShipyard: Math.hypot((pickupNav?.x ?? 0) - 11400, (pickupNav?.y ?? 0) - 1200) > 5000,
     pickupHubName: pickupNav?.pickupHubName,
     hasWrongTrailerCoupled: pickupNav?.hasWrongTrailerCoupled,
@@ -665,7 +665,7 @@ const revertCheck = await page.evaluate(() => {
 await page.evaluate(() => window.__rig.cancelActiveMission());
 
 check(
-  'Navegação 2 passos (Contentor Oceânico): Passo 1 aponta para recolha em Porto Comercial (2250,2050), Passo 2 vira para Estaleiro e desengate reverte para recolha',
+  'Navegação 2 passos (Contentor Oceânico): Passo 1 aponta para recolha em Porto Comercial (2052,1637), Passo 2 vira para Estaleiro e desengate reverte para recolha',
   navCheck.pickupPhase === 'pickup' &&
     navCheck.pickupNearHarborContainer &&
     navCheck.pickupNotAtShipyard &&

@@ -40,22 +40,32 @@ await page.goto(URL, { waitUntil: 'load', timeout: 30000 });
 await page.waitForFunction(() => !!window.__rig, null, { timeout: 30000 });
 await page.waitForTimeout(1000);
 
-// 1. Universal parking pads (decoupled from trailers/licenses) + independent loose trailers covering all families
+// 1. Universal parking pads (decoupled from trailers/licenses, including inside compounds) + independent loose trailers covering all families
 const mapInventory = await page.evaluate(() => {
   const rig = window.__rig;
   const objs = rig.world.objects.objects;
-  const pads = objs.filter((o) => o.type === 'parking_pad');
   const validStyles = new Set(['asphalt', 'concrete', 'hazard', 'clean']);
-  const padsWithTrailerBinding = pads.filter((o) => !!o.params?.trailer).length;
-  const invalidStylePads = pads.filter((o) => o.variant && !validStyles.has(o.variant)).length;
-  const padStyles = Array.from(new Set(pads.map((o) => o.variant || 'asphalt')));
+  const allPads = [];
+  for (const o of objs) {
+    if (o.type === 'parking_pad') {
+      allPads.push(o);
+    } else if (o.type === 'compound' && Array.isArray(o.params?.parts)) {
+      for (const p of o.params.parts) {
+        if (p.type === 'parking_pad') allPads.push(p);
+      }
+    }
+  }
+  const resolvedPads = rig.world.parkingPads;
+  const padsWithTrailerBinding = allPads.filter((o) => !!o.params?.trailer).length;
+  const invalidStylePads = allPads.filter((o) => o.variant && !validStyles.has(o.variant)).length;
+  const padStyles = Array.from(new Set(resolvedPads.map((p) => p.variant || 'asphalt')));
 
   const objTrailerTypes = objs
     .filter((o) => o.type === 'trailer')
     .map((o) => o.params?.trailer);
   const looseTypes = Array.from(new Set(objTrailerTypes));
   return {
-    padCount: pads.length,
+    padCount: resolvedPads.length,
     padsWithTrailerBinding,
     invalidStylePads,
     padStyles,
@@ -85,7 +95,7 @@ check(
   JSON.stringify(mapInventory),
 );
 
-// 2. OBB/SAT clearance lint across all universal parking_pads, independent trailer objects, and solid world objects
+// 2. OBB/SAT clearance lint across all universal parking_pads (including compounds), independent trailer objects, and solid world objects
 const clearanceReport = await page.evaluate(() => {
   const rig = window.__rig;
   const objs = rig.world.objects.objects;
@@ -126,12 +136,34 @@ const clearanceReport = await page.evaluate(() => {
     return true;
   };
 
-  const solids = objs
+  const expanded = [];
+  for (const o of objs) {
+    if (o.type === 'compound' && Array.isArray(o.params?.parts)) {
+      const c = Math.cos(o.angle), s = Math.sin(o.angle);
+      o.params.parts.forEach((p, i) => {
+        expanded.push({
+          id: `${o.id}#${i}`,
+          type: p.type,
+          variant: p.variant || '',
+          x: o.x + c * p.x - s * p.y,
+          y: o.y + s * p.x + c * p.y,
+          w: p.w,
+          h: p.h,
+          angle: o.angle + (p.angle || 0),
+          params: p.params,
+        });
+      });
+    } else {
+      expanded.push(o);
+    }
+  }
+
+  const solids = expanded
     .filter((o) => SOLID_TYPES.has(o.type))
     .map((o) => ({ id: o.id, type: o.type, variant: o.variant || '', poly: corners(o.x, o.y, o.w, o.h, o.angle) }));
 
   const overlaps = [];
-  for (const o of objs) {
+  for (const o of expanded) {
     if (o.type !== 'parking_pad' && o.type !== 'trailer') continue;
     const checkBoxes = [];
     if (o.type === 'parking_pad') {
@@ -150,8 +182,8 @@ const clearanceReport = await page.evaluate(() => {
     }
   }
   return {
-    totalPads: objs.filter((o) => o.type === 'parking_pad').length,
-    totalTrailers: objs.filter((o) => o.type === 'trailer').length,
+    totalPads: expanded.filter((o) => o.type === 'parking_pad').length,
+    totalTrailers: expanded.filter((o) => o.type === 'trailer').length,
     totalSolids: solids.length,
     overlaps,
   };

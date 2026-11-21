@@ -416,14 +416,28 @@ export class WorldObjects {
   }
 
   public get parkingPads(): ParkingPadSpec[] {
-    return this.objects
-      .filter((o) => o.type === 'parking_pad')
-      .map((o) => {
-        const raw = o.variant;
-        const variant: ParkingPadStyle =
-          raw === 'concrete' || raw === 'hazard' || raw === 'clean' ? raw : 'asphalt';
-        return { id: o.id, x: o.x, y: o.y, w: o.w, h: o.h, angle: o.angle, variant };
-      });
+    const pads: ParkingPadSpec[] = [];
+    const pushPad = (o: WorldObject) => {
+      if (o.type !== 'parking_pad') return;
+      const raw = o.variant;
+      const variant: ParkingPadStyle =
+        raw === 'concrete' || raw === 'hazard' || raw === 'clean' ? raw : 'asphalt';
+      pads.push({ id: o.id, x: o.x, y: o.y, w: o.w, h: o.h, angle: o.angle, variant });
+    };
+    for (const o of this.objects) {
+      if (o.type === 'parking_pad') {
+        pushPad(o);
+      } else if (o.type === 'compound') {
+        const parts = compoundParts(o);
+        for (let i = 0; i < parts.length; i++) {
+          if (parts[i].type === 'parking_pad') {
+            const partObj = compoundPartWorldObject(o, i);
+            if (partObj) pushPad(partObj);
+          }
+        }
+      }
+    }
+    return pads;
   }
 
   /** Rotated-rect hit test for the object editor (padded for easy grabbing) */

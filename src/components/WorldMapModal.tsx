@@ -96,39 +96,39 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
   return (
     <div
       data-testid="world-map-modal"
-      className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+      className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] flex items-center justify-center p-2 sm:p-4"
       onClick={onClose}
     >
       <div
-        className="bg-slate-950 border border-slate-700/80 max-w-5xl w-full rounded-xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden"
+        className="bg-slate-950 border border-slate-700/80 max-w-5xl w-full rounded-xl shadow-2xl flex flex-col max-h-[92dvh] overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="px-6 py-3.5 border-b border-slate-800 flex items-center justify-between gap-4">
-          <div>
-            <h2 className="text-lg font-bold text-white tracking-tight">
-              Mapa Estratégico — Ilha Atlântica
+        <div className="px-3.5 sm:px-6 py-2.5 sm:py-3.5 border-b border-slate-800 flex items-start sm:items-center justify-between gap-3 shrink-0">
+          <div className="min-w-0">
+            <h2 className="text-base sm:text-lg font-bold text-white tracking-tight leading-snug">
+              Mapa Estratégico — RigWorld
             </h2>
-            <p className="text-xs text-slate-400">
-              Tecla M · Clique num camião da frota para ver a distância, requisitos e estado.
+            <p className="text-[11px] sm:text-xs text-slate-400">
+              Toque num camião da frota para ver a distância, requisitos e estado.
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="Fechar"
-            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-900 transition-colors"
+            className="p-1.5 sm:p-2 -mr-1 sm:mr-0 rounded-lg text-slate-400 hover:text-white hover:bg-slate-900 transition-colors shrink-0"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Map + Side Info */}
-        <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
-          <div className="flex-1 bg-[#0b1320] p-3 flex items-center justify-center overflow-hidden">
+        <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden overscroll-contain">
+          <div className="shrink-0 lg:shrink lg:flex-1 bg-[#0b1320] p-2 sm:p-3 flex items-center justify-center overflow-hidden">
             <svg
               viewBox={`0 0 ${WORLD_W} ${WORLD_H}`}
-              className="w-full h-full max-h-[65vh] rounded-lg border border-slate-800 bg-[#0d1926]"
+              className="w-full h-auto lg:h-full max-h-[52dvh] lg:max-h-[65vh] rounded-lg border border-slate-800 bg-[#0d1926]"
             >
               {/* Subtle grid */}
               <rect x={0} y={0} width={WORLD_W} height={WORLD_H} fill="#10212e" />
@@ -398,17 +398,17 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
           </div>
 
           {/* Right Legend & Selected Truck Inspector */}
-          <div className="w-full lg:w-72 border-t lg:border-t-0 lg:border-l border-slate-800 p-4 flex flex-col justify-between gap-4 bg-slate-950">
-            <div className="space-y-4">
+          <div className="w-full lg:w-72 lg:overflow-y-auto border-t lg:border-t-0 lg:border-l border-slate-800 p-3.5 sm:p-4 flex flex-col justify-between gap-3 sm:gap-4 bg-slate-950 shrink-0">
+            <div className="space-y-3 sm:space-y-4">
               <div>
-                <h3 className="text-xs font-semibold text-slate-300 mb-2">Legenda</h3>
-                <div className="space-y-1.5 text-xs text-slate-400">
+                <h3 className="text-xs font-semibold text-slate-300 mb-1.5 sm:mb-2">Legenda</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-1 sm:gap-1.5 text-[11px] sm:text-xs text-slate-400">
                   <div>Seta ciano — Camião ativo</div>
-                  <div>Círculo / Quadrado / Losango — Frota 4×2 / 6×4 / 8×4</div>
-                  <div>Estrada castanha — Terra batida (acesso 8×4)</div>
+                  <div>Círculo / Quad. / Losango — 4×2 / 6×4 / 8×4</div>
+                  <div>Estrada castanha — Terra batida</div>
                   <div>Traço âmbar — Viadutos (Piso 1)</div>
                   <div>Verde / Âmbar — Oficinas / Bombas</div>
-                  <div>Rota âmbar / verde — 1. Recolha / 2. Entrega</div>
+                  <div>Rota âmbar / verde — Recolha / Entrega</div>
                 </div>
               </div>
 

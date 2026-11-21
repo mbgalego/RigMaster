@@ -64,11 +64,11 @@ check(
   `accel ${stockStats.engineAccel}->${tunedStats.engineAccel}, fade ${stockStats.brakeFadeRateMult}->${tunedStats.brakeFadeRateMult}, dirt ${stockStats.dirtGrip}->${tunedStats.dirtGrip}`,
 );
 
-// 2. GarageSystem preserves original 4 hub names + real Ilha Atlântica coordinates
+// 2. GarageSystem preserves original 4 hub names + real RigWorld coordinates
 const garage = GarageSystem.getInstance();
 const hubs = garage.getHubs();
 check(
-  'GarageSystem mantém os 4 hubs originais com coordenadas reais na Ilha Atlântica',
+  'GarageSystem mantém os 4 hubs originais com coordenadas reais em RigWorld',
   hubs.length === 4 &&
     garage.getHub('harbor').name === 'Porto Comercial' &&
     garage.getHub('shipyard').name === 'Estaleiro Logístico' &&

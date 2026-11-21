@@ -57,7 +57,27 @@ Simulador de condução pesada em **2D Top-Down** (Phaser 4 + Matter.js + React 
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.12.3** (Versão Atual — branch main)
+### **v2.12.6** (Versão Atual — branch main)
+- **Menus e Modais Otimizados para Ecrãs Pequenos (Mobile Portrait/Landscape):**
+  - `MissionsModal`: cabeçalho empilhado em `<sm` (`flex-col sm:flex-row`) com botão fechar alinhado ao título e seletor segmentado `Missões | Certificados` em largura total; barra de filtros de hubs convertida para faixa horizontal deslizável numa única linha em mobile (`overflow-x-auto`) libertando >65% da altura útil para a lista de missões; barra de contexto compacta e botões de ação em largura total (`w-full sm:w-auto`).
+  - `FleetGarageModal`: cabeçalho responsivo empilhado com `Mapa da Frota` em largura total em ecrãs estreitos e cartões com ações `flex-wrap` sem transbordo horizontal.
+  - `WorkshopUpgradesModal`: cabeçalho e faixa de estado mecânico adaptados a ecrãs estreitos, grelha fixa de 4 colunas (`grid-cols-4`) para os separadores `Motor | Travões | Suspensão | Pneus` e botão `Instalar` em largura total em mobile.
+  - `WorldMapModal`: corpo com scroll vertical em mobile (`overflow-y-auto lg:overflow-hidden`) com mapa limitado a `max-h-[52dvh]` e painel lateral/legenda empilhados sem corte.
+  - Modais em `App.tsx` (Conclusão de Missão, Licenças, Garagens/Meteorologia e Exportar/Importar JSON): altura máxima `max-h-[92dvh]`, espaçamento compacto (`p-2 sm:p-4`), barra rápida meteorológica com quebra de linha controlada (`flex-wrap`) e rodapés empilhados em ecrãs pequenos.
+
+### **v2.12.5**
+- **Incorporação do Mapa Oficial Editado de RigWorld (`rigworld.json`, `WorldObjects.ts`, `World.ts`, `scripts/smoke-trailers.mjs`, `scripts/smoke-bridge.mjs`, `scripts/smoke-progression.mjs`)**:
+  - **Novo traçado oficial de RigWorld**: integradas todas as 38 estradas e 6 viadutos elevados (`rd_22`, `rd_25`, `rd_28`, `rd_30`, `rd_32`, `rd_39` com nós rodoviários a Norte e Centro + ligação ao Porto Comercial), os novos terminais logísticos compostos no Porto Comercial (`wo_280`) e Centro-Oeste (`wo_281`), docas portuárias ampliadas (`wo_1..wo_5`), plataforma asfaltada (`wo_282`), nova iluminação e posto de combustível atualizado.
+  - **Suporte nativo a baías universais dentro de compostos (`WorldObjects.ts`)**: `parkingPads` decompõe agora objetos `compound` (tal como `repairBays`), tornando as 8 baías dos novos terminais compostos elegíveis para spawn automático de atrelados de missão.
+  - **Normalização & zero sobreposições**: todas as 19 baías convertidas para baías universais sem ligação a atrelados (`asphalt`/`concrete`/`hazard`/`clean`), 2 sobreposições legadas (`wo_40..41` vs `wo_98`) corrigidas e os 14 atrelados soltos (todas as 12 famílias + ambos os `pup`) distribuídos com 0 sobreposições OBB/SAT contra os 86 sólidos e os 6 camiões da frota.
+  - **Reposição oficial (`World.ts`)**: `reseed()` (*Restaurar RigWorld Original*) limpa o rascunho local e recarrega o ficheiro oficial `rigworld.json` em vez da semente procedural antiga.
+
+### **v2.12.4** (branch main)
+- **Renomeação Oficial do Mapa para RigWorld (`rigworld.json`, `World.ts`, `WorldMapModal.tsx`, `MissionSystem.ts`, `App.tsx`, `scripts/test-phase1-systems.ts`)**:
+  - Ficheiro oficial do mapa renomeado de `ilha_atlantica.json` para `rigworld.json` e todas as referências na interface, missões, mapa estratégico e testes atualizadas de *Ilha Atlântica* para **RigWorld** (com migração automática de `name` em rascunhos locais guardados em `localStorage` sem perder edições do utilizador).
+  - Adicionado botão **Copiar JSON** no modal de Importar/Exportar JSON (junto a *Descarregar .json* com prefixo `rigworld_*.json`) para facilitar a exportação e integração de mapas editados no Editor.
+
+### **v2.12.3** (branch main)
 - **Baías de Estacionamento Universais (`WorldObjects.ts`, `TrailerManager.ts`, `MainScene.ts`, `EditorScene.ts`, `MinimapScene.ts`, `App.tsx`, `ilha_atlantica.json`, `scripts/smoke-trailers.mjs`)**:
   - **Desacoplamento total de cartas e tipologias**: todos os `parking_pad` passam a ser baías universais compatíveis com qualquer semi-reboque ou bitrem, sem ligação a `params.trailer`, sem cores por carta e sem silhuetas fixas.
   - **4 estilos gráficos puramente visuais**: `asphalt` (*Baía Asfalto*), `concrete` (*Baía Betão*), `hazard` (*Baía Segurança*) e `clean` (*Baía Longa / Moderna*), com guias subtis de alinhamento central; editáveis no Editor via catálogo **Baías**, redimensionáveis diretamente nas pegas de canto (`RESIZABLE_TYPES`) e com seletor de estilo visual no inspetor.

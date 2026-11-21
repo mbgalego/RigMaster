@@ -1,17 +1,22 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import {fileURLToPath} from 'url';
 import {defineConfig} from 'vite';
+
+const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': rootDir,
       },
     },
     server: {
+      port: 3000,
+      host: '0.0.0.0',
       // Allow AI Studio reverse-proxied preview hosts in Vite 8+
       allowedHosts: true as const,
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
@@ -21,6 +26,8 @@ export default defineConfig(() => {
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
     preview: {
+      port: 3000,
+      host: '0.0.0.0',
       allowedHosts: true as const,
     },
   };

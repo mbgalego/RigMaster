@@ -171,7 +171,7 @@ const CARGO_RISK_WEIGHT: Record<TrailerType, number> = {
 };
 
 /**
- * Distinct mission pool per hub — every hub reflects its real specialization on Ilha Atlântica.
+ * Distinct mission pool per hub — every hub reflects its real specialization on RigWorld.
  */
 export const MISSION_TEMPLATES: MissionTemplate[] = [
   // ---- Porto Comercial (harbor): Urbano / Portuário / Curto Curso ----
@@ -205,7 +205,7 @@ export const MISSION_TEMPLATES: MissionTemplate[] = [
   },
   {
     id: 'harbor_reefer_coldchain',
-    title: 'Cadeia de Frio — Pescado Atlântico',
+    title: 'Cadeia de Frio — Pescado da Costa',
     description: 'Frigorífico isotérmico do cais portuário para a Zona Industrial Sul.',
     originHub: 'harbor',
     targetHub: 'industrial',
@@ -366,7 +366,7 @@ export const MISSION_TEMPLATES: MissionTemplate[] = [
   },
   {
     id: 'industrial_bitrem_tanker',
-    title: 'Bitrem Cisterna ADR — Travessia Atlântica',
+    title: 'Bitrem Cisterna ADR — Travessia RigWorld',
     description: 'Dupla cisterna pressurizada para o Porto Comercial; exige ADR Básico e 6×4.',
     originHub: 'industrial',
     targetHub: 'harbor',
@@ -508,7 +508,7 @@ export class MissionSystem {
     return +(cargoFactor * (1 + distanceBonus + weatherBonus + nightBonus + offroadBonus)).toFixed(2);
   }
 
-  /** Builds a concrete MissionOffer with real Ilha Atlântica dock coordinates and projected rep. */
+  /** Builds a concrete MissionOffer with real RigWorld dock coordinates and projected rep. */
   public buildOffer(template: MissionTemplate): MissionOffer {
     const garage = GarageSystem.getInstance();
     const originHubData = garage.getHub(template.originHub);

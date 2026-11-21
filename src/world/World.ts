@@ -3,14 +3,14 @@ import { WorldTerrain } from './WorldTerrain';
 import { WorldObjects } from './WorldObjects';
 import { RoadNetwork, RoadData } from '../systems/RoadNetwork';
 // The authored world, versioned as data (edited in-game, exported, committed).
-import worldData from './ilha_atlantica.json';
+import worldData from './rigworld.json';
 
 /**
  * The single, bounded world — a giant island. One terrain (procedural,
  * seeded), one vector road network, one prefab object layer. No tiles.
  *
  * The world content (roads + objects + spawn) is authored as data in
- * `ilha_atlantica.json` — edited in-game, exported and committed. The
+ * `rigworld.json` — edited in-game, exported and committed. The
  * procedural seed remains as a dev fallback / reset-to-default tool.
  */
 export class World {
@@ -21,7 +21,7 @@ export class World {
   public objects!: WorldObjects;
   public roads!: RoadNetwork;
 
-  public name: string = 'Ilha Atlântica';
+  public name: string = 'RigWorld';
   public version: number = 0; // bumped on any edit → minimap refresh
   public spawnPoint: { x: number; y: number; angle: number } = { x: 5760, y: 4700, angle: 0 };
 
@@ -48,7 +48,7 @@ export class World {
     this.objects = new WorldObjects(scene);
     this.roads = RoadNetwork.getInstance();
     // Se houver rascunho guardado em browser storage, restaura-o automaticamente;
-    // caso contrário carrega ilha_atlantica.json (ou seed() como fallback).
+    // caso contrário carrega rigworld.json (ou seed() como fallback).
     if (this.restoreDraft()) {
       this.restoredFromDraft = true;
     } else {
@@ -66,9 +66,12 @@ export class World {
   }
 
   public reseed() {
-    this.spawnPoint = { x: 5760, y: 4700, angle: 0 };
-    this.seed();
     World.clearDraft();
+    if (!this.loadData(worldData)) {
+      this.spawnPoint = { x: 5760, y: 4700, angle: 0 };
+      this.seed();
+    }
+    this.restoredFromDraft = false;
     this.lastSavedVersion = this.version; // a reseed is an explicit reset, not a draft
   }
 
@@ -220,7 +223,9 @@ export class World {
       if (d.spawn && Number.isFinite(d.spawn.x) && Number.isFinite(d.spawn.y)) {
         this.spawnPoint = { x: d.spawn.x, y: d.spawn.y, angle: d.spawn.angle || 0 };
       }
-      if (typeof d.name === 'string') this.name = d.name;
+      if (typeof d.name === 'string') {
+        this.name = /^ilha\s+atl[aâ]nt/i.test(d.name.trim()) ? 'RigWorld' : d.name;
+      }
       this.version++;
       return true;
     } catch (e) {

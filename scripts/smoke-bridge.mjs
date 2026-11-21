@@ -89,14 +89,14 @@ const seedState = await page.evaluate(() => {
 check('mapa semente contém viadutos (layer 1)', seedState.cacheCount >= 2, `${seedState.cacheCount} viadutos (${seedState.roadIds.join(', ')})`);
 check('barreiras de rampa/guardas de tabuleiro geradas', seedState.barrierCount > 20, `${seedState.barrierCount} segs`);
 
-// 2. Drive underneath rd_21 (y=2048) along ground arterial rd_4 (x=8064)
+// 2. Drive underneath rd_22 (y≈1956) along ground arterial rd_4 (x=8061)
 await page.evaluate(() => {
   const rig = window.__rig;
   rig.truck.setElevation(0, 0);
-  rig.truck.setPosition(8064, 2220, 0); // facing North
+  rig.truck.setPosition(8061, 2180, 0); // facing North
   const dist = rig.truck.hitchOffsetY + (rig.trailer?.kingpinDist ?? 96);
   rig.trailer?.setElevation(0, 0);
-  rig.trailer?.setPosition(8064, 2220 + dist, 0);
+  rig.trailer?.setPosition(8061, 2180 + dist, 0);
   rig.truck.vLong = 140;
   rig.truck.currentSpeed = 140;
 });
@@ -107,29 +107,29 @@ const sawUnderpassFade = underSamples.some((s) => s.underFlag && s.alpha < 0.9);
 const minUnderY = Math.min(...underSamples.map((s) => s.y));
 check(
   'passagem por baixo do viaduto mantém piso 0 sem salto de z',
-  !sawLayerJumpUnder && maxUnderZ === 0 && minUnderY < 1980,
+  !sawLayerJumpUnder && maxUnderZ === 0 && minUnderY < 1880,
   `minY=${minUnderY.toFixed(1)}, maxZ=${maxUnderZ}`,
 );
 check('passagem por baixo ativa transparência do tabuleiro', sawUnderpassFade, `minAlpha=${Math.min(...underSamples.map((s) => s.alpha)).toFixed(2)}`);
 
-// 3. Regression #2: offroad grass underneath elevated bridge (7500, 2048) gives OFFROAD_GRIP (0.55)
+// 3. Regression #2: offroad grass underneath elevated bridge rd_22 (8320, 1958) gives OFFROAD_GRIP (0.55)
 const gripUnder = await page.evaluate(() => {
   const rn = window.__rig.roadNetwork;
   return {
-    l0: rn.gripAt(7500, 2048, 0),
-    l1: rn.gripAt(7500, 2048, 1),
+    l0: rn.gripAt(8320, 1958, 0),
+    l1: rn.gripAt(8320, 1958, 1),
   };
 });
 check('relva sob viaduto devolve OFFROAD_GRIP (0.55) na camada 0', Math.abs(gripUnder.l0 - 0.55) < 0.01 && Math.abs(gripUnder.l1 - 1.0) < 0.01, JSON.stringify(gripUnder));
 
-// 4a. Climb west ramp of rd_21 (5760..10368, y=2048) -> reach z=1.0 & layer=1 (truck + trailer)
+// 4a. Climb west ramp of rd_22 (7661..8991, y≈1952..1961) -> reach z=1.0 & layer=1 (truck + trailer)
 await page.evaluate(() => {
   const rig = window.__rig;
   rig.truck.setElevation(0, 0);
-  rig.truck.setPosition(5780, 2048, Math.PI / 2); // facing East on west ramp portal
+  rig.truck.setPosition(7680, 1952, Math.PI / 2); // facing East on west ramp portal
   const dist = rig.truck.hitchOffsetY + (rig.trailer?.kingpinDist ?? 96);
   rig.trailer?.setElevation(0, 0);
-  rig.trailer?.setPosition(5780 - dist, 2048, Math.PI / 2);
+  rig.trailer?.setPosition(7680 - dist, 1952, Math.PI / 2);
   rig.truck.vLong = 140;
   rig.truck.currentSpeed = 140;
 });
@@ -142,14 +142,14 @@ check(
   `x=${climbLast.x.toFixed(1)}, maxZ=${maxClimbZ.toFixed(2)}, truckL=${climbLast.layer}, trL=${climbLast.trLayer}`,
 );
 
-// 4b. Drive off east exit ramp (10120 -> >10420) and verify smooth return to layer 0 / z = 0
+// 4b. Drive west off rd_22 exit ramp (8020 -> <7600) and verify smooth return to layer 0 / z = 0
 await page.evaluate(() => {
   const rig = window.__rig;
   rig.truck.setElevation(1, 1);
-  rig.truck.setPosition(10120, 2048, Math.PI / 2);
+  rig.truck.setPosition(8020, 1955, -Math.PI / 2);
   const dist = rig.truck.hitchOffsetY + (rig.trailer?.kingpinDist ?? 96);
   rig.trailer?.setElevation(1, 1);
-  rig.trailer?.setPosition(10120 - dist, 2048, Math.PI / 2);
+  rig.trailer?.setPosition(8020 + dist, 1955, -Math.PI / 2);
   rig.truck.vLong = 140;
   rig.truck.currentSpeed = 140;
 });
@@ -157,7 +157,7 @@ const exitSamples = await stepBridgeSim({ frames: 260, throttle: 1, steer: 0 });
 const exitLast = exitSamples[exitSamples.length - 1];
 check(
   'descida de rampa regressa suavemente ao piso 0 (z = 0)',
-  exitLast.x > 10420 && exitLast.layer === 0 && exitLast.z === 0 && exitLast.trLayer === 0,
+  exitLast.x < 7600 && exitLast.layer === 0 && exitLast.z === 0 && exitLast.trLayer === 0,
   JSON.stringify(exitLast),
 );
 
@@ -172,20 +172,20 @@ const promoCheck = await page.evaluate(() => {
 });
 check('promoção antecipada para L1 em rampas curtas quando maxZ >= 0.94', promoCheck.layer === 1 && promoCheck.z >= 0.94, JSON.stringify(promoCheck));
 
-// Test L1 guardrail containment (steer directly into south rail of rd_21 at y=2048+69)
+// Test L1 guardrail containment (steer directly into south rail of rd_22 at y≈1958+101)
 await page.evaluate(() => {
   const rig = window.__rig;
   rig.truck.setElevation(1, 1);
-  rig.truck.setPosition(8064, 2055, Math.PI * 0.85);
+  rig.truck.setPosition(8250, 1965, Math.PI * 0.85);
   const dist = rig.truck.hitchOffsetY + (rig.trailer?.kingpinDist ?? 96);
   rig.trailer?.setElevation(1, 1);
-  rig.trailer?.setPosition(8064 - Math.sin(Math.PI * 0.85) * dist, 2055 + Math.cos(Math.PI * 0.85) * dist, Math.PI * 0.85);
+  rig.trailer?.setPosition(8250 - Math.sin(Math.PI * 0.85) * dist, 1965 + Math.cos(Math.PI * 0.85) * dist, Math.PI * 0.85);
   rig.truck.vLong = 140;
   rig.truck.currentSpeed = 140;
 });
 const railSamples = await stepBridgeSim({ frames: 90, throttle: 1, steer: 0 });
 const railLast = railSamples[railSamples.length - 1];
-check('guardas de tabuleiro L1 contêm o camião na via elevada', Math.abs(railLast.y - 2048) < 90, `y=${railLast.y.toFixed(1)} (deck y=2048)`);
+check('guardas de tabuleiro L1 contêm o camião na via elevada', Math.abs(railLast.y - 1958) < 125, `y=${railLast.y.toFixed(1)} (deck y=1958)`);
 
 // 6. Regression #3: fromJSON normalizes invalid layer values
 const jsonNorm = await page.evaluate(() => {
