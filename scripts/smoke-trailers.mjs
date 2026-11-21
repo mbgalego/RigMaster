@@ -40,37 +40,52 @@ await page.goto(URL, { waitUntil: 'load', timeout: 30000 });
 await page.waitForFunction(() => !!window.__rig, null, { timeout: 30000 });
 await page.waitForTimeout(1000);
 
-// 1. Loose map trailers cover all new types + bitrem pups
+// 1. Universal parking pads (decoupled from trailers/licenses) + independent loose trailers covering all families
 const mapInventory = await page.evaluate(() => {
   const rig = window.__rig;
-  const padTypes = rig.world.objects.parkingPads.map((p) => p.type);
-  const objTrailerTypes = rig.world.objects.objects
+  const objs = rig.world.objects.objects;
+  const pads = objs.filter((o) => o.type === 'parking_pad');
+  const validStyles = new Set(['asphalt', 'concrete', 'hazard', 'clean']);
+  const padsWithTrailerBinding = pads.filter((o) => !!o.params?.trailer).length;
+  const invalidStylePads = pads.filter((o) => o.variant && !validStyles.has(o.variant)).length;
+  const padStyles = Array.from(new Set(pads.map((o) => o.variant || 'asphalt')));
+
+  const objTrailerTypes = objs
     .filter((o) => o.type === 'trailer')
     .map((o) => o.params?.trailer);
-  // Count spawned loose trailers including bitrem pups
-  const looseTypes = Array.from(new Set([...padTypes, ...objTrailerTypes]));
+  const looseTypes = Array.from(new Set(objTrailerTypes));
   return {
+    padCount: pads.length,
+    padsWithTrailerBinding,
+    invalidStylePads,
+    padStyles,
     looseTypes,
-    bitremLeadPads: padTypes.filter((t) => t === 'bitrem_lead').length,
-    bitremTankerLeadPads: padTypes.filter((t) => t === 'bitrem_tanker_lead').length,
+    bitremLeads: objTrailerTypes.filter((t) => t === 'bitrem_lead').length,
+    bitremPups: objTrailerTypes.filter((t) => t === 'bitrem_pup').length,
+    bitremTankerLeads: objTrailerTypes.filter((t) => t === 'bitrem_tanker_lead').length,
+    bitremTankerPups: objTrailerTypes.filter((t) => t === 'bitrem_tanker_pup').length,
   };
 });
 
 const expectedMapTypes = [
   'standard', 'reefer', 'container', 'tanker_milk',
   'long_cargo', 'flatbed_heavy', 'timber', 'tanker_fuel',
-  'bitrem_lead', 'bitrem_tanker_lead',
+  'bitrem_lead', 'bitrem_pup', 'bitrem_tanker_lead', 'bitrem_tanker_pup',
   'fragile_glass', 'tanker_hazmat',
 ];
 check(
-  'mapa inclui todas as novas tipologias (cisternas e especializadas)',
-  expectedMapTypes.every((t) => mapInventory.looseTypes.includes(t)) &&
-    mapInventory.bitremLeadPads >= 1 &&
-    mapInventory.bitremTankerLeadPads >= 1,
+  'baías universais sem ligação a atrelados e mapa inclui todas as tipologias soltas + pups',
+  mapInventory.padCount >= 10 &&
+    mapInventory.padsWithTrailerBinding === 0 &&
+    mapInventory.invalidStylePads === 0 &&
+    mapInventory.padStyles.length >= 4 &&
+    expectedMapTypes.every((t) => mapInventory.looseTypes.includes(t)) &&
+    mapInventory.bitremLeads >= 1 && mapInventory.bitremPups >= 1 &&
+    mapInventory.bitremTankerLeads >= 1 && mapInventory.bitremTankerPups >= 1,
   JSON.stringify(mapInventory),
 );
 
-// 2. OBB/SAT clearance lint across all parking_pads, spawned trailer/pup footprints, and solid world objects
+// 2. OBB/SAT clearance lint across all universal parking_pads, independent trailer objects, and solid world objects
 const clearanceReport = await page.evaluate(() => {
   const rig = window.__rig;
   const objs = rig.world.objects.objects;
@@ -118,15 +133,13 @@ const clearanceReport = await page.evaluate(() => {
   const overlaps = [];
   for (const o of objs) {
     if (o.type !== 'parking_pad' && o.type !== 'trailer') continue;
-    const tType = o.params?.trailer || 'standard';
-    const [tw, th] = TRAILER_DIMS[tType] || [46, 220];
-    const checkBoxes = [{ label: `${o.id}(${o.type}:${tType})`, poly: corners(o.x, o.y, o.w, o.h, o.angle) }];
+    const checkBoxes = [];
     if (o.type === 'parking_pad') {
-      checkBoxes.push({ label: `${o.id}:trailer(${tType})`, poly: corners(o.x, o.y, tw, th, o.angle) });
-      if (tType === 'bitrem_lead' || tType === 'bitrem_tanker_lead') {
-        const bx = -Math.sin(o.angle), by = Math.cos(o.angle);
-        checkBoxes.push({ label: `${o.id}:pup`, poly: corners(o.x + bx * 112, o.y + by * 112, tw, th, o.angle) });
-      }
+      checkBoxes.push({ label: `${o.id}(parking_pad:${o.variant || 'asphalt'})`, poly: corners(o.x, o.y, o.w, o.h, o.angle) });
+    } else {
+      const tType = o.params?.trailer || 'standard';
+      const [tw, th] = TRAILER_DIMS[tType] || [46, 220];
+      checkBoxes.push({ label: `${o.id}(trailer:${tType})`, poly: corners(o.x, o.y, tw, th, o.angle) });
     }
     for (const box of checkBoxes) {
       for (const s of solids) {
@@ -136,12 +149,54 @@ const clearanceReport = await page.evaluate(() => {
       }
     }
   }
-  return { totalPads: objs.filter((o) => o.type === 'parking_pad').length, totalSolids: solids.length, overlaps };
+  return {
+    totalPads: objs.filter((o) => o.type === 'parking_pad').length,
+    totalTrailers: objs.filter((o) => o.type === 'trailer').length,
+    totalSolids: solids.length,
+    overlaps,
+  };
 });
 check(
   'lint OBB/SAT: zero sobreposições entre parking_pads/atrelados e edifícios/obstáculos sólidos',
-  clearanceReport.totalPads >= 10 && clearanceReport.overlaps.length === 0,
-  `pads=${clearanceReport.totalPads}, solids=${clearanceReport.totalSolids}, overlaps=${clearanceReport.overlaps.length}${clearanceReport.overlaps.length ? ' -> ' + clearanceReport.overlaps.slice(0, 3).join('; ') : ''}`,
+  clearanceReport.totalPads >= 10 && clearanceReport.totalTrailers >= 12 && clearanceReport.overlaps.length === 0,
+  `pads=${clearanceReport.totalPads}, trailers=${clearanceReport.totalTrailers}, solids=${clearanceReport.totalSolids}, overlaps=${clearanceReport.overlaps.length}${clearanceReport.overlaps.length ? ' -> ' + clearanceReport.overlaps.slice(0, 3).join('; ') : ''}`,
+);
+
+// 2b. Accepting a mission spawns the pickup trailer aligned inside a free universal parking_pad of the origin hub
+const missionPadSpawn = await page.evaluate(() => {
+  const rig = window.__rig;
+  const accepted = rig.acceptMission('harbor_city_dist');
+  const lead = rig.missionPickupLead;
+  const pads = rig.world.parkingPads;
+  let nearestPad = null;
+  let nearestDist = Infinity;
+  if (lead) {
+    const lx = lead.body.position.x;
+    const ly = lead.body.position.y;
+    for (const p of pads) {
+      const d = Math.hypot(p.x - lx, p.y - ly);
+      if (d < nearestDist) {
+        nearestDist = d;
+        nearestPad = { id: p.id, x: p.x, y: p.y, variant: p.variant };
+      }
+    }
+  }
+  const spawnedType = lead?.type ?? null;
+  rig.cancelActiveMission();
+  return {
+    accepted,
+    spawnedType,
+    nearestDist: Number.isFinite(nearestDist) ? +nearestDist.toFixed(1) : null,
+    nearestPad,
+  };
+});
+check(
+  'aceitar missão coloca o atrelado alinhado numa baía universal livre do hub de origem',
+  missionPadSpawn.accepted === true &&
+    missionPadSpawn.spawnedType === 'standard' &&
+    missionPadSpawn.nearestDist !== null &&
+    missionPadSpawn.nearestDist < 5,
+  JSON.stringify(missionPadSpawn),
 );
 
 // 3. Test Career locks Menu -> Tipologia to Sandbox only, then verify UI license gating in Sandbox

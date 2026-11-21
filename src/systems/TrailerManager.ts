@@ -57,15 +57,13 @@ export class TrailerManager {
   }
 
   /**
-   * Full rebuild from the world's parking pads: destroys every loose trailer
-   * and spawns new ones on every pad. When `preserveDamage` is true (e.g. exiting
-   * the editor), existing structural/cargo/rear-light health is carried over to
-   * matching trailers at the same pad or world-object id.
+   * Full rebuild of loose map trailers: destroys every loose trailer and respawns
+   * all independent `'trailer'` world objects. Universal `parking_pad` objects do
+   * not auto-spawn trailers (they serve as open bays used by missions and free parking).
+   * When `preserveDamage` is true (e.g. exiting the editor), existing structural,
+   * cargo, and rear-light health is carried over to matching world-object ids.
    */
-  public rebuild(
-    pads: Array<{ x: number; y: number; angle: number; type: TrailerType }>,
-    preserveDamage: boolean = false,
-  ) {
+  public rebuild(preserveDamage: boolean = false) {
     type SavedHealth = {
       trailerHealth: number;
       cargoHealth: number;
@@ -86,8 +84,7 @@ export class TrailerManager {
     }
 
     this.destroyAll();
-    for (const pad of pads) this.spawnAt(pad.x, pad.y, pad.type, pad.angle);
-    // Editor-placed trailers live as data-only 'trailer' world objects — respawn them
+    // All parked free-drive trailers live as independent 'trailer' world objects
     for (const o of (this.scene.world.objects.objects as WorldObject[])) {
       if (o.type === 'trailer' && !o.temp) this.spawnObjectTrailer(o);
     }

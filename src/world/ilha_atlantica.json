@@ -804,9 +804,7 @@
       "angle": 180,
       "w": 130,
       "h": 300,
-      "params": {
-        "trailer": "standard"
-      }
+      "variant": "asphalt"
     },
     {
       "id": "wo_35",
@@ -816,9 +814,7 @@
       "angle": 180,
       "w": 130,
       "h": 300,
-      "params": {
-        "trailer": "reefer"
-      }
+      "variant": "clean"
     },
     {
       "id": "wo_36",
@@ -828,9 +824,7 @@
       "angle": 180,
       "w": 130,
       "h": 300,
-      "params": {
-        "trailer": "container"
-      }
+      "variant": "asphalt"
     },
     {
       "id": "wo_37",
@@ -840,9 +834,7 @@
       "angle": 180,
       "w": 130,
       "h": 300,
-      "params": {
-        "trailer": "tanker_milk"
-      }
+      "variant": "clean"
     },
     {
       "id": "wo_38",
@@ -852,9 +844,7 @@
       "angle": 180,
       "w": 170,
       "h": 700,
-      "params": {
-        "trailer": "long_cargo"
-      }
+      "variant": "concrete"
     },
     {
       "id": "wo_39",
@@ -864,9 +854,7 @@
       "angle": 180,
       "w": 170,
       "h": 700,
-      "params": {
-        "trailer": "flatbed_heavy"
-      }
+      "variant": "concrete"
     },
     {
       "id": "wo_40",
@@ -876,9 +864,7 @@
       "angle": 180,
       "w": 140,
       "h": 420,
-      "params": {
-        "trailer": "bitrem_lead"
-      }
+      "variant": "hazard"
     },
     {
       "id": "wo_41",
@@ -888,9 +874,7 @@
       "angle": 180,
       "w": 140,
       "h": 420,
-      "params": {
-        "trailer": "bitrem_lead"
-      }
+      "variant": "hazard"
     },
     {
       "id": "wo_42",
@@ -900,9 +884,7 @@
       "angle": 180,
       "w": 140,
       "h": 420,
-      "params": {
-        "trailer": "bitrem_tanker_lead"
-      }
+      "variant": "hazard"
     },
     {
       "id": "wo_43",
@@ -912,9 +894,7 @@
       "angle": 180,
       "w": 140,
       "h": 300,
-      "params": {
-        "trailer": "fragile_glass"
-      }
+      "variant": "asphalt"
     },
     {
       "id": "wo_44",
@@ -924,9 +904,7 @@
       "angle": 180,
       "w": 140,
       "h": 300,
-      "params": {
-        "trailer": "tanker_hazmat"
-      }
+      "variant": "hazard"
     },
     {
       "id": "wo_45",
@@ -1166,9 +1144,7 @@
       "angle": 0,
       "w": 110,
       "h": 300,
-      "params": {
-        "trailer": "standard"
-      }
+      "variant": "concrete"
     },
     {
       "id": "wo_71",
@@ -1178,9 +1154,7 @@
       "angle": 0,
       "w": 110,
       "h": 300,
-      "params": {
-        "trailer": "reefer"
-      }
+      "variant": "concrete"
     },
     {
       "id": "wo_72",
@@ -1190,9 +1164,7 @@
       "angle": 0,
       "w": 110,
       "h": 300,
-      "params": {
-        "trailer": "container"
-      }
+      "variant": "concrete"
     },
     {
       "id": "wo_73",
@@ -2855,9 +2827,7 @@
       "angle": -90.6,
       "w": 130,
       "h": 420,
-      "params": {
-        "trailer": "standard"
-      }
+      "variant": "clean"
     },
     {
       "id": "wo_243",
@@ -3136,9 +3106,7 @@
       "angle": 180,
       "w": 170,
       "h": 420,
-      "params": {
-        "trailer": "timber"
-      }
+      "variant": "concrete"
     },
     {
       "id": "wo_274",
@@ -3148,8 +3116,126 @@
       "angle": 180,
       "w": 170,
       "h": 420,
+      "variant": "concrete"
+    },
+    {
+      "id": "wo_275",
+      "type": "trailer",
+      "x": 2250,
+      "y": 2050,
+      "w": 46,
+      "h": 220,
+      "angle": 180,
+      "params": {
+        "trailer": "container"
+      }
+    },
+    {
+      "id": "wo_276",
+      "type": "trailer",
+      "x": 2400,
+      "y": 2050,
+      "w": 46,
+      "h": 220,
+      "angle": 180,
+      "params": {
+        "trailer": "reefer"
+      }
+    },
+    {
+      "id": "wo_277",
+      "type": "trailer",
+      "x": 10900,
+      "y": 1650,
+      "w": 46,
+      "h": 248,
+      "angle": 180,
       "params": {
         "trailer": "tanker_fuel"
+      }
+    },
+    {
+      "id": "wo_278",
+      "type": "trailer",
+      "x": 11080,
+      "y": 1650,
+      "w": 46,
+      "h": 255,
+      "angle": 180,
+      "params": {
+        "trailer": "timber"
+      }
+    },
+    {
+      "id": "wo_279",
+      "type": "trailer",
+      "x": 11450,
+      "y": 1650,
+      "w": 48,
+      "h": 275,
+      "angle": 180,
+      "params": {
+        "trailer": "flatbed_heavy"
+      }
+    },
+    {
+      "id": "wo_280",
+      "type": "trailer",
+      "x": 12170,
+      "y": 7680,
+      "w": 46,
+      "h": 155,
+      "angle": 180,
+      "params": {
+        "trailer": "bitrem_lead"
+      }
+    },
+    {
+      "id": "wo_281",
+      "type": "trailer",
+      "x": 12170,
+      "y": 7513,
+      "w": 46,
+      "h": 155,
+      "angle": 180,
+      "params": {
+        "trailer": "bitrem_pup"
+      }
+    },
+    {
+      "id": "wo_282",
+      "type": "trailer",
+      "x": 12320,
+      "y": 7680,
+      "w": 46,
+      "h": 155,
+      "angle": 180,
+      "params": {
+        "trailer": "bitrem_tanker_lead"
+      }
+    },
+    {
+      "id": "wo_283",
+      "type": "trailer",
+      "x": 12320,
+      "y": 7513,
+      "w": 46,
+      "h": 155,
+      "angle": 180,
+      "params": {
+        "trailer": "bitrem_tanker_pup"
+      }
+    },
+    {
+      "id": "wo_284",
+      "type": "trailer",
+      "x": 1650,
+      "y": 8300,
+      "w": 46,
+      "h": 225,
+      "angle": 180,
+      "params": {
+        "trailer": "tanker_hazmat"
       }
     }
   ]

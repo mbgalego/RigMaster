@@ -1,8 +1,5 @@
 import Phaser from 'phaser';
 import { RoadNetwork, SURFACE_GRIP } from '../systems/RoadNetwork';
-import { isTankerType, type TrailerType } from '../entities/Trailer';
-import { LICENSE_COLORS_HEX } from '../systems/LicenseSystem';
-import { TRAILER_TYPE_TO_LICENSE } from '../systems/TrailerManager';
 import { WorldTerrain } from './WorldTerrain';
 import { COLLISION_CAT, COLLISION_MASK } from '../physics/CollisionLayers';
 
@@ -13,9 +10,21 @@ import { COLLISION_CAT, COLLISION_MASK } from '../physics/CollisionLayers';
  * chunk, deterministic seed for the default island. No tiles anywhere.
  */
 
+export type ParkingPadStyle = 'asphalt' | 'concrete' | 'hazard' | 'clean';
+
+export interface ParkingPadSpec {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  angle: number;
+  variant: ParkingPadStyle;
+}
+
 export type WObjType =
   | 'dock'            // flat loading platform (hub docks, factory docks)
-  | 'parking_pad'     // flat trailer parking slot (params.trailer → spawns one; future capture point)
+  | 'parking_pad'     // universal flat trailer parking bay (pure visual variant; missions spawn into free bays)
   | 'trailer'        // DATA-ONLY: editor-placed loose trailer (params.trailer → live entity, no static body)
   | 'pad_asphalt'     // flat asphalt base pad (yard ground, no collision)
   | 'pad_dirt'        // flat dirt/gravel base pad (yard ground, no collision)
@@ -406,10 +415,15 @@ export class WorldObjects {
     return bays;
   }
 
-  public get parkingPads(): Array<{ x: number; y: number; angle: number; type: TrailerType }> {
+  public get parkingPads(): ParkingPadSpec[] {
     return this.objects
-      .filter((o) => o.type === 'parking_pad' && o.params?.trailer)
-      .map((o) => ({ x: o.x, y: o.y, angle: o.angle, type: o.params!.trailer as TrailerType }));
+      .filter((o) => o.type === 'parking_pad')
+      .map((o) => {
+        const raw = o.variant;
+        const variant: ParkingPadStyle =
+          raw === 'concrete' || raw === 'hazard' || raw === 'clean' ? raw : 'asphalt';
+        return { id: o.id, x: o.x, y: o.y, w: o.w, h: o.h, angle: o.angle, variant };
+      });
   }
 
   /** Rotated-rect hit test for the object editor (padded for easy grabbing) */
@@ -757,27 +771,45 @@ export class WorldObjects {
     this.add('building', 900, 9250, 260, 160, { variant: 'archway' });
     for (let i = 0; i < 3; i++) this.add('dock', 576 + i * 128, 9450, 118, 118, { variant: 'port' });
 
-    // ---- Trailer parks (real sites: park, couple, go) ----
+    // ---- Universal trailer parking bays (agnostic of license/trailer type) ----
     // Nose faces SOUTH (angle PI) — the classic depot posture.
-    const pad = (x: number, y: number, w: number, h: number, trailer: string) =>
-      this.add('parking_pad', x, y, w, h, { params: { trailer }, angle: Math.PI });
-    // Porto (C) — east of Porto (clear of exam barriers & warehouses)
-    pad(1950, 2050, 130, 300, 'standard');
-    pad(2100, 2050, 130, 300, 'reefer');
-    pad(2250, 2050, 130, 300, 'container');
-    pad(2400, 2050, 130, 300, 'tanker_milk');
-    // Estaleiro (C+E) — south of Estaleiro
-    pad(10900, 1650, 170, 420, 'tanker_fuel');
-    pad(11080, 1650, 170, 420, 'timber');
-    pad(11260, 1650, 170, 700, 'long_cargo');
-    pad(11450, 1650, 170, 700, 'flatbed_heavy');
-    // Bitrem (H) — north of Zona Industrial (clear of warehouse wo_98)
-    pad(12020, 7680, 140, 420, 'bitrem_lead');
-    pad(12170, 7680, 140, 420, 'bitrem_lead');
-    pad(12320, 7680, 140, 420, 'bitrem_tanker_lead');
-    // Fragile glass & Hazmat tanker (X) — east of Centro Histórico
-    pad(1500, 8300, 140, 300, 'fragile_glass');
-    pad(1650, 8300, 140, 300, 'tanker_hazmat');
+    // Free bays are automatically used by missions when spawning pickup trailers;
+    // independent 'trailer' objects below provide parked free-drive variety.
+    const pad = (x: number, y: number, w: number, h: number, variant: ParkingPadStyle = 'asphalt') =>
+      this.add('parking_pad', x, y, w, h, { variant, angle: Math.PI });
+    const parkedTrailer = (x: number, y: number, w: number, h: number, trailer: string, angle = Math.PI) =>
+      this.add('trailer', x, y, w, h, { params: { trailer }, angle });
+
+    // Porto — 2 free bays for missions + 2 parked free-drive trailers
+    pad(1950, 2050, 130, 300, 'asphalt');
+    pad(2100, 2050, 130, 300, 'clean');
+    pad(2250, 2050, 130, 300, 'asphalt');
+    pad(2400, 2050, 130, 300, 'clean');
+    parkedTrailer(2250, 2050, 46, 220, 'container');
+    parkedTrailer(2400, 2050, 46, 220, 'reefer');
+
+    // Estaleiro — 1 free long bay for missions + 3 parked free-drive trailers
+    pad(10900, 1650, 170, 420, 'concrete');
+    pad(11080, 1650, 170, 420, 'concrete');
+    pad(11260, 1650, 170, 700, 'concrete');
+    pad(11450, 1650, 170, 700, 'concrete');
+    parkedTrailer(10900, 1650, 46, 248, 'tanker_fuel');
+    parkedTrailer(11080, 1650, 46, 255, 'timber');
+    parkedTrailer(11450, 1650, 48, 275, 'flatbed_heavy');
+
+    // Zona Industrial — 1 free hazard bay for missions + 2 parked bitrem pairs
+    pad(12020, 7680, 140, 420, 'hazard');
+    pad(12170, 7680, 140, 420, 'hazard');
+    pad(12320, 7680, 140, 420, 'hazard');
+    parkedTrailer(12170, 7680, 46, 155, 'bitrem_lead');
+    parkedTrailer(12170, 7680 - 167, 46, 155, 'bitrem_pup');
+    parkedTrailer(12320, 7680, 46, 155, 'bitrem_tanker_lead');
+    parkedTrailer(12320, 7680 - 167, 46, 155, 'bitrem_tanker_pup');
+
+    // Centro Histórico — 1 free bay for missions + 1 parked hazmat tanker
+    pad(1500, 8300, 140, 300, 'asphalt');
+    pad(1650, 8300, 140, 300, 'hazard');
+    parkedTrailer(1650, 8300, 46, 225, 'tanker_hazmat');
 
     // ---- Exam practice courses (jersey lanes near the exam sites) ----
     // C exam (1920,1400): flanked approach lane
@@ -843,9 +875,8 @@ export class WorldObjects {
       //      pads (nose north, toward the docks) — future capture points ----
       this.add('pad_asphalt', 10840, 10050, 460, 360);
       this.add('dock_wall', 10840, 9898, 420, 56, { params: { docks: 3 } });
-      const dockYardTypes = ['standard', 'reefer', 'container'];
       for (let i = 0; i < 3; i++) {
-        this.add('parking_pad', 10720 + i * 120, 10080, 110, 300, { params: { trailer: dockYardTypes[i] } });
+        this.add('parking_pad', 10720 + i * 120, 10080, 110, 300, { variant: 'concrete' });
       }
     }
 
@@ -934,7 +965,7 @@ export class WorldObjects {
       this.add('container_stack', 6740, 3773, 103, 240);
       this.add('jersey_barrier', 6922, 3267, 164, 20, { angle: deg(-89.7) });
       this.add('wall', 6891, 4094, 1109, 20);
-      this.add('parking_pad', 6611, 3994, 130, 420, { angle: deg(-90.6), params: { trailer: 'standard' } });
+      this.add('parking_pad', 6611, 3994, 130, 420, { angle: deg(-90.6), variant: 'clean' });
       this.add('container_stack', 6605, 3771, 110, 226);
       this.add('wall', 6342, 3775, 643, 20, { angle: deg(89.8) });
       this.add('container_stack', 6466, 3776, 109, 225);
@@ -1296,75 +1327,90 @@ export class WorldObjects {
           break;
         }
         case 'parking_pad': {
-          // Trailer bay marking — yellow bay lines, hatched entry, faint
-          // silhouette of the trailer it spawns. Doubles as a future
-          // arrival/capture trigger point.
-          const tr = String(o.params?.trailer || 'standard') as TrailerType;
-          const licId = TRAILER_TYPE_TO_LICENSE[tr] ?? 'C';
-          const mark = LICENSE_COLORS_HEX[licId];
-          const isTanker = isTankerType(tr);
-          g.fillStyle(0x1c2027, 1);
+          // Universal trailer parking bay — pure visual variants (asphalt, concrete,
+          // hazard, clean) with zero link to any license or trailer type.
+          const style: ParkingPadStyle =
+            o.variant === 'concrete' || o.variant === 'hazard' || o.variant === 'clean'
+              ? o.variant
+              : 'asphalt';
+
+          const palette = {
+            asphalt:  { bg: 0x1c2027, border: 0xfacc15, corner: 0xfde047, stop: 0xe2e8f0, guide: 0x64748b },
+            concrete: { bg: 0x353d49, border: 0xe2e8f0, corner: 0xfacc15, stop: 0xf8fafc, guide: 0x94a3b8 },
+            hazard:   { bg: 0x1e232b, border: 0xf59e0b, corner: 0xfacc15, stop: 0xfacc15, guide: 0x94a3b8 },
+            clean:    { bg: 0x222934, border: 0xcbd5e1, corner: 0x38bdf8, stop: 0xf1f5f9, guide: 0x64748b },
+          }[style];
+
+          // Base slab
+          g.fillStyle(palette.bg, 1);
           g.fillRect(x0, y0, o.w, o.h);
-          // Bay boundary (solid license color, dim) + bright corner brackets
-          g.lineStyle(2, mark, 0.45);
-          g.strokeRect(x0 + 4, y0 + 4, o.w - 8, o.h - 8);
-          g.lineStyle(3, mark, 0.85);
+
+          // Concrete expansion joints & subtle tire wear tracks
+          if (style === 'concrete') {
+            g.lineStyle(1.5, 0x28303b, 0.85);
+            for (let sy = y0 + 84; sy < y0 + o.h - 24; sy += 84) {
+              g.lineBetween(x0 + 3, sy, x0 + o.w - 3, sy);
+            }
+            g.fillStyle(0x2a313c, 0.32);
+            const trackW = Math.min(18, o.w * 0.14);
+            g.fillRect(o.x - o.w * 0.24 - trackW / 2, y0 + 26, trackW, o.h - 58);
+            g.fillRect(o.x + o.w * 0.24 - trackW / 2, y0 + 26, trackW, o.h - 58);
+          }
+
+          // Hazard side stripes along left & right edges
+          if (style === 'hazard') {
+            g.fillStyle(0x11151b, 0.9);
+            g.fillRect(x0 + 3, y0 + 3, 9, o.h - 6);
+            g.fillRect(x0 + o.w - 12, y0 + 3, 9, o.h - 6);
+            g.fillStyle(0xfacc15, 0.78);
+            for (let sy = y0 + 6; sy < y0 + o.h - 14; sy += 24) {
+              g.fillRect(x0 + 4, sy, 7, 11);
+              g.fillRect(x0 + o.w - 11, sy, 7, 11);
+            }
+          }
+
+          // Bay boundary outline + high-contrast corner brackets
+          const inset = style === 'hazard' ? 14 : 4;
+          g.lineStyle(2, palette.border, 0.55);
+          g.strokeRect(x0 + inset, y0 + 4, o.w - inset * 2, o.h - 8);
+          g.lineStyle(3, palette.corner, 0.9);
           const b = 22;
           for (const [cx, cy, dx, dy] of [
-            [x0 + 4, y0 + 4, 1, 1], [x0 + o.w - 4, y0 + 4, -1, 1],
-            [x0 + 4, y0 + o.h - 4, 1, -1], [x0 + o.w - 4, y0 + o.h - 4, -1, -1],
+            [x0 + inset, y0 + 4, 1, 1], [x0 + o.w - inset, y0 + 4, -1, 1],
+            [x0 + inset, y0 + o.h - 4, 1, -1], [x0 + o.w - inset, y0 + o.h - 4, -1, -1],
           ]) {
             g.lineBetween(cx, cy, cx + dx * b, cy);
             g.lineBetween(cx, cy, cx, cy + dy * b);
           }
-          // Stop bar at the nose end (local -y)
-          g.fillStyle(0xe2e8f0, 0.65);
-          g.fillRect(x0 + 14, y0 + 10, o.w - 28, 6);
-          // Hatched entry strip + chevrons pointing to the nose (local +y end)
-          g.lineStyle(2, mark, 0.4);
-          for (let hx = x0 + 6; hx < x0 + o.w + 20; hx += 26) {
-            g.lineBetween(hx, y0 + o.h - 4, Math.min(hx + 22, x0 + o.w - 6), y0 + o.h - 30);
+
+          // Subtle center alignment guide dashes (helps reversing any trailer straight in)
+          g.lineStyle(2, palette.guide, 0.42);
+          for (let gy = y0 + 34; gy < y0 + o.h - 76; gy += 32) {
+            g.lineBetween(o.x, gy, o.x, Math.min(gy + 16, y0 + o.h - 76));
           }
-          const chevY = y0 + o.h - 46;
+
+          // Wheel-stop bar at the nose end (local -y)
+          g.fillStyle(palette.stop, 0.78);
+          g.fillRect(x0 + inset + 10, y0 + 10, o.w - (inset + 10) * 2, 6);
+
+          // Entry apron + chevrons pointing into the bay (local +y end)
+          if (style !== 'clean') {
+            g.lineStyle(2, palette.border, 0.36);
+            for (let hx = x0 + inset + 4; hx < x0 + o.w - inset - 4; hx += 24) {
+              g.lineBetween(hx, y0 + o.h - 4, Math.min(hx + 20, x0 + o.w - inset - 4), y0 + o.h - 26);
+            }
+          }
+          const chevY = y0 + o.h - 42;
+          g.lineStyle(2.2, palette.corner, 0.65);
           for (let k = 0; k < 3; k++) {
-            const cy = chevY - k * 18;
+            const cy = chevY - k * 16;
+            if (cy < y0 + 36) break;
             const s = 10;
             g.beginPath();
             g.moveTo(o.x - s, cy + s);
             g.lineTo(o.x, cy);
             g.lineTo(o.x + s, cy + s);
             g.strokePath();
-          }
-          // Faint silhouettes of the parked trailer(s) near the nose end
-          const box = (cy: number, L: number, W: number) => {
-            g.fillStyle(0x11151b, 0.9);
-            if (isTanker) {
-              g.fillRoundedRect(o.x - W / 2, cy - L / 2, W, L, 16);
-              g.lineStyle(1.5, 0x3c4550, 1);
-              g.strokeRoundedRect(o.x - W / 2, cy - L / 2, W, L, 16);
-              g.lineStyle(1.5, 0x26313e, 1);
-              g.lineBetween(o.x, cy - L / 2 + 12, o.x, cy + L / 2 - 12);
-            } else {
-              g.fillRect(o.x - W / 2, cy - L / 2, W, L);
-              g.lineStyle(1.5, 0x3c4550, 1);
-              g.strokeRect(o.x - W / 2, cy - L / 2, W, L);
-              g.lineStyle(2, 0x232b35, 1);
-              g.lineBetween(o.x - W / 2 + 6, cy, o.x + W / 2 - 6, cy);
-            }
-          };
-          if (tr === 'bitrem_lead' || tr === 'bitrem_pup' || tr === 'bitrem_tanker_lead' || tr === 'bitrem_tanker_pup') {
-            const pupCy = y0 + 16 + 77.5;
-            box(pupCy, 155, 46);
-            box(pupCy + 167, 155, 46);
-          } else {
-            const L =
-              tr === 'long_cargo' ? 310 :
-              tr === 'flatbed_heavy' ? 275 :
-              tr === 'timber' ? 255 :
-              tr === 'tanker_fuel' ? 248 :
-              tr === 'tanker_hazmat' ? 225 : 220;
-            const W = tr === 'flatbed_heavy' ? 48 : 46;
-            box(y0 + 16 + L / 2, L, W);
           }
           break;
         }

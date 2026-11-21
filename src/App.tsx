@@ -160,20 +160,10 @@ const CREATE_CATALOG: Array<{
     label: 'Pads',
     icon: CarFront,
     items: [
-      { spec: { type: 'parking_pad', w: 130, h: 420, params: { trailer: 'standard' }, label: 'Pad C Standard' }, icon: Truck },
-      { spec: { type: 'parking_pad', w: 130, h: 420, params: { trailer: 'reefer' }, label: 'Pad C Frigo' }, icon: Truck },
-      { spec: { type: 'parking_pad', w: 130, h: 420, params: { trailer: 'container' }, label: 'Pad C Contentor' }, icon: Container },
-      { spec: { type: 'parking_pad', w: 130, h: 420, params: { trailer: 'tanker_milk' }, label: 'Pad C Cist. Leite' }, icon: Truck },
-      { spec: { type: 'parking_pad', w: 170, h: 640, params: { trailer: 'long_cargo' }, label: 'Pad CE Pá Eólica' }, icon: Truck },
-      { spec: { type: 'parking_pad', w: 170, h: 520, params: { trailer: 'flatbed_heavy' }, label: 'Pad CE Prancha' }, icon: Truck },
-      { spec: { type: 'parking_pad', w: 160, h: 480, params: { trailer: 'timber' }, label: 'Pad CE Toros' }, icon: Truck },
-      { spec: { type: 'parking_pad', w: 160, h: 480, params: { trailer: 'tanker_fuel' }, label: 'Pad CE Petróleo' }, icon: Fuel },
-      { spec: { type: 'parking_pad', w: 140, h: 560, params: { trailer: 'bitrem_lead' }, label: 'Pad H Bitrem' }, icon: Truck },
-      { spec: { type: 'parking_pad', w: 140, h: 560, params: { trailer: 'bitrem_tanker_lead' }, label: 'Pad H Bitr. Cist.' }, icon: Fuel },
-      { spec: { type: 'parking_pad', w: 140, h: 300, params: { trailer: 'bitrem_pup' }, label: 'Pad HP' }, icon: Truck },
-      { spec: { type: 'parking_pad', w: 140, h: 300, params: { trailer: 'bitrem_tanker_pup' }, label: 'Pad HPC' }, icon: Fuel },
-      { spec: { type: 'parking_pad', w: 140, h: 420, params: { trailer: 'fragile_glass' }, label: 'Pad X Vidro' }, icon: Truck },
-      { spec: { type: 'parking_pad', w: 140, h: 420, params: { trailer: 'tanker_hazmat' }, label: 'Pad X Cist. ADR' }, icon: AlertTriangle },
+      { spec: { type: 'parking_pad', w: 130, h: 420, variant: 'asphalt', label: 'Baía Asfalto' }, icon: CarFront },
+      { spec: { type: 'parking_pad', w: 130, h: 420, variant: 'concrete', label: 'Baía Betão' }, icon: Layers },
+      { spec: { type: 'parking_pad', w: 140, h: 460, variant: 'hazard', label: 'Baía Segurança' }, icon: AlertTriangle },
+      { spec: { type: 'parking_pad', w: 165, h: 640, variant: 'clean', label: 'Baía Longa' }, icon: CarFront },
     ],
   },
   {
@@ -354,8 +344,8 @@ export default function App() {
     canMerge: false,
   });
   // Object tool live state (polled from EditorScene in the telemetry loop)
-  const [objectUI, setObjectUI] = useState<{ hasSelection: boolean; id: string; type: string; angleDeg: number; resizable: boolean; trailer: string; canPaste: boolean; rotationSnap: boolean; canUndo: boolean; isCompound: boolean; compoundPartCount: number }>({
-    hasSelection: false, id: '', type: '', angleDeg: 0, resizable: false, trailer: '', canPaste: false, rotationSnap: true, canUndo: false, isCompound: false, compoundPartCount: 0,
+  const [objectUI, setObjectUI] = useState<{ hasSelection: boolean; id: string; type: string; variant: string; angleDeg: number; resizable: boolean; trailer: string; canPaste: boolean; rotationSnap: boolean; canUndo: boolean; isCompound: boolean; compoundPartCount: number }>({
+    hasSelection: false, id: '', type: '', variant: '', angleDeg: 0, resizable: false, trailer: '', canPaste: false, rotationSnap: true, canUndo: false, isCompound: false, compoundPartCount: 0,
   });
 
   // Real-time Telemetry
@@ -2269,7 +2259,32 @@ export default function App() {
                         </span>
                       </>
                     ) : null}
-                    {objectUI.type === 'parking_pad' || objectUI.type === 'trailer' ? (
+                    {objectUI.type === 'parking_pad' ? (
+                      <>
+                        <div className="ed-fs-sm font-bold text-slate-500 px-1 pt-0.5 shrink-0">estilo visual da baía</div>
+                        <div className="grid grid-cols-2 gap-1 shrink-0">
+                          {([
+                            ['Asfalto', 'asphalt'],
+                            ['Betão', 'concrete'],
+                            ['Segurança', 'hazard'],
+                            ['Moderna', 'clean'],
+                          ] as Array<[string, string]>).map(([lbl, val]) => (
+                            <button
+                              key={val}
+                              onClick={() => { const ed = getEditorScene(); if (ed) ed.setParkingPadVariant(objectUI.id, val); }}
+                              className={`shrink-0 ed-fs font-bold px-1.5 py-1 rounded border text-left truncate ${
+                                (objectUI.variant || 'asphalt') === val
+                                  ? 'bg-amber-400 text-slate-900 border-amber-200'
+                                  : 'bg-slate-800 text-amber-300 border-slate-600 hover:bg-slate-700'
+                              }`}
+                            >
+                              {lbl}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    ) : null}
+                    {objectUI.type === 'trailer' ? (
                       <>
                         <div className="ed-fs-sm font-bold text-slate-500 px-1 pt-0.5 shrink-0">tipo de atrelado</div>
                         <div className="grid grid-cols-2 gap-1 shrink-0">

@@ -429,8 +429,8 @@ export class MainScene extends Phaser.Scene {
       this.matter.world.debugGraphic.setVisible(this.debugMatter);
     }
 
-    // 2. Spawn parked trailers on the world's parking pads, parked fleet trucks, then active rig
-    TrailerManager.getInstance(this).rebuild(this.world.parkingPads);
+    // 2. Spawn parked independent trailers, parked fleet trucks, then active rig
+    TrailerManager.getInstance(this).rebuild();
     this.parkedTruckManager = new ParkedTruckManager(this);
     this.spawnVehicleRig(this.currentVehicleConfig);
     const activeFleet = this.reputationSystem.getActiveTruck();
@@ -1622,32 +1622,66 @@ export class MainScene extends Phaser.Scene {
       return;
     }
 
-    // 2. Otherwise spawn a fresh mission trailer (and rear pup if bitrem) in a clear hub bay
-    const bays = MainScene.HUB_MISSION_PICKUP_BAYS[mission.originHub] ?? [
+    // 2. Prefer a FREE universal parking_pad belonging to the origin hub (aligned cleanly
+    //    with the bay), falling back to HUB_MISSION_PICKUP_BAYS only if all pads are occupied.
+    const neededBayLen =
+      isBitrem ? 340 :
+      mission.trailerType === 'long_cargo' ? 320 :
+      mission.trailerType === 'flatbed_heavy' ? 285 :
+      240;
+
+    const hubPads = this.world.parkingPads
+      .map((pad) => ({
+        pad,
+        dist: Phaser.Math.Distance.Between(originPos.x, originPos.y, pad.x, pad.y),
+        fits: pad.h >= neededBayLen,
+      }))
+      .filter((entry) => entry.dist <= 1850)
+      .sort((a, b) => {
+        if (a.fits !== b.fits) return a.fits ? -1 : 1;
+        return a.dist - b.dist;
+      })
+      .map((entry) => ({ x: entry.pad.x, y: entry.pad.y, angle: entry.pad.angle }));
+
+    const fallbackBays = MainScene.HUB_MISSION_PICKUP_BAYS[mission.originHub] ?? [
       { x: originPos.x, y: originPos.y, angle: Math.PI },
     ];
+    const candidateBays = [...hubPads, ...fallbackBays];
 
-    const isBayClear = (bx: number, by: number): boolean => {
-      const checkY = isBitrem ? by - 80 : by;
-      const minClear = isBitrem ? 150 : 105;
-      if (this.truck && Phaser.Math.Distance.Between(this.truck.body.position.x, this.truck.body.position.y, bx, checkY) < minClear) {
-        return false;
-      }
-      if (this.trailer && Phaser.Math.Distance.Between(this.trailer.body.position.x, this.trailer.body.position.y, bx, checkY) < minClear) {
-        return false;
-      }
-      for (const tr of mgr.loose) {
-        if (Phaser.Math.Distance.Between(tr.body.position.x, tr.body.position.y, bx, by) < 95) {
+    const isBayClear = (bx: number, by: number, angle: number): boolean => {
+      // Rear pup sits behind the lead's bumper along (-sin(angle), cos(angle)) * 167
+      const pupX = bx - Math.sin(angle) * 167;
+      const pupY = by + Math.cos(angle) * 167;
+      const checkPoints = isBitrem ? [{ x: bx, y: by }, { x: pupX, y: pupY }] : [{ x: bx, y: by }];
+
+      for (const pt of checkPoints) {
+        if (this.truck && Phaser.Math.Distance.Between(this.truck.body.position.x, this.truck.body.position.y, pt.x, pt.y) < 115) {
           return false;
         }
-        if (isBitrem && Phaser.Math.Distance.Between(tr.body.position.x, tr.body.position.y, bx, by - 165) < 95) {
+        if (this.trailer && Phaser.Math.Distance.Between(this.trailer.body.position.x, this.trailer.body.position.y, pt.x, pt.y) < 115) {
           return false;
+        }
+        if (this.pupTrailer && Phaser.Math.Distance.Between(this.pupTrailer.body.position.x, this.pupTrailer.body.position.y, pt.x, pt.y) < 115) {
+          return false;
+        }
+        for (const tr of mgr.loose) {
+          if (Phaser.Math.Distance.Between(tr.body.position.x, tr.body.position.y, pt.x, pt.y) < 95) {
+            return false;
+          }
+        }
+        // Avoid overlapping any parked fleet trucks
+        if (this.parkedTruckManager) {
+          for (const parked of this.parkedTruckManager.getAll()) {
+            if (Phaser.Math.Distance.Between(parked.fleet.x, parked.fleet.y, pt.x, pt.y) < 115) {
+              return false;
+            }
+          }
         }
       }
       return true;
     };
 
-    const chosenBay = bays.find((b) => isBayClear(b.x, b.y)) ?? bays[0];
+    const chosenBay = candidateBays.find((b) => isBayClear(b.x, b.y, b.angle)) ?? candidateBays[0];
     const looseBefore = mgr.loose.length;
     const spawnedLead = mgr.spawnAt(chosenBay.x, chosenBay.y, mission.trailerType, chosenBay.angle, true);
     const newlySpawned = mgr.loose.slice(looseBefore);
@@ -2286,12 +2320,12 @@ export class MainScene extends Phaser.Scene {
 
   public reseedWorld() {
     this.world.reseed();
-    TrailerManager.getInstance(this).rebuild(this.world.parkingPads);
+    TrailerManager.getInstance(this).rebuild();
   }
 
-  /** Respawns every loose trailer from pads + editor 'trailer' objects (optionally preserving damage). */
+  /** Respawns every independent 'trailer' world object (optionally preserving damage). */
   public rebuildTrailers(preserveDamage: boolean = false) {
-    TrailerManager.getInstance(this).rebuild(this.world.parkingPads, preserveDamage);
+    TrailerManager.getInstance(this).rebuild(preserveDamage);
   }
 
   public togglePhysicsDebug() {
@@ -2333,6 +2367,7 @@ export class MainScene extends Phaser.Scene {
       const midY = liveView.y + liveView.height * 0.5;
 
       // 1. Traffic lights: redraw ONLY on phase flip, >200px move, zoom change, or world edit
+      const objVer = this.world.version + this.world.objects.version;
       const phaseKey = this.world.objects.getTrafficLightPhaseKey();
       const lastT = this.lastTrafficRender;
       if (
@@ -2340,10 +2375,10 @@ export class MainScene extends Phaser.Scene {
         phaseKey !== lastT.phase ||
         Math.hypot(midX - lastT.x, midY - lastT.y) > 200 ||
         Math.abs(cam.zoom - lastT.zoom) > 0.02 ||
-        this.world.objects.version !== lastT.version
+        objVer !== lastT.version
       ) {
         this.world.objects.renderTrafficLights(this.lightsGraphics, liveView, 380);
-        this.lastTrafficRender = { x: midX, y: midY, zoom: cam.zoom, version: this.world.objects.version, phase: phaseKey };
+        this.lastTrafficRender = { x: midX, y: midY, zoom: cam.zoom, version: objVer, phase: phaseKey };
       }
 
       // 2. Overhead streetlamp arms (depth 14): redraw ONLY on >200px move, zoom change, or world edit
@@ -2352,11 +2387,11 @@ export class MainScene extends Phaser.Scene {
         Number.isNaN(lastO.x) ||
         Math.hypot(midX - lastO.x, midY - lastO.y) > 200 ||
         Math.abs(cam.zoom - lastO.zoom) > 0.02 ||
-        this.world.objects.version !== lastO.version
+        objVer !== lastO.version
       ) {
         this.overheadGraphics.clear();
         this.world.objects.renderOverhead(this.overheadGraphics, liveView, 420);
-        this.lastObjRender = { x: midX, y: midY, zoom: cam.zoom, version: this.world.objects.version };
+        this.lastObjRender = { x: midX, y: midY, zoom: cam.zoom, version: objVer };
       }
 
       // 3. Glowing streetlamp bulb cores (depth 14.5): redraw geometry only on >200px move; modulate alpha cheaply
@@ -2366,10 +2401,10 @@ export class MainScene extends Phaser.Scene {
           Number.isNaN(lastB.x) ||
           Math.hypot(midX - lastB.x, midY - lastB.y) > 200 ||
           Math.abs(cam.zoom - lastB.zoom) > 0.02 ||
-          this.world.objects.version !== lastB.version
+          objVer !== lastB.version
         ) {
           this.world.objects.renderLampBulbs(this.overheadLightsGraphics, liveView, 420);
-          this.lastLampBulbRender = { x: midX, y: midY, zoom: cam.zoom, version: this.world.objects.version };
+          this.lastLampBulbRender = { x: midX, y: midY, zoom: cam.zoom, version: objVer };
         }
         this.overheadLightsGraphics.setVisible(true).setAlpha(lampFactor);
       } else {
@@ -3265,7 +3300,7 @@ export class MainScene extends Phaser.Scene {
     const res = this.staticWorldChunks?.update(
       view,
       this.roadNetwork.version,
-      this.world.objects.version,
+      this.world.version + this.world.objects.version,
     );
 
     if (res && !res.fallbackActive) {

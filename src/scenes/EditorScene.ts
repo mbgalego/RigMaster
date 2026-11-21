@@ -1272,7 +1272,7 @@ export class EditorScene extends Phaser.Scene {
   private static readonly RESIZABLE_TYPES = new Set<string>([
     'wall', 'entrance', 'entrance_y', 'entrance_gas', 'road_entry', 'road_entry_y', 'road_turnout',
     'parking_lot', 'building', 'jersey_barrier', 'container_stack', 'dock', 'gas_canopy', 'silo',
-    'crane', 'roundabout', 'crosswalk', 'pad_asphalt', 'pad_dirt', 'dock_wall',
+    'crane', 'roundabout', 'crosswalk', 'pad_asphalt', 'pad_dirt', 'dock_wall', 'parking_pad',
   ]);
 
   private isResizable(o: WorldObject): boolean {
@@ -1681,15 +1681,16 @@ export class EditorScene extends Phaser.Scene {
     this.roadDirtySinceRelease = true;
   }
 
-  public getObjectUIState(): { hasSelection: boolean; id: string; type: string; angleDeg: number; resizable: boolean; trailer: string; canPaste: boolean; rotationSnap: boolean; canUndo: boolean; isCompound: boolean; compoundPartCount: number } {
+  public getObjectUIState(): { hasSelection: boolean; id: string; type: string; variant: string; angleDeg: number; resizable: boolean; trailer: string; canPaste: boolean; rotationSnap: boolean; canUndo: boolean; isCompound: boolean; compoundPartCount: number } {
     const o = this.selectedObject;
     return {
       hasSelection: !!o,
       id: o ? o.id : '',
       type: o ? o.type : '',
+      variant: o && o.type === 'parking_pad' ? String(o.variant || 'asphalt') : String(o?.variant || ''),
       angleDeg: o ? Math.round(Phaser.Math.RadToDeg(o.angle)) : 0,
       resizable: o ? this.isResizable(o) : false,
-      trailer: o && (o.type === 'parking_pad' || o.type === 'trailer') ? String(o.params?.trailer || 'standard') : '',
+      trailer: o && o.type === 'trailer' ? String(o.params?.trailer || 'standard') : '',
       canPaste: !!this.clipboard,
       rotationSnap: this.rotationSnap,
       canUndo: this.canUndo(),
@@ -1754,24 +1755,29 @@ export class EditorScene extends Phaser.Scene {
     }
   }
 
-  /** Switches the trailer type of a parking pad — or respawns an editor-placed
-   *  trailer object with a new type (re-renders via version bump). */
+  /** Switches the pure visual style of a universal parking pad (re-bakes static chunks immediately). */
+  public setParkingPadVariant(id: string, variant: string) {
+    this.pushUndo();
+    const o = this.mainScene.world.objects.get(id);
+    if (!o || o.type !== 'parking_pad') return;
+    o.variant = variant;
+    if (o.params && 'trailer' in o.params) {
+      delete o.params.trailer;
+    }
+    this.mainScene.world.objects.version++;
+    this.mainScene.world.version++;
+  }
+
+  /** Switches the trailer type of an editor-placed trailer object and respawns its live entity. */
   public setTrailerPadType(id: string, trailer: string) {
     this.pushUndo();
     const o = this.mainScene.world.objects.get(id);
-    if (!o) return;
-    if (o.type === 'parking_pad') {
-      o.params = { ...(o.params || {}), trailer };
-      this.mainScene.world.version++;
-      return;
-    }
-    if (o.type === 'trailer') {
-      // Editor-placed trailer: swap the type and respawn the live entity
-      o.params = { ...(o.params || {}), trailer };
-      TrailerManager.getInstance(this.mainScene).removeForObject(id);
-      TrailerManager.getInstance(this.mainScene).spawnObjectTrailer(o);
-      this.mainScene.world.version++;
-    }
+    if (!o || o.type !== 'trailer') return;
+    o.params = { ...(o.params || {}), trailer };
+    TrailerManager.getInstance(this.mainScene).removeForObject(id);
+    TrailerManager.getInstance(this.mainScene).spawnObjectTrailer(o);
+    this.mainScene.world.objects.version++;
+    this.mainScene.world.version++;
   }
 
   // ======================================================================

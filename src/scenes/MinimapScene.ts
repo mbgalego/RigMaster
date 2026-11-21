@@ -152,7 +152,7 @@ export class MinimapScene extends Phaser.Scene {
     for (const o of mainScene.world.objects.objects) {
       let color: string | null = null;
       if (o.type === 'dock' || o.type === 'exam_dock') color = '#eab308';
-      else if (o.type === 'parking_pad') color = '#ec4899';
+      else if (o.type === 'parking_pad') color = '#94a3b8';
       else if (o.type === 'building' || o.type === 'silo') color = '#475569';
       else if (o.type === 'gas_pump') color = '#34d058';
       if (!color) continue;
