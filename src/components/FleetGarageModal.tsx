@@ -28,13 +28,10 @@ interface FleetGarageModalProps {
   onOpenWorldMap: (focusTruckId?: string) => void;
 }
 
-const HUB_LABELS: Record<HubId, string> = {
-  harbor: 'Porto Comercial',
-  shipyard: 'Estaleiro Logístico',
-  industrial: 'Zona Industrial Sul',
-  historic: 'Centro Histórico',
-  serra: 'Serra dos Ventos',
-};
+function getHubDisplayName(hubId: HubId): string {
+  const gar = GarageSystem.getInstance();
+  return gar.hasHub(hubId) ? gar.getHub(hubId).name : hubId;
+}
 
 export const FleetGarageModal: React.FC<FleetGarageModalProps> = ({
   open,
@@ -129,9 +126,7 @@ export const FleetGarageModal: React.FC<FleetGarageModalProps> = ({
             const canPhysicalSwap = unlocked && !isActive && withinSwapRange && isStopped;
             const canSandboxSwap = isSandbox && !isActive;
 
-            const hubName =
-              GarageSystem.getInstance().getHubs().find((h) => h.id === state.locationHub)?.name ??
-              HUB_LABELS[state.locationHub];
+            const hubName = getHubDisplayName(state.locationHub);
 
             const fuelPct = Math.round((state.fuel / Math.max(1, spec.fuelCapacityL)) * 100);
             const minWear = Math.round(
@@ -235,7 +230,7 @@ export const FleetGarageModal: React.FC<FleetGarageModalProps> = ({
                         <div className={`font-mono tabular-nums ${repMet ? 'text-emerald-400' : 'text-amber-300'}`}>
                           {repMet ? '✓ ' : '• '}
                           {currentRepForReq.toLocaleString('pt-PT')} / {reqRep.amount.toLocaleString('pt-PT')} rep{' '}
-                          {reqRep.hubId === 'any' ? '(qualquer hub)' : HUB_LABELS[reqRep.hubId]}
+                          {reqRep.hubId === 'any' ? '(qualquer hub)' : getHubDisplayName(reqRep.hubId)}
                         </div>
                       )}
                       {spec.unlockReq.requiredCertificates.map((cid) => {

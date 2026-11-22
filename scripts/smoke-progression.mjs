@@ -60,7 +60,7 @@ const fleetClearance = await page.evaluate(() => {
   const objs = rig.world.objects.objects;
   const SOLID_TYPES = new Set([
     'building', 'wall', 'jersey_barrier', 'container_stack',
-    'silo', 'crane', 'dock_wall', 'gas_pump', 'air_water', 'price_sign',
+    'silo', 'crane', 'dock_wall', 'gas_pump', 'air_water', 'price_sign', 'hub_sign',
     'parking_pad', 'trailer',
   ]);
   const corners = (cx, cy, w, h, rad) => {
@@ -1073,19 +1073,324 @@ const draftMigrationCheck = await page.evaluate(() => {
   rig.matter.body.setVelocity(rig.truck.body, { x: 0, y: 0 });
   rig.update(performance.now(), 16.67);
   const nearbySerraPump = !!rig.telemetry.nearbyPump;
+  const hasAll5OfficialHubSigns = ['harbor', 'shipyard', 'industrial', 'historic', 'serra'].every((hid) =>
+    rig.world.objects.hubSigns.some((o) => o.params?.hubId === hid),
+  );
   // Limpa draft de teste
   localStorage.removeItem('rigmaster_world_draft');
-  return { serraRoads, hasGasPump, hasGarage, hasDocks, windTurbines, nearbySerraPump };
+  return { serraRoads, hasGasPump, hasGarage, hasDocks, windTurbines, nearbySerraPump, hasAll5OfficialHubSigns };
 });
 check(
-  'Migração automática de rascunho localStorage antigo preserva edições e injeta estradas, hub, posto e eólicas da Serra',
+  'Migração automática de rascunho localStorage antigo preserva edições e injeta estradas, hub, posto, eólicas e 5 sinais de HUB oficiais',
   draftMigrationCheck.serraRoads >= 8 &&
     draftMigrationCheck.hasGasPump &&
     draftMigrationCheck.hasGarage &&
     draftMigrationCheck.hasDocks &&
     draftMigrationCheck.windTurbines === 6 &&
-    draftMigrationCheck.nearbySerraPump,
+    draftMigrationCheck.nearbySerraPump &&
+    draftMigrationCheck.hasAll5OfficialHubSigns,
   JSON.stringify(draftMigrationCheck),
+);
+
+// 16. Fase 1 (v2.15.0): Sinais de HUB editáveis (incluindo Serra) + movimentação ao vivo + criação de novo HUB dinâmico
+const dynamicHubCheck = await page.evaluate(() => {
+  const rig = window.__rig;
+  const signs = rig.world.objects.hubSigns;
+  const officialIds = ['harbor', 'shipyard', 'industrial', 'historic', 'serra'];
+  const all5Present = officialIds.every((id) => signs.some((s) => s.params?.hubId === id));
+  const serraSign = signs.find((s) => s.params?.hubId === 'serra');
+  const serraDocksBefore = rig.garageSystem.getHub('serra').docks.length;
+
+  // 16a. Mover o sinal da Serra atualiza GarageSystem.getHub('serra').locationWorld ao vivo
+  const origX = serraSign.x, origY = serraSign.y;
+  rig.world.objects.moveObject(serraSign.id, origX + 180, origY - 120);
+  rig.garageSystem.syncFromWorld(rig.world.objects);
+  const movedLoc = { ...rig.garageSystem.getHub('serra').locationWorld };
+  const movedSynced = movedLoc.x === origX + 180 && movedLoc.y === origY - 120;
+
+  // Repor posição original da Serra
+  rig.world.objects.moveObject(serraSign.id, origX, origY);
+  rig.garageSystem.syncFromWorld(rig.world.objects);
+
+  // 16b. Criar novo HUB dinâmico ("Vale Norte") + 1 doca próxima
+  const customSign = rig.world.objects.add('hub_sign', 3400, -1800, 68, 68, {
+    params: {
+      hubId: 'custom_vale_norte',
+      name: 'Vale Norte',
+      badge: 'VALE',
+      color: '#a855f7',
+      regionRadius: 1600,
+    },
+  });
+  const customDock = rig.world.objects.add('dock', 3600, -1720, 128, 128);
+  rig.garageSystem.syncFromWorld(rig.world.objects);
+
+  const customHub = rig.garageSystem.hasHub('custom_vale_norte')
+    ? rig.garageSystem.getHub('custom_vale_norte')
+    : null;
+  const hubsCountWithCustom = rig.garageSystem.getHubs().length;
+  const customRepDefined = typeof rig.reputationSystem.getHubReputation('custom_vale_norte') === 'number';
+  const customDocksCount = customHub ? customHub.docks.length : 0;
+
+  // Verifica que o novo HUB aparece no Mapa Estratégico (M)
+  return {
+    all5Present,
+    serraSignFound: !!serraSign,
+    serraDocksBefore,
+    movedSynced,
+    hubsCountWithCustom,
+    customHubName: customHub?.name,
+    customHubIsCustom: customHub?.isCustom,
+    customDocksCount,
+    customRepDefined,
+    customSignId: customSign.id,
+    customDockId: customDock.id,
+  };
+});
+
+// Abrir Mapa Estratégico (M) e confirmar renderização do HUB dinâmico "Vale Norte"
+await page.keyboard.press('m');
+await page.waitForSelector('[data-testid="world-map-modal"]', { timeout: 4000 });
+const mapShowsCustomHub = await page.locator('[data-testid="world-map-modal"]').getByText('Vale Norte').isVisible();
+await page.keyboard.press('Escape');
+await page.waitForTimeout(150);
+
+// Apagar o HUB dinâmico e confirmar remoção limpa mantendo os 5 oficiais
+const cleanupHubCheck = await page.evaluate(({ signId, dockId }) => {
+  const rig = window.__rig;
+  rig.world.objects.remove(signId);
+  rig.world.objects.remove(dockId);
+  rig.garageSystem.syncFromWorld(rig.world.objects);
+  return {
+    stillExists: rig.garageSystem.hasHub('custom_vale_norte'),
+    hubsCountAfterDelete: rig.garageSystem.getHubs().length,
+  };
+}, { signId: dynamicHubCheck.customSignId, dockId: dynamicHubCheck.customDockId });
+
+check(
+  'Fase 1 HUBs dinâmicos: 5 sinais oficiais (incl. Serra), mover sinal sincroniza HUB, criar sinal+doca regista novo HUB no Mapa e apagar limpa corretamente',
+  dynamicHubCheck.all5Present &&
+    dynamicHubCheck.serraSignFound &&
+    dynamicHubCheck.serraDocksBefore >= 3 &&
+    dynamicHubCheck.movedSynced &&
+    dynamicHubCheck.hubsCountWithCustom === 6 &&
+    dynamicHubCheck.customHubName === 'Vale Norte' &&
+    dynamicHubCheck.customHubIsCustom === true &&
+    dynamicHubCheck.customDocksCount === 1 &&
+    dynamicHubCheck.customRepDefined &&
+    mapShowsCustomHub &&
+    !cleanupHubCheck.stillExists &&
+    cleanupHubCheck.hubsCountAfterDelete === 5,
+  JSON.stringify({ ...dynamicHubCheck, mapShowsCustomHub, ...cleanupHubCheck }),
+);
+
+// 21. Fase 2: Editor Simples de Missões — criar missão personalizada num HUB dinâmico via UI do Editor,
+//     validar persistência em World JSON (export/import), spawn seguro do atrelado longe do mastro e conclusão com reputação
+const customHubSetup = await page.evaluate(() => {
+  const rig = window.__rig;
+  rig.cancelActiveMission();
+  rig.setGameMode('career');
+  const sign = rig.world.objects.add('hub_sign', 3400, -1800, 68, 68, {
+    params: {
+      hubId: 'custom_vale_sul',
+      name: 'Vale Sul',
+      badge: 'VSUL',
+      color: '#ec4899',
+      regionRadius: 1500,
+    },
+  });
+  const dock = rig.world.objects.add('dock', 3680, -1720, 128, 128);
+  rig.garageSystem.syncFromWorld(rig.world.objects);
+  rig.toggleEditorMode();
+  return { signId: sign.id, dockId: dock.id, isEditor: rig.isEditorMode };
+});
+
+await page.waitForSelector('[data-testid="btn-editor-missions"]', { timeout: 4000 });
+await page.getByTestId('btn-editor-missions').click();
+await page.waitForSelector('[data-testid="mission-editor-modal"]', { timeout: 4000 });
+
+await page.getByTestId('mission-editor-title').fill('Rota Vale Sul → Porto');
+await page.getByTestId('mission-editor-desc').fill('Carga personalizada criada no Editor de Missões.');
+await page.getByTestId('mission-editor-origin').selectOption('custom_vale_sul');
+await page.getByTestId('mission-editor-target').selectOption('harbor');
+await page.getByTestId('mission-editor-trailer').selectOption('standard');
+await page.getByTestId('btn-save-custom-mission').click();
+await page.waitForSelector('[data-testid="mission-editor-saved-notice"]', { timeout: 4000 });
+
+// Close modal and return to Drive mode
+await page.keyboard.press('Escape');
+await page.waitForTimeout(150);
+
+const missionEditorResult = await page.evaluate(({ signId, dockId }) => {
+  const rig = window.__rig;
+  // Export & import JSON roundtrip verifying customMissions persist cleanly
+  const exported = rig.world.exportJSON();
+  const parsed = JSON.parse(exported);
+  const exportedCount = Array.isArray(parsed.customMissions) ? parsed.customMissions.length : 0;
+
+  // Wipe in-memory custom missions then re-import JSON to verify full roundtrip
+  rig.missionSystem.setCustomMissions([]);
+  const reimportOk = rig.world.importJSON(exported);
+  const customAfterImport = rig.missionSystem.getCustomMissions();
+  const created = customAfterImport.find((m) => m.title === 'Rota Vale Sul → Porto');
+
+  // Exit Editor back to Drive
+  if (rig.isEditorMode) rig.toggleEditorMode();
+
+  // Accept the custom mission in Drive mode and verify safe pickup trailer spawn away from hub_sign mast
+  const repBefore = rig.reputationSystem.getHubReputation('custom_vale_sul');
+  const accepted = created ? rig.acceptMission(created.id) : false;
+  const active = rig.missionSystem.getActiveMission();
+  const pickupLead = rig.missionPickupLead;
+  const hubPos = rig.garageSystem.getHub('custom_vale_sul').locationWorld;
+  const distFromMast = pickupLead
+    ? Math.hypot(pickupLead.body.position.x - hubPos.x, pickupLead.body.position.y - hubPos.y)
+    : -1;
+
+  // Complete the custom mission cleanly and verify reputation is awarded to custom_vale_sul
+  const completion = accepted ? rig.missionSystem.completeActiveMission(1.2, false) : null;
+  const repAfter = rig.reputationSystem.getHubReputation('custom_vale_sul');
+
+  // Clean up test custom mission & test HUB so world returns to pristine official state
+  if (created) rig.missionSystem.deleteCustomMission(created.id);
+  rig.missionSystem.clearLastCompletion();
+  rig.cleanupMissionSpawnedTrailers?.();
+  rig.world.objects.remove(signId);
+  rig.world.objects.remove(dockId);
+  rig.garageSystem.syncFromWorld(rig.world.objects);
+
+  return {
+    exportedCount,
+    reimportOk,
+    customCountAfterImport: customAfterImport.length,
+    createdId: created?.id ?? null,
+    createdIsCustom: created?.isCustom ?? false,
+    accepted,
+    activeOrigin: active?.mission.originHub ?? null,
+    activeTarget: active?.mission.targetHub ?? null,
+    distFromMast: Math.round(distFromMast),
+    completionAwarded: completion?.reputationAwarded ?? 0,
+    repDelta: repAfter - repBefore,
+    remainingCustomAfterDelete: rig.missionSystem.getCustomMissions().length,
+    hubsAfterCleanup: rig.garageSystem.getHubs().length,
+  };
+}, customHubSetup);
+
+check(
+  'Fase 2 Editor de Missões: criar missão via UI do Editor, persistência JSON export/import, spawn seguro longe do mastro e conclusão com reputação no HUB personalizado',
+  customHubSetup.isEditor &&
+    missionEditorResult.exportedCount === 1 &&
+    missionEditorResult.reimportOk &&
+    missionEditorResult.customCountAfterImport === 1 &&
+    missionEditorResult.createdIsCustom &&
+    missionEditorResult.accepted &&
+    missionEditorResult.activeOrigin === 'custom_vale_sul' &&
+    missionEditorResult.activeTarget === 'harbor' &&
+    missionEditorResult.distFromMast >= 100 &&
+    missionEditorResult.completionAwarded > 0 &&
+    missionEditorResult.repDelta === missionEditorResult.completionAwarded &&
+    missionEditorResult.remainingCustomAfterDelete === 0 &&
+    missionEditorResult.hubsAfterCleanup === 5,
+  JSON.stringify(missionEditorResult),
+);
+
+// 22. Isolamento de teclado em campos de texto, Zoom/Pan no Mapa Estratégico e Minimapa de raio local
+const kbBefore = await page.evaluate(() => {
+  const rig = window.__rig;
+  if (!rig.isEditorMode) rig.toggleEditorMode();
+  return {
+    isEditor: rig.isEditorMode,
+    minimapVis: rig.isMinimapVisible(),
+    truckX: Math.round(rig.truck.body.position.x),
+    truckY: Math.round(rig.truck.body.position.y),
+  };
+});
+await page.waitForSelector('[data-testid="btn-editor-missions"]', { timeout: 4000 });
+await page.getByTestId('btn-editor-missions').click();
+await page.waitForSelector('[data-testid="mission-editor-title"]', { timeout: 4000 });
+await page.getByTestId('mission-editor-title').click();
+await page.getByTestId('mission-editor-title').fill('');
+// Type real keystrokes covering EVERY game hotkey (WASD, Space, P, R, C, F, E, T, L, M)
+await page.keyboard.type('wasd prcfetlm teste', { delay: 10 });
+const typedValue = await page.getByTestId('mission-editor-title').inputValue();
+const kbAfter = await page.evaluate(() => {
+  const rig = window.__rig;
+  return {
+    isEditor: rig.isEditorMode,
+    minimapVis: rig.isMinimapVisible(),
+    truckX: Math.round(rig.truck.body.position.x),
+    truckY: Math.round(rig.truck.body.position.y),
+  };
+});
+// Close Mission Editor modal & return to Drive mode
+await page.locator('[data-testid="mission-editor-modal"] button[aria-label="Fechar Editor de Missões"]').click();
+await page.waitForTimeout(150);
+await page.evaluate(() => {
+  if (window.__rig.isEditorMode) window.__rig.toggleEditorMode();
+});
+await page.waitForTimeout(200);
+
+// Strategic World Map Zoom & Center-on-Truck check
+await page.keyboard.press('m');
+await page.waitForSelector('[data-testid="world-map-zoom-controls"]', { timeout: 4000 });
+const zoomInit = await page.getByTestId('world-map-zoom-level').innerText();
+const vbInit = await page.getByTestId('world-map-svg').getAttribute('viewBox');
+await page.getByTestId('btn-world-map-zoom-in').click();
+await page.getByTestId('btn-world-map-zoom-in').click();
+const zoomInText = await page.getByTestId('world-map-zoom-level').innerText();
+const vbZoomIn = await page.getByTestId('world-map-svg').getAttribute('viewBox');
+await page.getByTestId('btn-world-map-center-truck').click();
+const zoomCenterText = await page.getByTestId('world-map-zoom-level').innerText();
+await page.getByTestId('btn-world-map-zoom-reset').click();
+const zoomResetText = await page.getByTestId('world-map-zoom-level').innerText();
+await page.keyboard.press('Escape');
+await page.waitForTimeout(150);
+
+// Bounded local-radius Minimap check
+const minimapLocalCheck = await page.evaluate(() => {
+  const rig = window.__rig;
+  const mm = rig.scene.get('MinimapScene');
+  rig.update(1000, 16);
+  mm?.update?.(1000);
+  const bounds = mm?.getViewBounds?.() ?? null;
+  const tx = rig.truck.body.position.x;
+  const ty = rig.truck.body.position.y;
+  return {
+    spanWorld: bounds?.spanWorld ?? 0,
+    smallerThanFullWorld: !!(bounds && bounds.spanWorld > 2000 && bounds.spanWorld < 10000),
+    centeredOnTruck: !!(bounds && Math.hypot(bounds.centerX - tx, bounds.centerY - ty) < 20),
+  };
+});
+
+const parseVbW = (vb) => Number((vb || '').split(' ')[2] || 0);
+check(
+  'Teclado isolado no Editor de Missões (WASD/Espaço/atalhos), Zoom/Centrar no Mapa Estratégico e Minimapa de raio local (6.4 km)',
+  typedValue === 'wasd prcfetlm teste' &&
+    kbBefore.isEditor &&
+    kbAfter.isEditor &&
+    kbAfter.minimapVis === kbBefore.minimapVis &&
+    kbAfter.truckX === kbBefore.truckX &&
+    kbAfter.truckY === kbBefore.truckY &&
+    zoomInit === '100%' &&
+    parseInt(zoomInText, 10) > 150 &&
+    parseVbW(vbZoomIn) < parseVbW(vbInit) * 0.65 &&
+    parseInt(zoomCenterText, 10) >= 200 &&
+    zoomResetText === '100%' &&
+    minimapLocalCheck.spanWorld === 6400 &&
+    minimapLocalCheck.smallerThanFullWorld &&
+    minimapLocalCheck.centeredOnTruck,
+  JSON.stringify({
+    typedValue,
+    kbBefore,
+    kbAfter,
+    zoomInit,
+    zoomInText,
+    zoomCenterText,
+    zoomResetText,
+    vbInitW: parseVbW(vbInit),
+    vbZoomInW: parseVbW(vbZoomIn),
+    minimapLocalCheck,
+  }),
 );
 
 check('zero erros JS durante todo o teste de progressão', pageErrors.length === 0, pageErrors.join('; '));

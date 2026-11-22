@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { MainScene } from './MainScene';
-import { GarageSystem } from '../systems/GarageSystem';
+import { GarageSystem, parseHexColor } from '../systems/GarageSystem';
 import { RoadNetwork, RoadData, RoadPoint, RoadSurface, RoadSnapResult, RoadSample, BridgeSample } from '../systems/RoadNetwork';
 import { IntersectionSystem, IntersectionNode, TrafficLightSpec } from '../systems/IntersectionSystem';
 import { WorldObject, WObjType, CompoundPart, compoundParts, isCompound, compoundBoundsFromParts } from '../world/WorldObjects';
@@ -159,8 +159,9 @@ export class EditorScene extends Phaser.Scene {
     this.overlappingRoads = [];
     this.lastSnapResult = null;
     this.weldCache = null;
-    // Recria as entidades vivas dos atrelados (editor-placed trailers)
+    // Recria as entidades vivas dos atrelados (editor-placed trailers) e sincroniza HUBs
     this.mainScene.rebuildTrailers(true);
+    this.garageSystem.syncFromWorld(this.mainScene.world.objects);
   }
 
   /** Cancela toda a sessão: restaura o mundo ao estado de entrada no editor. */
@@ -180,6 +181,7 @@ export class EditorScene extends Phaser.Scene {
     this.lastSnapResult = null;
     this.weldCache = null;
     this.mainScene.rebuildTrailers(true);
+    this.garageSystem.syncFromWorld(this.mainScene.world.objects);
     this.mainScene.world.version++;
   }
 
@@ -419,6 +421,7 @@ export class EditorScene extends Phaser.Scene {
       this.prevPinchDist = 0;
       if (this.roadDirtySinceRelease) {
         this.roadDirtySinceRelease = false;
+        this.garageSystem.syncFromWorld(this.mainScene.world.objects);
         this.mainScene.world.version++; // refresh minimap once per drag
       }
     };
@@ -449,23 +452,49 @@ export class EditorScene extends Phaser.Scene {
     else if (this.compoundDrag) this.applyCompoundDrag(wp);
   }
 
+  /** True when focus is inside an HTML text input/textarea (e.g. Hub Sign Inspector). */
+  private isTypingInInput(e?: KeyboardEvent): boolean {
+    const check = (el: EventTarget | Element | null | undefined): boolean => {
+      if (!el || !(el instanceof HTMLElement)) return false;
+      const tag = el.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+    };
+    return check(e?.target) || check(typeof document !== 'undefined' ? document.activeElement : null);
+  }
+
+  private editorCursors: {
+    up: Phaser.Input.Keyboard.Key;
+    down: Phaser.Input.Keyboard.Key;
+    left: Phaser.Input.Keyboard.Key;
+    right: Phaser.Input.Keyboard.Key;
+  } | null = null;
+
   private setupKeyboardPan() {
     if (!this.input.keyboard) return;
 
-    this.keySpace = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
-    this.keyShift = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
+    this.keySpace = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE, false);
+    this.keyShift = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT, false);
+    this.editorCursors = {
+      up: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.UP, false),
+      down: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN, false),
+      left: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT, false),
+      right: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT, false),
+    };
 
     // Instant Drive Test with Tab
     this.input.keyboard.on('keydown-TAB', (e: KeyboardEvent) => {
+      if (this.isTypingInInput(e)) return;
       e.preventDefault();
       if (this.mainScene.isEditorMode) this.mainScene.toggleEditorMode();
     });
 
     // Road tool shortcuts
-    this.input.keyboard.on('keydown-ENTER', () => {
+    this.input.keyboard.on('keydown-ENTER', (e: KeyboardEvent) => {
+      if (this.isTypingInInput(e)) return;
       if (this.editorTool === 'road') this.finishPendingRoad();
     });
-    this.input.keyboard.on('keydown-ESC', () => {
+    this.input.keyboard.on('keydown-ESC', (e: KeyboardEvent) => {
+      if (this.isTypingInInput(e)) return;
       if (this.editorTool === 'road') {
         this.pendingRoad = null;
         this.rightClickPending = null;
@@ -480,19 +509,22 @@ export class EditorScene extends Phaser.Scene {
         this.selectedObject = null;
       }
     });
-    this.input.keyboard.on('keydown-BACKSPACE', () => {
+    this.input.keyboard.on('keydown-BACKSPACE', (e: KeyboardEvent) => {
+      if (this.isTypingInInput(e)) return;
       if (this.editorTool === 'road' && this.pendingRoad) {
         this.pendingRoad.points.pop();
         if (this.pendingRoad.points.length === 0) this.pendingRoad = null;
       }
     });
-    this.input.keyboard.on('keydown-DELETE', () => {
+    this.input.keyboard.on('keydown-DELETE', (e: KeyboardEvent) => {
+      if (this.isTypingInInput(e)) return;
       if (this.editorTool === 'road') this.deleteSelectedRoad();
       else if (this.editorTool === 'object') this.deleteSelectedObject();
       else if (this.editorTool === 'compound' && this.selectedObject) this.deleteSelectedObject();
     });
     // Rotate the selected object with R (+15°) / Shift+R (−15°)
     this.input.keyboard.on('keydown-R', (e: KeyboardEvent) => {
+      if (this.isTypingInInput(e)) return;
       if (this.editorTool === 'object' && this.selectedObject) {
         this.rotateSelectedObject(e.shiftKey ? -15 : 15);
       }
@@ -500,6 +532,7 @@ export class EditorScene extends Phaser.Scene {
 
     // Toggle rotation snap to 45° multiples with Shift+S
     this.input.keyboard.on('keydown-S', (e: KeyboardEvent) => {
+      if (this.isTypingInInput(e)) return;
       if (e.shiftKey && this.editorTool === 'object') {
         this.toggleRotationSnap();
       }
@@ -507,6 +540,7 @@ export class EditorScene extends Phaser.Scene {
 
     // Undo last object operation with Ctrl+Z
     this.input.keyboard.on('keydown-Z', (e: KeyboardEvent) => {
+      if (this.isTypingInInput(e)) return;
       if ((e.ctrlKey || e.metaKey) && !e.repeat && this.canUndo()) {
         e.preventDefault();
         const now = performance.now();
@@ -520,6 +554,7 @@ export class EditorScene extends Phaser.Scene {
     // Guards: ignore auto-repeat and debounce — Phaser 4 can deliver the same
     // keydown twice, which would duplicate/paste multiple objects at once.
     this.input.keyboard.on('keydown-D', (e: KeyboardEvent) => {
+      if (this.isTypingInInput(e)) return;
       if (!(e.ctrlKey || e.metaKey) || e.repeat || this.editorTool !== 'object') return;
       e.preventDefault();
       const now = performance.now();
@@ -528,12 +563,14 @@ export class EditorScene extends Phaser.Scene {
       this.duplicateSelectedObject();
     });
     this.input.keyboard.on('keydown-C', (e: KeyboardEvent) => {
+      if (this.isTypingInInput(e)) return;
       if ((e.ctrlKey || e.metaKey) && !e.repeat && this.editorTool === 'object' && this.selectedObject) {
         e.preventDefault();
         this.copySelectedObject();
       }
     });
     this.input.keyboard.on('keydown-V', (e: KeyboardEvent) => {
+      if (this.isTypingInInput(e)) return;
       if (!(e.ctrlKey || e.metaKey) || e.repeat || !this.clipboard) return;
       e.preventDefault();
       const now = performance.now();
@@ -1403,6 +1440,7 @@ export class EditorScene extends Phaser.Scene {
       d.grabX += ddx;
       d.grabY += ddy;
       if (o.type === 'trailer') TrailerManager.getInstance(this.mainScene).syncForObject(o);
+      if (o.type === 'hub_sign') this.garageSystem.syncFromWorld(this.mainScene.world.objects);
       this.roadDirtySinceRelease = true; // minimap refresh on release
     }
   }
@@ -1426,13 +1464,17 @@ export class EditorScene extends Phaser.Scene {
   public deleteSelectedObject() {
     if (!this.selectedObject) return;
     this.pushUndo();
+    const deletedType = this.selectedObject.type;
     // Editor-placed trailer: kill the live entity backing the data object
-    if (this.selectedObject.type === 'trailer') {
+    if (deletedType === 'trailer') {
       TrailerManager.getInstance(this.mainScene).removeForObject(this.selectedObject.id);
     }
     this.mainScene.world.objects.remove(this.selectedObject.id);
     this.selectedObject = null;
     this.objectDrag = null;
+    if (deletedType === 'hub_sign' || deletedType === 'dock' || deletedType === 'building') {
+      this.garageSystem.syncFromWorld(this.mainScene.world.objects);
+    }
     this.mainScene.world.version++;
   }
 
@@ -1455,6 +1497,33 @@ export class EditorScene extends Phaser.Scene {
     return !!this.clipboard;
   }
 
+  /** Generates a unique HubId for newly created, duplicated, or pasted `hub_sign` objects. */
+  private generateUniqueHubId(base: string = 'custom_hub'): string {
+    const used = new Set<string>(this.garageSystem.getHubs().map((h) => h.id));
+    for (const s of this.mainScene.world.objects.hubSigns) {
+      if (typeof s.params?.hubId === 'string') used.add(s.params.hubId);
+    }
+    const cleanBase = base.replace(/[^a-z0-9_]/gi, '_').replace(/_+/g, '_').replace(/^_|_$/g, '').toLowerCase() || 'custom_hub';
+    let idx = 1;
+    while (used.has(`${cleanBase}_${idx}`)) idx++;
+    return `${cleanBase}_${idx}`;
+  }
+
+  /** Builds fresh params for a cloned/pasted hub_sign so it creates a distinct dynamic HUB. */
+  private prepareClonedParams(type: WObjType, rawParams?: Record<string, any>): Record<string, any> | undefined {
+    if (!rawParams) return undefined;
+    const cloned = { ...rawParams };
+    if (type === 'hub_sign') {
+      const nextId = this.generateUniqueHubId('custom_hub');
+      const numMatch = nextId.match(/_(\d+)$/);
+      const suffix = numMatch ? numMatch[1] : '';
+      cloned.hubId = nextId;
+      cloned.name = cloned.name ? `${cloned.name} ${suffix}`.trim() : `Novo HUB ${suffix}`.trim();
+      cloned.badge = `HUB${suffix}`.slice(0, 8);
+    }
+    return cloned;
+  }
+
   /** Clone the selected object right next to it and select the clone. */
   public duplicateSelectedObject() {
     const src = this.selectedObject;
@@ -1465,9 +1534,12 @@ export class EditorScene extends Phaser.Scene {
       src.x + 40,
       src.y + Math.max(40, src.h / 2 + 24),
       src.w, src.h,
-      { angle: src.angle, variant: src.variant, params: src.params ? { ...src.params } : undefined },
+      { angle: src.angle, variant: src.variant, params: this.prepareClonedParams(src.type, src.params) },
     );
     if (o.type === 'trailer') TrailerManager.getInstance(this.mainScene).spawnObjectTrailer(o);
+    if (o.type === 'hub_sign' || o.type === 'dock' || o.type === 'building') {
+      this.garageSystem.syncFromWorld(this.mainScene.world.objects);
+    }
     this.mainScene.world.version++;
     this.selectedObject = o;
     this.objectDrag = null;
@@ -1495,9 +1567,12 @@ export class EditorScene extends Phaser.Scene {
       : { x: cb.cx + 40, y: cb.cy + 40 };
     const o = this.mainScene.world.objects.add(
       cb.type, Math.round(at.x), Math.round(at.y), cb.w, cb.h,
-      { angle: cb.angle, variant: cb.variant, params: cb.params ? { ...cb.params } : undefined },
+      { angle: cb.angle, variant: cb.variant, params: this.prepareClonedParams(cb.type, cb.params) },
     );
     if (o.type === 'trailer') TrailerManager.getInstance(this.mainScene).spawnObjectTrailer(o);
+    if (o.type === 'hub_sign' || o.type === 'dock' || o.type === 'building') {
+      this.garageSystem.syncFromWorld(this.mainScene.world.objects);
+    }
     this.mainScene.world.version++;
     this.selectedObject = o;
     this.objectDrag = null;
@@ -1515,7 +1590,7 @@ export class EditorScene extends Phaser.Scene {
   /** Tipos que NUNCA podem ser capturados como partes de um composto. */
   private canCapture(o: WorldObject): boolean {
     if (o.temp) return false;
-    if (o.type === 'compound' || o.type === 'trailer' || o.type === 'exam_dock') return false;
+    if (o.type === 'compound' || o.type === 'trailer' || o.type === 'exam_dock' || o.type === 'hub_sign') return false;
     return true;
   }
 
@@ -1682,8 +1757,62 @@ export class EditorScene extends Phaser.Scene {
     this.roadDirtySinceRelease = true;
   }
 
-  public getObjectUIState(): { hasSelection: boolean; id: string; type: string; variant: string; angleDeg: number; resizable: boolean; trailer: string; canPaste: boolean; rotationSnap: boolean; canUndo: boolean; isCompound: boolean; compoundPartCount: number } {
+  public getObjectUIState(): {
+    hasSelection: boolean;
+    id: string;
+    type: string;
+    variant: string;
+    angleDeg: number;
+    resizable: boolean;
+    trailer: string;
+    canPaste: boolean;
+    rotationSnap: boolean;
+    canUndo: boolean;
+    isCompound: boolean;
+    compoundPartCount: number;
+    hubSign: {
+      hubId: string;
+      name: string;
+      badge: string;
+      color: string;
+      regionRadius: number;
+      isCustom: boolean;
+      docks: number;
+      parkingPads: number;
+      garages: number;
+    } | null;
+  } {
     const o = this.selectedObject;
+    let hubSign: {
+      hubId: string;
+      name: string;
+      badge: string;
+      color: string;
+      regionRadius: number;
+      isCustom: boolean;
+      docks: number;
+      parkingPads: number;
+      garages: number;
+    } | null = null;
+    if (o && o.type === 'hub_sign') {
+      const hubId =
+        typeof o.params?.hubId === 'string' && o.params.hubId.trim().length > 0
+          ? o.params.hubId.trim()
+          : o.id;
+      const hub = this.garageSystem.hasHub(hubId) ? this.garageSystem.getHub(hubId) : null;
+      const stats = this.garageSystem.getHubStats(hubId, this.mainScene.world.objects);
+      hubSign = {
+        hubId,
+        name: String(o.params?.name ?? hub?.name ?? 'Novo HUB'),
+        badge: String(o.params?.badge ?? hub?.badge ?? 'HUB'),
+        color: String(o.params?.color ?? hub?.color ?? '#38bdf8'),
+        regionRadius: Math.round(Number(o.params?.regionRadius ?? hub?.regionRadius ?? 2200)),
+        isCustom: hub ? Boolean(hub.isCustom) : true,
+        docks: stats.docks,
+        parkingPads: stats.parkingPads,
+        garages: stats.garages,
+      };
+    }
     return {
       hasSelection: !!o,
       id: o ? o.id : '',
@@ -1697,6 +1826,7 @@ export class EditorScene extends Phaser.Scene {
       canUndo: this.canUndo(),
       isCompound: o ? isCompound(o) : false,
       compoundPartCount: o && isCompound(o) ? compoundParts(o).length : 0,
+      hubSign,
     };
   }
 
@@ -1781,6 +1911,26 @@ export class EditorScene extends Phaser.Scene {
     this.mainScene.world.version++;
   }
 
+  /** Updates editable metadata of a selected `hub_sign` object and syncs GarageSystem immediately. */
+  public updateHubSignParams(
+    id: string,
+    patch: Partial<{ name: string; badge: string; color: string; regionRadius: number }>,
+  ) {
+    const o = this.mainScene.world.objects.get(id);
+    if (!o || o.type !== 'hub_sign') return;
+    const next = { ...(o.params || {}) };
+    if (patch.name !== undefined) next.name = patch.name.slice(0, 32);
+    if (patch.badge !== undefined) next.badge = patch.badge.toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 8);
+    if (patch.color !== undefined && /^#[0-9a-fA-F]{6}$/.test(patch.color)) next.color = patch.color;
+    if (patch.regionRadius !== undefined && Number.isFinite(patch.regionRadius)) {
+      next.regionRadius = Phaser.Math.Clamp(Math.round(patch.regionRadius), 600, 6000);
+    }
+    o.params = next;
+    this.garageSystem.syncFromWorld(this.mainScene.world.objects);
+    this.mainScene.world.objects.version++;
+    this.mainScene.world.version++;
+  }
+
   // ======================================================================
   // SPAWN TOOL + ADD-OBJECT TOOL
   // ======================================================================
@@ -1812,10 +1962,29 @@ export class EditorScene extends Phaser.Scene {
       this.setTool('object');
       return;
     }
+    let params = spec.params ? { ...spec.params } : undefined;
+    if (spec.type === 'hub_sign') {
+      const nextId = this.generateUniqueHubId('custom_hub');
+      const numMatch = nextId.match(/_(\d+)$/);
+      const suffix = numMatch ? numMatch[1] : '1';
+      params = {
+        hubId: nextId,
+        name: `Novo HUB ${suffix}`,
+        badge: `HUB${suffix}`.slice(0, 8),
+        color: '#38bdf8',
+        regionRadius: 2200,
+        ...(spec.params || {}),
+      };
+      // Ensure a freshly placed catalog sign always gets the newly generated unique hubId
+      params.hubId = nextId;
+    }
     const o = this.mainScene.world.objects.add(spec.type, Math.round(x), Math.round(y), spec.w, spec.h, {
       variant: spec.variant,
-      params: spec.params,
+      params,
     });
+    if (o.type === 'hub_sign' || o.type === 'dock' || o.type === 'building') {
+      this.garageSystem.syncFromWorld(this.mainScene.world.objects);
+    }
     this.mainScene.world.version++;
     this.selectedObject = o;
     this.setTool('object'); // immediate editing — App polls editorTool to sync the dock
@@ -1843,6 +2012,15 @@ export class EditorScene extends Phaser.Scene {
     // Selected object outline + editing handles
     if (this.selectedObject && this.editorTool === 'object') {
       const o = this.selectedObject;
+      // HUB coverage radius preview when a hub_sign is selected
+      if (o.type === 'hub_sign') {
+        const radius = Math.max(400, Number(o.params?.regionRadius) || 2200);
+        const col = parseHexColor(o.params?.color, 0x38bdf8);
+        g.fillStyle(col, 0.045);
+        g.fillCircle(o.x, o.y, radius);
+        g.lineStyle(2.2 / z, col, 0.55);
+        g.strokeCircle(o.x, o.y, radius);
+      }
       this.rotatedRectPath(g, o, 3 / z);
       g.lineStyle(2.5 / z, 0xfacc15, 0.95);
       g.strokePath();
@@ -2195,14 +2373,14 @@ export class EditorScene extends Phaser.Scene {
   // ======================================================================
 
   public update(_time: number, delta: number) {
-    // Smooth camera panning with keyboard arrows / WASD when in editor
-    const cursors = this.input.keyboard?.createCursorKeys();
-    const panSpeed = (750 * (delta / 1000)) / this.cameras.main.zoom;
-
-    if (cursors?.left.isDown) this.cameras.main.scrollX -= panSpeed;
-    if (cursors?.right.isDown) this.cameras.main.scrollX += panSpeed;
-    if (cursors?.up.isDown) this.cameras.main.scrollY -= panSpeed;
-    if (cursors?.down.isDown) this.cameras.main.scrollY += panSpeed;
+    // Smooth camera panning with keyboard arrows when in editor (never while typing in HTML inputs)
+    if (!this.isTypingInInput() && this.editorCursors) {
+      const panSpeed = (750 * (delta / 1000)) / this.cameras.main.zoom;
+      if (this.editorCursors.left.isDown) this.cameras.main.scrollX -= panSpeed;
+      if (this.editorCursors.right.isDown) this.cameras.main.scrollX += panSpeed;
+      if (this.editorCursors.up.isDown) this.cameras.main.scrollY -= panSpeed;
+      if (this.editorCursors.down.isDown) this.cameras.main.scrollY += panSpeed;
+    }
 
     // Keep the MainScene camera perfectly in sync with the editor camera
     const mainCam = this.mainScene.cameras.main;

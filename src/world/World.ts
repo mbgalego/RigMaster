@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 import { WorldTerrain } from './WorldTerrain';
 import { WorldObjects } from './WorldObjects';
 import { RoadNetwork, RoadData } from '../systems/RoadNetwork';
+import { GarageSystem } from '../systems/GarageSystem';
+import { MissionSystem } from '../systems/MissionSystem';
 // The authored world, versioned as data (edited in-game, exported, committed).
 import worldData from './rigworld.json';
 
@@ -31,7 +33,7 @@ export class World {
 
   // --- Draft autosave (localStorage) — protege as edições do editor ---
   private static readonly DRAFT_KEY = 'rigmaster_world_draft';
-  private static readonly OFFICIAL_VERSION = 6;
+  private static readonly OFFICIAL_VERSION = 7;
   private static readonly DRAFT_DEBOUNCE_MS = 2000;
   private draftTimer = 0;
   private lastSavedVersion = -1;
@@ -67,6 +69,8 @@ export class World {
   public seed() {
     this.seedRoads();
     this.objects.seedWorld(this.terrain);
+    GarageSystem.getInstance().syncFromWorld(this.objects);
+    MissionSystem.getInstance().setCustomMissions([]);
     this.version++;
   }
 
@@ -225,11 +229,21 @@ export class World {
           }
         }
         if ((!hasNwObjects || draftVer < World.OFFICIAL_VERSION) && Array.isArray(official.objects)) {
+          const existingHubIds = new Set(
+            objects
+              .filter((o: any) => o?.type === 'hub_sign' && typeof o?.params?.hubId === 'string')
+              .map((o: any) => o.params.hubId),
+          );
           for (const o of official.objects) {
             const inNw = Number(o?.x) < -100 || Number(o?.y) < -100;
-            if (inNw && !existingObjIds.has(o.id)) {
+            const isMissingOfficialHubSign =
+              o?.type === 'hub_sign' &&
+              typeof o?.params?.hubId === 'string' &&
+              !existingHubIds.has(o.params.hubId);
+            if ((inNw || isMissingOfficialHubSign) && !existingObjIds.has(o.id)) {
               objects.push(o);
               existingObjIds.add(o.id);
+              if (isMissingOfficialHubSign) existingHubIds.add(o.params.hubId);
               migrated = true;
             }
           }
@@ -265,7 +279,8 @@ export class World {
   // ======================================================================
 
   public exportJSON(): string {
-    const data = {
+    const customMissions = MissionSystem.getInstance().getCustomMissions();
+    const data: Record<string, any> = {
       version: World.OFFICIAL_VERSION,
       name: this.name,
       worldMinX: World.WORLD_MIN_X,
@@ -275,6 +290,7 @@ export class World {
       spawn: this.spawnPoint,
       roads: this.roads.toJSON(),
       objects: this.objects.toJSON(),
+      customMissions,
     };
     return JSON.stringify(data, null, 2);
   }
@@ -297,6 +313,10 @@ export class World {
       if (typeof d.name === 'string') {
         this.name = /^ilha\s+atl[aâ]nt/i.test(d.name.trim()) ? 'RigWorld' : d.name;
       }
+      GarageSystem.getInstance().syncFromWorld(this.objects);
+      MissionSystem.getInstance().setCustomMissions(
+        Array.isArray(d.customMissions) ? d.customMissions : [],
+      );
       this.version++;
       return true;
     } catch (e) {

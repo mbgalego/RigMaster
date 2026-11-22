@@ -156,9 +156,8 @@ export class MainScene extends Phaser.Scene {
   private static readonly REPAIR_MAX_SPEED_KMH = 3;
   private static readonly TRUCK_SWAP_RADIUS = 160;
   /** OBB/SAT-verified, bitrem-safe pickup bays per hub for guaranteed mission trailer spawning. */
-  private static readonly HUB_MISSION_PICKUP_BAYS: Record<
-    HubId,
-    Array<{ x: number; y: number; angle: number }>
+  private static readonly HUB_MISSION_PICKUP_BAYS: Partial<
+    Record<HubId, Array<{ x: number; y: number; angle: number }>>
   > = {
     harbor: [
       { x: 2560, y: 2050, angle: Math.PI },
@@ -230,18 +229,9 @@ export class MainScene extends Phaser.Scene {
   // Road-snapped world position of the current exam dock (the real pass target)
   private examDockWorld: LicenseExam['targetDock'] | null = null;
 
-  // Regional hub neon signs: each hub dominated at 100% raises its own glowing
-  // sign on the map (the visible reward promised in the Hubs modal).
+  // Dynamic HUB neon sign overlays + labels (driven by editable `hub_sign` world objects)
   private hubSignsGraphics: Phaser.GameObjects.Graphics | null = null;
-  private hubSignTexts: Phaser.GameObjects.Text[] = [];
-  // Static sign placements matching initDefaultGrid()'s hub biomes (tile coords)
-  private static readonly HUB_SIGN_TILES: Array<{ id: string; label: string; c: number; r: number }> = [
-    { id: 'harbor', label: 'PORTO', c: 10, r: 4 },
-    { id: 'shipyard', label: 'ESTALEIRO', c: 90, r: 6 },
-    { id: 'industrial', label: 'INDUSTRIAL', c: 94, r: 68 },
-    { id: 'historic', label: 'HISTÓRICO', c: 8, r: 72 },
-    { id: 'serra', label: 'SERRA', c: -18, r: -4 },
-  ];
+  private hubSignTexts: Map<string, Phaser.GameObjects.Text> = new Map();
 
   // Minimap (rendered in dedicated MinimapScene with locked zoom = 1)
   private minimapVisible: boolean = true;
@@ -614,39 +604,55 @@ export class MainScene extends Phaser.Scene {
     // 4b. Minimap HUD (dedicated overlay scene so camera zoom never scales it)
     this.createMinimap();
 
-    // 5. Keyboard Hotkeys
+    // 5. Keyboard Hotkeys (always ignored while typing in HTML inputs / selects / textareas)
     if (this.input.keyboard) {
       // Toggle Editor Mode with Tab (EditorScene handles exiting when active)
       this.input.keyboard.on('keydown-TAB', (event: KeyboardEvent) => {
+        if (this.isTypingInInput(event)) return;
         event.preventDefault();
         if (!this.isEditorMode) this.toggleEditorMode();
       });
 
       // Toggle Debug Wireframe with P
-      this.input.keyboard.on('keydown-P', () => {
+      this.input.keyboard.on('keydown-P', (event: KeyboardEvent) => {
+        if (this.isTypingInInput(event)) return;
         this.togglePhysicsDebug();
       });
 
       // Reset Truck Spawn with R
-      this.input.keyboard.on('keydown-R', () => {
+      this.input.keyboard.on('keydown-R', (event: KeyboardEvent) => {
+        if (this.isTypingInInput(event) || this.isEditorMode) return;
         this.resetVehicleToSpawn();
       });
 
       // Decouple trailers with C (coupling itself is automatic)
-      this.input.keyboard.on('keydown-C', () => this.decoupleAction());
+      this.input.keyboard.on('keydown-C', (event: KeyboardEvent) => {
+        if (this.isTypingInInput(event) || this.isEditorMode) return;
+        this.decoupleAction();
+      });
 
       // Refuel at a gas pump with F
-      this.input.keyboard.on('keydown-F', () => this.tryRefuel());
+      this.input.keyboard.on('keydown-F', (event: KeyboardEvent) => {
+        if (this.isTypingInInput(event) || this.isEditorMode) return;
+        this.tryRefuel();
+      });
 
       // Repair at a garage service bay with E
-      this.input.keyboard.on('keydown-E', () => this.tryRepair());
+      this.input.keyboard.on('keydown-E', (event: KeyboardEvent) => {
+        if (this.isTypingInInput(event) || this.isEditorMode) return;
+        this.tryRepair();
+      });
 
       // Swap into nearby parked fleet truck with T
-      this.input.keyboard.on('keydown-T', () => this.trySwapTruck());
+      this.input.keyboard.on('keydown-T', (event: KeyboardEvent) => {
+        if (this.isTypingInInput(event) || this.isEditorMode) return;
+        this.trySwapTruck();
+      });
 
       // Cycle headlights (Off -> Low -> High -> Off) with L
-      this.input.keyboard.on('keydown-L', () => {
-        if (!this.isEditorMode && this.truck) {
+      this.input.keyboard.on('keydown-L', (event: KeyboardEvent) => {
+        if (this.isTypingInInput(event) || this.isEditorMode) return;
+        if (this.truck) {
           this.truck.cycleHeadlights();
         }
       });
@@ -664,61 +670,99 @@ export class MainScene extends Phaser.Scene {
   }
 
   /**
-   * Neon hub signs: each regional hub dominated at 100% raises its own glowing
-   * sign near its biome on the procedural map. Drawn every frame (pulsing halo);
-   * non-dominant hubs simply have no sign.
+   * Renders the elevated neon signboard & floating name for every editable `hub_sign`
+   * object in the world. Non-dominant hubs show a crisp, always-visible architectural
+   * totem; dominant hubs (100% progress) light up with a pulsing neon halo & glow.
    */
   private drawHubSigns(time: number) {
     if (!this.hubSignsGraphics) {
       this.hubSignsGraphics = this.add.graphics().setDepth(13);
-      this.hubSignTexts = MainScene.HUB_SIGN_TILES.map((s) =>
-        this.add.text(0, 0, s.label, {
-          fontFamily: 'monospace',
-          fontSize: '13px',
-          color: '#ffffff',
-          stroke: '#000000',
-          strokeThickness: 3,
-        }).setOrigin(0.5).setDepth(13).setVisible(false)
-      );
     }
 
-    const ts = 128; // world-tile legacy scale for the authored sign spots
     const g = this.hubSignsGraphics;
     g.clear();
 
+    const signs = this.world.objects.hubSigns;
+    const activeIds = new Set<string>();
     const pulse = 0.5 + 0.5 * Math.sin(time / 320);
-    for (let i = 0; i < MainScene.HUB_SIGN_TILES.length; i++) {
-      const spot = MainScene.HUB_SIGN_TILES[i];
-      const hub = this.garageSystem.getHub(spot.id as any);
+
+    for (const sign of signs) {
+      activeIds.add(sign.id);
+      const hubId =
+        typeof sign.params?.hubId === 'string' && sign.params.hubId.trim().length > 0
+          ? sign.params.hubId.trim()
+          : sign.id;
+      const hub = this.garageSystem.hasHub(hubId) ? this.garageSystem.getHub(hubId) : null;
       const dominant = !!hub && hub.isDominant;
-      const text = this.hubSignTexts[i];
-      text.setVisible(dominant);
+      const rawColor = hub?.color ?? (typeof sign.params?.color === 'string' ? sign.params.color : '#38bdf8');
+      const col = hub?.neonColorHex ?? parseInt(rawColor.replace('#', '') || '38bdf8', 16);
+      const label = (hub?.name ?? String(sign.params?.name || 'NOVO HUB')).toUpperCase();
+      const badge = (hub?.badge ?? String(sign.params?.badge || 'HUB')).toUpperCase().slice(0, 8);
 
-      if (!dominant) continue;
-      const x = spot.c * ts + ts / 2;
-      const y = spot.r * ts + ts / 2;
-      const col = hub!.neonColorHex;
+      const x = sign.x;
+      const y = sign.y;
 
-      // Pulsing ground halo
-      g.fillStyle(col, 0.08 + 0.06 * pulse);
-      g.fillCircle(x, y + 18, 46 + 6 * pulse);
-      // Pole
+      // Ground halo (vibrant pulsing when dominant, subtle ring otherwise)
+      if (dominant) {
+        g.fillStyle(col, 0.1 + 0.07 * pulse);
+        g.fillCircle(x, y + 12, 48 + 7 * pulse);
+      } else {
+        g.fillStyle(col, 0.055);
+        g.fillCircle(x, y + 12, 34);
+      }
+
+      // Steel mast
       g.fillStyle(0x0f172a, 1);
-      g.fillRect(x - 3, y - 12, 6, 52);
-      // Panel
-      g.fillStyle(0x020617, 0.92);
-      g.fillRoundedRect(x - 34, y - 66, 68, 54, 8);
-      g.lineStyle(2, col, 0.85 + 0.15 * pulse);
-      g.strokeRoundedRect(x - 34, y - 66, 68, 54, 8);
-      // Neon glyph bars
-      g.fillStyle(col, 0.7 + 0.3 * pulse);
-      g.fillRect(x - 18, y - 52, 36, 4);
-      g.fillRect(x - 18, y - 42, 24, 4);
-      g.fillRect(x - 18, y - 32, 12, 4);
+      g.fillRect(x - 3, y - 16, 6, 36);
+      g.fillStyle(0x475569, 0.85);
+      g.fillRect(x - 1, y - 14, 2, 32);
 
-      text.setPosition(x, y - 94);
+      // Signboard panel
+      g.fillStyle(0x020617, 0.93);
+      g.fillRoundedRect(x - 34, y - 66, 68, 52, 8);
+      g.lineStyle(dominant ? 2.4 : 1.8, col, dominant ? 0.85 + 0.15 * pulse : 0.72);
+      g.strokeRoundedRect(x - 34, y - 66, 68, 52, 8);
+
+      // Header color strip + glyph bars
+      const barAlpha = dominant ? 0.75 + 0.25 * pulse : 0.62;
+      g.fillStyle(col, barAlpha);
+      g.fillRect(x - 24, y - 56, 48, 5);
+      g.fillStyle(col, dominant ? 0.7 + 0.3 * pulse : 0.45);
+      g.fillRect(x - 20, y - 45, 34, 4);
+      g.fillRect(x - 20, y - 36, 22, 4);
+      g.fillRect(x - 20, y - 27, 14, 4);
+
+      // Status LED dot on top-right of panel
+      g.fillStyle(dominant ? 0x4ade80 : col, dominant ? 0.85 + 0.15 * pulse : 0.7);
+      g.fillCircle(x + 23, y - 31, dominant ? 3.5 : 2.5);
+
+      // Dynamic text label above signboard
+      let text = this.hubSignTexts.get(sign.id);
+      if (!text) {
+        text = this.add.text(x, y - 82, '', {
+          fontFamily: 'monospace',
+          fontSize: '12px',
+          fontStyle: 'bold',
+          color: '#ffffff',
+          stroke: '#020617',
+          strokeThickness: 4,
+        }).setOrigin(0.5).setDepth(13);
+        this.hubSignTexts.set(sign.id, text);
+      }
+      const displayText = badge ? `[${badge}] ${label}` : label;
+      if (text.text !== displayText) text.setText(displayText);
+      text.setPosition(x, y - 82);
       text.setColor('#' + col.toString(16).padStart(6, '0'));
-      text.setAlpha(0.75 + 0.25 * pulse);
+      text.setAlpha(dominant ? 0.85 + 0.15 * pulse : 0.9);
+      text.setVisible(true);
+    }
+
+    // Destroy text labels belonging to deleted hub_sign objects
+    for (const [id, txt] of this.hubSignTexts.entries()) {
+      if (!activeIds.has(id)) {
+        txt.destroy();
+        this.hubSignTexts.delete(id);
+      }
     }
   }
 
@@ -1595,7 +1639,9 @@ export class MainScene extends Phaser.Scene {
     this.cleanupMissionSpawnedTrailers();
 
     const mgr = TrailerManager.getInstance(this);
-    const originPos = this.garageSystem.getHub(mission.originHub).locationWorld;
+    const originHubData = this.garageSystem.getHub(mission.originHub);
+    const originPos = originHubData.locationWorld;
+    const hubSearchRadius = Math.max(1850, originHubData.regionRadius ?? 1850);
     const isBitrem = isBitremLeadType(mission.trailerType);
     const expectedPupType: TrailerType | null =
       mission.trailerType === 'bitrem_tanker_lead'
@@ -1614,7 +1660,7 @@ export class MainScene extends Phaser.Scene {
       if (tr.type !== mission.trailerType || tr.layer !== 0) continue;
       if (tr.trailerHealth < 99.5 || tr.cargoHealth < 99.5) continue;
       const dHub = Phaser.Math.Distance.Between(originPos.x, originPos.y, tr.body.position.x, tr.body.position.y);
-      if (dHub > 1600) continue;
+      if (dHub > hubSearchRadius) continue;
 
       let matchedPup: Trailer | null = null;
       if (isBitrem && expectedPupType) {
@@ -1649,7 +1695,8 @@ export class MainScene extends Phaser.Scene {
     }
 
     // 2. Prefer a FREE universal parking_pad belonging to the origin hub (aligned cleanly
-    //    with the bay), falling back to HUB_MISSION_PICKUP_BAYS only if all pads are occupied.
+    //    with the bay), falling back to HUB_MISSION_PICKUP_BAYS or safe offset spots around
+    //    custom HUBs (never directly on top of the hub_sign mast collider).
     const neededBayLen =
       isBitrem ? 340 :
       mission.trailerType === 'long_cargo' ? 320 :
@@ -1662,16 +1709,30 @@ export class MainScene extends Phaser.Scene {
         dist: Phaser.Math.Distance.Between(originPos.x, originPos.y, pad.x, pad.y),
         fits: pad.h >= neededBayLen,
       }))
-      .filter((entry) => entry.dist <= 1850)
+      .filter((entry) => entry.dist <= hubSearchRadius)
       .sort((a, b) => {
         if (a.fits !== b.fits) return a.fits ? -1 : 1;
         return a.dist - b.dist;
       })
       .map((entry) => ({ x: entry.pad.x, y: entry.pad.y, angle: entry.pad.angle }));
 
-    const fallbackBays = MainScene.HUB_MISSION_PICKUP_BAYS[mission.originHub] ?? [
-      { x: originPos.x, y: originPos.y, angle: Math.PI },
+    const customFallbackBays: Array<{ x: number; y: number; angle: number }> = [
+      { x: originPos.x + 140, y: originPos.y, angle: Math.PI },
+      { x: originPos.x - 140, y: originPos.y, angle: 0 },
+      { x: originPos.x, y: originPos.y + 160, angle: Math.PI / 2 },
+      { x: originPos.x, y: originPos.y - 160, angle: -Math.PI / 2 },
     ];
+    if (originHubData.docks.length > 0) {
+      const firstDock = originHubData.docks[0];
+      const dockAngleRad = (firstDock.requiredAngleDeg * Math.PI) / 180;
+      customFallbackBays.unshift({
+        x: firstDock.x + Math.cos(dockAngleRad) * 140,
+        y: firstDock.y + Math.sin(dockAngleRad) * 140,
+        angle: dockAngleRad,
+      });
+    }
+
+    const fallbackBays = MainScene.HUB_MISSION_PICKUP_BAYS[mission.originHub] ?? customFallbackBays;
     const candidateBays = [...hubPads, ...fallbackBays];
 
     const isBayClear = (bx: number, by: number, angle: number): boolean => {
@@ -2458,14 +2519,18 @@ export class MainScene extends Phaser.Scene {
       // 4. Seamless additive radial light pools across 100% of the viewport (zero pop-in at any zoom)
       const hubGlowSpots: HubGlowSpot[] = [];
       if (lampFactor > 0.03) {
-        const ts = 128;
-        for (const spot of MainScene.HUB_SIGN_TILES) {
-          const hub = this.garageSystem.getHub(spot.id as any);
-          if (!hub || !hub.isDominant) continue;
+        for (const sign of this.world.objects.hubSigns) {
+          const hubId =
+            typeof sign.params?.hubId === 'string' && sign.params.hubId.trim().length > 0
+              ? sign.params.hubId.trim()
+              : sign.id;
+          const hub = this.garageSystem.hasHub(hubId) ? this.garageSystem.getHub(hubId) : null;
+          const rawColor = hub?.color ?? (typeof sign.params?.color === 'string' ? sign.params.color : '#38bdf8');
+          const color = hub?.neonColorHex ?? parseInt(rawColor.replace('#', '') || '38bdf8', 16);
           hubGlowSpots.push({
-            x: spot.c * ts + ts / 2,
-            y: spot.r * ts + ts / 2,
-            color: hub.neonColorHex,
+            x: sign.x,
+            y: sign.y,
+            color,
           });
         }
       }
@@ -3958,10 +4023,21 @@ export class MainScene extends Phaser.Scene {
 
     // Toggle minimap with M only in Editor mode (in Drive mode, M opens the Strategic World Map)
     if (this.input.keyboard) {
-      this.input.keyboard.on('keydown-M', () => {
+      this.input.keyboard.on('keydown-M', (event: KeyboardEvent) => {
+        if (this.isTypingInInput(event)) return;
         if (this.isEditorMode) this.toggleMinimap();
       });
     }
+  }
+
+  /** True when focus is inside an HTML text input, textarea, select, or contentEditable field. */
+  private isTypingInInput(e?: KeyboardEvent): boolean {
+    const check = (el: EventTarget | Element | null | undefined): boolean => {
+      if (!el || !(el instanceof HTMLElement)) return false;
+      const tag = el.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+    };
+    return check(e?.target) || check(typeof document !== 'undefined' ? document.activeElement : null);
   }
 
   public toggleMinimap() {

@@ -495,12 +495,23 @@ export class Truck {
 
   private setupInput() {
     if (this.scene.input && this.scene.input.keyboard) {
-      this.cursors = this.scene.input.keyboard.createCursorKeys();
-      this.keyW = this.scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W);
-      this.keyA = this.scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A);
-      this.keyS = this.scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
-      this.keyD = this.scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D);
-      this.keySpace = this.scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+      const kb = this.scene.input.keyboard;
+      // enableCapture = false so Phaser never calls preventDefault() on W/A/S/D/Space/Arrows
+      // while the player is typing inside HTML inputs (Mission Editor, Hub Sign Inspector, etc.).
+      const spaceKey = kb.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE, false);
+      this.cursors = {
+        up: kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP, false),
+        down: kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN, false),
+        left: kb.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT, false),
+        right: kb.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT, false),
+        space: spaceKey,
+        shift: kb.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT, false),
+      };
+      this.keyW = kb.addKey(Phaser.Input.Keyboard.KeyCodes.W, false);
+      this.keyA = kb.addKey(Phaser.Input.Keyboard.KeyCodes.A, false);
+      this.keyS = kb.addKey(Phaser.Input.Keyboard.KeyCodes.S, false);
+      this.keyD = kb.addKey(Phaser.Input.Keyboard.KeyCodes.D, false);
+      this.keySpace = spaceKey;
     }
   }
 
@@ -679,11 +690,19 @@ export class Truck {
     // 1. Steering Input (Analog Touch direct; Keyboard speed-sensitive & progressive)
     // Steering system damage slows steering response (heavier rack) in addition to lateral pull.
     const steerResponseScale = Phaser.Math.Linear(0.55, 1.0, Phaser.Math.Clamp(this.damage.steering / 100, 0, 1));
-    const keyUp = (this.cursors && this.cursors.up.isDown) || (this.keyW && this.keyW.isDown);
-    const keyDown = (this.cursors && this.cursors.down.isDown) || (this.keyS && this.keyS.isDown);
-    const keyLeft = (this.cursors && this.cursors.left.isDown) || (this.keyA && this.keyA.isDown);
-    const keyRight = (this.cursors && this.cursors.right.isDown) || (this.keyD && this.keyD.isDown);
-    const keyHandbrake = this.keySpace && this.keySpace.isDown;
+    const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
+    const typingInDomInput =
+      activeEl instanceof HTMLElement &&
+      (activeEl.tagName === 'INPUT' ||
+        activeEl.tagName === 'TEXTAREA' ||
+        activeEl.tagName === 'SELECT' ||
+        activeEl.isContentEditable);
+
+    const keyUp = !typingInDomInput && ((this.cursors && this.cursors.up.isDown) || (this.keyW && this.keyW.isDown));
+    const keyDown = !typingInDomInput && ((this.cursors && this.cursors.down.isDown) || (this.keyS && this.keyS.isDown));
+    const keyLeft = !typingInDomInput && ((this.cursors && this.cursors.left.isDown) || (this.keyA && this.keyA.isDown));
+    const keyRight = !typingInDomInput && ((this.cursors && this.cursors.right.isDown) || (this.keyD && this.keyD.isDown));
+    const keyHandbrake = !typingInDomInput && Boolean(this.keySpace && this.keySpace.isDown);
 
     if (Math.abs(this.touchInput.steer) > 0.02) {
       const targetSteer = this.touchInput.steer * this.maxSteerAngle;

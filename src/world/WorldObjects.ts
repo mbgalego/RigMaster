@@ -55,8 +55,19 @@ export type WObjType =
   | 'log_pile'        // stacked timber logs at logging yard (solid)
   | 'rock_outcrop'    // alpine granite boulder formation (solid)
   | 'pine_tree'       // alpine conifer tree (small solid trunk)
+  | 'hub_sign'        // editable HUB neon/totem marker (params: hubId, name, badge, color, regionRadius, specialization?, description?)
   | 'exam_dock'       // TEMP exam target platform (never serialized)
   | 'compound';       // composto: agrupa vários sub-objetos com posições relativas (params.parts)
+
+export interface HubSignParams {
+  hubId: string;
+  name: string;
+  badge: string;
+  color: string;
+  regionRadius: number;
+  specialization?: string;
+  description?: string;
+}
 
 export interface WorldObject {
   id: string;
@@ -149,7 +160,7 @@ const CHUNK_PX = 2048;
 
 const SOLID_TYPES = new Set<WObjType>([
   'wall', 'jersey_barrier', 'building', 'container_stack', 'silo',
-  'gas_pump', 'air_water', 'price_sign', 'lamp', 'sign', 'traffic_light', 'roundabout',
+  'gas_pump', 'air_water', 'price_sign', 'hub_sign', 'lamp', 'sign', 'traffic_light', 'roundabout',
   'dock_wall', 'wind_turbine', 'log_pile', 'rock_outcrop', 'pine_tree', 'compound',
 ]);
 
@@ -444,6 +455,11 @@ export class WorldObjects {
     return pads;
   }
 
+  /** All editable HUB marker signs currently placed in the world. */
+  public get hubSigns(): WorldObject[] {
+    return this.objects.filter((o) => o.type === 'hub_sign');
+  }
+
   /** Rotated-rect hit test for the object editor (padded for easy grabbing) */
   public hitTest(x: number, y: number, pad = 8): WorldObject | null {
     let best: WorldObject | null = null;
@@ -648,6 +664,15 @@ export class WorldObjects {
       } else if (o.type === 'pine_tree') {
         // Only the narrow trunk is solid (canopy overhangs naturally)
         body = this.scene.matter.add.circle(o.x, o.y, Math.max(8, Math.min(o.w, o.h) * 0.16), {
+          isStatic: true,
+          friction: 0.8,
+          restitution: 0.1,
+          label: `obstacle_${o.type}`,
+          collisionFilter: { category: COLLISION_CAT.GROUND_OBS, mask: COLLISION_MASK.GROUND_OBS },
+        }) as unknown as MatterJS.BodyType;
+      } else if (o.type === 'hub_sign') {
+        // Compact steel totem mast collider (leaves full visual panel & pedestal easy to maneuver around)
+        body = this.scene.matter.add.circle(o.x, o.y, 12, {
           isStatic: true,
           friction: 0.8,
           restitution: 0.1,
@@ -3343,6 +3368,33 @@ export class WorldObjects {
               g.fillRect(dx + (d % 2 === 0 ? 2.4 : 0), ry + 4, 1.8, rowH - 10);
             }
           }
+          break;
+        }
+        case 'hub_sign': {
+          // Pedestal arquitetónico e mastro de Sinal de HUB (sempre visível; o néon e rótulo dinâmicos são sobrepostos em MainScene.drawHubSigns)
+          const rawHex = typeof o.params?.color === 'string' ? o.params.color.replace('#', '') : '';
+          const parsedCol = /^[0-9a-fA-F]{6}$/.test(rawHex) ? parseInt(rawHex, 16) : 0x38bdf8;
+          // Sombra de base
+          g.fillStyle(0x000000, 0.3);
+          g.fillCircle(o.x + 3, o.y + 4, 24);
+          // Plinto octogonal/circular em betão
+          g.fillStyle(0x334155, 1);
+          g.fillCircle(o.x, o.y, 20);
+          g.lineStyle(2, parsedCol, 0.65);
+          g.strokeCircle(o.x, o.y, 20);
+          g.fillStyle(0x1e293b, 1);
+          g.fillCircle(o.x, o.y, 13);
+          // Coluna central metálica
+          g.fillStyle(0x0f172a, 1);
+          g.fillCircle(o.x, o.y, 7);
+          g.fillStyle(parsedCol, 0.9);
+          g.fillCircle(o.x, o.y, 3.5);
+          // Marcadores direcionais no plinto
+          g.lineStyle(2, 0x94a3b8, 0.55);
+          g.lineBetween(o.x - 15, o.y, o.x - 10, o.y);
+          g.lineBetween(o.x + 10, o.y, o.x + 15, o.y);
+          g.lineBetween(o.x, o.y - 15, o.x, o.y - 10);
+          g.lineBetween(o.x, o.y + 10, o.x, o.y + 15);
           break;
         }
         case 'lamp': {

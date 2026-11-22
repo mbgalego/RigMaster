@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { X } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Crosshair, Maximize2, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { GarageSystem, type HubId } from '../systems/GarageSystem';
 import { ReputationSystem, type FleetTruckState, type GameMode } from '../systems/ReputationSystem';
 import { TRUCK_CATALOG } from '../systems/TruckCatalog';
@@ -26,6 +26,35 @@ const WORLD_MIN_X = World.WORLD_MIN_X;
 const WORLD_MIN_Y = World.WORLD_MIN_Y;
 const WORLD_SPAN_W = World.WORLD_SPAN_W;
 const WORLD_SPAN_H = World.WORLD_SPAN_H;
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 5;
+
+interface MapCamera {
+  zoom: number;
+  centerX: number;
+  centerY: number;
+}
+
+const DEFAULT_CAMERA: MapCamera = {
+  zoom: 1,
+  centerX: WORLD_MIN_X + WORLD_SPAN_W / 2,
+  centerY: WORLD_MIN_Y + WORLD_SPAN_H / 2,
+};
+
+function clampCamera(zoom: number, centerX: number, centerY: number): MapCamera {
+  const z = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
+  const halfW = WORLD_SPAN_W / (2 * z);
+  const halfH = WORLD_SPAN_H / (2 * z);
+  const minCx = WORLD_MIN_X + halfW;
+  const maxCx = WORLD_MIN_X + WORLD_SPAN_W - halfW;
+  const minCy = WORLD_MIN_Y + halfH;
+  const maxCy = WORLD_MIN_Y + WORLD_SPAN_H - halfH;
+  return {
+    zoom: z,
+    centerX: minCx <= maxCx ? Math.max(minCx, Math.min(maxCx, centerX)) : DEFAULT_CAMERA.centerX,
+    centerY: minCy <= maxCy ? Math.max(minCy, Math.min(maxCy, centerY)) : DEFAULT_CAMERA.centerY,
+  };
+}
 
 export const WorldMapModal: React.FC<WorldMapModalProps> = ({
   open,
@@ -42,15 +71,42 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
   onSwapTruck,
 }) => {
   const [selectedTruckId, setSelectedTruckId] = useState<string | null>(initialFocusTruckId ?? null);
+  const [camera, setCamera] = useState<MapCamera>(DEFAULT_CAMERA);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const dragStateRef = useRef<{
+    startX: number;
+    startY: number;
+    startCenterX: number;
+    startCenterY: number;
+    moved: boolean;
+  } | null>(null);
+  const pinchStartRef = useRef<{
+    dist: number;
+    zoom: number;
+    worldX: number;
+    worldY: number;
+  } | null>(null);
+  const suppressClickRef = useRef(false);
 
   useEffect(() => {
     if (open) {
       setSelectedTruckId(initialFocusTruckId ?? null);
+      setCamera(DEFAULT_CAMERA);
+      pointersRef.current.clear();
+      dragStateRef.current = null;
+      pinchStartRef.current = null;
+      setIsDragging(false);
     }
   }, [open, initialFocusTruckId]);
 
+  const [hubsVersion, setHubsVersion] = useState(0);
+  useEffect(() => GarageSystem.getInstance().subscribe(() => setHubsVersion((v) => v + 1)), []);
+
   const isSandbox = gameMode === 'sandbox';
-  const hubs = useMemo(() => GarageSystem.getInstance().getHubs(), [open]);
+  const hubs = useMemo(() => GarageSystem.getInstance().getHubs(), [open, hubsVersion]);
   const fleet = useMemo(
     () => (open ? ReputationSystem.getInstance().getFleet() : []),
     [open, gameMode, activeTruckId, hubReputation],
@@ -98,7 +154,7 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
   const terrainBackdropUrl = useMemo(() => {
     const terrain = scene?.world?.terrain;
     if (!terrain || typeof document === 'undefined') return null;
-    const cw = 360;
+    const cw = 520;
     const ch = Math.round((WORLD_SPAN_H / WORLD_SPAN_W) * cw);
     const canvas = document.createElement('canvas');
     canvas.width = cw;
@@ -150,7 +206,163 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
     return canvas.toDataURL('image/png');
   }, [scene]);
 
+  const viewW = WORLD_SPAN_W / camera.zoom;
+  const viewH = WORLD_SPAN_H / camera.zoom;
+  const viewX = camera.centerX - viewW / 2;
+  const viewY = camera.centerY - viewH / 2;
+
+  /** Converts a client (screen) coordinate into world coordinates inside the current SVG viewBox. */
+  const clientToWorld = useCallback(
+    (clientX: number, clientY: number, cam: MapCamera = camera) => {
+      const svg = svgRef.current;
+      if (!svg) return { x: cam.centerX, y: cam.centerY };
+      const rect = svg.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return { x: cam.centerX, y: cam.centerY };
+      const vw = WORLD_SPAN_W / cam.zoom;
+      const vh = WORLD_SPAN_H / cam.zoom;
+      // SVG default preserveAspectRatio="xMidYMid meet" letterboxes along whichever axis has slack
+      const scale = Math.min(rect.width / vw, rect.height / vh);
+      const renderedW = vw * scale;
+      const renderedH = vh * scale;
+      const offsetX = (rect.width - renderedW) / 2;
+      const offsetY = (rect.height - renderedH) / 2;
+      const normX = (clientX - rect.left - offsetX) / renderedW;
+      const normY = (clientY - rect.top - offsetY) / renderedH;
+      return {
+        x: cam.centerX - vw / 2 + normX * vw,
+        y: cam.centerY - vh / 2 + normY * vh,
+      };
+    },
+    [camera],
+  );
+
+  const handleZoomBy = useCallback(
+    (factor: number, pivotClient?: { x: number; y: number }) => {
+      setCamera((prev) => {
+        const nextZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, +(prev.zoom * factor).toFixed(3)));
+        if (Math.abs(nextZoom - prev.zoom) < 1e-4) return prev;
+        if (!pivotClient) {
+          return clampCamera(nextZoom, prev.centerX, prev.centerY);
+        }
+        const before = clientToWorld(pivotClient.x, pivotClient.y, prev);
+        const ratio = prev.zoom / nextZoom;
+        const nextCx = before.x + (prev.centerX - before.x) * ratio;
+        const nextCy = before.y + (prev.centerY - before.y) * ratio;
+        return clampCamera(nextZoom, nextCx, nextCy);
+      });
+    },
+    [clientToWorld],
+  );
+
+  const handleResetZoom = useCallback(() => {
+    setCamera(DEFAULT_CAMERA);
+  }, []);
+
+  const handleCenterOnTruck = useCallback(() => {
+    setCamera((prev) =>
+      clampCamera(Math.max(prev.zoom, 2.2), activeTruckPos.x, activeTruckPos.y),
+    );
+  }, [activeTruckPos.x, activeTruckPos.y]);
+
+  useEffect(() => {
+    if (!open) return;
+    const svg = svgRef.current;
+    if (!svg) return;
+    const onNativeWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.22 : 1 / 1.22;
+      handleZoomBy(factor, { x: e.clientX, y: e.clientY });
+    };
+    svg.addEventListener('wheel', onNativeWheel, { passive: false });
+    return () => svg.removeEventListener('wheel', onNativeWheel);
+  }, [open, handleZoomBy]);
+
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<SVGSVGElement>) => {
+      e.currentTarget.setPointerCapture(e.pointerId);
+      pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (pointersRef.current.size === 2) {
+        const pts = Array.from(pointersRef.current.values());
+        const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+        const midX = (pts[0].x + pts[1].x) / 2;
+        const midY = (pts[0].y + pts[1].y) / 2;
+        const worldMid = clientToWorld(midX, midY);
+        pinchStartRef.current = {
+          dist: Math.max(1, dist),
+          zoom: camera.zoom,
+          worldX: worldMid.x,
+          worldY: worldMid.y,
+        };
+        dragStateRef.current = null;
+        setIsDragging(true);
+      } else if (pointersRef.current.size === 1) {
+        dragStateRef.current = {
+          startX: e.clientX,
+          startY: e.clientY,
+          startCenterX: camera.centerX,
+          startCenterY: camera.centerY,
+          moved: false,
+        };
+        suppressClickRef.current = false;
+      }
+    },
+    [camera.centerX, camera.centerY, camera.zoom, clientToWorld],
+  );
+
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent<SVGSVGElement>) => {
+      if (!pointersRef.current.has(e.pointerId)) return;
+      pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (pointersRef.current.size === 2 && pinchStartRef.current) {
+        const pts = Array.from(pointersRef.current.values());
+        const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+        const nextZoom = Math.max(
+          MIN_ZOOM,
+          Math.min(MAX_ZOOM, pinchStartRef.current.zoom * (dist / pinchStartRef.current.dist)),
+        );
+        suppressClickRef.current = true;
+        setCamera(clampCamera(nextZoom, pinchStartRef.current.worldX, pinchStartRef.current.worldY));
+        return;
+      }
+
+      const drag = dragStateRef.current;
+      const svg = svgRef.current;
+      if (!drag || !svg) return;
+
+      const dxPx = e.clientX - drag.startX;
+      const dyPx = e.clientY - drag.startY;
+      if (!drag.moved && Math.hypot(dxPx, dyPx) < 5) return;
+      drag.moved = true;
+      suppressClickRef.current = true;
+      setIsDragging(true);
+
+      const rect = svg.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const scale = Math.min(rect.width / viewW, rect.height / viewH);
+      const dxWorld = dxPx / scale;
+      const dyWorld = dyPx / scale;
+      setCamera((prev) => clampCamera(prev.zoom, drag.startCenterX - dxWorld, drag.startCenterY - dyWorld));
+    },
+    [viewH, viewW],
+  );
+
+  const handlePointerUpOrCancel = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
+    pointersRef.current.delete(e.pointerId);
+    if (pointersRef.current.size < 2) {
+      pinchStartRef.current = null;
+    }
+    if (pointersRef.current.size === 0) {
+      dragStateRef.current = null;
+      setIsDragging(false);
+    }
+  }, []);
+
   if (!open) return null;
+
+  // Keep labels, icons, and target rings readable as zoom increases instead of ballooning
+  const s = 1 / Math.pow(camera.zoom, 0.65);
 
   const focusedTruck: FleetTruckState | null =
     fleet.find((f) => f.id === (selectedTruckId ?? initialFocusTruckId)) ?? null;
@@ -177,7 +389,7 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
               Mapa Estratégico — RigWorld
             </h2>
             <p className="text-[11px] sm:text-xs text-slate-400">
-              Toque num camião da frota para ver a distância, requisitos e estado.
+              Roda do rato ou pinça para zoom · Arrasta para navegar · Toca num camião para ver estado.
             </p>
           </div>
           <button
@@ -192,10 +404,75 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
 
         {/* Map + Side Info */}
         <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden overscroll-contain">
-          <div className="shrink-0 lg:shrink lg:flex-1 bg-[#0b1320] p-2 sm:p-3 flex items-center justify-center overflow-hidden">
+          <div className="relative shrink-0 lg:shrink lg:flex-1 bg-[#0b1320] p-2 sm:p-3 flex items-center justify-center overflow-hidden">
+            {/* Floating Zoom & Focus Controls */}
+            <div
+              data-testid="world-map-zoom-controls"
+              className="absolute top-3.5 right-3.5 sm:top-5 sm:right-5 z-10 flex items-center gap-1 bg-slate-950/90 border border-slate-700/80 rounded-lg p-1 shadow-lg backdrop-blur-sm"
+            >
+              <button
+                type="button"
+                data-testid="btn-world-map-zoom-out"
+                disabled={camera.zoom <= MIN_ZOOM + 0.01}
+                onClick={() => handleZoomBy(1 / 1.35)}
+                title="Reduzir Zoom"
+                aria-label="Reduzir Zoom"
+                className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-35 disabled:cursor-not-allowed transition-colors"
+              >
+                <ZoomOut className="w-3.5 h-3.5" />
+              </button>
+              <span
+                data-testid="world-map-zoom-level"
+                className="px-1.5 text-[11px] font-mono tabular-nums text-cyan-300 font-semibold min-w-[42px] text-center select-none"
+              >
+                {Math.round(camera.zoom * 100)}%
+              </span>
+              <button
+                type="button"
+                data-testid="btn-world-map-zoom-in"
+                disabled={camera.zoom >= MAX_ZOOM - 0.01}
+                onClick={() => handleZoomBy(1.35)}
+                title="Aumentar Zoom"
+                aria-label="Aumentar Zoom"
+                className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-35 disabled:cursor-not-allowed transition-colors"
+              >
+                <ZoomIn className="w-3.5 h-3.5" />
+              </button>
+              <div className="w-px h-4 bg-slate-700/80 mx-0.5" />
+              <button
+                type="button"
+                data-testid="btn-world-map-center-truck"
+                onClick={handleCenterOnTruck}
+                title="Centrar no Camião Ativo"
+                aria-label="Centrar no Camião Ativo"
+                className="p-1.5 rounded text-cyan-300 hover:text-white hover:bg-slate-800 transition-colors"
+              >
+                <Crosshair className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                data-testid="btn-world-map-zoom-reset"
+                disabled={camera.zoom <= MIN_ZOOM + 0.01}
+                onClick={handleResetZoom}
+                title="Ver Todo o Mundo (100%)"
+                aria-label="Ver Todo o Mundo"
+                className="p-1.5 rounded text-amber-300 hover:text-white hover:bg-slate-800 disabled:opacity-35 disabled:cursor-not-allowed transition-colors"
+              >
+                <Maximize2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
             <svg
-              viewBox={`${WORLD_MIN_X} ${WORLD_MIN_Y} ${WORLD_SPAN_W} ${WORLD_SPAN_H}`}
-              className="w-full h-auto lg:h-full max-h-[52dvh] lg:max-h-[65vh] rounded-lg border border-slate-800 bg-[#0b1927]"
+              ref={svgRef}
+              data-testid="world-map-svg"
+              viewBox={`${viewX} ${viewY} ${viewW} ${viewH}`}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUpOrCancel}
+              onPointerCancel={handlePointerUpOrCancel}
+              className={`w-full h-auto lg:h-full max-h-[52dvh] lg:max-h-[65vh] rounded-lg border border-slate-800 bg-[#0b1927] select-none touch-none ${
+                isDragging ? 'cursor-grabbing' : camera.zoom > 1 ? 'cursor-grab' : 'cursor-default'
+              }`}
             >
               {/* Ocean background */}
               <rect x={WORLD_MIN_X} y={WORLD_MIN_Y} width={WORLD_SPAN_W} height={WORLD_SPAN_H} fill="#0b1927" />
@@ -213,17 +490,17 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                 <rect x={0} y={0} width={World.WORLD_W} height={World.WORLD_H} rx={900} fill="#122634" opacity={0.85} />
               )}
               {/* Topographic region labels for the mountain range & foothills */}
-              <g pointerEvents="none" style={{ paintOrder: 'stroke' }} stroke="#0b1927" strokeWidth={65} strokeLinejoin="round">
-                <text x={-3350} y={-3920} textAnchor="middle" fill="#e2e8f0" fontSize={230} fontWeight="700" opacity={0.92}>
+              <g pointerEvents="none" style={{ paintOrder: 'stroke' }} stroke="#0b1927" strokeWidth={65 * s} strokeLinejoin="round">
+                <text x={-3350} y={-3920} textAnchor="middle" fill="#e2e8f0" fontSize={230 * s} fontWeight="700" opacity={0.92}>
                   Parque Eólico · 640m
                 </text>
-                <text x={-2350} y={240} textAnchor="middle" fill="#86efac" fontSize={205} fontWeight="600" opacity={0.88}>
+                <text x={-2350} y={240} textAnchor="middle" fill="#86efac" fontSize={205 * s} fontWeight="600" opacity={0.88}>
                   Serraria · 210m
                 </text>
-                <text x={3550} y={-2420} textAnchor="middle" fill="#cbd5e1" fontSize={205} fontWeight="600" opacity={0.85}>
+                <text x={3550} y={-2420} textAnchor="middle" fill="#cbd5e1" fontSize={205 * s} fontWeight="600" opacity={0.85}>
                   Montes do Norte
                 </text>
-                <text x={-2680} y={4450} textAnchor="end" fill="#cbd5e1" fontSize={200} fontWeight="600" opacity={0.85}>
+                <text x={-2680} y={4450} textAnchor="end" fill="#cbd5e1" fontSize={200 * s} fontWeight="600" opacity={0.85}>
                   Costa Atlântica
                 </text>
               </g>
@@ -243,16 +520,16 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                           ? '#64748b'
                           : '#334155'
                   }
-                  strokeWidth={r.width}
+                  strokeWidth={r.width * Math.max(0.7, Math.min(1, s * 1.1))}
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  opacity={r.layer > 0 ? 0.9 : 0.85}
+                  opacity={r.layer > 0 ? 0.92 : 0.88}
                 />
               ))}
 
               {/* Wind Turbines (crisp alpine turbine icons) */}
               {windTurbines.map((wt, i) => (
-                <g key={`wt-${i}`} transform={`translate(${wt.x}, ${wt.y})`}>
+                <g key={`wt-${i}`} transform={`translate(${wt.x}, ${wt.y}) scale(${s})`}>
                   <circle cx={0} cy={0} r={115} fill="#e0f2fe" fillOpacity={0.18} stroke="#bae6fd" strokeWidth={20} />
                   <line x1={0} y1={0} x2={0} y2={-165} stroke="#f8fafc" strokeWidth={28} strokeLinecap="round" />
                   <line x1={0} y1={0} x2={142} y2={82} stroke="#f8fafc" strokeWidth={28} strokeLinecap="round" />
@@ -263,44 +540,52 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
 
               {/* Repair Bays (subtle green dots) */}
               {repairBays.map((b, i) => (
-                <circle key={`rb-${i}`} cx={b.x} cy={b.y} r={90} fill="#10b981" opacity={0.55} />
+                <circle key={`rb-${i}`} cx={b.x} cy={b.y} r={90 * s} fill="#10b981" opacity={0.65} />
               ))}
 
               {/* Gas Pumps (subtle amber dots) */}
               {gasPumps.map((p, i) => (
-                <circle key={`gp-${i}`} cx={p.x} cy={p.y} r={80} fill="#f59e0b" opacity={0.45} />
+                <circle key={`gp-${i}`} cx={p.x} cy={p.y} r={80 * s} fill="#f59e0b" opacity={0.55} />
               ))}
 
               {/* Hub labels */}
               {hubs.map((hub) => (
-                <g key={hub.id}>
+                <g key={hub.id} pointerEvents="none">
                   <circle
                     cx={hub.locationWorld.x}
                     cy={hub.locationWorld.y}
-                    r={420}
+                    r={420 * s}
                     fill={hub.color}
                     fillOpacity={0.08}
                     stroke={hub.color}
-                    strokeWidth={28}
+                    strokeWidth={28 * s}
                     strokeOpacity={0.45}
                   />
                   <text
                     x={hub.locationWorld.x}
-                    y={hub.locationWorld.y - 480}
+                    y={hub.locationWorld.y - 480 * s}
                     textAnchor="middle"
                     fill="#f8fafc"
-                    fontSize={310}
+                    fontSize={310 * s}
                     fontWeight="700"
+                    style={{ paintOrder: 'stroke' }}
+                    stroke="#0b1927"
+                    strokeWidth={55 * s}
+                    strokeLinejoin="round"
                   >
                     {hub.name}
                   </text>
                   <text
                     x={hub.locationWorld.x}
-                    y={hub.locationWorld.y - 160}
+                    y={hub.locationWorld.y - 160 * s}
                     textAnchor="middle"
                     fill="#94a3b8"
-                    fontSize={230}
+                    fontSize={230 * s}
                     fontFamily="monospace"
+                    style={{ paintOrder: 'stroke' }}
+                    stroke="#0b1927"
+                    strokeWidth={45 * s}
+                    strokeLinejoin="round"
                   >
                     {(hubReputation[hub.id] ?? 0).toLocaleString('pt-PT')} rep
                   </text>
@@ -318,66 +603,64 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
 
                 if (isPickup && nav?.pickupPos) {
                   return (
-                    <g data-testid="world-map-mission-pickup-route">
-                      {/* Secondary preview leg: pickup -> final delivery dock */}
+                    <g data-testid="world-map-mission-pickup-route" pointerEvents="none">
                       <line
                         x1={nav.pickupPos.x}
                         y1={nav.pickupPos.y}
                         x2={deliveryPos.x}
                         y2={deliveryPos.y}
                         stroke="#34d399"
-                        strokeWidth={28}
-                        strokeDasharray="110 130"
+                        strokeWidth={28 * s}
+                        strokeDasharray={`${110 * s} ${130 * s}`}
                         opacity={0.45}
                       />
                       <circle
                         cx={deliveryPos.x}
                         cy={deliveryPos.y}
-                        r={165}
+                        r={165 * s}
                         fill="#10b981"
                         fillOpacity={0.14}
                         stroke="#34d399"
-                        strokeWidth={28}
+                        strokeWidth={28 * s}
                         opacity={0.65}
                       />
                       <text
                         x={deliveryPos.x}
-                        y={deliveryPos.y - 250}
+                        y={deliveryPos.y - 250 * s}
                         textAnchor="middle"
                         fill="#6ee7b7"
-                        fontSize={210}
+                        fontSize={210 * s}
                         fontWeight="600"
-                        opacity={0.8}
+                        opacity={0.85}
                       >
                         2. Entrega
                       </text>
 
-                      {/* Primary active leg: truck -> pickup trailer */}
                       <line
                         x1={activeTruckPos.x}
                         y1={activeTruckPos.y}
                         x2={nav.pickupPos.x}
                         y2={nav.pickupPos.y}
                         stroke="#f59e0b"
-                        strokeWidth={48}
-                        strokeDasharray="160 110"
+                        strokeWidth={48 * s}
+                        strokeDasharray={`${160 * s} ${110 * s}`}
                         opacity={0.92}
                       />
                       <circle
                         cx={nav.pickupPos.x}
                         cy={nav.pickupPos.y}
-                        r={240}
+                        r={240 * s}
                         fill="#f59e0b"
                         fillOpacity={0.25}
                         stroke="#fbbf24"
-                        strokeWidth={44}
+                        strokeWidth={44 * s}
                       />
                       <text
                         x={nav.pickupPos.x}
-                        y={nav.pickupPos.y - 310}
+                        y={nav.pickupPos.y - 310 * s}
                         textAnchor="middle"
                         fill="#fde68a"
-                        fontSize={240}
+                        fontSize={240 * s}
                         fontWeight="700"
                       >
                         1. Recolha
@@ -387,32 +670,32 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                 }
 
                 return (
-                  <g data-testid="world-map-mission-delivery-route">
+                  <g data-testid="world-map-mission-delivery-route" pointerEvents="none">
                     <line
                       x1={activeTruckPos.x}
                       y1={activeTruckPos.y}
                       x2={deliveryPos.x}
                       y2={deliveryPos.y}
                       stroke="#34d399"
-                      strokeWidth={48}
-                      strokeDasharray="160 120"
+                      strokeWidth={48 * s}
+                      strokeDasharray={`${160 * s} ${120 * s}`}
                       opacity={0.9}
                     />
                     <circle
                       cx={deliveryPos.x}
                       cy={deliveryPos.y}
-                      r={230}
+                      r={230 * s}
                       fill="#10b981"
                       fillOpacity={0.25}
                       stroke="#34d399"
-                      strokeWidth={44}
+                      strokeWidth={44 * s}
                     />
                     <text
                       x={deliveryPos.x}
-                      y={deliveryPos.y - 300}
+                      y={deliveryPos.y - 300 * s}
                       textAnchor="middle"
                       fill="#6ee7b7"
-                      fontSize={240}
+                      fontSize={240 * s}
                       fontWeight="700"
                     >
                       Entrega
@@ -432,13 +715,17 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                 return (
                   <g
                     key={truck.id}
-                    onClick={() => setSelectedTruckId(truck.id)}
+                    transform={`translate(${truck.x}, ${truck.y}) scale(${s})`}
+                    onClick={() => {
+                      if (suppressClickRef.current) return;
+                      setSelectedTruckId(truck.id);
+                    }}
                     style={{ cursor: 'pointer' }}
                   >
                     {isSelected && (
                       <circle
-                        cx={truck.x}
-                        cy={truck.y}
+                        cx={0}
+                        cy={0}
                         r={340}
                         fill="none"
                         stroke="#38bdf8"
@@ -447,8 +734,8 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                     )}
                     {spec.axleConfig === '4x2' && (
                       <circle
-                        cx={truck.x}
-                        cy={truck.y}
+                        cx={0}
+                        cy={0}
                         r={190}
                         fill={unlocked ? color : '#0f172a'}
                         stroke={unlocked ? '#f8fafc' : '#64748b'}
@@ -457,8 +744,8 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                     )}
                     {spec.axleConfig === '6x4' && (
                       <rect
-                        x={truck.x - 180}
-                        y={truck.y - 180}
+                        x={-180}
+                        y={-180}
                         width={360}
                         height={360}
                         rx={36}
@@ -469,19 +756,23 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                     )}
                     {spec.axleConfig === '8x4' && (
                       <polygon
-                        points={`${truck.x},${truck.y - 230} ${truck.x + 230},${truck.y} ${truck.x},${truck.y + 230} ${truck.x - 230},${truck.y}`}
+                        points="0,-230 230,0 0,230 -230,0"
                         fill={unlocked ? color : '#0f172a'}
                         stroke={unlocked ? '#f8fafc' : '#64748b'}
                         strokeWidth={36}
                       />
                     )}
                     <text
-                      x={truck.x}
-                      y={truck.y + 420}
+                      x={0}
+                      y={420}
                       textAnchor="middle"
                       fill={unlocked ? '#e2e8f0' : '#64748b'}
                       fontSize={210}
                       fontWeight="600"
+                      style={{ paintOrder: 'stroke' }}
+                      stroke="#0b1927"
+                      strokeWidth={45}
+                      strokeLinejoin="round"
                     >
                       {spec.name}
                     </text>
@@ -491,7 +782,8 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
 
               {/* Player Active Truck */}
               <g
-                transform={`translate(${activeTruckPos.x}, ${activeTruckPos.y}) rotate(${(activeTruckPos.angle * 180) / Math.PI})`}
+                pointerEvents="none"
+                transform={`translate(${activeTruckPos.x}, ${activeTruckPos.y}) rotate(${(activeTruckPos.angle * 180) / Math.PI}) scale(${s})`}
               >
                 <polygon
                   points="0,-280 180,200 0,110 -180,200"

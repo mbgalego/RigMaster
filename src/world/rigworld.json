@@ -1,5 +1,5 @@
 {
-  "version": 6,
+  "version": 7,
   "name": "RigWorld",
   "worldW": 13824,
   "worldH": 10240,
@@ -5627,6 +5627,86 @@
       "w": 66,
       "h": 66,
       "angle": 0
+    },
+    {
+      "id": "wo_445",
+      "type": "hub_sign",
+      "x": 1020,
+      "y": 1200,
+      "angle": 0,
+      "w": 68,
+      "h": 68,
+      "params": {
+        "hubId": "harbor",
+        "name": "Porto Comercial",
+        "badge": "PORT",
+        "color": "#06b6d4",
+        "regionRadius": 2400
+      }
+    },
+    {
+      "id": "wo_446",
+      "type": "hub_sign",
+      "x": 11200,
+      "y": 1200,
+      "angle": 0,
+      "w": 68,
+      "h": 68,
+      "params": {
+        "hubId": "shipyard",
+        "name": "Estaleiro Logístico",
+        "badge": "SHIP",
+        "color": "#f97316",
+        "regionRadius": 2400
+      }
+    },
+    {
+      "id": "wo_447",
+      "type": "hub_sign",
+      "x": 11470,
+      "y": 8310,
+      "angle": 0,
+      "w": 68,
+      "h": 68,
+      "params": {
+        "hubId": "industrial",
+        "name": "Zona Industrial Sul",
+        "badge": "IND",
+        "color": "#eab308",
+        "regionRadius": 2600
+      }
+    },
+    {
+      "id": "wo_448",
+      "type": "hub_sign",
+      "x": 1510,
+      "y": 8770,
+      "angle": 0,
+      "w": 68,
+      "h": 68,
+      "params": {
+        "hubId": "historic",
+        "name": "Centro Histórico",
+        "badge": "HIST",
+        "color": "#ec4899",
+        "regionRadius": 2600
+      }
+    },
+    {
+      "id": "wo_449",
+      "type": "hub_sign",
+      "x": -2320,
+      "y": -600,
+      "angle": 0,
+      "w": 68,
+      "h": 68,
+      "params": {
+        "hubId": "serra",
+        "name": "Serra dos Ventos",
+        "badge": "SERRA",
+        "color": "#10b981",
+        "regionRadius": 3400
+      }
     }
   ],
   "worldMinX": -6144,

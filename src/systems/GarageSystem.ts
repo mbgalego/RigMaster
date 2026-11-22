@@ -1,9 +1,21 @@
 import type { TrailerType } from '../entities/Trailer';
+import type { WorldObjects } from '../world/WorldObjects';
 import { ReputationSystem } from './ReputationSystem';
 
-export type HubId = 'harbor' | 'shipyard' | 'industrial' | 'historic' | 'serra';
+export const OFFICIAL_HUB_IDS = ['harbor', 'shipyard', 'industrial', 'historic', 'serra'] as const;
+export type OfficialHubId = (typeof OFFICIAL_HUB_IDS)[number];
+export type HubId = string;
 export type FutureHubId = HubId;
 export type WeatherModifier = 'clear' | 'rain' | 'fog' | 'night';
+
+const OFFICIAL_HUB_SET = new Set<string>(OFFICIAL_HUB_IDS);
+
+export function parseHexColor(color: string | undefined, fallback: number = 0x38bdf8): number {
+  if (typeof color !== 'string') return fallback;
+  const clean = color.trim().replace(/^#/, '');
+  if (!/^[0-9a-fA-F]{6}$/.test(clean)) return fallback;
+  return parseInt(clean, 16);
+}
 
 export interface HubDockSpec {
   id: string;
@@ -45,11 +57,22 @@ export interface HubData {
   unlockedModifier: WeatherModifier;
   description: string;
   contracts: RegionalContract[];
+  /** True for custom hubs created in the map editor via hub_sign objects. */
+  isCustom?: boolean;
+}
+
+export interface HubWorldStats {
+  docks: number;
+  parkingPads: number;
+  garages: number;
 }
 
 export class GarageSystem {
   private static instance: GarageSystem;
   private hubs: Record<HubId, HubData>;
+  private defaultDocksByHub: Record<string, HubDockSpec[]> = {};
+  private knownDockLabels = new Map<string, string>();
+  private savedHubState: Record<string, { progress: number; isDominant: boolean; contracts?: Array<{ id: string; completed: boolean }> }> = {};
   private activeModifier: WeatherModifier = 'clear';
   private listeners: Array<() => void> = [];
 
@@ -254,6 +277,14 @@ export class GarageSystem {
       },
     };
 
+    // Preserve official dock metadata (labels & fallback docks) before any dynamic world sync
+    for (const hub of Object.values(this.hubs)) {
+      this.defaultDocksByHub[hub.id] = hub.docks.map((d) => ({ ...d }));
+      for (const d of hub.docks) {
+        this.knownDockLabels.set(d.id, d.label);
+      }
+    }
+
     this.loadProgress();
   }
 
@@ -269,7 +300,184 @@ export class GarageSystem {
   }
 
   public getHub(id: HubId): HubData {
-    return this.hubs[id];
+    return this.hubs[id] ?? this.hubs['harbor'] ?? Object.values(this.hubs)[0];
+  }
+
+  public hasHub(id: HubId): boolean {
+    return id in this.hubs;
+  }
+
+  /**
+   * Synchronizes all hubs (positions, metadata, newly added custom hubs, removed custom hubs,
+   * and dynamically associated docks/garages) from the editable `hub_sign` objects in WorldObjects.
+   */
+  public syncFromWorld(objects: WorldObjects): void {
+    const signs = objects.hubSigns;
+    if (signs.length === 0) return;
+
+    const seenIds = new Set<string>();
+    for (const sign of signs) {
+      const rawId = typeof sign.params?.hubId === 'string' && sign.params.hubId.trim().length > 0
+        ? sign.params.hubId.trim()
+        : sign.id;
+      // Defensive collision guard if two signs share the same hubId
+      let hubId = rawId;
+      if (seenIds.has(hubId)) {
+        hubId = `${rawId}_${sign.id}`;
+      }
+      seenIds.add(hubId);
+
+      const existing = this.hubs[hubId];
+      const color =
+        typeof sign.params?.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(sign.params.color.trim())
+          ? sign.params.color.trim()
+          : existing?.color ?? '#38bdf8';
+      const neonColorHex = parseHexColor(color, existing?.neonColorHex ?? 0x38bdf8);
+      const name =
+        typeof sign.params?.name === 'string' && sign.params.name.trim().length > 0
+          ? sign.params.name.trim()
+          : existing?.name ?? 'Novo HUB';
+      const badge =
+        typeof sign.params?.badge === 'string' && sign.params.badge.trim().length > 0
+          ? sign.params.badge.trim().toUpperCase().slice(0, 8)
+          : existing?.badge ?? 'HUB';
+      const regionRadius = Math.max(
+        400,
+        Math.min(8000, Math.round(Number(sign.params?.regionRadius) || existing?.regionRadius || 2200)),
+      );
+      const specialization =
+        typeof sign.params?.specialization === 'string' && sign.params.specialization.trim().length > 0
+          ? sign.params.specialization.trim()
+          : existing?.specialization ?? 'HUB Personalizado (Editor)';
+      const description =
+        typeof sign.params?.description === 'string' && sign.params.description.trim().length > 0
+          ? sign.params.description.trim()
+          : existing?.description ?? 'HUB criado no editor de mapas. Associe docas, baías e oficinas nas proximidades.';
+
+      if (existing) {
+        existing.name = name;
+        existing.badge = badge;
+        existing.color = color;
+        existing.neonColorHex = neonColorHex;
+        existing.locationWorld = { x: Math.round(sign.x), y: Math.round(sign.y) };
+        existing.regionRadius = regionRadius;
+        existing.specialization = specialization;
+        existing.description = description;
+      } else {
+        const saved = this.savedHubState[hubId];
+        this.hubs[hubId] = {
+          id: hubId,
+          name,
+          badge,
+          color,
+          neonColorHex,
+          locationWorld: { x: Math.round(sign.x), y: Math.round(sign.y) },
+          regionRadius,
+          specialization,
+          exclusiveTrailers: ['standard', 'container', 'reefer'],
+          garageIds: [],
+          docks: [],
+          progress: saved?.progress ?? 0,
+          isDominant: saved?.isDominant ?? false,
+          unlockedBiomeTiles: [],
+          unlockedModifier: 'clear',
+          description,
+          contracts: [],
+          isCustom: !OFFICIAL_HUB_SET.has(hubId),
+        };
+      }
+    }
+
+    // Remove deleted custom hubs (keep the 5 official hubs registered so Career saves never break)
+    for (const id of Object.keys(this.hubs)) {
+      if (!OFFICIAL_HUB_SET.has(id) && !seenIds.has(id)) {
+        delete this.hubs[id];
+      }
+    }
+
+    // Dynamically bind docks & garages to their nearest qualifying hub (within regionRadius)
+    const allHubs = Object.values(this.hubs);
+    const docksByHub = new Map<string, HubDockSpec[]>();
+    const garagesByHub = new Map<string, string[]>();
+    for (const hub of allHubs) {
+      docksByHub.set(hub.id, []);
+      garagesByHub.set(hub.id, []);
+    }
+
+    for (const o of objects.objects) {
+      if (o.type !== 'dock') continue;
+      let bestHub: HubData | null = null;
+      let bestDist = Infinity;
+      for (const hub of allHubs) {
+        const d = Math.hypot(o.x - hub.locationWorld.x, o.y - hub.locationWorld.y);
+        if (d <= hub.regionRadius && d < bestDist) {
+          bestDist = d;
+          bestHub = hub;
+        }
+      }
+      if (bestHub) {
+        const list = docksByHub.get(bestHub.id)!;
+        const label = this.knownDockLabels.get(o.id) ?? `Doca ${bestHub.badge} ${list.length + 1}`;
+        list.push({
+          id: o.id,
+          label,
+          x: Math.round(o.x),
+          y: Math.round(o.y),
+          width: Math.round(o.w),
+          height: Math.round(o.h),
+          requiredAngleDeg: Math.round(((o.angle || 0) * 180) / Math.PI),
+        });
+      }
+    }
+
+    for (const bay of objects.repairBays) {
+      let bestHub: HubData | null = null;
+      let bestDist = Infinity;
+      for (const hub of allHubs) {
+        const d = Math.hypot(bay.x - hub.locationWorld.x, bay.y - hub.locationWorld.y);
+        if (d <= hub.regionRadius && d < bestDist) {
+          bestDist = d;
+          bestHub = hub;
+        }
+      }
+      if (bestHub) {
+        const gList = garagesByHub.get(bestHub.id)!;
+        if (!gList.includes(bay.garageId)) gList.push(bay.garageId);
+      }
+    }
+
+    for (const hub of allHubs) {
+      hub.docks = docksByHub.get(hub.id) ?? [];
+      hub.garageIds = garagesByHub.get(hub.id) ?? [];
+    }
+
+    ReputationSystem.getInstance().ensureHubIds(Object.keys(this.hubs));
+    this.notify();
+  }
+
+  /** Live counts of docks, universal parking pads, and repair garages inside a hub's region. */
+  public getHubStats(hubId: HubId, objects: WorldObjects): HubWorldStats {
+    const hub = this.hubs[hubId];
+    if (!hub) return { docks: 0, parkingPads: 0, garages: 0 };
+    const allHubs = Object.values(this.hubs);
+    let parkingPads = 0;
+    for (const pad of objects.parkingPads) {
+      let bestHub: HubData | null = null;
+      let bestDist = Infinity;
+      for (const h of allHubs) {
+        const d = Math.hypot(pad.x - h.locationWorld.x, pad.y - h.locationWorld.y);
+        if (d <= h.regionRadius && d < bestDist) {
+          bestDist = d;
+          bestHub = h;
+        }
+      }
+      if (bestHub?.id === hubId) parkingPads++;
+    }
+    return {
+      docks: hub.docks.length,
+      parkingPads,
+      garages: hub.garageIds.length,
+    };
   }
 
   /** Resolves the nearest hub to any world position (used by workshops, parked trucks, and telemetry). */
@@ -286,10 +494,22 @@ export class GarageSystem {
     return bestId;
   }
 
-  /** Returns the primary delivery dock spec for a hub (or index modulo available docks). */
+  /** Returns the primary delivery dock spec for a hub (or index modulo available docks, with safe fallback). */
   public getHubDock(id: HubId, index: number = 0): HubDockSpec {
-    const docks = this.hubs[id].docks;
-    return docks[Math.abs(index) % docks.length];
+    const hub = this.getHub(id);
+    const docks = hub.docks.length > 0 ? hub.docks : (this.defaultDocksByHub[hub.id] ?? []);
+    if (docks.length > 0) {
+      return docks[Math.abs(index) % docks.length];
+    }
+    return {
+      id: `${hub.id}_virtual_dock`,
+      label: `Zona ${hub.name}`,
+      x: hub.locationWorld.x,
+      y: hub.locationWorld.y,
+      width: 96,
+      height: 280,
+      requiredAngleDeg: 0,
+    };
   }
 
   /** Convenience delegate to ReputationSystem for current reputation in a hub. */
@@ -383,20 +603,17 @@ export class GarageSystem {
 
   private saveProgress() {
     try {
-      const state = {
-        hubs: Object.fromEntries(
-          Object.entries(this.hubs).map(([k, v]) => [
-            k,
-            {
-              progress: v.progress,
-              isDominant: v.isDominant,
-              contracts: v.contracts.map((c) => ({ id: c.id, completed: c.completed })),
-            },
-          ])
-        ),
-      };
+      const merged: Record<string, any> = { ...this.savedHubState };
+      for (const [k, v] of Object.entries(this.hubs)) {
+        merged[k] = {
+          progress: v.progress,
+          isDominant: v.isDominant,
+          contracts: v.contracts.map((c) => ({ id: c.id, completed: c.completed })),
+        };
+      }
+      this.savedHubState = merged;
       if (typeof localStorage !== 'undefined') {
-        localStorage.setItem('rigmaster_garages', JSON.stringify(state));
+        localStorage.setItem('rigmaster_garages', JSON.stringify({ hubs: merged }));
       }
     } catch {
       // Ignore
@@ -408,7 +625,8 @@ export class GarageSystem {
       const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('rigmaster_garages') : null;
       if (raw) {
         const state = JSON.parse(raw);
-        if (state.hubs) {
+        if (state.hubs && typeof state.hubs === 'object') {
+          this.savedHubState = { ...state.hubs };
           for (const [k, v] of Object.entries(state.hubs as Record<string, any>)) {
             if (this.hubs[k as HubId]) {
               this.hubs[k as HubId].progress = v.progress;
@@ -428,4 +646,5 @@ export class GarageSystem {
     }
   }
 }
+
 

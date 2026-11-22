@@ -29,6 +29,7 @@ import { MissionsModal } from './components/MissionsModal';
 import { FleetGarageModal } from './components/FleetGarageModal';
 import { WorkshopUpgradesModal } from './components/WorkshopUpgradesModal';
 import { WorldMapModal } from './components/WorldMapModal';
+import { MissionEditorModal } from './components/MissionEditorModal';
 import {
   RotateCcw,
   Volume2,
@@ -256,6 +257,7 @@ const CREATE_CATALOG: Array<{
     label: 'Serviços',
     icon: Fuel,
     items: [
+      { spec: { type: 'hub_sign', w: 68, h: 68, label: 'Sinal de HUB' }, icon: MapPin },
       { spec: { type: 'gas_pump', w: 48, h: 110, label: 'Bomba Combustível' }, icon: Fuel },
       { spec: { type: 'gas_canopy', w: 420, h: 340, label: 'Pista Posto (Alcatrão)' }, icon: Layers },
       { spec: { type: 'building', w: 240, h: 136, variant: 'convenience_store', label: 'Loja Conveniência' }, icon: Store },
@@ -306,6 +308,9 @@ export default function App() {
   const [showLicenseModal, setShowLicenseModal] = useState<boolean>(false);
   const [showGarageModal, setShowGarageModal] = useState<boolean>(false);
   const [showMissionsModal, setShowMissionsModal] = useState<boolean>(false);
+  const [showMissionEditorModal, setShowMissionEditorModal] = useState<boolean>(false);
+  const [missionEditorHubId, setMissionEditorHubId] = useState<string | null>(null);
+  const [customMissionCount, setCustomMissionCount] = useState<number>(0);
   const [showFleetModal, setShowFleetModal] = useState<boolean>(false);
   const [showWorkshopModal, setShowWorkshopModal] = useState<boolean>(false);
   const [showWorldMapModal, setShowWorldMapModal] = useState<boolean>(false);
@@ -359,8 +364,44 @@ export default function App() {
     canMerge: false,
   });
   // Object tool live state (polled from EditorScene in the telemetry loop)
-  const [objectUI, setObjectUI] = useState<{ hasSelection: boolean; id: string; type: string; variant: string; angleDeg: number; resizable: boolean; trailer: string; canPaste: boolean; rotationSnap: boolean; canUndo: boolean; isCompound: boolean; compoundPartCount: number }>({
-    hasSelection: false, id: '', type: '', variant: '', angleDeg: 0, resizable: false, trailer: '', canPaste: false, rotationSnap: true, canUndo: false, isCompound: false, compoundPartCount: 0,
+  const [objectUI, setObjectUI] = useState<{
+    hasSelection: boolean;
+    id: string;
+    type: string;
+    variant: string;
+    angleDeg: number;
+    resizable: boolean;
+    trailer: string;
+    canPaste: boolean;
+    rotationSnap: boolean;
+    canUndo: boolean;
+    isCompound: boolean;
+    compoundPartCount: number;
+    hubSign: {
+      hubId: string;
+      name: string;
+      badge: string;
+      color: string;
+      regionRadius: number;
+      isCustom: boolean;
+      docks: number;
+      parkingPads: number;
+      garages: number;
+    } | null;
+  }>({
+    hasSelection: false,
+    id: '',
+    type: '',
+    variant: '',
+    angleDeg: 0,
+    resizable: false,
+    trailer: '',
+    canPaste: false,
+    rotationSnap: true,
+    canUndo: false,
+    isCompound: false,
+    compoundPartCount: 0,
+    hubSign: null,
   });
 
   // Real-time Telemetry
@@ -515,6 +556,7 @@ export default function App() {
     showLicenseModal ||
       showGarageModal ||
       showMissionsModal ||
+      showMissionEditorModal ||
       showFleetModal ||
       showWorkshopModal ||
       showWorldMapModal ||
@@ -532,6 +574,7 @@ export default function App() {
       }
       if (e.key === 'Escape') {
         setShowMissionsModal(false);
+        setShowMissionEditorModal(false);
         setShowFleetModal(false);
         setShowWorkshopModal(false);
         setShowWorldMapModal(false);
@@ -571,6 +614,12 @@ export default function App() {
       setActiveWeather(garSys.getActiveModifier());
     });
 
+    const misSys = MissionSystem.getInstance();
+    setCustomMissionCount(misSys.getCustomMissions().length);
+    const unsubMis = misSys.subscribe(() => {
+      setCustomMissionCount(misSys.getCustomMissions().length);
+    });
+
     // Telemetry polling loop from MainScene
     let lastTelKey = '';
     let lastEditorFlag: boolean | null = null;
@@ -600,7 +649,7 @@ export default function App() {
           `${t.gameMode}|${t.activeTruckId}|${t.activeTruckUpgrades.engine},${t.activeTruckUpgrades.brakes},${t.activeTruckUpgrades.suspension},${t.activeTruckUpgrades.tires}|` +
           `${Math.round(t.truckWear.engine)},${Math.round(t.truckWear.brakes)},${Math.round(t.truckWear.tires)}|${Math.round(t.brakeHeat * 20)}|${Math.round(t.altitudeM / 5)},${Math.round(t.gradePercent)}|` +
           `${t.nearbySwapTruck ? `${t.nearbySwapTruck.id}:${Math.round(t.nearbySwapTruck.dist)}` : ''}|${t.currentHubId}|` +
-          `${t.hubReputation.harbor},${t.hubReputation.shipyard},${t.hubReputation.industrial},${t.hubReputation.historic},${t.hubReputation.serra}|` +
+          `${Object.entries(t.hubReputation).map(([k, v]) => `${k}:${v}`).join(',')}|` +
           `${am ? `${am.mission.id}:${am.phase}:${Math.floor(am.elapsedSec)}:${am.collisions}:${Math.round(am.minCargoHealth)}:${am.inTargetDock ? 1 : 0}:${am.dockHoldSec.toFixed(1)}` : ''}|` +
           `${nav ? `${nav.phase}:${Math.round(nav.distPx / 100)}:${nav.pickupHubName}:${nav.hasWrongTrailerCoupled ? 1 : 0}:${nav.needsPupOnly ? 1 : 0}` : ''}|` +
           `${lmc ? lmc.completedAt : ''}|` +
@@ -656,18 +705,51 @@ export default function App() {
       clearInterval(interval);
       unsubLic();
       unsubGar();
+      unsubMis();
       destroyGame();
     };
   }, []);
 
-  // Keep the Phaser canvas from stealing pointer events while any HTML modal is open
+  // Keep the Phaser canvas & keyboard plugins from stealing pointer or keyboard events
+  // while any HTML modal is open or any text/select input has focus.
   useEffect(() => {
-    const game = getGame();
-    const canvas = game?.canvas as HTMLCanvasElement | undefined;
-    if (canvas) {
-      canvas.style.pointerEvents = modalOpen ? 'none' : 'auto';
-    }
-  }, [modalOpen]);
+    const isDomInput = (el: Element | null): boolean =>
+      el instanceof HTMLElement &&
+      (el.tagName === 'INPUT' ||
+        el.tagName === 'TEXTAREA' ||
+        el.tagName === 'SELECT' ||
+        el.isContentEditable);
+
+    const applyIsolation = () => {
+      const game = getGame();
+      const canvas = game?.canvas as HTMLCanvasElement | undefined;
+      if (canvas) {
+        canvas.style.pointerEvents = modalOpen ? 'none' : 'auto';
+      }
+      const blockKeyboard = modalOpen || isDomInput(document.activeElement);
+      const scenes = [getMainScene(), getEditorScene()];
+      for (const sc of scenes) {
+        const kb = sc?.input?.keyboard;
+        if (!kb) continue;
+        kb.enabled = !blockKeyboard;
+        if (blockKeyboard) {
+          kb.resetKeys();
+          kb.disableGlobalCapture();
+        } else {
+          kb.enableGlobalCapture();
+        }
+      }
+    };
+
+    applyIsolation();
+    const onFocusChange = () => applyIsolation();
+    document.addEventListener('focusin', onFocusChange, true);
+    document.addEventListener('focusout', onFocusChange, true);
+    return () => {
+      document.removeEventListener('focusin', onFocusChange, true);
+      document.removeEventListener('focusout', onFocusChange, true);
+    };
+  }, [modalOpen, isEditorMode]);
 
   // Mode Switch
   const handleToggleMode = () => {
@@ -1940,6 +2022,26 @@ export default function App() {
               {/* Subtle Divider */}
               <div className="w-8 h-px bg-slate-800 my-0.5 shrink-0" />
 
+              {/* Custom Missions Editor */}
+              <button
+                type="button"
+                data-testid="btn-editor-missions"
+                onClick={() => {
+                  setMissionEditorHubId(null);
+                  setShowMissionEditorModal(true);
+                }}
+                className="relative w-[66px] h-14 md:w-[80px] md:h-16 rounded-lg bg-slate-900/90 text-cyan-300 border border-cyan-500/40 hover:bg-cyan-500/15 hover:text-cyan-200 flex flex-col items-center justify-center transition shrink-0"
+                title="Criar e gerir missões personalizadas entre HUBs"
+              >
+                <ClipboardList className="ed-icon" />
+                <span className="ed-fs-xs font-bold mt-0.5">Missões</span>
+                {customMissionCount > 0 && (
+                  <span className="absolute top-1 right-1 px-1 rounded bg-cyan-500 text-slate-950 font-mono text-[9px] font-black leading-tight">
+                    {customMissionCount}
+                  </span>
+                )}
+              </button>
+
               {/* Navigation: Fit Entire Map (Ver o mapa todo) */}
               <button
                 onClick={handleResetView}
@@ -2349,6 +2451,141 @@ export default function App() {
                           ))}
                         </div>
                       </>
+                    ) : null}
+                    {objectUI.type === 'hub_sign' && objectUI.hubSign ? (
+                      <div
+                        data-testid="hub-sign-inspector"
+                        className="mt-1 pt-1.5 border-t border-slate-800 flex flex-col gap-1.5 shrink-0"
+                      >
+                        <div className="flex items-center justify-between gap-1 px-0.5">
+                          <span className="ed-fs-sm font-mono font-bold uppercase tracking-wider text-cyan-300">
+                            SINAL DE HUB
+                          </span>
+                          <span className="text-[9px] font-mono text-slate-400 truncate">
+                            {objectUI.hubSign.isCustom ? 'Personalizado' : 'Oficial'}
+                          </span>
+                        </div>
+                        <label className="flex flex-col gap-0.5">
+                          <span className="text-[10px] text-slate-400">Nome do HUB</span>
+                          <input
+                            type="text"
+                            data-testid="hub-sign-name-input"
+                            value={objectUI.hubSign.name}
+                            maxLength={32}
+                            onChange={(e) => {
+                              const ed = getEditorScene();
+                              if (!ed) return;
+                              ed.updateHubSignParams(objectUI.id, { name: e.target.value });
+                              setObjectUI(ed.getObjectUIState());
+                            }}
+                            className="w-full px-1.5 py-1 rounded bg-slate-900 border border-slate-700 text-[11px] text-white focus:outline-none focus:border-cyan-400"
+                          />
+                        </label>
+                        <label className="flex flex-col gap-0.5">
+                          <span className="text-[10px] text-slate-400">Sigla (Badge)</span>
+                          <input
+                            type="text"
+                            data-testid="hub-sign-badge-input"
+                            value={objectUI.hubSign.badge}
+                            maxLength={8}
+                            onChange={(e) => {
+                              const ed = getEditorScene();
+                              if (!ed) return;
+                              ed.updateHubSignParams(objectUI.id, { badge: e.target.value });
+                              setObjectUI(ed.getObjectUIState());
+                            }}
+                            className="w-full px-1.5 py-1 rounded bg-slate-900 border border-slate-700 text-[11px] font-mono uppercase text-white focus:outline-none focus:border-cyan-400"
+                          />
+                        </label>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[10px] text-slate-400">Cor do HUB</span>
+                          <div className="grid grid-cols-4 gap-1">
+                            {[
+                              '#06b6d4',
+                              '#10b981',
+                              '#f97316',
+                              '#eab308',
+                              '#ec4899',
+                              '#a855f7',
+                              '#3b82f6',
+                              '#ef4444',
+                            ].map((hex) => (
+                              <button
+                                key={hex}
+                                type="button"
+                                onClick={() => {
+                                  const ed = getEditorScene();
+                                  if (!ed) return;
+                                  ed.updateHubSignParams(objectUI.id, { color: hex });
+                                  setObjectUI(ed.getObjectUIState());
+                                }}
+                                aria-label={`Cor ${hex}`}
+                                className={`h-5 rounded border transition ${
+                                  objectUI.hubSign?.color.toLowerCase() === hex
+                                    ? 'border-white scale-105 ring-1 ring-white/70'
+                                    : 'border-slate-700 opacity-80 hover:opacity-100'
+                                }`}
+                                style={{ backgroundColor: hex }}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                        <label className="flex flex-col gap-0.5">
+                          <div className="flex items-center justify-between text-[10px] text-slate-400">
+                            <span>Raio de cobertura</span>
+                            <span className="font-mono text-cyan-300">
+                              {(objectUI.hubSign.regionRadius / 1000).toFixed(1)} km
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min={600}
+                            max={5000}
+                            step={100}
+                            value={objectUI.hubSign.regionRadius}
+                            onChange={(e) => {
+                              const ed = getEditorScene();
+                              if (!ed) return;
+                              ed.updateHubSignParams(objectUI.id, { regionRadius: Number(e.target.value) });
+                              setObjectUI(ed.getObjectUIState());
+                            }}
+                            className="w-full accent-cyan-400"
+                          />
+                        </label>
+                        <div className="bg-slate-900/80 border border-slate-800 rounded p-1.5 text-[10px] font-mono space-y-0.5">
+                          <div className="flex justify-between text-slate-300">
+                            <span>Docas associadas:</span>
+                            <span className={objectUI.hubSign.docks > 0 ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>
+                              {objectUI.hubSign.docks}
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-slate-300">
+                            <span>Baías (Atrelados):</span>
+                            <span className="text-slate-100">{objectUI.hubSign.parkingPads}</span>
+                          </div>
+                          <div className="flex justify-between text-slate-300">
+                            <span>Oficinas:</span>
+                            <span className="text-slate-100">{objectUI.hubSign.garages}</span>
+                          </div>
+                          {objectUI.hubSign.docks === 0 && (
+                            <div className="pt-1 text-[9px] font-sans text-amber-300 leading-tight">
+                              Adiciona pelo menos 1 Doca dentro do círculo para permitir entregas neste HUB.
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          data-testid="btn-hub-sign-missions"
+                          onClick={() => {
+                            setMissionEditorHubId(objectUI.hubSign?.hubId ?? null);
+                            setShowMissionEditorModal(true);
+                          }}
+                          className="w-full py-1.5 px-2 rounded bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/50 text-cyan-200 ed-fs font-bold flex items-center justify-center gap-1 transition"
+                        >
+                          <ClipboardList className="w-3 h-3" />
+                          Missões deste HUB
+                        </button>
+                      </div>
                     ) : null}
                     <span className="ed-fs text-slate-400 shrink-0 hidden lg:inline">
                       arrasta = mover · pega rosa = rodar livre{objectUI.resizable ? ' · quadrados brancos = redimensionar' : ''} · Ctrl+D duplica · Ctrl+C/V copia e cola
@@ -2813,6 +3050,18 @@ export default function App() {
         onOpenWorldMap={() => {
           setMapFocusTruckId(null);
           setShowWorldMapModal(true);
+        }}
+      />
+
+      <MissionEditorModal
+        open={showMissionEditorModal}
+        initialHubId={missionEditorHubId}
+        onClose={() => setShowMissionEditorModal(false)}
+        onWorldChanged={() => {
+          const scene = getMainScene();
+          if (scene?.world) {
+            scene.world.version++;
+          }
         }}
       />
 

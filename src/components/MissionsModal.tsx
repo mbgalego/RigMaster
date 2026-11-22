@@ -69,7 +69,12 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
     }
   }, [open, currentHubId]);
 
-  const hubs = useMemo(() => GarageSystem.getInstance().getHubs(), [open]);
+  const [hubsVersion, setHubsVersion] = useState(0);
+  const [missionsVersion, setMissionsVersion] = useState(0);
+  useEffect(() => GarageSystem.getInstance().subscribe(() => setHubsVersion((v) => v + 1)), []);
+  useEffect(() => MissionSystem.getInstance().subscribe(() => setMissionsVersion((v) => v + 1)), []);
+
+  const hubs = useMemo(() => GarageSystem.getInstance().getHubs(), [open, hubsVersion]);
   const repSys = ReputationSystem.getInstance();
   const misSys = MissionSystem.getInstance();
   const licSys = LicenseSystem.getInstance();
@@ -79,12 +84,12 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
 
   const availableMissions = useMemo(
     () => (open ? misSys.getAvailableMissions(selectedHub) : []),
-    [open, selectedHub, activeTruckType, gameMode, hubReputation, activeMission],
+    [open, selectedHub, activeTruckType, gameMode, hubReputation, activeMission, hubsVersion, missionsVersion],
   );
 
   const allHubMissions = useMemo(
     () => (open ? misSys.getAllHubMissions(selectedHub) : []),
-    [open, selectedHub, activeTruckType, gameMode, hubReputation],
+    [open, selectedHub, activeTruckType, gameMode, hubReputation, hubsVersion, missionsVersion],
   );
 
   const certificates = useMemo(
@@ -278,17 +283,30 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
             <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3.5 sm:px-6 py-3 sm:py-4 divide-y divide-slate-800/80">
               {displayedMissions.length === 0 ? (
                 <div className="py-10 text-center text-sm text-slate-400">
-                  Nenhuma missão disponível neste hub para o camião e licenças atuais.
-                  {lockedCount > 0 && (
-                    <div className="mt-2">
-                      <button
-                        type="button"
-                        onClick={() => setShowLocked(true)}
-                        className="text-cyan-400 hover:underline text-xs font-semibold"
-                      >
-                        Mostrar requisitos das {lockedCount} missões bloqueadas
-                      </button>
-                    </div>
+                  {allHubMissions.length === 0 ? (
+                    <>
+                      Este HUB ainda não tem missões configuradas.
+                      <div className="mt-1.5 text-xs text-slate-500">
+                        {selectedHubObj?.docks?.length
+                          ? `${selectedHubObj.docks.length} doca${selectedHubObj.docks.length > 1 ? 's' : ''} detetada${selectedHubObj.docks.length > 1 ? 's' : ''} no raio do HUB — cria rotas no Editor (botão Missões).`
+                          : 'Adicione pelo menos 1 Doca no Editor e crie rotas no botão Missões.'}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      Nenhuma missão disponível neste hub para o camião e licenças atuais.
+                      {lockedCount > 0 && (
+                        <div className="mt-2">
+                          <button
+                            type="button"
+                            onClick={() => setShowLocked(true)}
+                            className="text-cyan-400 hover:underline text-xs font-semibold"
+                          >
+                            Mostrar requisitos das {lockedCount} missões bloqueadas
+                          </button>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               ) : (
@@ -311,6 +329,11 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
                           <h3 className="text-sm font-semibold text-white">
                             {offer.title}
                           </h3>
+                          {offer.isCustom && (
+                            <span className="text-[10px] font-mono uppercase tracking-wider text-cyan-300 font-semibold">
+                              Personalizada
+                            </span>
+                          )}
                           <span className="text-[11px] sm:text-xs text-slate-400 font-mono tabular-nums">
                             {offer.originHubName} → {offer.targetHubName} ({distKm} km)
                           </span>

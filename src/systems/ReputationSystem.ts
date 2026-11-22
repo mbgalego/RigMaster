@@ -162,7 +162,7 @@ export const CERTIFICATE_IDS: CertificateId[] = [
   'Fragile_Expert',
 ];
 
-const HUB_IDS: HubId[] = ['harbor', 'shipyard', 'industrial', 'historic', 'serra'];
+const OFFICIAL_HUB_IDS: HubId[] = ['harbor', 'shipyard', 'industrial', 'historic', 'serra'];
 
 const STORAGE_KEYS = {
   hubReputation: 'rigmaster_hubReputation',
@@ -322,8 +322,25 @@ export class ReputationSystem {
 
   // ---- Reputation ----
 
+  /** Ensures dynamically added HUBs exist in career (0) and sandbox (10000) maps. */
+  public ensureHubIds(ids: HubId[]): void {
+    let changed = false;
+    for (const id of ids) {
+      if (!id) continue;
+      if (!(id in this.careerReputation)) {
+        this.careerReputation[id] = 0;
+        changed = true;
+      }
+      if (!(id in this.sandboxReputation)) {
+        this.sandboxReputation[id] = 10000;
+        changed = true;
+      }
+    }
+    if (changed) this.notify();
+  }
+
   public getHubReputation(hubId: HubId): number {
-    if (this.gameMode === 'sandbox') return this.sandboxReputation[hubId] ?? 0;
+    if (this.gameMode === 'sandbox') return this.sandboxReputation[hubId] ?? 10000;
     return this.careerReputation[hubId] ?? 0;
   }
 
@@ -334,12 +351,12 @@ export class ReputationSystem {
 
   public getTotalReputation(): number {
     const rep = this.gameMode === 'sandbox' ? this.sandboxReputation : this.careerReputation;
-    return HUB_IDS.reduce((sum, id) => sum + (rep[id] ?? 0), 0);
+    return Object.values(rep).reduce((sum, val) => sum + (val ?? 0), 0);
   }
 
   public getMaxSingleHubReputation(): number {
     const rep = this.gameMode === 'sandbox' ? this.sandboxReputation : this.careerReputation;
-    return HUB_IDS.reduce((m, id) => Math.max(m, rep[id] ?? 0), 0);
+    return Object.values(rep).reduce((m, val) => Math.max(m, val ?? 0), 0);
   }
 
   /**
@@ -505,7 +522,7 @@ export class ReputationSystem {
 
     if (req.minHubRep) {
       if (req.minHubRep.hubId === 'any') {
-        const maxCareerRep = HUB_IDS.reduce((m, id) => Math.max(m, this.careerReputation[id] ?? 0), 0);
+        const maxCareerRep = Object.values(this.careerReputation).reduce((m, val) => Math.max(m, val ?? 0), 0);
         if (maxCareerRep < req.minHubRep.amount) return false;
       } else {
         if ((this.careerReputation[req.minHubRep.hubId] ?? 0) < req.minHubRep.amount) return false;
@@ -762,11 +779,17 @@ export class ReputationSystem {
     const rawRep = safeGetStorage(STORAGE_KEYS.hubReputation);
     if (rawRep) {
       try {
-        const parsed = JSON.parse(rawRep) as Partial<Record<HubId, unknown>>;
-        for (const id of HUB_IDS) {
-          const val = parsed[id];
-          if (typeof val === 'number' && Number.isFinite(val) && val >= 0) {
-            this.careerReputation[id] = Math.round(val);
+        const parsed = JSON.parse(rawRep) as Record<string, unknown>;
+        if (parsed && typeof parsed === 'object') {
+          for (const [id, val] of Object.entries(parsed)) {
+            if (typeof val === 'number' && Number.isFinite(val) && val >= 0) {
+              this.careerReputation[id] = Math.round(val);
+            }
+          }
+        }
+        for (const id of OFFICIAL_HUB_IDS) {
+          if (typeof this.careerReputation[id] !== 'number') {
+            this.careerReputation[id] = 0;
           }
         }
       } catch {
@@ -838,8 +861,8 @@ export class ReputationSystem {
             if (!saved) continue;
             if (typeof saved.unlocked === 'boolean') base.unlocked = base.unlocked || saved.unlocked;
             if (typeof saved.claimed === 'boolean') base.claimed = saved.claimed;
-            if (typeof saved.locationHub === 'string' && HUB_IDS.includes(saved.locationHub as HubId)) {
-              base.locationHub = saved.locationHub as HubId;
+            if (typeof saved.locationHub === 'string' && saved.locationHub.trim().length > 0) {
+              base.locationHub = saved.locationHub.trim();
             }
             if (typeof saved.x === 'number' && Number.isFinite(saved.x)) base.x = saved.x;
             if (typeof saved.y === 'number' && Number.isFinite(saved.y)) base.y = saved.y;

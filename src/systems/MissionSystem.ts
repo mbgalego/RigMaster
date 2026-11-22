@@ -41,6 +41,10 @@ export interface MissionTemplate {
   isOffroadRoute?: boolean;
   /** Optional weather bias/hazard tag (e.g., rain on extreme ADR). */
   weatherHazard?: WeatherModifier;
+  /** Optional WorldObject ID of the exact destination dock (survives dock reordering). */
+  targetDockId?: string;
+  /** True for player-authored missions created in the Map Editor. */
+  isCustom?: boolean;
 }
 
 export interface MissionOffer extends MissionTemplate {
@@ -71,6 +75,22 @@ export const TRAILER_TYPE_LABELS: Record<TrailerType, string> = {
   fragile_glass: 'Vidro Frágil',
   tanker_hazmat: 'Cisterna ADR',
 };
+
+/** Lead trailer types available for selection in the Mission Editor (pups auto-pair with their leads). */
+export const EDITABLE_MISSION_TRAILER_TYPES: TrailerType[] = [
+  'standard',
+  'container',
+  'reefer',
+  'tanker_milk',
+  'timber',
+  'long_cargo',
+  'flatbed_heavy',
+  'tanker_fuel',
+  'bitrem_lead',
+  'bitrem_tanker_lead',
+  'fragile_glass',
+  'tanker_hazmat',
+];
 
 /** Single source of truth for active mission navigation (world GPS arrow, minimap, world map, HUD). */
 export interface MissionNavTarget {
@@ -553,6 +573,7 @@ export class MissionSystem {
   private activeMission: ActiveMissionState | null = null;
   private lastCompletion: MissionCompletionResult | null = null;
   private completedMissionCount: number = 0;
+  private customMissions: MissionTemplate[] = [];
   private listeners: Array<() => void> = [];
 
   public static getInstance(): MissionSystem {
@@ -565,6 +586,218 @@ export class MissionSystem {
   /** Test helper to reset singleton cleanly. */
   public static resetInstanceForTests(): void {
     MissionSystem.instance = null;
+  }
+
+  /** Returns copies of all custom missions stored in the active world. */
+  public getCustomMissions(): MissionTemplate[] {
+    return this.customMissions.map((m) => ({
+      ...m,
+      requiredCertificates: [...m.requiredCertificates],
+      isCustom: true,
+    }));
+  }
+
+  /** Returns official + custom mission templates combined. */
+  public getAllTemplates(): MissionTemplate[] {
+    return [...MISSION_TEMPLATES, ...this.customMissions];
+  }
+
+  /** Replaces all custom missions (called when loading/importing/undoing a World JSON). */
+  public setCustomMissions(rawList: unknown[]): void {
+    const validTrailers = new Set<string>(EDITABLE_MISSION_TRAILER_TYPES);
+    const validLicenses = new Set<LicenseId>(['C', 'CE', 'H', 'X']);
+    const validAxles = new Set<AxleConfig>(['4x2', '6x4', '8x4']);
+    const seen = new Set<string>();
+    const sanitized: MissionTemplate[] = [];
+
+    for (const item of rawList) {
+      if (!item || typeof item !== 'object') continue;
+      const r = item as Record<string, any>;
+      const id = typeof r.id === 'string' && r.id.trim() ? r.id.trim() : '';
+      const title = typeof r.title === 'string' && r.title.trim() ? r.title.trim().slice(0, 64) : '';
+      const originHub = typeof r.originHub === 'string' && r.originHub.trim() ? r.originHub.trim() : '';
+      const targetHub = typeof r.targetHub === 'string' && r.targetHub.trim() ? r.targetHub.trim() : '';
+      if (!id || !title || !originHub || !targetHub || seen.has(id)) continue;
+      seen.add(id);
+
+      const trailerType: TrailerType = validTrailers.has(r.trailerType) ? r.trailerType : 'standard';
+      const requiredLicense: LicenseId = validLicenses.has(r.requiredLicense) ? r.requiredLicense : 'C';
+      const requiredAxleConfig: AxleConfig = validAxles.has(r.requiredAxleConfig) ? r.requiredAxleConfig : '4x2';
+      const targetDockIndex = Number.isFinite(Number(r.targetDockIndex)) ? Math.max(0, Math.floor(Number(r.targetDockIndex))) : 0;
+      const baseReputation = Number.isFinite(Number(r.baseReputation))
+        ? Math.max(50, Math.min(2500, Math.round(Number(r.baseReputation))))
+        : 320;
+      const targetTimeSec = Number.isFinite(Number(r.targetTimeSec))
+        ? Math.max(45, Math.min(1800, Math.round(Number(r.targetTimeSec))))
+        : 240;
+
+      sanitized.push({
+        id,
+        title,
+        description:
+          typeof r.description === 'string' && r.description.trim()
+            ? r.description.trim().slice(0, 160)
+            : `Entrega personalizada para ${targetHub}.`,
+        originHub,
+        targetHub,
+        targetDockIndex,
+        targetDockId: typeof r.targetDockId === 'string' && r.targetDockId.trim() ? r.targetDockId.trim() : undefined,
+        trailerType,
+        requiredLicense,
+        requiredAxleConfig,
+        requiredCertificates: Array.isArray(r.requiredCertificates)
+          ? (r.requiredCertificates.filter((c: unknown) => typeof c === 'string') as CertificateId[])
+          : [],
+        minOriginHubRep:
+          Number.isFinite(Number(r.minOriginHubRep)) && Number(r.minOriginHubRep) > 0
+            ? Math.round(Number(r.minOriginHubRep))
+            : undefined,
+        baseReputation,
+        targetTimeSec,
+        nightRecommended: Boolean(r.nightRecommended),
+        isOffroadRoute: Boolean(r.isOffroadRoute),
+        weatherHazard:
+          r.weatherHazard === 'rain' || r.weatherHazard === 'fog' || r.weatherHazard === 'night' || r.weatherHazard === 'clear'
+            ? r.weatherHazard
+            : undefined,
+        isCustom: true,
+      });
+    }
+
+    this.customMissions = sanitized;
+
+    // If active mission was a custom mission that no longer exists, cancel it cleanly.
+    if (
+      this.activeMission?.mission.isCustom &&
+      !this.customMissions.some((m) => m.id === this.activeMission?.mission.id)
+    ) {
+      this.activeMission = null;
+    }
+
+    this.notify();
+  }
+
+  /** Creates or updates a custom mission template and notifies listeners. */
+  public upsertCustomMission(
+    input: Omit<MissionTemplate, 'id' | 'isCustom'> & { id?: string },
+  ): MissionTemplate {
+    let id = input.id?.trim() ?? '';
+    if (!id || MISSION_TEMPLATES.some((t) => t.id === id)) {
+      let n = this.customMissions.length + 1;
+      while (this.customMissions.some((m) => m.id === `custom_mis_${n}`)) n++;
+      id = `custom_mis_${n}`;
+    }
+
+    const template: MissionTemplate = {
+      ...input,
+      id,
+      title: input.title.trim().slice(0, 64) || 'Missão Personalizada',
+      description: input.description.trim().slice(0, 160) || 'Transporte personalizado entre HUBs.',
+      targetDockIndex: Math.max(0, Math.floor(input.targetDockIndex || 0)),
+      targetDockId: input.targetDockId?.trim() || undefined,
+      requiredCertificates: [...(input.requiredCertificates ?? [])],
+      baseReputation: Math.max(50, Math.min(2500, Math.round(input.baseReputation || 300))),
+      targetTimeSec: Math.max(45, Math.min(1800, Math.round(input.targetTimeSec || 240))),
+      nightRecommended: Boolean(input.nightRecommended),
+      isOffroadRoute: Boolean(input.isOffroadRoute),
+      isCustom: true,
+    };
+
+    const idx = this.customMissions.findIndex((m) => m.id === id);
+    if (idx >= 0) {
+      this.customMissions[idx] = template;
+    } else {
+      this.customMissions.push(template);
+    }
+
+    this.notify();
+    return { ...template, requiredCertificates: [...template.requiredCertificates] };
+  }
+
+  /** Deletes a custom mission by ID. Returns true if found and removed. */
+  public deleteCustomMission(id: string): boolean {
+    const before = this.customMissions.length;
+    this.customMissions = this.customMissions.filter((m) => m.id !== id);
+    if (this.customMissions.length === before) return false;
+    if (this.activeMission?.mission.id === id) {
+      this.activeMission = null;
+    }
+    this.notify();
+    return true;
+  }
+
+  /** Computes suggested base reputation, target time, distance, and risk for the Mission Editor. */
+  public computeSuggestedMissionStats(params: {
+    originHub: HubId;
+    targetHub: HubId;
+    targetDockIndex: number;
+    targetDockId?: string;
+    trailerType: TrailerType;
+    isOffroadRoute?: boolean;
+    nightRecommended?: boolean;
+  }): {
+    distancePx: number;
+    suggestedBaseRep: number;
+    suggestedTimeSec: number;
+    riskMultiplier: number;
+    estimatedRepByRating: Record<MissionRating, number>;
+  } {
+    const garage = GarageSystem.getInstance();
+    const originHubData = garage.getHub(params.originHub);
+    const targetHubData = garage.getHub(params.targetHub);
+    const matchedDock =
+      (params.targetDockId
+        ? targetHubData.docks.find((d) => d.id === params.targetDockId)
+        : undefined) ?? garage.getHubDock(params.targetHub, params.targetDockIndex);
+
+    const distancePx = Math.round(
+      Math.hypot(
+        matchedDock.x - originHubData.locationWorld.x,
+        matchedDock.y - originHubData.locationWorld.y,
+      ),
+    );
+    const cargoFactor = CARGO_RISK_WEIGHT[params.trailerType] ?? 1.0;
+    const rawRep = (220 + (distancePx / 1000) * 34) * cargoFactor + (params.isOffroadRoute ? 60 : 0) + (params.nightRecommended ? 45 : 0);
+    const suggestedBaseRep = Math.max(150, Math.min(1400, Math.round(rawRep / 10) * 10));
+    const speedPxPerSec = params.isOffroadRoute ? 32 : 42;
+    const suggestedTimeSec = Math.max(90, Math.min(900, Math.round((75 + distancePx / speedPxPerSec) / 10) * 10));
+
+    const previewTemplate: MissionTemplate = {
+      id: '_preview',
+      title: '_preview',
+      description: '',
+      originHub: params.originHub,
+      targetHub: params.targetHub,
+      targetDockIndex: params.targetDockIndex,
+      targetDockId: params.targetDockId,
+      trailerType: params.trailerType,
+      requiredLicense: 'C',
+      requiredAxleConfig: '4x2',
+      requiredCertificates: [],
+      baseReputation: suggestedBaseRep,
+      targetTimeSec: suggestedTimeSec,
+      isOffroadRoute: params.isOffroadRoute,
+      nightRecommended: params.nightRecommended,
+    };
+    const riskMultiplier = this.computeRiskMultiplier(
+      previewTemplate,
+      distancePx,
+      garage.getActiveModifier(),
+    );
+    const estimatedRepByRating: Record<MissionRating, number> = {
+      S: Math.round(suggestedBaseRep * RATING_MULTIPLIERS.S * riskMultiplier),
+      A: Math.round(suggestedBaseRep * RATING_MULTIPLIERS.A * riskMultiplier),
+      B: Math.round(suggestedBaseRep * RATING_MULTIPLIERS.B * riskMultiplier),
+      C: Math.round(suggestedBaseRep * RATING_MULTIPLIERS.C * riskMultiplier),
+    };
+
+    return {
+      distancePx,
+      suggestedBaseRep,
+      suggestedTimeSec,
+      riskMultiplier,
+      estimatedRepByRating,
+    };
   }
 
   /** Computes combined risk multiplier from cargo, distance, weather/night, and off-road route. */
@@ -588,7 +821,10 @@ export class MissionSystem {
     const garage = GarageSystem.getInstance();
     const originHubData = garage.getHub(template.originHub);
     const targetHubData = garage.getHub(template.targetHub);
-    const targetDock = garage.getHubDock(template.targetHub, template.targetDockIndex);
+    const targetDock =
+      (template.targetDockId
+        ? targetHubData.docks.find((d) => d.id === template.targetDockId)
+        : undefined) ?? garage.getHubDock(template.targetHub, template.targetDockIndex);
     const distancePx = Math.round(
       Math.hypot(
         targetDock.x - originHubData.locationWorld.x,
@@ -652,7 +888,7 @@ export class MissionSystem {
    * in Career mode (all visible in Sandbox mode).
    */
   public getAvailableMissions(hubId?: HubId): MissionOffer[] {
-    return MISSION_TEMPLATES.filter((t) => {
+    return this.getAllTemplates().filter((t) => {
       if (hubId && t.originHub !== hubId) return false;
       return this.canAccessMission(t);
     }).map((t) => this.buildOffer(t));
@@ -660,7 +896,7 @@ export class MissionSystem {
 
   /** Returns all templates for a hub (useful for Sandbox/debug inspection). */
   public getAllHubMissions(hubId: HubId): MissionOffer[] {
-    return MISSION_TEMPLATES.filter((t) => t.originHub === hubId).map((t) => this.buildOffer(t));
+    return this.getAllTemplates().filter((t) => t.originHub === hubId).map((t) => this.buildOffer(t));
   }
 
   public getActiveMission(): ActiveMissionState | null {
@@ -702,7 +938,7 @@ export class MissionSystem {
         reason: 'Já existe uma missão ativa — cancele-a primeiro antes de aceitar outra.',
       };
     }
-    const template = MISSION_TEMPLATES.find((t) => t.id === missionId);
+    const template = this.getAllTemplates().find((t) => t.id === missionId);
     if (!template) return { ok: false, reason: 'Missão não encontrada.' };
     if (!this.canAccessMission(template)) {
       return { ok: false, reason: 'Requisitos de licença, camião ou certificado não cumpridos.' };
