@@ -32,8 +32,8 @@ export class MinimapScene extends Phaser.Scene {
     this.cameras.main.setZoom(1);
     this.cameras.main.setScroll(0, 0);
 
-    const mmW = Math.round((World.WORLD_W / 128) * MinimapScene.PX_PER_TILE);
-    const mmH = Math.round((World.WORLD_H / 128) * MinimapScene.PX_PER_TILE);
+    const mmW = Math.round((World.WORLD_SPAN_W / 128) * MinimapScene.PX_PER_TILE);
+    const mmH = Math.round((World.WORLD_SPAN_H / 128) * MinimapScene.PX_PER_TILE);
 
     if (this.textures.exists('minimap_base')) this.textures.remove('minimap_base');
     const texture = this.textures.createCanvas('minimap_base', mmW, mmH);
@@ -106,17 +106,32 @@ export class MinimapScene extends Phaser.Scene {
     const px = MinimapScene.PX_PER_TILE;
     const mmW = texture.width;
     const mmH = texture.height;
-    const scale = mmW / World.WORLD_W;
+    const minX = World.WORLD_MIN_X;
+    const minY = World.WORLD_MIN_Y;
+    const scaleX = mmW / World.WORLD_SPAN_W;
+    const scaleY = mmH / World.WORLD_SPAN_H;
+    const scale = Math.min(scaleX, scaleY);
 
-    ctx.fillStyle = '#0a2338';
+    ctx.fillStyle = '#091f33';
     ctx.fillRect(0, 0, mmW, mmH);
     const terrain = mainScene.world.terrain;
-    for (let my = 0; my < mmH; my++) {
-      for (let mx = 0; mx < mmW; mx++) {
-        const wx = mx / scale;
-        const wy = my / scale;
-        if (terrain.isWater(wx, wy)) continue;
-        ctx.fillStyle = terrain.isBeach(wx, wy) ? '#8a744d' : '#22381f';
+    for (let my = 0; my < mmH; my += px) {
+      for (let mx = 0; mx < mmW; mx += px) {
+        const wx = minX + mx / scaleX;
+        const wy = minY + my / scaleY;
+        const m = terrain.coastMetric(wx, wy);
+        if (m < -60) continue;
+        if (m < 40) {
+          ctx.fillStyle = '#11344e';
+        } else if (m < 130) {
+          ctx.fillStyle = (wx < -1200 || wy < -1200) ? '#555e67' : '#8a744d';
+        } else {
+          const alt = terrain.elevationAt(wx, wy);
+          if (alt >= 460) ctx.fillStyle = '#8b99a8';
+          else if (alt >= 260) ctx.fillStyle = '#556370';
+          else if (alt >= 55) ctx.fillStyle = '#1c3b25';
+          else ctx.fillStyle = '#22381f';
+        }
         ctx.fillRect(mx, my, px, px);
       }
     }
@@ -129,8 +144,8 @@ export class MinimapScene extends Phaser.Scene {
       const tracePath = () => {
         ctx.beginPath();
         road.points.forEach((p, i) => {
-          const mx = p.x * scale;
-          const my = p.y * scale;
+          const mx = (p.x - minX) * scaleX;
+          const my = (p.y - minY) * scaleY;
           if (i === 0) ctx.moveTo(mx, my); else ctx.lineTo(mx, my);
         });
         if (road.closed) ctx.closePath();
@@ -151,13 +166,15 @@ export class MinimapScene extends Phaser.Scene {
 
     for (const o of mainScene.world.objects.objects) {
       let color: string | null = null;
+      let sz = px;
       if (o.type === 'dock' || o.type === 'exam_dock') color = '#eab308';
       else if (o.type === 'parking_pad') color = '#94a3b8';
       else if (o.type === 'building' || o.type === 'silo') color = '#475569';
       else if (o.type === 'gas_pump') color = '#34d058';
+      else if (o.type === 'wind_turbine') { color = '#e0f2fe'; sz = px + 1.5; }
       if (!color) continue;
       ctx.fillStyle = color;
-      ctx.fillRect(o.x * scale - px / 2, o.y * scale - px / 2, px, px);
+      ctx.fillRect((o.x - minX) * scaleX - sz / 2, (o.y - minY) * scaleY - sz / 2, sz, sz);
     }
     texture.refresh();
   }
@@ -168,12 +185,14 @@ export class MinimapScene extends Phaser.Scene {
     if (!g || !img) return;
     g.clear();
 
-    const worldW = World.WORLD_W;
-    const worldH = World.WORLD_H;
+    const minX = World.WORLD_MIN_X;
+    const minY = World.WORLD_MIN_Y;
+    const worldW = World.WORLD_SPAN_W;
+    const worldH = World.WORLD_SPAN_H;
     const w = MinimapScene.getDisplaySize(this.scale.width);
     const h = w;
-    const toMapX = (wx: number) => img.x + (wx / worldW) * w;
-    const toMapY = (wy: number) => img.y + (wy / worldH) * h;
+    const toMapX = (wx: number) => img.x + ((wx - minX) / worldW) * w;
+    const toMapY = (wy: number) => img.y + ((wy - minY) / worldH) * h;
 
     // Cyan border glow
     g.lineStyle(2, 0x22d3ee, 0.9);

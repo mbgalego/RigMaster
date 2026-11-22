@@ -1,9 +1,8 @@
 import type { TrailerType } from '../entities/Trailer';
 import { ReputationSystem } from './ReputationSystem';
 
-export type HubId = 'harbor' | 'shipyard' | 'industrial' | 'historic';
-/** Prepared for future biome expansion (Serra / Pedreira). */
-export type FutureHubId = HubId | 'serra';
+export type HubId = 'harbor' | 'shipyard' | 'industrial' | 'historic' | 'serra';
+export type FutureHubId = HubId;
 export type WeatherModifier = 'clear' | 'rain' | 'fog' | 'night';
 
 export interface HubDockSpec {
@@ -204,6 +203,52 @@ export class GarageSystem {
             completed: false,
             targetX: 12160,
             targetY: 8560,
+          },
+        ],
+      },
+      serra: {
+        id: 'serra',
+        name: 'Serra dos Ventos',
+        badge: 'SERRA',
+        color: '#10b981',
+        neonColorHex: 0x10b981,
+        locationWorld: { x: -2350, y: -550 },
+        regionRadius: 3400,
+        specialization: 'Montanha / Parque Eólico & Madeireiros',
+        exclusiveTrailers: ['timber', 'long_cargo', 'flatbed_heavy', 'tanker_fuel', 'standard'],
+        garageIds: ['wo_310'],
+        docks: [
+          { id: 'wo_301', label: 'Serraria — Pátio Madeireiro', x: -2520, y: -720, width: 96, height: 280, requiredAngleDeg: 0 },
+          { id: 'wo_302', label: 'Parque Eólico — Cume Norte', x: -3500, y: -3050, width: 104, height: 320, requiredAngleDeg: 0 },
+          { id: 'wo_303', label: 'Parque Eólico — Subestação', x: -3220, y: -3050, width: 100, height: 300, requiredAngleDeg: 0 },
+        ],
+        progress: 0,
+        isDominant: false,
+        unlockedBiomeTiles: ['wind_turbine', 'log_pile', 'rock_outcrop', 'pine_tree'],
+        unlockedModifier: 'fog',
+        description: 'Expansão montanhosa a noroeste com zona de madeireiros (210 m), curvas em serpentina e parque eólico no cume (640 m).',
+        contracts: [
+          {
+            id: 'serra_01',
+            title: 'Extração Florestal para o Porto Comercial',
+            sourceHub: 'serra',
+            targetHub: 'harbor',
+            cargoDescription: 'Toros de pinheiro alpino cortados na serraria da serra.',
+            rewardProgress: 50,
+            completed: false,
+            targetX: 509,
+            targetY: 795,
+          },
+          {
+            id: 'serra_02',
+            title: 'Pá Eólica 62m para o Parque do Cume',
+            sourceHub: 'serra',
+            targetHub: 'serra',
+            cargoDescription: 'Subida técnica pelas curvas em serpentina até aos 640 m de altitude.',
+            rewardProgress: 50,
+            completed: false,
+            targetX: -3500,
+            targetY: -3050,
           },
         ],
       },

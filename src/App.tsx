@@ -97,6 +97,8 @@ import {
   ClipboardList,
   Map as MapIcon,
   FlaskConical,
+  TrendingUp,
+  TrendingDown,
 } from 'lucide-react';
 
 /** Catálogo do Criar, organizado por categorias — cada categoria tem o seu
@@ -234,6 +236,8 @@ const CREATE_CATALOG: Array<{
       { spec: { type: 'sign', w: 22, h: 22, variant: 'speed', label: 'Limite 50' }, icon: Gauge },
       { spec: { type: 'sign', w: 22, h: 22, variant: 'no_parking', label: 'Proibido Estacionar' }, icon: Ban },
       { spec: { type: 'sign', w: 22, h: 22, variant: 'pedestrian', label: 'Peões' }, icon: PersonStanding },
+      { spec: { type: 'sign', w: 36, h: 36, variant: 'steep_uphill', label: 'Subida Acentuada' }, icon: TrendingUp },
+      { spec: { type: 'sign', w: 36, h: 36, variant: 'steep_downhill', label: 'Descida Acentuada' }, icon: TrendingDown },
       { spec: { type: 'traffic_light', w: 22, h: 22, params: { dir: 'n', group: 0 }, label: 'Semáforo' }, icon: Lamp },
       { spec: { type: 'lamp', w: 14, h: 14, label: 'Candeeiro' }, icon: Lamp },
     ],
@@ -257,6 +261,17 @@ const CREATE_CATALOG: Array<{
       { spec: { type: 'building', w: 240, h: 136, variant: 'convenience_store', label: 'Loja Conveniência' }, icon: Store },
       { spec: { type: 'air_water', w: 64, h: 36, label: 'Ar / Água / Aspirador' }, icon: Wind },
       { spec: { type: 'price_sign', w: 50, h: 96, label: 'Totem Preços' }, icon: Gauge },
+    ],
+  },
+  {
+    id: 'serra',
+    label: 'Serra',
+    icon: Mountain,
+    items: [
+      { spec: { type: 'wind_turbine', w: 120, h: 120, label: 'Torre Eólica' }, icon: Wind },
+      { spec: { type: 'log_pile', w: 170, h: 64, label: 'Pilha de Toros' }, icon: Layers },
+      { spec: { type: 'rock_outcrop', w: 96, h: 84, label: 'Afloramento Rochoso' }, icon: Mountain },
+      { spec: { type: 'pine_tree', w: 72, h: 72, label: 'Pinheiro Alpino' }, icon: Mountain },
     ],
   },
 ];
@@ -390,9 +405,11 @@ export default function App() {
     activeTruckUpgrades: { ...DEFAULT_TRUCK_UPGRADES },
     truckWear: createCleanTruckWear(),
     brakeHeat: 0,
+    altitudeM: 0,
+    gradePercent: 0,
     nearbySwapTruck: null,
     currentHubId: 'harbor',
-    hubReputation: { harbor: 0, shipyard: 0, industrial: 0, historic: 0 },
+    hubReputation: { harbor: 0, shipyard: 0, industrial: 0, historic: 0, serra: 0 },
     activeMission: null,
     missionNavTarget: null,
     lastMissionCompletion: null,
@@ -581,9 +598,9 @@ export default function App() {
           `${t.nearbyPump ? `${t.nearbyPump.x},${t.nearbyPump.y}` : ''}|` +
           `${t.nearbyRepairBay ? `${t.nearbyRepairBay.x},${t.nearbyRepairBay.y}` : ''}|` +
           `${t.gameMode}|${t.activeTruckId}|${t.activeTruckUpgrades.engine},${t.activeTruckUpgrades.brakes},${t.activeTruckUpgrades.suspension},${t.activeTruckUpgrades.tires}|` +
-          `${Math.round(t.truckWear.engine)},${Math.round(t.truckWear.brakes)},${Math.round(t.truckWear.tires)}|${Math.round(t.brakeHeat * 20)}|` +
+          `${Math.round(t.truckWear.engine)},${Math.round(t.truckWear.brakes)},${Math.round(t.truckWear.tires)}|${Math.round(t.brakeHeat * 20)}|${Math.round(t.altitudeM / 5)},${Math.round(t.gradePercent)}|` +
           `${t.nearbySwapTruck ? `${t.nearbySwapTruck.id}:${Math.round(t.nearbySwapTruck.dist)}` : ''}|${t.currentHubId}|` +
-          `${t.hubReputation.harbor},${t.hubReputation.shipyard},${t.hubReputation.industrial},${t.hubReputation.historic}|` +
+          `${t.hubReputation.harbor},${t.hubReputation.shipyard},${t.hubReputation.industrial},${t.hubReputation.historic},${t.hubReputation.serra}|` +
           `${am ? `${am.mission.id}:${am.phase}:${Math.floor(am.elapsedSec)}:${am.collisions}:${Math.round(am.minCargoHealth)}:${am.inTargetDock ? 1 : 0}:${am.dockHoldSec.toFixed(1)}` : ''}|` +
           `${nav ? `${nav.phase}:${Math.round(nav.distPx / 100)}:${nav.pickupHubName}:${nav.hasWrongTrailerCoupled ? 1 : 0}:${nav.needsPupOnly ? 1 : 0}` : ''}|` +
           `${lmc ? lmc.completedAt : ''}|` +
@@ -973,20 +990,6 @@ export default function App() {
             <span className={`font-mono text-xs font-black ${telemetry.isReversing ? 'text-amber-400' : 'text-cyan-400'}`}>
               {telemetry.isReversing ? 'R' : 'D'}
             </span>
-            {telemetry.truckHealth < 100 && (
-              <>
-                <div className="w-px h-3 bg-white/20" />
-                <span
-                  className={`flex items-center gap-1 whitespace-nowrap font-mono text-xs font-black ${
-                    telemetry.truckHealth < 35 ? 'text-red-400 animate-pulse' : telemetry.truckHealth < 70 ? 'text-amber-300' : 'text-slate-200'
-                  }`}
-                  title={`Integridade do Camião — Motor ${telemetry.truckDamage.engine}% · Direção ${telemetry.truckDamage.steering}% · Chassi ${telemetry.truckDamage.chassis}% · Luzes ${telemetry.truckDamage.lights}% (Fr E:${Math.round(telemetry.truckDamage.leftLight)}% D:${Math.round(telemetry.truckDamage.rightLight)}% · Tr Stop:${Math.round(Math.min(telemetry.truckDamage.rearLights.brakeLeft, telemetry.truckDamage.rearLights.brakeRight))}% MA:${Math.round(Math.min(telemetry.truckDamage.rearLights.reverseLeft, telemetry.truckDamage.rearLights.reverseRight))}%)`}
-                >
-                  <Wrench className="w-3 h-3" />
-                  {telemetry.truckHealth}%
-                </span>
-              </>
-            )}
             {telemetry.brakeHeat >= 0.45 && (
               <>
                 <div className="w-px h-3 bg-white/20" />
@@ -997,6 +1000,24 @@ export default function App() {
                   title="Temperatura dos travões (fade térmico acima de 55%)"
                 >
                   Travões {Math.round(telemetry.brakeHeat * 100)}%
+                </span>
+              </>
+            )}
+            {(telemetry.altitudeM >= 25 || Math.abs(telemetry.gradePercent) >= 2.5) && (
+              <>
+                <div className="w-px h-3 bg-white/20" />
+                <span
+                  data-testid="hud-mountain-altitude"
+                  className="flex items-center gap-1 whitespace-nowrap font-mono tabular-nums text-xs font-bold text-emerald-300"
+                  title={`Altitude ${telemetry.altitudeM}m · Inclinação ${telemetry.gradePercent > 0 ? '+' : ''}${telemetry.gradePercent.toFixed(1)}%`}
+                >
+                  <Mountain className="w-3 h-3 text-emerald-400" />
+                  <span>{telemetry.altitudeM}m</span>
+                  {Math.abs(telemetry.gradePercent) >= 1.5 && (
+                    <span className={telemetry.gradePercent > 0 ? 'text-amber-300' : 'text-sky-300'}>
+                      {telemetry.gradePercent > 0 ? `+${Math.round(telemetry.gradePercent)}%` : `${Math.round(telemetry.gradePercent)}%`}
+                    </span>
+                  )}
                 </span>
               </>
             )}

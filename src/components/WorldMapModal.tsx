@@ -4,6 +4,7 @@ import { GarageSystem, type HubId } from '../systems/GarageSystem';
 import { ReputationSystem, type FleetTruckState, type GameMode } from '../systems/ReputationSystem';
 import { TRUCK_CATALOG } from '../systems/TruckCatalog';
 import type { ActiveMissionState, MissionNavTarget } from '../systems/MissionSystem';
+import { World } from '../world/World';
 import type { MainScene } from '../scenes/MainScene';
 
 interface WorldMapModalProps {
@@ -21,8 +22,10 @@ interface WorldMapModalProps {
   onSwapTruck: (truckId: string, remoteSandbox: boolean) => void;
 }
 
-const WORLD_W = 13824;
-const WORLD_H = 10240;
+const WORLD_MIN_X = World.WORLD_MIN_X;
+const WORLD_MIN_Y = World.WORLD_MIN_Y;
+const WORLD_SPAN_W = World.WORLD_SPAN_W;
+const WORLD_SPAN_H = World.WORLD_SPAN_H;
 
 export const WorldMapModal: React.FC<WorldMapModalProps> = ({
   open,
@@ -83,6 +86,70 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
     [open, scene],
   );
 
+  const windTurbines = useMemo(
+    () =>
+      open && scene?.world?.objects
+        ? scene.world.objects.objects.filter((o) => o.type === 'wind_turbine')
+        : [],
+    [open, scene],
+  );
+
+  // Bake true terrain coastline, ocean depth, foothills, mountain relief & contour isolines once from WorldTerrain
+  const terrainBackdropUrl = useMemo(() => {
+    const terrain = scene?.world?.terrain;
+    if (!terrain || typeof document === 'undefined') return null;
+    const cw = 360;
+    const ch = Math.round((WORLD_SPAN_H / WORLD_SPAN_W) * cw);
+    const canvas = document.createElement('canvas');
+    canvas.width = cw;
+    canvas.height = ch;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    const img = ctx.createImageData(cw, ch);
+    const buf = img.data;
+    const stepX = WORLD_SPAN_W / cw;
+    const stepY = WORLD_SPAN_H / ch;
+
+    for (let py = 0; py < ch; py++) {
+      const wy = WORLD_MIN_Y + (py + 0.5) * stepY;
+      for (let px = 0; px < cw; px++) {
+        const wx = WORLD_MIN_X + (px + 0.5) * stepX;
+        const m = terrain.coastMetric(wx, wy);
+        let r = 11, g = 25, b = 39; // deep ocean
+        if (m >= -90 && m < 40) {
+          r = 16; g = 45; b = 68; // shallow coastal water
+        } else if (m >= 40 && m < 130) {
+          if (wx < -1200 || wy < -1200) { r = 74; g = 84; b = 94; }
+          else { r = 116; g = 102; b = 74; }
+        } else if (m >= 130) {
+          const alt = terrain.elevationAt(wx, wy);
+          if (alt >= 500) { r = 84; g = 98; b = 112; }
+          else if (alt >= 280) { r = 53; g = 67; b = 79; }
+          else if (alt >= 55) { r = 24; g = 54; b = 42; }
+          else { r = 20; g = 42; b = 52; }
+          // Subtle contour rings every 100m on mountain slopes
+          if (alt >= 60) {
+            const band = Math.floor(alt / 100);
+            const altR = terrain.elevationAt(wx + stepX, wy);
+            const altD = terrain.elevationAt(wx, wy + stepY);
+            if (Math.floor(altR / 100) !== band || Math.floor(altD / 100) !== band) {
+              r = Math.min(255, r + 24);
+              g = Math.min(255, g + 28);
+              b = Math.min(255, b + 32);
+            }
+          }
+        }
+        const idx = (py * cw + px) * 4;
+        buf[idx] = r;
+        buf[idx + 1] = g;
+        buf[idx + 2] = b;
+        buf[idx + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    return canvas.toDataURL('image/png');
+  }, [scene]);
+
   if (!open) return null;
 
   const focusedTruck: FleetTruckState | null =
@@ -127,11 +194,39 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
         <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden overscroll-contain">
           <div className="shrink-0 lg:shrink lg:flex-1 bg-[#0b1320] p-2 sm:p-3 flex items-center justify-center overflow-hidden">
             <svg
-              viewBox={`0 0 ${WORLD_W} ${WORLD_H}`}
-              className="w-full h-auto lg:h-full max-h-[52dvh] lg:max-h-[65vh] rounded-lg border border-slate-800 bg-[#0d1926]"
+              viewBox={`${WORLD_MIN_X} ${WORLD_MIN_Y} ${WORLD_SPAN_W} ${WORLD_SPAN_H}`}
+              className="w-full h-auto lg:h-full max-h-[52dvh] lg:max-h-[65vh] rounded-lg border border-slate-800 bg-[#0b1927]"
             >
-              {/* Subtle grid */}
-              <rect x={0} y={0} width={WORLD_W} height={WORLD_H} fill="#10212e" />
+              {/* Ocean background */}
+              <rect x={WORLD_MIN_X} y={WORLD_MIN_Y} width={WORLD_SPAN_W} height={WORLD_SPAN_H} fill="#0b1927" />
+              {/* Exact WorldTerrain coastline, foothills, alpine massif & topographic contour bands */}
+              {terrainBackdropUrl ? (
+                <image
+                  href={terrainBackdropUrl}
+                  x={WORLD_MIN_X}
+                  y={WORLD_MIN_Y}
+                  width={WORLD_SPAN_W}
+                  height={WORLD_SPAN_H}
+                  preserveAspectRatio="none"
+                />
+              ) : (
+                <rect x={0} y={0} width={World.WORLD_W} height={World.WORLD_H} rx={900} fill="#122634" opacity={0.85} />
+              )}
+              {/* Topographic region labels for the mountain range & foothills */}
+              <g pointerEvents="none" style={{ paintOrder: 'stroke' }} stroke="#0b1927" strokeWidth={65} strokeLinejoin="round">
+                <text x={-3350} y={-3920} textAnchor="middle" fill="#e2e8f0" fontSize={230} fontWeight="700" opacity={0.92}>
+                  Parque Eólico · 640m
+                </text>
+                <text x={-2350} y={240} textAnchor="middle" fill="#86efac" fontSize={205} fontWeight="600" opacity={0.88}>
+                  Serraria · 210m
+                </text>
+                <text x={3550} y={-2420} textAnchor="middle" fill="#cbd5e1" fontSize={205} fontWeight="600" opacity={0.85}>
+                  Montes do Norte
+                </text>
+                <text x={-2680} y={4450} textAnchor="end" fill="#cbd5e1" fontSize={200} fontWeight="600" opacity={0.85}>
+                  Costa Atlântica
+                </text>
+              </g>
 
               {/* Roads */}
               {roadPaths.map((r) => (
@@ -153,6 +248,17 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                   strokeLinejoin="round"
                   opacity={r.layer > 0 ? 0.9 : 0.85}
                 />
+              ))}
+
+              {/* Wind Turbines (crisp alpine turbine icons) */}
+              {windTurbines.map((wt, i) => (
+                <g key={`wt-${i}`} transform={`translate(${wt.x}, ${wt.y})`}>
+                  <circle cx={0} cy={0} r={115} fill="#e0f2fe" fillOpacity={0.18} stroke="#bae6fd" strokeWidth={20} />
+                  <line x1={0} y1={0} x2={0} y2={-165} stroke="#f8fafc" strokeWidth={28} strokeLinecap="round" />
+                  <line x1={0} y1={0} x2={142} y2={82} stroke="#f8fafc" strokeWidth={28} strokeLinecap="round" />
+                  <line x1={0} y1={0} x2={-142} y2={82} stroke="#f8fafc" strokeWidth={28} strokeLinecap="round" />
+                  <circle cx={0} cy={0} r={34} fill="#ef4444" />
+                </g>
               ))}
 
               {/* Repair Bays (subtle green dots) */}
@@ -409,6 +515,7 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                   <div>Traço âmbar — Viadutos (Piso 1)</div>
                   <div>Verde / Âmbar — Oficinas / Bombas</div>
                   <div>Rota âmbar / verde — Recolha / Entrega</div>
+                  <div>Hélice branca — Torres Eólicas (Serra NW)</div>
                 </div>
               </div>
 

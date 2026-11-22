@@ -49,8 +49,12 @@ export type WObjType =
   | 'air_water'       // tyre-air, water & vacuum service island (solid)
   | 'price_sign'      // fuel price totem (solid)
   | 'lamp'            // street lamp (solid small)
-  | 'sign'            // traffic sign (variant: 'stop'|'yield'|'speed'|'no_parking'|'pedestrian') (solid small)
+  | 'sign'            // traffic sign (variant: 'stop'|'yield'|'speed'|'no_parking'|'pedestrian'|'steep_uphill'|'steep_downhill') (solid small)
   | 'traffic_light'   // signal head (params: dir 'n'|'s'|'e'|'w', group 0|1)
+  | 'wind_turbine'    // alpine wind turbine (solid mast base + animated spinning 3-blade rotor)
+  | 'log_pile'        // stacked timber logs at logging yard (solid)
+  | 'rock_outcrop'    // alpine granite boulder formation (solid)
+  | 'pine_tree'       // alpine conifer tree (small solid trunk)
   | 'exam_dock'       // TEMP exam target platform (never serialized)
   | 'compound';       // composto: agrupa vários sub-objetos com posições relativas (params.parts)
 
@@ -146,7 +150,7 @@ const CHUNK_PX = 2048;
 const SOLID_TYPES = new Set<WObjType>([
   'wall', 'jersey_barrier', 'building', 'container_stack', 'silo',
   'gas_pump', 'air_water', 'price_sign', 'lamp', 'sign', 'traffic_light', 'roundabout',
-  'dock_wall', 'compound',
+  'dock_wall', 'wind_turbine', 'log_pile', 'rock_outcrop', 'pine_tree', 'compound',
 ]);
 
 /** Tipos desenhados na camada FLATS (sob os sólidos) — ver render(). */
@@ -624,6 +628,32 @@ export class WorldObjects {
             }) as unknown as MatterJS.BodyType);
           }
         }
+      } else if (o.type === 'wind_turbine') {
+        // Only the central steel tower mast is solid — trucks can maneuver on the apron under the sweeping blades
+        body = this.scene.matter.add.circle(o.x, o.y, Math.max(18, Math.min(o.w, o.h) * 0.22), {
+          isStatic: true,
+          friction: 0.8,
+          restitution: 0.1,
+          label: `obstacle_${o.type}`,
+          collisionFilter: { category: COLLISION_CAT.GROUND_OBS, mask: COLLISION_MASK.GROUND_OBS },
+        }) as unknown as MatterJS.BodyType;
+      } else if (o.type === 'rock_outcrop') {
+        body = this.scene.matter.add.circle(o.x, o.y, Math.max(16, Math.min(o.w, o.h) * 0.42), {
+          isStatic: true,
+          friction: 0.9,
+          restitution: 0.1,
+          label: `obstacle_${o.type}`,
+          collisionFilter: { category: COLLISION_CAT.GROUND_OBS, mask: COLLISION_MASK.GROUND_OBS },
+        }) as unknown as MatterJS.BodyType;
+      } else if (o.type === 'pine_tree') {
+        // Only the narrow trunk is solid (canopy overhangs naturally)
+        body = this.scene.matter.add.circle(o.x, o.y, Math.max(8, Math.min(o.w, o.h) * 0.16), {
+          isStatic: true,
+          friction: 0.8,
+          restitution: 0.1,
+          label: `obstacle_${o.type}`,
+          collisionFilter: { category: COLLISION_CAT.GROUND_OBS, mask: COLLISION_MASK.GROUND_OBS },
+        }) as unknown as MatterJS.BodyType;
       } else {
         body = this.scene.matter.add.rectangle(o.x, o.y, o.w, o.h, {
           angle: o.angle,
@@ -1215,6 +1245,161 @@ export class WorldObjects {
               if (p.x + p.w / 2 < view.x - margin || p.x - p.w / 2 > view.x + view.width + margin) continue;
               if (p.y + p.h / 2 < view.y - margin || p.y - p.h / 2 > view.y + view.height + margin) continue;
               drawBulb(p);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Renders animated 3-blade wind turbine rotors, translucent ground shadows,
+   * nacelles, and pulsing red aviation warning beacons above vehicles & roads.
+   */
+  public renderWindTurbines(
+    g: Phaser.GameObjects.Graphics,
+    view: Phaser.Geom.Rectangle,
+    timeMs: number,
+    nightAlpha: number = 0,
+    margin = 520,
+  ) {
+    g.clear();
+    const x0 = Math.floor((view.x - margin) / OBJ_CELL), x1 = Math.floor((view.x + view.width + margin) / OBJ_CELL);
+    const y0 = Math.floor((view.y - margin) / OBJ_CELL), y1 = Math.floor((view.y + view.height + margin) / OBJ_CELL);
+    const drawn = new Set<string>();
+
+    const drawRotor = (o: WorldObject) => {
+      const bladeLen = Math.max(135, Math.max(o.w, o.h) * 1.45);
+      // Deterministic phase & wind speed per turbine so neighbouring rotors don't spin in robotic lockstep
+      const idHash = o.id.split('').reduce((acc, ch) => acc * 31 + ch.charCodeAt(0), 7);
+      const phaseOffset = (Math.abs(idHash) % 628) / 100;
+      const rpmRad = 0.00085 + ((Math.abs(idHash) % 7) * 0.00005);
+      const rotorAng = timeMs * rpmRad + phaseOffset;
+      const yaw = o.angle || -0.55; // Nacelle facing prevailing NW mountain wind
+
+      // Hub center slightly offset along nacelle yaw
+      const hubX = o.x + Math.cos(yaw) * 26;
+      const hubY = o.y + Math.sin(yaw) * 26;
+
+      // 1. Translucent ground shadow cast to SE (+34, +40)
+      const shX = hubX + 36;
+      const shY = hubY + 42;
+      g.fillStyle(0x020617, 0.16);
+      for (let i = 0; i < 3; i++) {
+        const a = rotorAng + (i * Math.PI * 2) / 3;
+        const tipX = shX + Math.cos(a) * bladeLen;
+        const tipY = shY + Math.sin(a) * bladeLen;
+        const px = -Math.sin(a);
+        const py = Math.cos(a);
+        g.beginPath();
+        g.moveTo(shX + px * 6, shY + py * 6);
+        g.lineTo(shX + Math.cos(a) * bladeLen * 0.25 + px * 11, shY + Math.sin(a) * bladeLen * 0.25 + py * 11);
+        g.lineTo(tipX + px * 2, tipY + py * 2);
+        g.lineTo(tipX - px * 2, tipY - py * 2);
+        g.lineTo(shX + Math.cos(a) * bladeLen * 0.25 - px * 6, shY + Math.sin(a) * bladeLen * 0.25 - py * 6);
+        g.lineTo(shX - px * 6, shY - py * 6);
+        g.closePath();
+        g.fillPath();
+      }
+
+      // 2. Nacelle housing (elongated white aerodynamic pod rotated to wind yaw)
+      const nx = Math.cos(yaw);
+      const ny = Math.sin(yaw);
+      const lx = -ny;
+      const ly = nx;
+      const nacBack = -28;
+      const nacFront = 28;
+      const nacHalfW = 13;
+      g.fillStyle(0xe2e8f0, 1);
+      g.beginPath();
+      g.moveTo(o.x + nx * nacBack + lx * nacHalfW, o.y + ny * nacBack + ly * nacHalfW);
+      g.lineTo(o.x + nx * nacFront + lx * (nacHalfW * 0.72), o.y + ny * nacFront + ly * (nacHalfW * 0.72));
+      g.lineTo(o.x + nx * nacFront - lx * (nacHalfW * 0.72), o.y + ny * nacFront - ly * (nacHalfW * 0.72));
+      g.lineTo(o.x + nx * nacBack - lx * nacHalfW, o.y + ny * nacBack - ly * nacHalfW);
+      g.closePath();
+      g.fillPath();
+      g.lineStyle(1.5, 0x64748b, 0.9);
+      g.strokePath();
+
+      // Cooling vent grille on rear of nacelle
+      g.fillStyle(0x475569, 0.85);
+      g.fillCircle(o.x + nx * -16, o.y + ny * -16, 6);
+
+      // 3. Three aerodynamic white blades with red aviation tips
+      for (let i = 0; i < 3; i++) {
+        const a = rotorAng + (i * Math.PI * 2) / 3;
+        const ca = Math.cos(a);
+        const sa = Math.sin(a);
+        const px = -sa;
+        const py = ca;
+        const tipX = hubX + ca * bladeLen;
+        const tipY = hubY + sa * bladeLen;
+        const midX = hubX + ca * bladeLen * 0.24;
+        const midY = hubY + sa * bladeLen * 0.24;
+
+        // Main white composite blade
+        g.fillStyle(0xf8fafc, 0.98);
+        g.beginPath();
+        g.moveTo(hubX + px * 5.5, hubY + py * 5.5);
+        g.lineTo(midX + px * 11, midY + py * 11);
+        g.lineTo(tipX + px * 2.2, tipY + py * 2.2);
+        g.lineTo(tipX - px * 2.2, tipY - py * 2.2);
+        g.lineTo(midX - px * 5.5, midY - py * 5.5);
+        g.lineTo(hubX - px * 5.5, hubY - py * 5.5);
+        g.closePath();
+        g.fillPath();
+        g.lineStyle(1, 0x94a3b8, 0.8);
+        g.strokePath();
+
+        // Red aviation warning stripe on outer 18% of blade
+        const r0X = hubX + ca * bladeLen * 0.82;
+        const r0Y = hubY + sa * bladeLen * 0.82;
+        g.fillStyle(0xdc2626, 0.95);
+        g.beginPath();
+        g.moveTo(r0X + px * 4.6, r0Y + py * 4.6);
+        g.lineTo(tipX + px * 2.2, tipY + py * 2.2);
+        g.lineTo(tipX - px * 2.2, tipY - py * 2.2);
+        g.lineTo(r0X - px * 3.0, r0Y - py * 3.0);
+        g.closePath();
+        g.fillPath();
+      }
+
+      // 4. Nose cone spinner
+      g.fillStyle(0xf1f5f9, 1);
+      g.fillCircle(hubX, hubY, 12);
+      g.lineStyle(1.5, 0x64748b, 0.9);
+      g.strokeCircle(hubX, hubY, 12);
+
+      // 5. Pulsing red aviation obstruction beacon on top of nacelle
+      const blink = Math.sin(timeMs * 0.004 + phaseOffset) > -0.15 ? 1 : 0.2;
+      const beaconX = o.x + nx * -6;
+      const beaconY = o.y + ny * -6;
+      const glowAlpha = Math.max(0.28, nightAlpha * 0.7) * blink;
+      g.fillStyle(0xef4444, glowAlpha);
+      g.fillCircle(beaconX, beaconY, 13 + nightAlpha * 6);
+      g.fillStyle(0xfca5a5, 0.95 * blink);
+      g.fillCircle(beaconX, beaconY, 3.6);
+    };
+
+    for (let cy = y0; cy <= y1; cy++) {
+      for (let cx = x0; cx <= x1; cx++) {
+        const list = this.grid.get(`${cx}_${cy}`);
+        if (!list) continue;
+        for (const o of list) {
+          if (drawn.has(o.id)) continue;
+          if (o.type === 'wind_turbine') {
+            drawn.add(o.id);
+            drawRotor(o);
+          } else if (o.type === 'compound') {
+            drawn.add(o.id);
+            const parts = compoundParts(o);
+            for (let i = 0; i < parts.length; i++) {
+              if (parts[i].type !== 'wind_turbine') continue;
+              const p = compoundPartWorldObject(o, i);
+              if (!p) continue;
+              if (p.x + margin < view.x || p.x - margin > view.x + view.width) continue;
+              if (p.y + margin < view.y || p.y - margin > view.y + view.height) continue;
+              drawRotor(p);
             }
           }
         }
@@ -2866,6 +3051,129 @@ export class WorldObjects {
           g.strokeCircle(o.x, o.y, r * 0.24);
           break;
         }
+        case 'wind_turbine': {
+          // Base octogonal em betão armado + anel de ancoragem + torre tubular metálica branca
+          // (as pás rotativas + nacela + luz aeronáutica são desenhadas ao vivo por renderWindTurbines)
+          const r = Math.min(o.w, o.h) / 2;
+          // Sombra de base
+          g.fillStyle(0x000000, 0.26);
+          g.fillCircle(o.x + 8, o.y + 10, r * 0.92);
+          // Sapata octogonal em betão + brita compactada
+          g.fillStyle(0x475569, 1);
+          g.beginPath();
+          for (let i = 0; i < 8; i++) {
+            const a = (i * Math.PI) / 4 + Math.PI / 8;
+            const px = o.x + Math.cos(a) * r;
+            const py = o.y + Math.sin(a) * r;
+            if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+          }
+          g.closePath();
+          g.fillPath();
+          g.lineStyle(2, 0x1e293b, 0.9);
+          g.strokePath();
+          // Plataforma de manutenção circular
+          g.fillStyle(0x64748b, 1);
+          g.fillCircle(o.x, o.y, r * 0.72);
+          g.lineStyle(1.5, 0xfacc15, 0.75);
+          g.strokeCircle(o.x, o.y, r * 0.66);
+          // Torre cilíndrica branca em aço
+          const mastR = Math.max(18, r * 0.44);
+          g.fillStyle(0xcbd5e1, 1);
+          g.fillCircle(o.x, o.y, mastR);
+          g.fillStyle(0xf1f5f9, 1);
+          g.fillCircle(o.x - 2, o.y - 2, mastR * 0.76);
+          g.lineStyle(2, 0x475569, 0.95);
+          g.strokeCircle(o.x, o.y, mastR);
+          // Escada / porta técnica de acesso
+          g.fillStyle(0x334155, 1);
+          g.fillRect(o.x - 6, o.y + mastR * 0.75, 12, r * 0.28);
+          break;
+        }
+        case 'log_pile': {
+          // Pilha de toros de madeira empilhados em berços metálicos (zona madeireira)
+          g.fillStyle(0x000000, 0.30);
+          g.fillRoundedRect(x0 + 5, y0 + 6, o.w, o.h, 5);
+          // Berços / estacas metálicas laterais
+          g.fillStyle(0x334155, 1);
+          g.fillRect(x0 + o.w * 0.14, y0 - 3, 7, o.h + 6);
+          g.fillRect(x0 + o.w * 0.86 - 7, y0 - 3, 7, o.h + 6);
+          // Filas de troncos horizontais com variação tonal de casca
+          const rows = Math.max(3, Math.round(o.h / 14));
+          const logH = o.h / rows;
+          const barks = [0x6b4423, 0x7c502b, 0x5c3a1e, 0x855830];
+          for (let i = 0; i < rows; i++) {
+            const ly = y0 + i * logH;
+            g.fillStyle(barks[i % barks.length], 1);
+            g.fillRoundedRect(x0 + 2, ly + 1, o.w - 4, logH - 2, 3);
+            // Reflexo superior da casca
+            g.fillStyle(0xa67446, 0.35);
+            g.fillRect(x0 + 8, ly + 2, o.w - 16, Math.max(2, (logH - 2) * 0.28));
+            // Topo cortado (madeira clara nas extremidades)
+            g.fillStyle(0xd9b382, 0.95);
+            g.fillRect(x0 + 1, ly + 2, 5, logH - 4);
+            g.fillRect(x0 + o.w - 6, ly + 2, 5, logH - 4);
+          }
+          // Cintas de amarração metálicas
+          g.lineStyle(2, 0xf59e0b, 0.85);
+          g.lineBetween(x0 + o.w * 0.28, y0, x0 + o.w * 0.28, y0 + o.h);
+          g.lineBetween(x0 + o.w * 0.72, y0, x0 + o.w * 0.72, y0 + o.h);
+          break;
+        }
+        case 'rock_outcrop': {
+          // Afloramento rochoso de granito alpino com facetas iluminadas a NO e sombra a SE
+          const rx = o.w / 2;
+          const ry = o.h / 2;
+          const pts = 7;
+          const makePoly = (ox: number, oy: number, scale: number) => {
+            g.beginPath();
+            for (let i = 0; i < pts; i++) {
+              const a = (i * Math.PI * 2) / pts;
+              const jag = 0.78 + ((i * 37 + Math.round(o.w)) % 10) * 0.032;
+              const px = o.x + ox + Math.cos(a) * rx * scale * jag;
+              const py = o.y + oy + Math.sin(a) * ry * scale * jag;
+              if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+            }
+            g.closePath();
+            g.fillPath();
+          };
+          g.fillStyle(0x020617, 0.32);
+          makePoly(6, 8, 1.0);
+          g.fillStyle(0x475569, 1);
+          makePoly(0, 0, 1.0);
+          g.lineStyle(1.5, 0x1e293b, 0.85);
+          g.strokePath();
+          g.fillStyle(0x64748b, 1);
+          makePoly(-rx * 0.1, -ry * 0.1, 0.76);
+          g.fillStyle(0x94a3b8, 0.75);
+          makePoly(-rx * 0.22, -ry * 0.22, 0.44);
+          break;
+        }
+        case 'pine_tree': {
+          // Pinheiro alpino em camadas cónicas vistas de topo
+          const r = Math.min(o.w, o.h) / 2;
+          g.fillStyle(0x020617, 0.30);
+          g.fillCircle(o.x + 6, o.y + 7, r * 0.92);
+          const drawStar = (rad: number, color: number, rot: number) => {
+            g.fillStyle(color, 1);
+            g.beginPath();
+            const spikes = 8;
+            for (let i = 0; i < spikes * 2; i++) {
+              const a = rot + (i * Math.PI) / spikes;
+              const dist = i % 2 === 0 ? rad : rad * 0.56;
+              const px = o.x + Math.cos(a) * dist;
+              const py = o.y + Math.sin(a) * dist;
+              if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+            }
+            g.closePath();
+            g.fillPath();
+          };
+          drawStar(r, 0x143320, 0);
+          drawStar(r * 0.74, 0x1d4b2e, 0.39);
+          drawStar(r * 0.46, 0x2b6a40, 0.18);
+          g.fillStyle(0x4d9260, 0.85);
+          g.fillCircle(o.x - r * 0.08, o.y - r * 0.08, r * 0.16);
+          break;
+        }
         case 'gas_pump': {
           // Ilha realista com bombas duplas, lancil chanfrado amarelo/preto, pilaretes duplos,
           // terminal de pagamento central, mangueiras flexíveis e ponto de extintor/limpeza
@@ -3122,6 +3430,77 @@ export class WorldObjects {
             g.lineBetween(o.x + 0.2 * u, o.y + 1.6 * u, o.x + 2.5 * u, o.y + 4.8 * u);
             g.lineStyle(1.2 * u, 0x0f172a, 1);
             g.lineBetween(o.x - 2.3 * u, o.y + 0.5 * u, o.x + 2.2 * u, o.y - 0.5 * u);
+          } else if (o.variant === 'steep_uphill' || o.variant === 'steep_downhill') {
+            // Sinais de perigo europeus A2b (Subida acentuada) e A2a (Descida perigosa):
+            // triângulo equilátero branco de ponta para cima, orla vermelha larga, cunha de rampa e seta direcional
+            const isUp = o.variant === 'steep_uphill';
+            // Sombra projetada
+            g.fillStyle(0x000000, 0.34);
+            g.fillTriangle(
+              o.x + 1.8, o.y - 11.4 * u + 2.2,
+              o.x - 11.8 * u + 1.8, o.y + 9.8 * u + 2.2,
+              o.x + 11.8 * u + 1.8, o.y + 9.8 * u + 2.2,
+            );
+            // Rebordo escuro fino + fundo branco exterior
+            g.fillStyle(0x0f172a, 1);
+            g.fillTriangle(
+              o.x, o.y - 12.2 * u,
+              o.x - 12.5 * u, o.y + 10.3 * u,
+              o.x + 12.5 * u, o.y + 10.3 * u,
+            );
+            g.fillStyle(0xffffff, 1);
+            g.fillTriangle(
+              o.x, o.y - 11.6 * u,
+              o.x - 11.9 * u, o.y + 9.8 * u,
+              o.x + 11.9 * u, o.y + 9.8 * u,
+            );
+            // Orla vermelha de perigo
+            g.fillStyle(0xdc2626, 1);
+            g.fillTriangle(
+              o.x, o.y - 10.5 * u,
+              o.x - 10.8 * u, o.y + 9.0 * u,
+              o.x + 10.8 * u, o.y + 9.0 * u,
+            );
+            // Campo interior branco
+            g.fillStyle(0xffffff, 1);
+            g.fillTriangle(
+              o.x, o.y - 6.6 * u,
+              o.x - 7.3 * u, o.y + 6.8 * u,
+              o.x + 7.3 * u, o.y + 6.8 * u,
+            );
+            // Cunha inclinada preta (rampa ascendente ↗ ou descendente ↘)
+            g.fillStyle(0x0f172a, 1);
+            if (isUp) {
+              g.fillTriangle(
+                o.x - 5.2 * u, o.y + 5.8 * u,
+                o.x + 5.4 * u, o.y + 5.8 * u,
+                o.x + 5.4 * u, o.y + 0.6 * u,
+              );
+              // Seta laranja-âmbar destacada a subir (↗)
+              g.lineStyle(1.8 * u, 0xd97706, 1);
+              g.lineBetween(o.x - 3.6 * u, o.y + 2.4 * u, o.x + 2.8 * u, o.y - 1.2 * u);
+              g.fillStyle(0xd97706, 1);
+              g.fillTriangle(
+                o.x + 4.0 * u, o.y - 1.9 * u,
+                o.x + 1.1 * u, o.y - 2.1 * u,
+                o.x + 2.5 * u, o.y + 0.3 * u,
+              );
+            } else {
+              g.fillTriangle(
+                o.x - 5.4 * u, o.y + 5.8 * u,
+                o.x + 5.2 * u, o.y + 5.8 * u,
+                o.x - 5.4 * u, o.y + 0.6 * u,
+              );
+              // Seta azul-celeste/carmesim destacada a descer (↘)
+              g.lineStyle(1.8 * u, 0x0284c7, 1);
+              g.lineBetween(o.x - 2.8 * u, o.y - 1.2 * u, o.x + 3.6 * u, o.y + 2.4 * u);
+              g.fillStyle(0x0284c7, 1);
+              g.fillTriangle(
+                o.x + 4.8 * u, o.y + 3.1 * u,
+                o.x + 3.3 * u, o.y + 0.6 * u,
+                o.x + 1.9 * u, o.y + 3.0 * u,
+              );
+            }
           } else if (o.variant === 'stop') {
             // STOP (B2): octógono vermelho com rebordo branco e letras "STOP"
             const drawOct = (cx: number, cy: number, rad: number) => {

@@ -78,6 +78,10 @@ export class Truck {
   /** Vertical layer (0 = ground, 1 = elevated viaduct) and continuous ramp progress z in [0, 1]. */
   public layer: 0 | 1 = 0;
   public elevationZ: number = 0;
+  /** Terrain altitude in metres (0 = coastal plain, ~640 = Serra dos Ventos summit). */
+  public altitudeM: number = 0;
+  /** Signed longitudinal road grade along tractor forward vector (+0.08 = 8% uphill, -0.08 = 8% downhill). */
+  public terrainGrade: number = 0;
   public vLong: number = 0;             // Longitudinal forward speed (px/s)
   public vLat: number = 0;              // Lateral slip speed (px/s)
   public currentSpeed: number = 0;      // In px/s
@@ -369,10 +373,11 @@ export class Truck {
     return this.refuel(this.fuelCapacity);
   }
 
-  /** Consumes fuel based on distance driven this frame (scaled by truck model + engine upgrade). */
+  /** Consumes fuel based on distance driven this frame (scaled by truck model, engine upgrade, and uphill climb). */
   private consumeFuel(distancePx: number) {
     if (distancePx <= 0 || this.fuelLevel <= 0) return;
-    const burnt = distancePx * this.fuelConsumptionPerPx * this.effectiveStats.fuelConsumptionScale;
+    const climbMult = this.isAccelerating && this.terrainGrade > 0.015 ? 1 + this.terrainGrade * 4.5 : 1;
+    const burnt = distancePx * this.fuelConsumptionPerPx * this.effectiveStats.fuelConsumptionScale * climbMult;
     this.fuelLevel = Math.max(0, this.fuelLevel - burnt);
     if (this.fuelLevel <= 0) {
       this.fuelLevel = 0;
@@ -589,6 +594,12 @@ export class Truck {
     this.roadGrip = Phaser.Math.Clamp(grip, 0.25, 1.0);
   }
 
+  /** Sets live terrain altitude (m) and signed longitudinal grade (+ uphill, - downhill). */
+  public setTerrainSlope(altitudeM: number, grade: number) {
+    this.altitudeM = Math.max(0, altitudeM);
+    this.terrainGrade = Phaser.Math.Clamp(grade, -0.25, 0.25);
+  }
+
   /** Updates vertical layer & continuous ramp elevation (updates depth and Matter collision masks). */
   public setElevation(layer: 0 | 1, z: number, forceElevatedVisual: boolean = false) {
     this.elevationZ = Phaser.Math.Clamp(z, 0, 1);
@@ -776,9 +787,20 @@ export class Truck {
     const coastDecel = 18 * rollingMult * dt;
     const effectiveBrake = this.getEffectiveBrakeForce();
 
+    // Mountain slope gravity (positive grade = uphill pulling backward; negative grade = downhill pushing forward)
+    const slopeMassMult = this.hasCoupledTrailer
+      ? 1.0 + Math.min(0.65, (this.trailerRollingDragFactor - 1) * 1.4 + 0.22)
+      : 0.72;
+    const slopeAccel = Math.abs(this.terrainGrade) > 0.008 ? -195 * this.terrainGrade * slopeMassMult : 0;
+    const uphillRevMax =
+      slopeAccel > 0
+        ? effectiveMaxRev * Phaser.Math.Clamp(1 - Math.abs(this.terrainGrade) * 1.8, 0.48, 1.0)
+        : effectiveMaxRev;
+
     this.isBraking = false;
     this.isAccelerating = false;
     let serviceBrakeLoad = 0;
+    let slopeHandled = false;
 
     if (isHandbrake) {
       this.isBraking = true;
@@ -788,12 +810,13 @@ export class Truck {
       } else if (this.vLong < 0) {
         this.vLong = Math.min(0, this.vLong + 300 * dt);
       }
+      if (Math.abs(this.vLong) < 4) slopeHandled = true;
     } else if (isThrottleActive) {
       this.isAccelerating = true;
       const throttleMult = keyUp ? 1.0 : this.touchInput.throttle;
 
       if (this.touchInput.gear === 'D' || keyUp) {
-        // Forward drive: progressive diesel torque curve (highest at start, smoothly tapering)
+        // Forward drive: progressive diesel torque curve + low-gear crawler reserve on steep climbs
         if (this.vLong < -2) {
           // Rolling backward: apply service brake to bring to standstill first
           this.vLong += effectiveBrake * dt;
@@ -805,20 +828,37 @@ export class Truck {
         } else {
           const speedRatio = Math.min(Math.max(0, this.vLong) / effectiveMaxFwd, 1.0);
           const torqueFactor = Math.max(0.35, 1.0 - speedRatio * 0.65);
-          const fwdAccel = this.engineAccel * torqueFactor * throttleMult * surfaceAccelScale;
-          this.vLong = Math.min(effectiveMaxFwd, this.vLong + fwdAccel * dt);
+          let fwdAccel = this.engineAccel * torqueFactor * throttleMult * surfaceAccelScale;
+          // 1st-gear crawler torque ensures loaded diesel trucks never stall on steep mountain climbs
+          if (slopeAccel < 0 && speedRatio < 0.35) {
+            const lowGearBlend = 1 - speedRatio / 0.35;
+            const climbFloor = Math.abs(slopeAccel) + 18 * throttleMult * enginePowerScale;
+            fwdAccel = Math.max(fwdAccel, Phaser.Math.Linear(fwdAccel, climbFloor, lowGearBlend));
+          }
+          const netFwd = fwdAccel + slopeAccel;
+          const cap = slopeAccel > 0 ? effectiveMaxFwd * 1.28 : effectiveMaxFwd;
+          this.vLong = Phaser.Math.Clamp(this.vLong + netFwd * dt, -effectiveMaxRev * 1.25, cap);
+          slopeHandled = true;
         }
       } else {
-        // Reverse drive in R gear
+        // Reverse drive in R gear (high-torque crawler gear ratio — slow but strong even uphill)
         if (this.vLong > 2) {
-          this.vLong -= effectiveBrake * dt;
+          this.vLong = Math.max(0, this.vLong - effectiveBrake * dt);
           this.isBraking = true;
           serviceBrakeLoad = 0.85;
+          if (this.vLong <= 2) slopeHandled = true;
         } else {
-          const revRatio = Math.min(Math.max(0, -this.vLong) / effectiveMaxRev, 1.0);
-          const revTorqueFactor = Math.max(0.4, 1.0 - revRatio * 0.5);
-          const revAccel = this.engineAccel * 0.65 * revTorqueFactor * throttleMult * (1 - surfaceLoss * 0.25) * enginePowerScale;
-          this.vLong = Math.max(-effectiveMaxRev, this.vLong - revAccel * dt);
+          const revRatio = Math.min(Math.max(0, -this.vLong) / Math.max(1, uphillRevMax), 1.0);
+          const revTorqueFactor = Math.max(0.55, 1.0 - revRatio * 0.45);
+          let revAccel =
+            this.engineAccel * 1.15 * revTorqueFactor * throttleMult * (1 - surfaceLoss * 0.25) * enginePowerScale;
+          if (slopeAccel > 0) {
+            revAccel = Math.max(revAccel, slopeAccel + 28 * throttleMult * enginePowerScale);
+          }
+          const netRev = -revAccel + slopeAccel;
+          const minRevCap = slopeAccel < 0 ? -effectiveMaxRev * 1.2 : -uphillRevMax;
+          this.vLong = Math.max(minRevCap, this.vLong + netRev * dt);
+          slopeHandled = true;
         }
       }
     } else if (isBrakeActive) {
@@ -826,7 +866,7 @@ export class Truck {
       const brakeMult = keyDown ? 1.0 : this.touchInput.brake;
 
       if (!keyDown || this.isOutOfFuel) {
-        // Service foot brake pedal (Touch) OR S key when out of fuel:
+        // Service foot brake pedal (Touch) OR S key when out of fuel (includes hill-hold when stopped):
         if (this.vLong > 1.5) {
           this.vLong = Math.max(0, this.vLong - effectiveBrake * brakeMult * dt);
           serviceBrakeLoad = brakeMult;
@@ -835,19 +875,30 @@ export class Truck {
           serviceBrakeLoad = brakeMult;
         } else {
           this.vLong = 0;
+          slopeHandled = true;
         }
       } else {
-        // S key on keyboard (brakes forward first, or slowly backs up if stopped)
+        // S key on keyboard (brakes forward first, then backs up with crawler reverse torque)
         if (this.vLong > 2.0) {
           this.vLong = Math.max(0, this.vLong - effectiveBrake * dt);
           serviceBrakeLoad = 1.0;
+          if (this.vLong <= 2.0) slopeHandled = true;
         } else {
-          // Slow reverse on S key
-          const revRatio = Math.min(Math.max(0, -this.vLong) / effectiveMaxRev, 1.0);
-          const revTorqueFactor = Math.max(0.4, 1.0 - revRatio * 0.5);
-          const revAccel = this.engineAccel * 0.6 * revTorqueFactor * brakeMult * (1 - surfaceLoss * 0.25) * enginePowerScale;
-          this.vLong = Math.max(-effectiveMaxRev, this.vLong - revAccel * dt);
+          // Crawler reverse on S key (slow, controlled, high diesel torque even backing uphill)
+          this.isBraking = false;
+          this.isAccelerating = true;
+          const revRatio = Math.min(Math.max(0, -this.vLong) / Math.max(1, uphillRevMax), 1.0);
+          const revTorqueFactor = Math.max(0.55, 1.0 - revRatio * 0.45);
+          let revAccel =
+            this.engineAccel * 1.1 * revTorqueFactor * brakeMult * (1 - surfaceLoss * 0.25) * enginePowerScale;
+          if (slopeAccel > 0) {
+            revAccel = Math.max(revAccel, slopeAccel + 28 * brakeMult * enginePowerScale);
+          }
+          const netRev = -revAccel + slopeAccel;
+          const minRevCap = slopeAccel < 0 ? -effectiveMaxRev * 1.2 : -uphillRevMax;
+          this.vLong = Math.max(minRevCap, this.vLong + netRev * dt);
           this.isReversing = true;
+          slopeHandled = true;
         }
       }
     } else {
@@ -861,9 +912,20 @@ export class Truck {
       }
     }
 
+    // ---- Mountain Slope Gravity (when coasting or braking in motion) ----
+    if (slopeAccel !== 0 && !slopeHandled) {
+      const downhillOverspeedCap = effectiveMaxFwd * 1.28;
+      this.vLong = Phaser.Math.Clamp(
+        this.vLong + slopeAccel * dt,
+        -effectiveMaxRev * 1.25,
+        downhillOverspeedCap,
+      );
+    }
+
     // ---- Brake thermal model (fade & cooling) & operational wear ----
     const absSpeedNorm = Phaser.Math.Clamp(Math.abs(this.vLong) / Math.max(1, this.maxForwardSpeed), 0, 1);
-    const loadHeatFactor = this.hasCoupledTrailer ? 1.35 : 0.85;
+    const downhillBrakeHeatBoost = this.terrainGrade < -0.02 ? 1 + Math.abs(this.terrainGrade) * 5.5 : 1;
+    const loadHeatFactor = (this.hasCoupledTrailer ? 1.35 : 0.85) * downhillBrakeHeatBoost;
     if (serviceBrakeLoad > 0.05 && absSpeedNorm > 0.08) {
       const heatGain =
         0.24 * serviceBrakeLoad * absSpeedNorm * loadHeatFactor * this.effectiveStats.brakeFadeRateMult * dt;

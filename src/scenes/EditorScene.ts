@@ -1273,6 +1273,7 @@ export class EditorScene extends Phaser.Scene {
     'wall', 'entrance', 'entrance_y', 'entrance_gas', 'road_entry', 'road_entry_y', 'road_turnout',
     'parking_lot', 'building', 'jersey_barrier', 'container_stack', 'dock', 'gas_canopy', 'silo',
     'crane', 'roundabout', 'crosswalk', 'pad_asphalt', 'pad_dirt', 'dock_wall', 'parking_pad',
+    'wind_turbine', 'log_pile', 'rock_outcrop', 'pine_tree',
   ]);
 
   private isResizable(o: WorldObject): boolean {
@@ -2221,6 +2222,9 @@ export class EditorScene extends Phaser.Scene {
   }
 
   public resetView() {
-    this.cameras.main.centerOn(World.WORLD_W / 2, World.WORLD_H / 2);
+    this.cameras.main.centerOn(
+      World.WORLD_MIN_X + World.WORLD_SPAN_W / 2,
+      World.WORLD_MIN_Y + World.WORLD_SPAN_H / 2,
+    );
   }
 }

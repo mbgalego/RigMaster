@@ -64,19 +64,24 @@ check(
   `accel ${stockStats.engineAccel}->${tunedStats.engineAccel}, fade ${stockStats.brakeFadeRateMult}->${tunedStats.brakeFadeRateMult}, dirt ${stockStats.dirtGrip}->${tunedStats.dirtGrip}`,
 );
 
-// 2. GarageSystem preserves original 4 hub names + real RigWorld coordinates
+// 2. GarageSystem preserves original 4 hubs + 5th NW mountain hub (Serra dos Ventos)
 const garage = GarageSystem.getInstance();
 const hubs = garage.getHubs();
 check(
-  'GarageSystem mantém os 4 hubs originais com coordenadas reais em RigWorld',
-  hubs.length === 4 &&
+  'GarageSystem mantém os 4 hubs originais + Serra dos Ventos (5 hubs) com coordenadas reais em RigWorld',
+  hubs.length === 5 &&
     garage.getHub('harbor').name === 'Porto Comercial' &&
     garage.getHub('shipyard').name === 'Estaleiro Logístico' &&
     garage.getHub('industrial').name === 'Zona Industrial Sul' &&
     garage.getHub('historic').name === 'Centro Histórico' &&
+    garage.getHub('serra').name === 'Serra dos Ventos' &&
+    garage.getHub('serra').locationWorld.x < 0 &&
+    garage.getHub('serra').locationWorld.y < 0 &&
     garage.getHub('shipyard').locationWorld.x > 10000 &&
     garage.getHub('industrial').locationWorld.y > 7000 &&
-    garage.findHubForPosition(11350, 1100) === 'shipyard',
+    garage.findHubForPosition(11350, 1100) === 'shipyard' &&
+    garage.findHubForPosition(-2520, -720) === 'serra' &&
+    garage.findHubForPosition(-3500, -3050) === 'serra',
   hubs.map((h) => `${h.id}@(${h.locationWorld.x},${h.locationWorld.y})`).join(' | '),
 );
 
@@ -89,13 +94,16 @@ rep.resetCareerProgress();
 const starterMissionsHarbor = missions.getAvailableMissions('harbor');
 const starterMissionsShipyard = missions.getAvailableMissions('shipyard');
 const starterMissionsHistoric = missions.getAvailableMissions('historic');
+const starterMissionsSerra = missions.getAvailableMissions('serra');
 check(
   'Carreira inicial (Classe C, Iveco 4×2): só mostra missões elegíveis e oculta CE/H/X/6×4',
   starterMissionsHarbor.length === 4 &&
     starterMissionsShipyard.length === 0 &&
     starterMissionsHistoric.some((m) => m.id === 'historic_night_supply') &&
-    !starterMissionsHistoric.some((m) => m.id === 'historic_bitrem_tanker_adr'),
-  `harbor=${starterMissionsHarbor.length}, shipyard=${starterMissionsShipyard.length}, historic=${starterMissionsHistoric.length}`,
+    !starterMissionsHistoric.some((m) => m.id === 'historic_bitrem_tanker_adr') &&
+    starterMissionsSerra.some((m) => m.id === 'serra_alpine_supply') &&
+    !starterMissionsSerra.some((m) => m.id === 'serra_wind_blade_climb'),
+  `harbor=${starterMissionsHarbor.length}, shipyard=${starterMissionsShipyard.length}, historic=${starterMissionsHistoric.length}, serra=${starterMissionsSerra.length}`,
 );
 
 // 4. Mission rating A at Porto Comercial raises reputation by baseRep * 1.2 * risk

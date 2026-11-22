@@ -57,7 +57,41 @@ Simulador de condução pesada em **2D Top-Down** (Phaser 4 + Matter.js + React 
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.12.6** (Versão Atual — branch main)
+### **v2.14.0** (Versão Atual — branch main)
+- **Continuidade Completa da Montanha & Mapa Estendido Orgânico (`WorldTerrain.ts`, `World.ts`, `MinimapScene.ts`, `WorldMapModal.tsx`, `rigworld.json`, `scripts/smoke-progression.mjs`)**:
+  - **Maciço Alpino 360° sem cortes abruptos**: margem Noroeste ampliada para `WORLD_MIN_X = -6144`, `WORLD_MIN_Y = -5120`, permitindo que o cume de `640m` desça naturalmente pelas novas encostas **Crista Norte** e **Contraforte Ocidental** até pinhais costeiros, falésias rochosas e mar aberto em redor de todo o cabo.
+  - **Linha de Costa 100% Orgânica & Contrafortes Norte/Oeste**: removidos os recortes retangulares artificiais (`landPatches` NW) e substituídos por união orgânica contínua (`smoothMax`) ligando a **Serra dos Ventos** aos novos **Montes do Norte** (descendo suavemente até ao **Estaleiro Logístico**) e à **Costa Atlântica Oeste** (descendo suavemente até ao **Centro Histórico**), com pequenos ilhéus rochosos nas baías exteriores e preservação absoluta a `0m` de toda a ilha original.
+  - **2 Novas Estradas Panorâmicas & Cenário Alpino**: adicionadas `rd_48` (**Estrada Panorâmica do Norte**, ligando a base da Serra pelos Montes do Norte diretamente ao Estaleiro Logístico, com sinalização de subida/descida acentuada e **Miradouro Montes do Norte**) e `rd_49` (**Estrada Costeira do Atlântico**, ligando a Via Costeira Oeste pelas colinas atlânticas ao Centro Histórico, com **Miradouro do Atlântico**), enriquecidas com pinheiros alpinos e afloramentos graníticos (`rigworld.json` promovido para `version: 6` com migração automática de rascunhos locais).
+  - **Mapa Estratégico & Minimapa Fiéis ao Relevo Real**: `WorldMapModal.tsx` renderiza agora a silhueta costeira, águas rasas, relevo de altitude e curvas de nível diretamente a partir de `WorldTerrain` (substituindo elipses fixas), e o minimapa/visão geral exibem a nova costa orgânica e falésias alpinas com `1:1` de coerência.
+
+### **v2.13.3**
+- **HUD Superior Mais Limpo, Sinais de Subida/Descida Acentuada & Calibração de Declive (`App.tsx`, `WorldObjects.ts`, `WorldTerrain.ts`, `MainScene.ts`, `World.ts`, `rigworld.json`)**:
+  - Removido o indicador duplicado de integridade/dano do trator no HUD superior (já visível no HUD inferior), libertando espaço horizontal na barra do topo.
+  - Adicionadas duas novas variantes de sinalização rodoviária europeia (A2b `steep_uphill` — *Subida Acentuada* e A2a `steep_downhill` — *Descida Acentuada*), desenhadas com triângulo vermelho de perigo, cunha inclinada e seta direcional de alto contraste, disponíveis também no catálogo **Trânsito** do Editor.
+  - Calibrada a escala de leitura de declive alpino (`WorldTerrain.ALPINE_GRADE_SCALE = 0.42`) para valores rodoviários realistas (`7%–18%` na Serpentina e Picada Florestal, `0%` em patamares planos).
+  - Colocados 14 sinais de subida/descida acentuada ao longo das bermas reais da **Serra dos Ventos** (subida da Serraria, Serpentina da Serra e Picada Florestal) com `0` sobreposições OBB/SAT e migração automática em `World.restoreDraft()` (`version: 5`).
+
+### **v2.13.2**
+- **Binário de Marcha-Atrás Reduzida & Retenção em Declive (`Truck.ts`, `scripts/smoke-progression.mjs`)**:
+  - Corrigida a perda de marcha-atrás ao descer inclinações acentuadas na Serra dos Ventos: a marcha-atrás (tanto tecla `S` como caixa `R` nos controlos táteis) passa a modelar relação curta de binário reduzido (*crawler*), vencendo sempre a gravidade da rampa mesmo com atrelados pesados e mantendo velocidade controlada e progressiva a recuar encosta acima.
+  - Adicionada reserva de binário de 1.ª velocidade reduzida em subidas íngremes para a frente (evitando estagnação com cargas pesadas) e retenção de travão de serviço parado em inclinações (*hill-hold*).
+
+### **v2.13.1**
+- **Migração Automática de Rascunhos Antigos (`World.ts`, `rigworld.json`, `scripts/smoke-progression.mjs`)**:
+  - Corrigido o cenário em que navegadores com um rascunho de editor guardado em `localStorage` (`rigmaster_world_draft` anterior à expansão Noroeste) carregavam apenas o terreno montanhoso sem as estradas, hub, posto de abastecimento, serraria e torres eólicas da **Serra dos Ventos**.
+  - `rigworld.json` promovido para `version: 4` e `World.restoreDraft()` passa a fundir automaticamente as 6 estradas e todos os objetos oficiais da Serra dos Ventos em rascunhos legados (preservando eventuais edições na ilha principal).
+  - `World.endEditorSession()` passa a gravar `localStorage` apenas quando houve alterações efetivas na sessão de editor, evitando fixar snapshots obsoletos ao abrir/fechar o Editor sem editar.
+  - Adicionado acesso asfaltado dedicado (`wo_385`) entre a estrada da Serraria (`rd_44`) e o Posto de Combustível da Serra (`wo_313`/`wo_314`).
+
+### **v2.13.0**
+- **Expansão Montanhosa Noroeste — 5.º Hub Regional «Serra dos Ventos» (`WorldTerrain.ts`, `World.ts`, `StaticWorldChunks.ts`, `WorldObjects.ts`, `Truck.ts`, `GarageSystem.ts`, `ReputationSystem.ts`, `MissionSystem.ts`, `MainScene.ts`, `MinimapScene.ts`, `WorldMapModal.tsx`, `EditorScene.ts`, `App.tsx`, `rigworld.json`)**:
+  - **Mapa alargado para Noroeste sem alterar RigWorld existente**: espaço negativo `[-5120..13824, -4096..10240]` preservando integralmente todas as 38 estradas e 258 objetos originais da ilha; ligação dupla livre de obstáculos pelo Corredor Norte (`rd_42` a partir de `rd_2`) e pela Via Costeira Oeste (`rd_43` a partir de `rd_8`).
+  - **Relevo 2D de Montanha & Física de Rampa**: campo contínuo de altitude (`0m` plano na ilha original → patamar plano de `210m` na Serraria → crista e planalto do Cume a `640m`), sombreamento direcional de encostas (hillshading NW), curvas de nível topográficas de `60m`, biomas alpinos (floresta de coníferas, rocha de encosta, granito de altitude), setas subtis de aclive desenhadas nas estradas inclinadas, leitura compacta de altitude/declive no HUD e física longitudinal de gravidade em `Truck.ts` (perda de embalo e maior consumo a subir, aceleração e aquecimento extra de travões a descer, retenção em travão de mão).
+  - **Zona de Madeireiros / Serraria (`210m`)**: serração industrial, 8 pilhas de toros (`log_pile`), doca dedicada (`wo_301`), Oficina da Serra (`wo_310`), Posto de Combustível, 4 baías universais e atrelados florestais livres (`timber`).
+  - **Parque Eólico do Cume (`640m`)**: acesso por serpentina alpina asfaltada com curvas largas (`rd_45`, `w=124px` apta para pás eólicas de 62m) ou picada florestal em terra batida (`rd_47`), anel panorâmico de serviço (`rd_46`), 6 torres eólicas gigantes animadas (`wind_turbine`) com rotores giratórios de 3 pás, sombras móveis e farolins vermelhos de aviação, subestação elétrica e 2 docas de cume (`wo_302` Cume Norte, `wo_303` Subestação).
+  - **Progressão, Missões, Mapa Estratégico & Editor**: 5.º hub `serra` totalmente integrado em `GarageSystem`, `ReputationSystem` e `MissionSystem` (+5 novas missões de montanha, totalizando 25 missões); minimapa e `WorldMapModal` atualizados com curvas topográficas e ícones de torres eólicas; 4 novos prefabs alpinos disponíveis no Editor (`Torre Eólica`, `Pilha de Toros`, `Afloramento Rochoso`, `Pinheiro Alpino`).
+
+### **v2.12.6**
 - **Menus e Modais Otimizados para Ecrãs Pequenos (Mobile Portrait/Landscape):**
   - `MissionsModal`: cabeçalho empilhado em `<sm` (`flex-col sm:flex-row`) com botão fechar alinhado ao título e seletor segmentado `Missões | Certificados` em largura total; barra de filtros de hubs convertida para faixa horizontal deslizável numa única linha em mobile (`overflow-x-auto`) libertando >65% da altura útil para a lista de missões; barra de contexto compacta e botões de ação em largura total (`w-full sm:w-auto`).
   - `FleetGarageModal`: cabeçalho responsivo empilhado com `Mapa da Frota` em largura total em ecrãs estreitos e cartões com ações `flex-wrap` sem transbordo horizontal.

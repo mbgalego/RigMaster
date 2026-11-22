@@ -162,7 +162,7 @@ export const CERTIFICATE_IDS: CertificateId[] = [
   'Fragile_Expert',
 ];
 
-const HUB_IDS: HubId[] = ['harbor', 'shipyard', 'industrial', 'historic'];
+const HUB_IDS: HubId[] = ['harbor', 'shipyard', 'industrial', 'historic', 'serra'];
 
 const STORAGE_KEYS = {
   hubReputation: 'rigmaster_hubReputation',
@@ -190,7 +190,7 @@ function cloneFleetTruck(t: FleetTruckState): FleetTruckState {
 }
 
 function createInitialReputation(): Record<HubId, number> {
-  return { harbor: 0, shipyard: 0, industrial: 0, historic: 0 };
+  return { harbor: 0, shipyard: 0, industrial: 0, historic: 0, serra: 0 };
 }
 
 function createInitialCertificates(): Record<CertificateId, CertificateState> {
@@ -274,6 +274,7 @@ export class ReputationSystem {
     shipyard: 10000,
     industrial: 10000,
     historic: 10000,
+    serra: 10000,
   };
   private sandboxFleet: FleetTruckState[] = createInitialFleet(true);
   private sandboxActiveTruckId: string = 'truck_iveco_daily_4x2';

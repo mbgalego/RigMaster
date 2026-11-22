@@ -33,6 +33,7 @@ const HUB_LABELS: Record<HubId, string> = {
   shipyard: 'Estaleiro Logístico',
   industrial: 'Zona Industrial Sul',
   historic: 'Centro Histórico',
+  serra: 'Serra dos Ventos',
 };
 
 export const FleetGarageModal: React.FC<FleetGarageModalProps> = ({

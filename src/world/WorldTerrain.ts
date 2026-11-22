@@ -13,7 +13,27 @@ import Phaser from 'phaser';
 
 const CHUNK = 1024; // world px per chunk
 const RES = 512;    // internal canvas resolution per chunk (2 world px / texel)
-const MAX_CACHE = 40;
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+function smoothMax(a: number, b: number, k: number): number {
+  const h = Math.max(k - Math.abs(a - b), 0) / k;
+  return Math.max(a, b) + h * h * k * 0.25;
+}
+
+export interface TerrainSlopeSample {
+  /** Altitude above sea level in metres (0 = coastal plain, ~640 = summit plateau) */
+  altitudeM: number;
+  /** Partial derivative d(altitudeM)/dx in m / world-px */
+  dhdx: number;
+  /** Partial derivative d(altitudeM)/dy in m / world-px */
+  dhdy: number;
+  /** Steepness magnitude in percent grade (e.g. 8.5 means 8.5%) */
+  slopePercent: number;
+}
 
 export class WorldTerrain {
   private scene: Phaser.Scene;
@@ -22,7 +42,7 @@ export class WorldTerrain {
   private overviewImg: Phaser.GameObjects.Image | null = null;
   private lightingEnabled: boolean = false;
   private order: string[] = [];
-  /** Rects of guaranteed land (coastal hubs: port, shipyard…) */
+  /** Rects of guaranteed land (coastal hubs: port, shipyard, mountain causeways…) */
   private landPatches: Array<{ x0: number; y0: number; x1: number; y1: number }> = [];
 
   public setLightingEnabled(enabled: boolean) {
@@ -45,8 +65,13 @@ export class WorldTerrain {
     this.landPatches = patches;
   }
 
+  /** Negative NW origin for the expanded Serra dos Ventos massif & northern/western foothills (existing island stays at 0..13824, 0..10240). */
+  public static get WORLD_MIN_X() { return -6144; }
+  public static get WORLD_MIN_Y() { return -5120; }
   public static get WORLD_W() { return 13824; }
   public static get WORLD_H() { return 10240; }
+  public static get WORLD_SPAN_W() { return WorldTerrain.WORLD_W - WorldTerrain.WORLD_MIN_X; }
+  public static get WORLD_SPAN_H() { return WorldTerrain.WORLD_H - WorldTerrain.WORLD_MIN_Y; }
 
   // ======================================================================
   // NOISE (seeded, deterministic)
@@ -82,29 +107,90 @@ export class WorldTerrain {
     return sum / norm;
   }
 
+  private ellipseMetric(x: number, y: number, cx: number, cy: number, rx: number, ry: number): number {
+    const d = Math.hypot((x - cx) / rx, (y - cy) / ry);
+    return (1 - d) * Math.min(rx, ry);
+  }
+
+  private capsuleMetric(x: number, y: number, ax: number, ay: number, bx: number, by: number, radius: number): number {
+    const dx = bx - ax;
+    const dy = by - ay;
+    const l2 = dx * dx + dy * dy;
+    const t = l2 > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2)) : 0;
+    return radius - Math.hypot(x - (ax + t * dx), y - (ay + t * dy));
+  }
+
   // ======================================================================
-  // LAND SHAPE (island mask)
+  // LAND SHAPE (organic island + complete 360° NW Mountain Range & Foothills)
   // ======================================================================
 
   /**
-   * Distance-to-shore metric: distance to the nearest world edge, softened by
-   * rounded corners and modulated by noise so the coastline wiggles (bays and
-   * small peninsulas) but never eats more than ~460px of land.
+   * Distance-to-shore metric: seamless organic union of original RigWorld [0..13824, 0..10240],
+   * the complete 360° Serra dos Ventos massif (with full North & West back-slopes),
+   * the Cordilheira Norte foothills sweeping east to Estaleiro Logístico,
+   * the Costa Atlântica foothills sweeping south to Centro Histórico,
+   * and small scenic rocky islets in the outer bays.
    */
   public coastMetric(x: number, y: number): number {
-    // Guaranteed-land patches (coastal hubs) always count as deep inland
+    // Guaranteed-land patches (4 original coastal hubs on the main island)
     for (const p of this.landPatches) {
       if (x >= p.x0 && x <= p.x1 && y >= p.y0 && y <= p.y1) return 1000;
     }
-    const dx = Math.min(x, WorldTerrain.WORLD_W - x);
-    const dy = Math.min(y, WorldTerrain.WORLD_H - y);
-    const d = Math.min(dx, dy);
-    // Rounded corners: push metric down near corners
-    const cx = Math.min(x, WorldTerrain.WORLD_W - x);
-    const cy = Math.min(y, WorldTerrain.WORLD_H - y);
-    const corner = Math.hypot(Math.max(0, 900 - cx), Math.max(0, 900 - cy));
     const wiggle = (this.fbm(x * 0.0016, y * 0.0016, 3) - 0.5) * 380;
-    return d - corner * 0.35 + wiggle;
+    const fineWiggle = (this.fbm(x * 0.0042 + 19, y * 0.0042 + 7, 2) - 0.5) * 120;
+
+    // 1. Original main island [0..WORLD_W, 0..WORLD_H]
+    const dx1 = Math.min(x, WorldTerrain.WORLD_W - x);
+    const dy1 = Math.min(y, WorldTerrain.WORLD_H - y);
+    const d1 = Math.min(dx1, dy1);
+    const corner1 = Math.hypot(Math.max(0, 900 - dx1), Math.max(0, 900 - dy1));
+    const mainBase = d1 - corner1 * 0.35;
+
+    // 2. Complete Serra dos Ventos Alpine Massif (full N & W back-slopes inside [-6144..-5120])
+    const massifCore = this.ellipseMetric(x, y, -2950, -2050, 2550, 2450);
+    const massifSummitCape = this.ellipseMetric(x, y, -3520, -3080, 1980, 1520);
+    const massifSerraria = this.ellipseMetric(x, y, -2450, -350, 1850, 1380);
+    const nwCape = smoothMax(smoothMax(massifCore, massifSummitCape, 380), massifSerraria, 380);
+
+    // 3. Cordilheira Norte / Montes do Norte — rolling northern foothills curving east to Estaleiro
+    const northRidgeW = this.capsuleMetric(x, y, -1650, -2300, 2750, -1850, 1460);
+    const northRidgeE = this.capsuleMetric(x, y, 2750, -1850, 7450, -680, 1280);
+    const northNeck = this.capsuleMetric(x, y, -900, -450, 3456, -150, 950);
+    const northFoothills = smoothMax(smoothMax(northRidgeW, northRidgeE, 360), northNeck, 340);
+
+    // 4. Costa Atlântica Oeste — rolling western coastal hills curving south to Centro Histórico
+    const westUpper = this.capsuleMetric(x, y, -2250, -200, -1950, 2950, 1380);
+    const westNeck = this.capsuleMetric(x, y, -1250, 1200, 350, 3072, 1180);
+    const westLower = this.capsuleMetric(x, y, -1950, 2950, -1050, 6550, 1180);
+    const westJoin = this.capsuleMetric(x, y, -1050, 6550, 520, 7168, 920);
+    const westFoothills = smoothMax(
+      smoothMax(smoothMax(westUpper, westNeck, 360), westLower, 360),
+      westJoin,
+      360,
+    );
+
+    // Smooth organic union of all landmass lobes (no 90° rectangular cuts)
+    let land = smoothMax(mainBase, nwCape, 480);
+    land = smoothMax(land, northFoothills, 440);
+    land = smoothMax(land, westFoothills, 440);
+
+    // Organic outer-edge ocean margin guard so land never touches the rectangular canvas border
+    const edgeX = Math.min(x - WorldTerrain.WORLD_MIN_X, WorldTerrain.WORLD_W - x);
+    const edgeY = Math.min(y - WorldTerrain.WORLD_MIN_Y, WorldTerrain.WORLD_H - y);
+    const nwEdgeGuard = (x < 0 || y < 0)
+      ? smoothstep(460, 120, Math.min(edgeX, edgeY)) * 900
+      : 0;
+
+    // 5. Scenic offshore rocky islets in the outer NE & SW bays
+    const isletNE1 = this.ellipseMetric(x, y, 10550, -2550, 640, 340);
+    const isletNE2 = this.ellipseMetric(x, y, 11420, -2050, 260, 190);
+    const isletSW1 = this.ellipseMetric(x, y, -4250, 4850, 480, 340);
+    const isletSW2 = this.ellipseMetric(x, y, -3650, 5650, 230, 180);
+    const isletW1 = this.ellipseMetric(x, y, -4780, 1520, 310, 230);
+    const islets = Math.max(isletNE1, isletNE2, isletSW1, isletSW2, isletW1);
+
+    const combined = Math.max(land - nwEdgeGuard, islets);
+    return combined + wiggle + (x < 0 || y < 0 ? fineWiggle : 0);
   }
 
   public isWater(x: number, y: number): boolean {
@@ -117,23 +203,175 @@ export class WorldTerrain {
   }
 
   // ======================================================================
+  // MOUNTAIN ELEVATION HEIGHTFIELD (Serra dos Ventos + Northern & Western Foothills)
+  // ======================================================================
+
+  /**
+   * Continuous elevation in metres:
+   * - Strictly 0m across all of original RigWorld (x >= 50 && y >= 50).
+   * - 640m flat summit plateau at Parque Eólico (-3350, -2950) with complete
+   *   northern (Crista Norte) and western (Contraforte Oeste) alpine back-slopes.
+   * - 210m flat mid-mountain terrace at Serraria / Madeireiros (-2350, -550).
+   * - Gradual foothill chains tapering naturally eastward (Cordilheira Norte toward
+   *   Estaleiro Logístico) and southward (Costa Atlântica toward Centro Histórico),
+   *   all sloping cleanly down to sea level at the coast.
+   */
+  public elevationAt(x: number, y: number): number {
+    // Fast-path: original RigWorld island (x >= 50 && y >= 50) stays strictly flat at 0m
+    if (x >= 50 && y >= 50) return 0;
+
+    // Smooth boundary mask ensuring zero elevation bleed into original RigWorld (x >= 0, y >= 0)
+    const westMask = smoothstep(50, -480, x);
+    const northMask = smoothstep(50, -460, y);
+    const cornerGuard = 1 - smoothstep(-280, 45, x) * smoothstep(-280, 45, y);
+    const extMask = Math.max(westMask, northMask) * cornerGuard;
+    if (extMask <= 0.0005) return 0;
+
+    // 1. Summit Massif — Parque Eólico do Cume centered at (-3350, -2950)
+    const sx = (x - (-3350)) / 2450;
+    const sy = (y - (-2950)) / 1850;
+    const sDist = Math.hypot(sx, sy);
+    const summitProfile = 1 - smoothstep(0.32, 1.18, sDist);
+    const summitAlt = 640 * summitProfile;
+
+    // 2. Mid-Mountain Timber Bench — Zona de Madeireiros centered at (-2350, -550)
+    const tx = (x - (-2350)) / 1380;
+    const ty = (y - (-550)) / 980;
+    const tDist = Math.hypot(tx, ty);
+    const timberProfile = 1 - smoothstep(0.42, 1.15, tDist);
+    const timberAlt = 210 * timberProfile;
+
+    // 3. Connecting Mountain Spine Ridge between Timber Bench and Summit Switchbacks
+    const rx = (x - (-2300)) / 1750;
+    const ry = (y - (-1750)) / 1150;
+    const rDist = Math.hypot(rx, ry);
+    const ridgeAlt = 390 * (1 - smoothstep(0.18, 1.12, rDist));
+
+    // 4. Complete Northern & Western Alpine Back-Slopes (no sudden mountain cut-off!)
+    const nPeakDist = Math.hypot((x - (-2550)) / 1850, (y - (-3920)) / 1150);
+    const northCrestAlt = 465 * (1 - smoothstep(0.12, 1.05, nPeakDist));
+
+    const wSpurDist = Math.hypot((x - (-4580)) / 1350, (y - (-2350)) / 1550);
+    const westSpurAlt = 410 * (1 - smoothstep(0.14, 1.05, wSpurDist));
+
+    // 5. Cordilheira Norte — Eastern mountain tail tapering gently toward Estaleiro Logístico
+    const ne1Dist = Math.hypot((x - 1350) / 2150, (y - (-2080)) / 1220);
+    const ne1Alt = 295 * (1 - smoothstep(0.10, 1.08, ne1Dist));
+
+    const ne2Dist = Math.hypot((x - 4350) / 2250, (y - (-1620)) / 1120);
+    const ne2Alt = 195 * (1 - smoothstep(0.10, 1.08, ne2Dist));
+
+    const ne3Dist = Math.hypot((x - 6850) / 1650, (y - (-880)) / 860);
+    const ne3Alt = 105 * (1 - smoothstep(0.10, 1.08, ne3Dist));
+
+    // 6. Costa Atlântica Oeste — Southern mountain tail tapering gently toward Centro Histórico
+    const sw1Dist = Math.hypot((x - (-2050)) / 1450, (y - 1950) / 1680);
+    const sw1Alt = 185 * (1 - smoothstep(0.12, 1.08, sw1Dist));
+
+    const sw2Dist = Math.hypot((x - (-1720)) / 1220, (y - 4450) / 1850);
+    const sw2Alt = 130 * (1 - smoothstep(0.12, 1.08, sw2Dist));
+
+    const sw3Dist = Math.hypot((x - (-1050)) / 920, (y - 6350) / 1150);
+    const sw3Alt = 70 * (1 - smoothstep(0.12, 1.08, sw3Dist));
+
+    // Smooth union of all geological formations
+    let h = smoothMax(summitAlt, timberAlt, 55);
+    h = smoothMax(h, ridgeAlt, 65);
+    h = smoothMax(h, northCrestAlt, 60);
+    h = smoothMax(h, westSpurAlt, 55);
+    h = smoothMax(h, ne1Alt, 50);
+    h = smoothMax(h, ne2Alt, 45);
+    h = smoothMax(h, ne3Alt, 35);
+    h = smoothMax(h, sw1Alt, 45);
+    h = smoothMax(h, sw2Alt, 40);
+    h = smoothMax(h, sw3Alt, 30);
+
+    // Subtle natural rock undulations (suppressed on flat operational plateaus so yards & docks stay level)
+    const onSummitPlateau = smoothstep(0.46, 0.30, sDist);
+    const onTimberPlateau = smoothstep(0.56, 0.38, tDist);
+    const plateauFlatness = Math.max(onSummitPlateau, onTimberPlateau);
+    const ridgeNoise = (this.fbm(x * 0.0014 + 13, y * 0.0014 + 29, 3) - 0.5) * 44;
+    h = Math.max(0, h + ridgeNoise * (1 - plateauFlatness) * Math.min(1, h / 120));
+
+    // Clamp crisp flat plateaus for Wind Farm Summit (640m) and Timber Yard (210m)
+    if (onSummitPlateau > 0.01) {
+      h = Phaser.Math.Linear(h, 640, onSummitPlateau);
+    }
+    if (onTimberPlateau > 0.01) {
+      h = Phaser.Math.Linear(h, 210, onTimberPlateau);
+    }
+
+    // Natural coastal slope taper so mountain flanks descend gracefully to sea level at every shoreline
+    if (plateauFlatness < 0.99) {
+      const coastTaper = smoothstep(45, 540, this.coastMetric(x, y));
+      const effectiveTaper = Phaser.Math.Linear(coastTaper, 1, plateauFlatness);
+      h *= effectiveTaper;
+    }
+
+    return Math.max(0, h * extMask);
+  }
+
+  /**
+   * Maps metres-per-world-pixel to realistic highway grade (m/m), accounting for
+   * 2D horizontal map compression (~2.4m alpine map distance per pixel).
+   * Yields ~8–15% grades on the Serpentina switchbacks and ~17% on the dirt shortcut.
+   */
+  public static readonly ALPINE_GRADE_SCALE = 0.42;
+
+  /**
+   * Computes altitude and analytical slope gradient at world position (x, y).
+   */
+  public slopeAt(x: number, y: number): TerrainSlopeSample {
+    const alt = this.elevationAt(x, y);
+    if (alt <= 0.1 && x > -200 && y > -200) {
+      return { altitudeM: 0, dhdx: 0, dhdy: 0, slopePercent: 0 };
+    }
+    const eps = 24;
+    const hx1 = this.elevationAt(x + eps, y);
+    const hx0 = this.elevationAt(x - eps, y);
+    const hy1 = this.elevationAt(x, y + eps);
+    const hy0 = this.elevationAt(x, y - eps);
+    const dhdx = (hx1 - hx0) / (2 * eps);
+    const dhdy = (hy1 - hy0) / (2 * eps);
+    const gradeMag = Math.hypot(dhdx, dhdy) * WorldTerrain.ALPINE_GRADE_SCALE;
+    return {
+      altitudeM: alt,
+      dhdx,
+      dhdy,
+      slopePercent: gradeMag * 100,
+    };
+  }
+
+  // ======================================================================
   // BIOME REGIONS
   // ======================================================================
 
-  /** Region id: 0 grass, 1 forest, 2 farmland, 3 urban, 4 industrial, 5 historic, 6 port */
+  /**
+   * Region id:
+   * 0 grass, 1 forest, 2 farmland, 3 urban, 4 industrial, 5 historic, 6 port,
+   * 7 alpine pine / logging forest, 8 alpine rock / scree, 9 alpine summit plateau
+   */
   public regionAt(x: number, y: number): number {
-    // Port (NW coastal strip)
-    if (x < 2800 && y < 2100) return 6;
+    // Mountain biomes driven by altitude in Serra dos Ventos & foothills
+    const alt = this.elevationAt(x, y);
+    if (alt >= 520) return 9; // Summit wind-farm granite & frost plateau
+    if (alt >= 300) return 8; // Exposed alpine rock & scree slopes
+    if (alt >= 55) return 7;  // Alpine conifer & foothill forest belt
+
+    // Port (NW coastal strip of original island)
+    if (x >= -120 && x < 2800 && y >= -120 && y < 2100) return 6;
     // Shipyard (NE)
-    if (x > 7400 && x < 10600 && y < 1700) return 4;
+    if (x > 7400 && x < 10600 && y >= 0 && y < 1700) return 4;
     // Industrial (SE)
     if (x > 9200 && y > 6900) return 4;
     // Historic (SW)
-    if (x < 2600 && y > 7200) return 5;
+    if (x >= 0 && x < 2600 && y > 7200) return 5;
     // Urban centre band
     if (x > 3600 && x < 8200 && y > 2400 && y < 7600) return 3;
     // Farmland belt south of centre
     if (y > 7400 && x > 2600 && x < 9200) return 2;
+    // Foothills of Serra dos Ventos (x < 0 || y < 0): dense pine forest
+    if (x < -100 || y < -100) return 7;
     // Forest patches on the remaining countryside (noise-driven)
     const f = this.fbm(x * 0.0011 + 37, y * 0.0011 + 91, 3);
     if (f > 0.62) return 1;
@@ -206,37 +444,51 @@ export class WorldTerrain {
   }
 
   /**
-   * Flat island silhouette covering the whole world (built once, drawn under
-   * the detailed chunks) — reads correctly at any camera zoom.
+   * Flat island silhouette covering the whole expanded world (built once, drawn
+   * under the detailed chunks) — reads correctly at any camera zoom.
    */
   public ensureOverview() {
     if (this.scene.textures.exists('terrain_overview')) return;
-    const ow = 344, oh = 256; // 40 world px per texel
+    const step = 40; // 40 world px per texel
+    const ow = Math.ceil(WorldTerrain.WORLD_SPAN_W / step);
+    const oh = Math.ceil(WorldTerrain.WORLD_SPAN_H / step);
     const tex = this.scene.textures.createCanvas('terrain_overview', ow, oh);
     if (!tex) return;
     const ctx = tex.getContext();
     for (let y = 0; y < oh; y++) {
       for (let x = 0; x < ow; x++) {
-        const wx = (x + 0.5) * 40, wy = (y + 0.5) * 40;
+        const wx = WorldTerrain.WORLD_MIN_X + (x + 0.5) * step;
+        const wy = WorldTerrain.WORLD_MIN_Y + (y + 0.5) * step;
         const m = this.coastMetric(wx, wy);
         let color: string;
-        if (m < 40) color = '#0a2338';
-        else if (m < 130) color = '#8a744d';
+        if (m < -60) color = '#0a2338';
+        else if (m < 40) color = '#11354f';
+        else if (m < 130) color = (wx < -1200 || wy < -1200) ? '#535b63' : '#8a744d';
         else {
           const region = this.regionAt(wx, wy);
-          color = region === 3 || region === 4 || region === 6 ? '#262b33'
+          color = region === 9 ? '#82909d'
+            : region === 8 ? '#505a63'
+            : region === 7 ? '#193522'
+            : region === 3 || region === 4 || region === 6 ? '#262b33'
             : region === 5 ? '#383b41'
             : region === 2 ? '#33301a'
             : '#1f3619';
+          if (region >= 7) {
+            const s = this.slopeAt(wx, wy);
+            if (s.slopePercent > 1.5) {
+              const dot = (s.dhdx * 0.707 + s.dhdy * 0.707) * 16.2;
+              color = this.shadeHex(color, Phaser.Math.Clamp(dot * 3.8, -0.55, 0.55));
+            }
+          }
         }
         ctx.fillStyle = color;
         ctx.fillRect(x, y, 1, 1);
       }
     }
     tex.refresh();
-    this.overviewImg = this.scene.add.image(0, 0, 'terrain_overview')
+    this.overviewImg = this.scene.add.image(WorldTerrain.WORLD_MIN_X, WorldTerrain.WORLD_MIN_Y, 'terrain_overview')
       .setOrigin(0, 0)
-      .setDisplaySize(WorldTerrain.WORLD_W, WorldTerrain.WORLD_H)
+      .setDisplaySize(WorldTerrain.WORLD_SPAN_W, WorldTerrain.WORLD_SPAN_H)
       .setDepth(-1)
       .setLighting(this.lightingEnabled && this.chunks.size < 2);
   }
@@ -264,24 +516,75 @@ export class WorldTerrain {
   private paintChunk(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
     const cell = 8; // texels per cell → 16 world px per cell
     const pxToWorld = CHUNK / RES;
+    const chunkBaseX = cx * CHUNK;
+    const chunkBaseY = cy * CHUNK;
+    // Fast check: does this chunk overlap the Serra dos Ventos mountain zone?
+    const isMountainChunk = chunkBaseX < 400 || chunkBaseY < 400;
+
     for (let ty = 0; ty < RES; ty += cell) {
       for (let tx = 0; tx < RES; tx += cell) {
-        const wx = cx * CHUNK + tx * pxToWorld + pxToWorld * cell / 2;
-        const wy = cy * CHUNK + ty * pxToWorld + pxToWorld * cell / 2;
-        ctx.fillStyle = this.cellColor(wx, wy);
+        const wx = chunkBaseX + tx * pxToWorld + pxToWorld * cell / 2;
+        const wy = chunkBaseY + ty * pxToWorld + pxToWorld * cell / 2;
+        ctx.fillStyle = this.cellColor(wx, wy, isMountainChunk);
         ctx.fillRect(tx, ty, cell, cell);
       }
     }
-    // Sparse detail: grass tufts / rocks / ripples in world px
+
+    // Topographic contour isolines (every 60m) on mountain slopes for instant 2D relief readability
+    if (isMountainChunk) {
+      this.paintMountainContours(ctx, cx, cy);
+    }
+
+    // Sparse detail: grass tufts / pine trees / rocks / ripples in chunk-local px
     this.paintDetail(ctx, cx, cy);
   }
 
-  private cellColor(x: number, y: number): string {
+  /** Paints crisp subtle topographic contour lines every 60m of elevation across mountain chunks. */
+  private paintMountainContours(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
+    const stepTex = 8; // 16 world px grid
+    const pxToWorld = CHUNK / RES;
+    const intervalM = 60;
+
+    for (let ty = 0; ty < RES; ty += stepTex) {
+      for (let tx = 0; tx < RES; tx += stepTex) {
+        const wx = cx * CHUNK + (tx + stepTex * 0.5) * pxToWorld;
+        const wy = cy * CHUNK + (ty + stepTex * 0.5) * pxToWorld;
+        if (this.isWater(wx, wy)) continue;
+        const a0 = this.elevationAt(wx, wy);
+        if (a0 < 35) continue;
+        const b0 = Math.floor(a0 / intervalM);
+        const ax = this.elevationAt(wx + stepTex * pxToWorld, wy);
+        const ay = this.elevationAt(wx, wy + stepTex * pxToWorld);
+        if (Math.floor(ax / intervalM) !== b0 || Math.floor(ay / intervalM) !== b0) {
+          const isMajor = (b0 % 2 === 0);
+          ctx.fillStyle = isMajor ? 'rgba(15, 23, 34, 0.34)' : 'rgba(20, 30, 42, 0.20)';
+          ctx.fillRect(tx, ty, stepTex, stepTex);
+        }
+      }
+    }
+  }
+
+  /** Applies subtle NW directional hillshading (+bright on sunlit NW slopes, -dark on SE slopes). */
+  private shadeHex(hex: string, shadeDelta: number): string {
+    if (Math.abs(shadeDelta) < 0.01) return hex;
+    const n = parseInt(hex.slice(1), 16);
+    const shift = Math.round(shadeDelta * 36);
+    const r = Math.max(0, Math.min(255, ((n >> 16) & 255) + shift));
+    const g = Math.max(0, Math.min(255, ((n >> 8) & 255) + shift));
+    const b = Math.max(0, Math.min(255, (n & 255) + shift));
+    return `rgb(${r},${g},${b})`;
+  }
+
+  private cellColor(x: number, y: number, allowMountainShade = false): string {
     const m = this.coastMetric(x, y);
     if (m < -60) return '#0a2338';          // deep ocean
     if (m < 40) return '#123a56';           // shallow water
     if (m < 130) {
-      // Beach sand with grain
+      // Rocky alpine cliffs near NW cape vs warm beach sand on main island
+      if (x < -1200 || y < -1200) {
+        const g = this.valueNoise(x * 0.06, y * 0.06);
+        return g > 0.5 ? '#596169' : '#4a5259';
+      }
       const g = this.valueNoise(x * 0.09, y * 0.09);
       return g > 0.5 ? '#a9915f' : '#9c855a';
     }
@@ -289,67 +592,127 @@ export class WorldTerrain {
     const region = this.regionAt(x, y);
     const v = this.fbm(x * 0.02, y * 0.02, 2); // fine variation
 
+    let base: string;
     switch (region) {
+      case 9: { // High alpine summit plateau (wind-swept granite + light frost)
+        const f = this.fbm(x * 0.009 + 5, y * 0.009 + 19, 3);
+        base = f > 0.66 ? '#95a3b0' : f > 0.42 ? '#7c8894' : '#68737f';
+        break;
+      }
+      case 8: { // Alpine scree / rocky granite slopes
+        const r = this.fbm(x * 0.012 + 41, y * 0.012 + 11, 2);
+        base = r > 0.62 ? '#596066' : r > 0.36 ? '#4a5156' : '#3d4547';
+        break;
+      }
+      case 7: { // Alpine pine & timber forest belt
+        const p = this.fbm(x * 0.008 + 73, y * 0.008 + 17, 2);
+        base = p > 0.62 ? '#233f28' : p > 0.36 ? '#1b3421' : '#152a1b';
+        break;
+      }
       case 6: { // port: concrete aprons + water near docks
-        return v > 0.5 ? '#2c3038' : '#272b33';
+        base = v > 0.5 ? '#2c3038' : '#272b33';
+        break;
       }
       case 4: { // industrial: oil-stained concrete
-        return v > 0.62 ? '#26262b' : v > 0.35 ? '#222226' : '#1d1d21';
+        base = v > 0.62 ? '#26262b' : v > 0.35 ? '#222226' : '#1d1d21';
+        break;
       }
       case 5: { // historic: worn cobblestone
         const c = this.valueNoise(Math.floor(x / 26), Math.floor(y / 26));
-        return c > 0.5 ? '#3d4046' : '#363940';
+        base = c > 0.5 ? '#3d4046' : '#363940';
+        break;
       }
       case 3: { // urban: mixed concrete / asphalt yards
-        return v > 0.6 ? '#262a31' : v > 0.3 ? '#21242b' : '#1c1f25';
+        base = v > 0.6 ? '#262a31' : v > 0.3 ? '#21242b' : '#1c1f25';
+        break;
       }
       case 2: { // farmland: crop strips
         const strip = Math.sin(x * 0.012 + this.hash(Math.floor(y / 400), 7) * 6.28) * 0.5 + 0.5;
-        return strip > 0.5 ? '#3d3a1e' : '#33301a';
+        base = strip > 0.5 ? '#3d3a1e' : '#33301a';
+        break;
       }
       case 1: { // forest floor
-        return v > 0.5 ? '#1d3317' : '#182b13';
+        base = v > 0.5 ? '#1d3317' : '#182b13';
+        break;
       }
       default: { // grass
         const g = this.fbm(x * 0.006, y * 0.006, 2);
-        if (g > 0.68) return '#28461f';
-        if (g > 0.4) return '#223c1c';
-        return '#1c3318';
+        base = g > 0.68 ? '#28461f' : g > 0.4 ? '#223c1c' : '#1c3318';
+        break;
       }
     }
+
+    // Apply directional NW hillshading on mountain slopes for unmistakable 2D depth
+    if (allowMountainShade && region >= 7) {
+      const s = this.slopeAt(x, y);
+      if (s.slopePercent > 1.2) {
+        // Light from NW (-0.707, -0.707): slopes facing NW (dhdx > 0 or dhdy > 0) brighten, SE slopes darken
+        const lightDot = (s.dhdx * 0.707 + s.dhdy * 0.707) * 16.2;
+        const delta = Phaser.Math.Clamp(lightDot * 4.5, -0.75, 0.75);
+        return this.shadeHex(base, delta);
+      }
+    }
+    return base;
   }
 
   private paintDetail(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
     const pxToWorld = CHUNK / RES;
+    const chunkBaseX = cx * CHUNK;
+    const chunkBaseY = cy * CHUNK;
     const rand = (ix: number, iy: number, salt: number) => {
-      let h = ix * 374761393 + iy * 668265263 + salt * 97 + this.seed;
+      let h = (ix + cx * 997) * 374761393 + (iy + cy * 991) * 668265263 + salt * 97 + this.seed;
       h = (h ^ (h >>> 13)) * 1274126177;
       return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
     };
 
-    // Trees on land (forest region mostly; sparse elsewhere)
+    // Trees on land (conifers in alpine forest region 7, deciduous in region 1, sparse elsewhere)
     for (let iy = 0; iy < RES; iy += 18) {
       for (let ix = 0; ix < RES; ix += 18) {
-        const wx = cx * CHUNK + (ix + rand(ix, iy, 3) * 14) * pxToWorld;
-        const wy = cy * CHUNK + (iy + rand(ix, iy, 5) * 14) * pxToWorld;
+        const lx = ix + rand(ix, iy, 3) * 14;
+        const ly = iy + rand(ix, iy, 5) * 14;
+        const wx = chunkBaseX + lx * pxToWorld;
+        const wy = chunkBaseY + ly * pxToWorld;
         if (this.isWater(wx, wy) || this.isBeach(wx, wy)) continue;
         const region = this.regionAt(wx, wy);
-        if (region === 3 || region === 4 || region === 6 || region === 5) continue;
-        const chance = region === 1 ? 0.5 : 0.03;
+        if (region === 3 || region === 4 || region === 6 || region === 5 || region === 9) continue;
+
+        if (region === 8) {
+          // Sparse alpine boulders & scree rocks on rocky slopes
+          if (rand(ix, iy, 11) > 0.14) continue;
+          const r = 4 + rand(ix, iy, 13) * 5;
+          ctx.fillStyle = 'rgba(15, 23, 34, 0.35)';
+          ctx.beginPath();
+          ctx.arc(lx + 2, ly + 2.5, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#6c757e';
+          ctx.beginPath();
+          ctx.arc(lx, ly, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#8b95a0';
+          ctx.beginPath();
+          ctx.arc(lx - r * 0.25, ly - r * 0.25, r * 0.5, 0, Math.PI * 2);
+          ctx.fill();
+          continue;
+        }
+
+        const chance = region === 7 ? 0.38 : region === 1 ? 0.5 : 0.03;
         if (rand(ix, iy, 11) > chance) continue;
 
-        const r = 9 + rand(ix, iy, 13) * 7;
-        ctx.fillStyle = '#152410';
+        // Avoid cluttering the Timber Yard operational apron (-2650..-2000, -860..-260)
+        if (region === 7 && wx > -2720 && wx < -1960 && wy > -920 && wy < -200) continue;
+
+        const r = region === 7 ? 7 + rand(ix, iy, 13) * 5.5 : 9 + rand(ix, iy, 13) * 7;
+        ctx.fillStyle = region === 7 ? '#0d1d13' : '#152410';
         ctx.beginPath();
-        ctx.arc(wx * RES / CHUNK, wy * RES / CHUNK, r + 2.5, 0, Math.PI * 2);
+        ctx.arc(lx + 2, ly + 2.5, r + 1.8, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = region === 1 ? '#2e5424' : '#2b4e22';
+        ctx.fillStyle = region === 7 ? '#1d4229' : region === 1 ? '#2e5424' : '#2b4e22';
         ctx.beginPath();
-        ctx.arc(wx * RES / CHUNK, wy * RES / CHUNK, r, 0, Math.PI * 2);
+        ctx.arc(lx, ly, r, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = '#3c6a2c';
+        ctx.fillStyle = region === 7 ? '#2c5c3b' : '#3c6a2c';
         ctx.beginPath();
-        ctx.arc(wx * RES / CHUNK - r * 0.25, wy * RES / CHUNK - r * 0.3, r * 0.55, 0, Math.PI * 2);
+        ctx.arc(lx - r * 0.22, ly - r * 0.28, r * 0.52, 0, Math.PI * 2);
         ctx.fill();
       }
     }
@@ -358,8 +721,8 @@ export class WorldTerrain {
     for (let i = 0; i < 30; i++) {
       const ix = rand(i, cx * 7 + cy, 21) * RES;
       const iy = rand(i, cx * 13 + cy * 3, 23) * RES;
-      const wx = cx * CHUNK + ix * pxToWorld;
-      const wy = cy * CHUNK + iy * pxToWorld;
+      const wx = chunkBaseX + ix * pxToWorld;
+      const wy = chunkBaseY + iy * pxToWorld;
       const m = this.coastMetric(wx, wy);
       if (m >= 40 || m < -80) continue;
       ctx.strokeStyle = 'rgba(180, 220, 255, 0.12)';
@@ -374,8 +737,8 @@ export class WorldTerrain {
     for (let i = 0; i < 14; i++) {
       const ix = rand(i, cy * 31, 31) * RES;
       const iy = rand(i, cx * 17, 33) * RES;
-      const wx = cx * CHUNK + ix * pxToWorld;
-      const wy = cy * CHUNK + iy * pxToWorld;
+      const wx = chunkBaseX + ix * pxToWorld;
+      const wy = chunkBaseY + iy * pxToWorld;
       if (this.regionAt(wx, wy) !== 2 || this.isWater(wx, wy)) continue;
       ctx.strokeStyle = 'rgba(120, 110, 50, 0.35)';
       ctx.lineWidth = 1;

@@ -179,6 +179,11 @@ export class MainScene extends Phaser.Scene {
       { x: 1970, y: 8300, angle: Math.PI },
       { x: 1340, y: 8300, angle: Math.PI },
     ],
+    serra: [
+      { x: -2680, y: -110, angle: 0 },
+      { x: -2500, y: -110, angle: 0 },
+      { x: -2320, y: -110, angle: 0 },
+    ],
   };
   private pumpPulsePhase: number = 0;
   /** Nearest unlocked parked fleet truck within physical swap range. */
@@ -196,6 +201,7 @@ export class MainScene extends Phaser.Scene {
 
   // Damage, G-Force & Impact FX
   private impactGraphics: Phaser.GameObjects.Graphics | null = null;
+  private windTurbineGraphics: Phaser.GameObjects.Graphics | null = null;
   private impactGraphicsDirty: boolean = false;
   private pumpGraphicsDirty: boolean = false;
   private weatherGraphicsDirty: boolean = false;
@@ -234,6 +240,7 @@ export class MainScene extends Phaser.Scene {
     { id: 'shipyard', label: 'ESTALEIRO', c: 90, r: 6 },
     { id: 'industrial', label: 'INDUSTRIAL', c: 94, r: 68 },
     { id: 'historic', label: 'HISTÓRICO', c: 8, r: 72 },
+    { id: 'serra', label: 'SERRA', c: -18, r: -4 },
   ];
 
   // Minimap (rendered in dedicated MinimapScene with locked zoom = 1)
@@ -288,6 +295,8 @@ export class MainScene extends Phaser.Scene {
     activeTruckUpgrades: TruckUpgrades;
     truckWear: TruckWearState;
     brakeHeat: number;
+    altitudeM: number;
+    gradePercent: number;
     nearbySwapTruck: { id: string; type: TruckType; name: string; dist: number } | null;
     currentHubId: HubId;
     hubReputation: Record<HubId, number>;
@@ -344,9 +353,11 @@ export class MainScene extends Phaser.Scene {
     activeTruckUpgrades: { ...DEFAULT_TRUCK_UPGRADES },
     truckWear: createCleanTruckWear(),
     brakeHeat: 0,
+    altitudeM: 0,
+    gradePercent: 0,
     nearbySwapTruck: null,
     currentHubId: 'harbor',
-    hubReputation: { harbor: 0, shipyard: 0, industrial: 0, historic: 0 },
+    hubReputation: { harbor: 0, shipyard: 0, industrial: 0, historic: 0, serra: 0 },
     activeMission: null,
     missionNavTarget: null,
     lastMissionCompletion: null,
@@ -420,11 +431,21 @@ export class MainScene extends Phaser.Scene {
     this.missionMarkerGraphics = this.add.graphics().setDepth(12).setLighting(false);
     // Impact sparks & hood smoke (above vehicles/bridges, depth 23)
     this.impactGraphics = this.add.graphics().setDepth(23).setLighting(false);
+    // Animated mountain wind turbine rotors & aviation beacons (highest world layer, depth 24)
+    this.windTurbineGraphics = this.add.graphics().setDepth(24).setLighting(false);
 
-    // Set world physics bounds (island edge)
-    const worldW = World.WORLD_W;
-    const worldH = World.WORLD_H;
-    this.matter.world.setBounds(0, 0, worldW, worldH, 64, true, true, true, true);
+    // Set world physics bounds (island + NW mountain expansion)
+    this.matter.world.setBounds(
+      World.WORLD_MIN_X,
+      World.WORLD_MIN_Y,
+      World.WORLD_SPAN_W,
+      World.WORLD_SPAN_H,
+      64,
+      true,
+      true,
+      true,
+      true,
+    );
     if (this.matter.world.debugGraphic) {
       this.matter.world.debugGraphic.setVisible(this.debugMatter);
     }
@@ -479,7 +500,12 @@ export class MainScene extends Phaser.Scene {
     });
 
     // 3. Camera Setup
-    this.cameras.main.setBounds(0, 0, worldW, worldH);
+    this.cameras.main.setBounds(
+      World.WORLD_MIN_X,
+      World.WORLD_MIN_Y,
+      World.WORLD_SPAN_W,
+      World.WORLD_SPAN_H,
+    );
     this.cameras.main.setBackgroundColor(0x0a2338); // ocean blue behind the island
     this.cameras.main.startFollow(this.truck.container, true, 0.1, 0.1);
     // Responsive default zoom: small screens (phones) start more zoomed out
@@ -2311,7 +2337,12 @@ export class MainScene extends Phaser.Scene {
       // a menos que o utilizador tenha cancelado (commit=false → restaura snapshot).
       this.world.endEditorSession(commit);
       this.scene.stop('EditorScene');
-      this.cameras.main.setBounds(0, 0, World.WORLD_W, World.WORLD_H);
+      this.cameras.main.setBounds(
+        World.WORLD_MIN_X,
+        World.WORLD_MIN_Y,
+        World.WORLD_SPAN_W,
+        World.WORLD_SPAN_H,
+      );
       this.cameras.main.setZoom(this.preEditorZoom);
       this.cameras.main.startFollow(this.truck.container, true, 0.1, 0.1);
       this.scene.bringToTop('MinimapScene');
@@ -2359,6 +2390,19 @@ export class MainScene extends Phaser.Scene {
     this.renderStaticWorldAndRoads(cam, liveView);
     // Gas pump highlight (nearby / refuelling)
     this.renderPumps();
+    // Spinning wind turbine rotors & aviation beacons (visible in Drive & Editor modes)
+    if (this.windTurbineGraphics) {
+      if (cam.zoom >= 0.08) {
+        this.world.objects.renderWindTurbines(
+          this.windTurbineGraphics,
+          liveView,
+          time,
+          this.isEditorMode ? 0 : timeSnap.lampFactor,
+        );
+      } else {
+        this.windTurbineGraphics.clear();
+      }
+    }
 
     // Lightweight animated traffic lights, streetlamp arms, bulb cores & seamless light pools
     if (this.lightsGraphics && this.overheadGraphics && this.overheadLightsGraphics && cam.zoom >= 0.12) {
@@ -2495,6 +2539,13 @@ export class MainScene extends Phaser.Scene {
       const roadGrip = this.roadNetwork.gripAt(tx, ty, this.truck.layer);
       const padGrip = this.truck.layer === 0 ? this.world.objects.pavedGripAt(tx, ty) : 0;
       this.truck.setRoadGrip(Math.max(roadGrip, padGrip));
+
+      // Mountain terrain elevation & longitudinal slope physics along truck heading
+      const slope = this.world.terrain.slopeAt(tx, ty);
+      const tAng = this.truck.body.angle;
+      const longGrade =
+        (slope.dhdx * Math.sin(tAng) + slope.dhdy * -Math.cos(tAng)) * 0.42;
+      this.truck.setTerrainSlope(slope.altitudeM, longGrade);
 
       // Fade overhead viaduct deck while driving underneath on ground layer
       const underBridge =
@@ -2870,6 +2921,8 @@ export class MainScene extends Phaser.Scene {
           tires: Math.round(this.truck.wear.tires),
         },
         brakeHeat: Math.round(this.truck.brakeHeat * 100) / 100,
+        altitudeM: Math.round(this.truck.altitudeM),
+        gradePercent: Math.round(this.truck.terrainGrade * 1000) / 10,
         nearbySwapTruck: this.nearbySwapTruck,
         currentHubId,
         hubReputation: this.reputationSystem.getAllHubReputation(),
@@ -3420,6 +3473,42 @@ export class MainScene extends Phaser.Scene {
               const run = Math.min(len - t, PERIOD - phase); // exact gap length
               s += run; t += run;
             }
+          }
+        }
+      }
+
+      // 4. Mountain uphill grade chevrons (subtle visual slope cue on sloped mountain roads)
+      if (b.minX < 150 || b.minY < 150) {
+        const CHEVRON_STEP = 280;
+        let distAcc = 120;
+        for (let i = 0; i < samples.length - 1; i++) {
+          const a = samples[i], bS = samples[i + 1];
+          const segLen = Math.hypot(bS.x - a.x, bS.y - a.y);
+          if (segLen < 0.001) continue;
+          distAcc += segLen;
+          if (distAcc < CHEVRON_STEP) continue;
+          distAcc = 0;
+          if (a.x < vx0 || a.x > vx1 || a.y < vy0 || a.y > vy1) continue;
+          const sl = this.world.terrain.slopeAt(a.x, a.y);
+          if (sl.slopePercent < 4.0) continue;
+          const dotUp = a.tx * sl.dhdx + a.ty * sl.dhdy;
+          if (Math.abs(dotUp) < 0.0015) continue;
+          const dir = dotUp > 0 ? 1 : -1;
+          const ux = a.tx * dir;
+          const uy = a.ty * dir;
+          const nx = -uy;
+          const ny = ux;
+          const halfSpan = Math.min(20, a.w * 0.22);
+          const back = 13;
+          g.lineStyle(3, 0xfef08a, 0.26);
+          for (const shift of [-7, 7]) {
+            const cx = a.x + ux * shift;
+            const cy = a.y + uy * shift;
+            g.beginPath();
+            g.moveTo(cx - ux * back + nx * halfSpan, cy - uy * back + ny * halfSpan);
+            g.lineTo(cx, cy);
+            g.lineTo(cx - ux * back - nx * halfSpan, cy - uy * back - ny * halfSpan);
+            g.strokePath();
           }
         }
       }

@@ -65,9 +65,9 @@ export class StaticWorldChunks {
   private bakeCount = 0;
   private visibleChunkCount = 0;
   private fallbackActive = false;
-  private minChunkX = -1;
+  private minChunkX = Math.floor(WorldTerrain.WORLD_MIN_X / CHUNK_SIZE) - 1;
   private maxChunkX = Math.ceil(WorldTerrain.WORLD_W / CHUNK_SIZE);
-  private minChunkY = -1;
+  private minChunkY = Math.floor(WorldTerrain.WORLD_MIN_Y / CHUNK_SIZE) - 1;
   private maxChunkY = Math.ceil(WorldTerrain.WORLD_H / CHUNK_SIZE);
 
   constructor(

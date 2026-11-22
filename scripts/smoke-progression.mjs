@@ -423,7 +423,7 @@ const sandboxCheck = await page.evaluate(() => {
 
   rig.setGameMode('sandbox');
   const unlockedAll = rig.reputationSystem.getFleet().every((t) => t.unlocked);
-  const all20Missions = rig.missionSystem.getAvailableMissions().length === 20;
+  const all25Missions = rig.missionSystem.getAvailableMissions().length === 25;
   const remoteSwap8x4 = rig.trySwapTruck('truck_volvo_fh16_8x4', true);
   const activeInSandbox = rig.truck.truckType;
   const freeUpgradeAnywhere = rig.installTruckUpgrade('suspension', 'heavy_duty');
@@ -439,7 +439,7 @@ const sandboxCheck = await page.evaluate(() => {
 
   return {
     unlockedAll,
-    all20Missions,
+    all25Missions,
     remoteSwap8x4,
     activeInSandbox,
     freeUpgradeAnywhere,
@@ -451,9 +451,9 @@ const sandboxCheck = await page.evaluate(() => {
   };
 });
 check(
-  'Modo Sandbox desbloqueia 6 camiões, 20 missões, troca remota e upgrades livres sem contaminar Carreira',
+  'Modo Sandbox desbloqueia 6 camiões, 25 missões, troca remota e upgrades livres sem contaminar Carreira',
   sandboxCheck.unlockedAll &&
-    sandboxCheck.all20Missions &&
+    sandboxCheck.all25Missions &&
     sandboxCheck.remoteSwap8x4 &&
     sandboxCheck.activeInSandbox === 'volvo_fh16_8x4' &&
     sandboxCheck.freeUpgradeAnywhere &&
@@ -943,6 +943,150 @@ check(
   JSON.stringify({ reviewChecks, h1AfterReload, h2UnlockedCount }),
 );
 
+
+// 14. Expansão Montanhosa NW — Serra dos Ventos (altitude, estradas secas, eólicas, madeireiros e física de rampa)
+const mountainCheck = await page.evaluate(() => {
+  const rig = window.__rig;
+  const terrain = rig.world.terrain;
+  const portoAlt = terrain.elevationAt(1152, 1024);
+  const timberAlt = terrain.elevationAt(-2520, -720);
+  const summitAlt = terrain.elevationAt(-3500, -3050);
+  const windTurbines = rig.world.objects.objects.filter((o) => o.type === 'wind_turbine').length;
+  const logPiles = rig.world.objects.objects.filter((o) => o.type === 'log_pile').length;
+  const serraRoads = rig.roadNetwork.roads.filter((r) => parseInt(r.id.replace('rd_', ''), 10) >= 42);
+  let roadWaterHits = 0;
+  for (const rd of serraRoads) {
+    for (let i = 0; i < rd.points.length - 1; i++) {
+      const a = rd.points[i], b = rd.points[i + 1];
+      const steps = Math.max(4, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 80));
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        if (terrain.isWater(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t)) roadWaterHits++;
+      }
+    }
+  }
+  // Test slope gravity physics: coasting uphill decelerates faster than coasting downhill
+  const t = rig.truck;
+  t.setTerrainSlope(320, 0.10); // +10% uphill
+  rig.matter.body.setVelocity(t.body, { x: 0, y: -6 });
+  rig.matter.body.setAngle(t.body, 0);
+  t.vLong = 6;
+  t.update(16.67);
+  const speedAfterUphill = t.vLong;
+
+  t.setTerrainSlope(320, -0.10); // -10% downhill
+  rig.matter.body.setVelocity(t.body, { x: 0, y: -6 });
+  rig.matter.body.setAngle(t.body, 0);
+  t.vLong = 6;
+  t.update(16.67);
+  const speedAfterDownhill = t.vLong;
+
+  // Test reverse crawler torque facing steep -18% downhill with heavy trailer load
+  const prevHasTrailer = t.hasCoupledTrailer;
+  const prevDrag = t.trailerRollingDragFactor;
+  t.hasCoupledTrailer = true;
+  t.trailerRollingDragFactor = 1.35;
+  t.setTerrainSlope(380, -0.18); // steep -18% downhill
+  t.vLong = 0;
+  t.setTouchGear('R');
+  t.setTouchThrottle(1.0);
+  for (let i = 0; i < 90; i++) t.update(16.67);
+  const reverseUphillSpeed = t.vLong; // must be strongly negative (backing up the hill)
+  t.setTouchThrottle(0);
+  t.setTouchGear('D');
+  t.hasCoupledTrailer = prevHasTrailer;
+  t.trailerRollingDragFactor = prevDrag;
+  t.setTerrainSlope(0, 0);
+  t.vLong = 0;
+
+  const northBackSlopeAlt = rig.world.terrain.elevationAt(-2700, -4050);
+  const westBackSlopeAlt = rig.world.terrain.elevationAt(-4750, -2500);
+  const northSeaWater = rig.world.terrain.isWater(-3350, -4950);
+  const westSeaWater = rig.world.terrain.isWater(-5950, -2950);
+
+  return {
+    portoAlt: Math.round(portoAlt),
+    timberAlt: Math.round(timberAlt),
+    summitAlt: Math.round(summitAlt),
+    northBackSlopeAlt: Math.round(northBackSlopeAlt),
+    westBackSlopeAlt: Math.round(westBackSlopeAlt),
+    northSeaWater,
+    westSeaWater,
+    windTurbines,
+    logPiles,
+    serraRoadCount: serraRoads.length,
+    roadWaterHits,
+    serraHubFound: rig.garageSystem.findHubForPosition(-3500, -3050) === 'serra',
+    slopePhysicsValid: speedAfterDownhill > speedAfterUphill + 0.15,
+    reverseUphillSpeed: Math.round(reverseUphillSpeed * 10) / 10,
+    reverseUphillWorks: reverseUphillSpeed <= -12,
+  };
+});
+check(
+  'Expansão NW Serra dos Ventos & Montes/Costa: altitude (0m→210m→640m), encostas N/W completas até ao mar, 8 estradas em terra seca, 6 torres eólicas, física de rampa e marcha-atrás a subir',
+  mountainCheck.portoAlt === 0 &&
+    mountainCheck.timberAlt >= 195 && mountainCheck.timberAlt <= 225 &&
+    mountainCheck.summitAlt >= 625 && mountainCheck.summitAlt <= 655 &&
+    mountainCheck.northBackSlopeAlt >= 250 && mountainCheck.westBackSlopeAlt >= 250 &&
+    mountainCheck.northSeaWater && mountainCheck.westSeaWater &&
+    mountainCheck.windTurbines >= 6 &&
+    mountainCheck.logPiles >= 8 &&
+    mountainCheck.serraRoadCount >= 8 &&
+    mountainCheck.roadWaterHits === 0 &&
+    mountainCheck.serraHubFound &&
+    mountainCheck.slopePhysicsValid &&
+    mountainCheck.reverseUphillWorks,
+  JSON.stringify(mountainCheck),
+);
+
+// 15. Migração automática de rascunho localStorage antigo (pré-Serra v3) + Posto de Combustível da Serra
+await page.evaluate(() => {
+  const rig = window.__rig;
+  const parsed = JSON.parse(rig.world.exportJSON());
+  // Simula um rascunho v3 antigo do utilizador (apenas ilha original, sem estradas nem objetos da Serra NW)
+  const legacyDraft = {
+    version: 3,
+    name: 'RigWorld',
+    worldW: 13824,
+    worldH: 10240,
+    spawn: parsed.spawn,
+    roads: parsed.roads.filter((r) => parseInt(r.id.replace('rd_', ''), 10) <= 41),
+    objects: parsed.objects.filter((o) => parseInt(o.id.replace('wo_', ''), 10) <= 299),
+  };
+  localStorage.setItem('rigmaster_world_draft', JSON.stringify(legacyDraft));
+});
+await page.reload({ waitUntil: 'load', timeout: 30000 });
+await page.waitForFunction(() => !!window.__rig, null, { timeout: 30000 });
+await page.waitForTimeout(700);
+
+const draftMigrationCheck = await page.evaluate(() => {
+  const rig = window.__rig;
+  const serraRoads = rig.roadNetwork.roads.filter((r) => parseInt(r.id.replace('rd_', ''), 10) >= 42).length;
+  const hasGasPump = rig.world.objects.objects.some((o) => o.id === 'wo_314' && o.type === 'gas_pump');
+  const hasGarage = rig.world.objects.objects.some((o) => o.id === 'wo_310' && o.variant === 'garage');
+  const hasDocks = ['wo_301', 'wo_302', 'wo_303'].every((id) =>
+    rig.world.objects.objects.some((o) => o.id === id && o.type === 'dock'),
+  );
+  const windTurbines = rig.world.objects.objects.filter((o) => o.type === 'wind_turbine').length;
+  // Verifica deteção real do posto de combustível da Serra ao estacionar junto à bomba wo_314 (-1620, -120)
+  rig.matter.body.setPosition(rig.truck.body, { x: -1620, y: -120 });
+  rig.matter.body.setVelocity(rig.truck.body, { x: 0, y: 0 });
+  rig.update(performance.now(), 16.67);
+  const nearbySerraPump = !!rig.telemetry.nearbyPump;
+  // Limpa draft de teste
+  localStorage.removeItem('rigmaster_world_draft');
+  return { serraRoads, hasGasPump, hasGarage, hasDocks, windTurbines, nearbySerraPump };
+});
+check(
+  'Migração automática de rascunho localStorage antigo preserva edições e injeta estradas, hub, posto e eólicas da Serra',
+  draftMigrationCheck.serraRoads >= 8 &&
+    draftMigrationCheck.hasGasPump &&
+    draftMigrationCheck.hasGarage &&
+    draftMigrationCheck.hasDocks &&
+    draftMigrationCheck.windTurbines === 6 &&
+    draftMigrationCheck.nearbySerraPump,
+  JSON.stringify(draftMigrationCheck),
+);
 
 check('zero erros JS durante todo o teste de progressão', pageErrors.length === 0, pageErrors.join('; '));
 
