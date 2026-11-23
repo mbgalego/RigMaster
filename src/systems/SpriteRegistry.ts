@@ -61,7 +61,7 @@ export const AVAILABLE_SPRITES: readonly SpriteAssetEntry[] = [
   { key: 'truck_scania_r_8x4', url: '/assets/sprites/vehicles/trucks/scania_r_8x4.png', category: 'truck' },
   { key: 'truck_volvo_fh16_8x4', url: '/assets/sprites/vehicles/trucks/volvo_fh16_8x4.png', category: 'truck' },
 
-  // Phase D2 — Semi-Trailers (10/14 — RGBA PNG, facing UP / North)
+  // Phase D2 — Semi-Trailers (14/14 — 100% complete! RGBA PNG, facing UP / North)
   { key: 'trailer_standard', url: '/assets/sprites/vehicles/trailers/standard.png', category: 'trailer' },
   { key: 'trailer_reefer', url: '/assets/sprites/vehicles/trailers/reefer.png', category: 'trailer' },
   { key: 'trailer_container', url: '/assets/sprites/vehicles/trailers/container.png', category: 'trailer' },
@@ -72,6 +72,10 @@ export const AVAILABLE_SPRITES: readonly SpriteAssetEntry[] = [
   { key: 'trailer_tanker_fuel', url: '/assets/sprites/vehicles/trailers/tanker_fuel.png', category: 'trailer' },
   { key: 'trailer_bitrem_lead', url: '/assets/sprites/vehicles/trailers/bitrem_lead.png', category: 'trailer' },
   { key: 'trailer_bitrem_pup', url: '/assets/sprites/vehicles/trailers/bitrem_pup.png', category: 'trailer' },
+  { key: 'trailer_bitrem_tanker_lead', url: '/assets/sprites/vehicles/trailers/bitrem_tanker_lead.png', category: 'trailer' },
+  { key: 'trailer_bitrem_tanker_pup', url: '/assets/sprites/vehicles/trailers/bitrem_tanker_pup.png', category: 'trailer' },
+  { key: 'trailer_fragile_glass', url: '/assets/sprites/vehicles/trailers/fragile_glass.png', category: 'trailer' },
+  { key: 'trailer_tanker_hazmat', url: '/assets/sprites/vehicles/trailers/tanker_hazmat.png', category: 'trailer' },
 ] as const;
 
 export class SpriteRegistry {

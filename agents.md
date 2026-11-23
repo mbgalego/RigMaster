@@ -168,7 +168,12 @@ public/assets/sprites/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.18.3** (Versão Atual — branch main)
+### **v2.18.4** (Versão Atual — branch main)
+- **Fase D2 Concluída a 100% (14/14 Atrelados & Cisternas) — Frota Integralmente Texturizada em 2D (`SpriteRegistry.ts`, `docs/TEXTURE_PROMPTS.md`, `public/assets/sprites/vehicles/trailers/`)**:
+  - Recortadas via `scripts/process-sprites.mjs` (magenta `#FF00FF`), validadas em fundo escuro/claro e integradas as últimas 4 sprites da frota de reboques: `bitrem_tanker_lead.png` (bitrem cisterna da frente com quinta-roda traseira), `bitrem_tanker_pup.png` (bitrem cisterna traseiro em inox/turquesa), `fragile_glass.png` (porta-vidros óticos com painéis translúcidos em cavalete A) e `tanker_hazmat.png` (cisterna química pressurizada ADR com gaiola reforçada amarela).
+  - **Marco Fase D1 + D2 a 100%**: todas as **30 texturas base de superfície e frota** (`10/10` *tiles* contínuos + `6/6` tratores + `14/14` semi-reboques e cisternas) estão integradas no motor com fallback vetorial automático.
+
+### **v2.18.3**
 - **Fase D1 Concluída a 100% & Fase D2 (10/14 Atrelados) — Processamento Chroma-Key & Integração de 13 Novas Sprites de Veículos (`SpriteRegistry.ts`, `docs/TEXTURE_PROMPTS.md`, `public/assets/sprites/vehicles/`)**:
   - **Frota Completa de 6/6 Camiões Tratores (100% Fase D1)**: recortadas via `scripts/process-sprites.mjs` (magenta `#FF00FF` e verde `#00FF00` para `scania_r_8x4`), validadas em fundo escuro/claro e integradas `man_tgx_6x4.png`, `volvo_fh_6x4.png`, `scania_r_8x4.png` e `volvo_fh16_8x4.png` — ativas tanto no camião conduzido (`Truck.ts`, incluindo duplo eixo direcional nos `8×4`) como na frota estacionada no mundo (`ParkedTruckManager.ts`).
   - **9 Novos Semi-Reboques & Cisternas (10/14 Fase D2)**: recortadas e integradas `reefer.png`, `container.png`, `tanker_milk.png`, `long_cargo.png` (pá eólica), `flatbed_heavy.png` (prancha com escavadora), `timber.png` (toros florestais), `tanker_fuel.png` (cisterna ADR), `bitrem_lead.png` (com quinta-roda traseira) e `bitrem_pup.png` (chroma verde `#00FF00`), mantendo fallback vetorial automático apenas para os 4 atrelados ainda pendentes (`bitrem_tanker_lead`, `bitrem_tanker_pup`, `fragile_glass`, `tanker_hazmat`).
