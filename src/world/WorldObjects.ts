@@ -2,6 +2,13 @@ import Phaser from 'phaser';
 import { RoadNetwork, SURFACE_GRIP } from '../systems/RoadNetwork';
 import { WorldTerrain } from './WorldTerrain';
 import { COLLISION_CAT, COLLISION_MASK } from '../physics/CollisionLayers';
+import type { FlatSurfacePatterns } from './StaticWorldChunks';
+
+export interface FlatSurfaceTarget {
+  ctx: CanvasRenderingContext2D;
+  patterns: FlatSurfacePatterns;
+  markUsed: () => void;
+}
 
 /**
  * Vector prefab layer — every man-made thing in the world is an object here:
@@ -1061,6 +1068,7 @@ export class WorldObjects {
     view: Phaser.Geom.Rectangle,
     overhead?: Phaser.GameObjects.Graphics,
     roadFlats?: Phaser.GameObjects.Graphics,
+    flatTex?: FlatSurfaceTarget | null,
   ) {
     const M = 120;
     const x0 = Math.floor((view.x - M) / OBJ_CELL), x1 = Math.floor((view.x + view.width + M) / OBJ_CELL);
@@ -1123,7 +1131,7 @@ export class WorldObjects {
     // Base pads first, painted floors on top (Array.sort is stable, so
     // objects with the same z keep their original insertion order).
     flatObjs.sort((a, b) => this.flatZ(a) - this.flatZ(b));
-    for (const o of flatObjs) this.drawFlat(flats, o);
+    for (const o of flatObjs) this.drawFlat(flats, o, flatTex);
     if (roadFlats && roadFlatObjs.length > 0) {
       roadFlatObjs.sort((a, b) => this.flatZ(a) - this.flatZ(b));
       for (const o of roadFlatObjs) this.drawFlat(roadFlats, o);
@@ -1498,20 +1506,60 @@ export class WorldObjects {
     g.restore();
   }
 
-  private drawFlat(g: Phaser.GameObjects.Graphics, o: WorldObject) {
+  private fillTexturedFlatRect(
+    flatTex: FlatSurfaceTarget,
+    o: WorldObject,
+    pattern: CanvasPattern,
+    glazeColor: string,
+    borderColor?: string,
+    borderWidth = 2,
+  ) {
+    const ctx = flatTex.ctx;
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    if (o.angle !== 0) ctx.rotate(o.angle);
+    const hw = o.w / 2;
+    const hh = o.h / 2;
+    ctx.fillStyle = pattern;
+    ctx.fillRect(-hw, -hh, o.w, o.h);
+    if (glazeColor) {
+      ctx.fillStyle = glazeColor;
+      ctx.fillRect(-hw, -hh, o.w, o.h);
+    }
+    if (borderColor) {
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth = borderWidth;
+      ctx.strokeRect(-hw, -hh, o.w, o.h);
+    }
+    ctx.restore();
+    flatTex.markUsed();
+  }
+
+  private drawFlat(g: Phaser.GameObjects.Graphics, o: WorldObject, flatTex?: FlatSurfaceTarget | null) {
     this.rotated(g, o, () => {
       const x0 = o.x - o.w / 2, y0 = o.y - o.h / 2;
       switch (o.type) {
         case 'dock': {
           // Cais portuário/industrial: laje em betão com juntas, defensas em borracha, cabeços de amarração e nivelador
-          g.fillStyle(0x475569, 1);
-          g.fillRect(x0, y0, o.w, o.h);
-          g.fillStyle(0x3b4252, 1);
-          g.fillRect(x0 + 3, y0 + 10, o.w - 6, o.h - 13);
-          // Juntas da laje
-          g.lineStyle(1, 0x2a303c, 0.7);
-          g.lineBetween(o.x, y0 + 12, o.x, y0 + o.h - 4);
-          g.lineBetween(x0 + 4, o.y + 4, x0 + o.w - 4, o.y + 4);
+          if (flatTex?.patterns.concrete) {
+            this.fillTexturedFlatRect(
+              flatTex,
+              o,
+              flatTex.patterns.concrete,
+              'rgba(24, 30, 42, 0.46)',
+              'rgba(18, 24, 34, 0.85)',
+              2,
+            );
+          } else {
+            g.fillStyle(0x475569, 1);
+            g.fillRect(x0, y0, o.w, o.h);
+            g.fillStyle(0x3b4252, 1);
+            g.fillRect(x0 + 3, y0 + 10, o.w - 6, o.h - 13);
+            // Juntas da laje
+            g.lineStyle(1, 0x2a303c, 0.7);
+            g.lineBetween(o.x, y0 + 12, o.x, y0 + o.h - 4);
+            g.lineBetween(x0 + 4, o.y + 4, x0 + o.w - 4, o.y + 4);
+          }
           // Rebordo do lado da água / encosto + defensas pretas
           g.fillStyle(0x1e222a, 1);
           g.fillRect(x0, y0, o.w, 10);
@@ -1565,17 +1613,31 @@ export class WorldObjects {
             clean:    { bg: 0x222934, border: 0xcbd5e1, corner: 0x38bdf8, stop: 0xf1f5f9, guide: 0x64748b },
           }[style];
 
-          // Base slab
-          g.fillStyle(palette.bg, 1);
-          g.fillRect(x0, y0, o.w, o.h);
-
-          // Concrete expansion joints & subtle tire wear tracks
-          if (style === 'concrete') {
-            g.lineStyle(1.5, 0x28303b, 0.85);
-            for (let sy = y0 + 84; sy < y0 + o.h - 24; sy += 84) {
-              g.lineBetween(x0 + 3, sy, x0 + o.w - 3, sy);
+          // Base slab (seamless concrete/asphalt texture when available, procedural fallback otherwise)
+          const padPattern =
+            style === 'concrete'
+              ? flatTex?.patterns.concrete ?? null
+              : flatTex?.patterns.asphalt ?? null;
+          if (flatTex && padPattern) {
+            const glaze = style === 'concrete'
+              ? 'rgba(26, 32, 44, 0.48)'
+              : style === 'clean'
+              ? 'rgba(18, 24, 34, 0.42)'
+              : 'rgba(14, 18, 26, 0.44)';
+            this.fillTexturedFlatRect(flatTex, o, padPattern, glaze);
+          } else {
+            g.fillStyle(palette.bg, 1);
+            g.fillRect(x0, y0, o.w, o.h);
+            // Concrete expansion joints & subtle tire wear tracks
+            if (style === 'concrete') {
+              g.lineStyle(1.5, 0x28303b, 0.85);
+              for (let sy = y0 + 84; sy < y0 + o.h - 24; sy += 84) {
+                g.lineBetween(x0 + 3, sy, x0 + o.w - 3, sy);
+              }
             }
-            g.fillStyle(0x2a313c, 0.32);
+          }
+          if (style === 'concrete') {
+            g.fillStyle(0x2a313c, 0.28);
             const trackW = Math.min(18, o.w * 0.14);
             g.fillRect(o.x - o.w * 0.24 - trackW / 2, y0 + 26, trackW, o.h - 58);
             g.fillRect(o.x + o.w * 0.24 - trackW / 2, y0 + 26, trackW, o.h - 58);
@@ -1639,7 +1701,18 @@ export class WorldObjects {
           break;
         }
         case 'pad_asphalt': {
-          // Asphalt yard base — dark surface, aggregate noise, expansion seams
+          // Industrial yard apron — brushed concrete slabs when textured, procedural dark asphalt fallback
+          if (flatTex?.patterns.concrete) {
+            this.fillTexturedFlatRect(
+              flatTex,
+              o,
+              flatTex.patterns.concrete,
+              'rgba(18, 22, 30, 0.58)',
+              'rgba(14, 18, 24, 0.82)',
+              2,
+            );
+            break;
+          }
           g.fillStyle(0x262b33, 1);
           g.fillRect(x0, y0, o.w, o.h);
           const num = parseInt(o.id.replace(/\D/g, ''), 10) || 0;
@@ -1662,7 +1735,18 @@ export class WorldObjects {
           break;
         }
         case 'pad_dirt': {
-          // Dirt/gravel yard base — earth tone, tyre ruts, gravel specks
+          // Dirt/gravel yard base — seamless gravel texture when available, procedural earth fallback
+          if (flatTex?.patterns.dirt) {
+            this.fillTexturedFlatRect(
+              flatTex,
+              o,
+              flatTex.patterns.dirt,
+              'rgba(38, 26, 14, 0.16)',
+              'rgba(42, 30, 18, 0.78)',
+              2,
+            );
+            break;
+          }
           g.fillStyle(0x54452e, 1);
           g.fillRect(x0, y0, o.w, o.h);
           const num = parseInt(o.id.replace(/\D/g, ''), 10) || 0;
@@ -1690,8 +1774,12 @@ export class WorldObjects {
           break;
         }
         case 'parking_lot': {
-          g.fillStyle(0x1c2027, 1);
-          g.fillRect(x0, y0, o.w, o.h);
+          if (flatTex?.patterns.asphalt) {
+            this.fillTexturedFlatRect(flatTex, o, flatTex.patterns.asphalt, 'rgba(14, 18, 26, 0.44)');
+          } else {
+            g.fillStyle(0x1c2027, 1);
+            g.fillRect(x0, y0, o.w, o.h);
+          }
           g.lineStyle(2, 0xe2e8f0, 0.5);
           g.strokeRect(x0 + 3, y0 + 3, o.w - 6, o.h - 6);
           // Slot rows painted along the short axis, aisle down the middle

@@ -41,9 +41,16 @@ export interface SpriteAssetEntry {
  * under `public/assets/sprites/`.
  */
 export const AVAILABLE_SPRITES: readonly SpriteAssetEntry[] = [
-  // Phase D1 — Seamless Surface Tiles (512×512 PNG, no chroma key)
+  // Phase D1 — Seamless Surface Tiles (10/10 — 512×512 PNG, no chroma key)
   { key: 'tile_road_asphalt', url: '/assets/sprites/tiles/road_asphalt.png', category: 'tile' },
+  { key: 'tile_road_cobble', url: '/assets/sprites/tiles/road_cobble.png', category: 'tile' },
+  { key: 'tile_road_dirt', url: '/assets/sprites/tiles/road_dirt.png', category: 'tile' },
+  { key: 'tile_pad_concrete', url: '/assets/sprites/tiles/pad_concrete.png', category: 'tile' },
   { key: 'tile_terrain_grass', url: '/assets/sprites/tiles/terrain_grass.png', category: 'tile' },
+  { key: 'tile_terrain_forest', url: '/assets/sprites/tiles/terrain_forest.png', category: 'tile' },
+  { key: 'tile_terrain_sand', url: '/assets/sprites/tiles/terrain_sand.png', category: 'tile' },
+  { key: 'tile_terrain_alpine_rock', url: '/assets/sprites/tiles/terrain_alpine_rock.png', category: 'tile' },
+  { key: 'tile_terrain_alpine_summit', url: '/assets/sprites/tiles/terrain_alpine_summit.png', category: 'tile' },
   { key: 'tile_terrain_water', url: '/assets/sprites/tiles/terrain_water.png', category: 'tile' },
 
   // Phase D1 — Tractor Trucks (RGBA PNG, facing UP / North)

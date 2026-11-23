@@ -4,7 +4,7 @@ import { Trailer, TrailerType, isBitremLeadType } from '../entities/Trailer';
 import { Kingpin, ArticulationTelemetry } from '../physics/Kingpin';
 import { World } from '../world/World';
 import { WorldObjects, RepairBay } from '../world/WorldObjects';
-import { StaticWorldChunks, type StaticChunkStats } from '../world/StaticWorldChunks';
+import { StaticWorldChunks, type StaticChunkStats, type RoadSurfacePatterns } from '../world/StaticWorldChunks';
 import { WorldLightPools, type HubGlowSpot, type LightPoolStats } from '../world/WorldLightPools';
 import { SpriteRegistry } from '../systems/SpriteRegistry';
 import { LicenseSystem, LicenseExam, LicenseId } from '../systems/LicenseSystem';
@@ -12,7 +12,7 @@ import { GarageSystem, HubDockSpec, HubId, WeatherModifier } from '../systems/Ga
 import { TimeOfDaySystem, TimePeriod, TimeOfDaySnapshot } from '../systems/TimeOfDaySystem';
 import { WeatherSystem, type LocalWeatherSample, type WeatherCondition } from '../systems/WeatherSystem';
 import { TrailerManager, TRAILER_TYPE_TO_LICENSE, CouplingCandidate } from '../systems/TrailerManager';
-import { RoadNetwork, RoadData, RoadSample, BridgeRoadCache } from '../systems/RoadNetwork';
+import { RoadNetwork, RoadData, RoadSample, RoadSurface, BridgeRoadCache } from '../systems/RoadNetwork';
 import { IntersectionSystem } from '../systems/IntersectionSystem';
 import {
   ReputationSystem,
@@ -407,19 +407,29 @@ export class MainScene extends Phaser.Scene {
     this.solidsGraphics = this.add.graphics().setDepth(2.8).setLighting(false);
     // Chunked GPU RenderTexture cache for static flats + ground roads + roadFlats + solids (depth 3)
     this.staticWorldChunks = new StaticWorldChunks(this, (chunkRect, scratches) => {
+      let hasFlatTex = false;
       this.world.objects.render(
         scratches.flats,
         scratches.solids,
         chunkRect,
         undefined,
         scratches.roadFlats,
+        scratches.flatCtx
+          ? {
+              ctx: scratches.flatCtx,
+              patterns: scratches.flatPatterns,
+              markUsed: () => {
+                hasFlatTex = true;
+              },
+            }
+          : null,
       );
-      const hasAsphaltTex = this.drawGroundRoadsInto(
+      const hasRoadTex = this.drawGroundRoadsInto(
         scratches.roads,
         chunkRect,
         220,
-        scratches.asphaltCtx,
-        scratches.asphaltPattern,
+        scratches.roadCtx,
+        scratches.roadPatterns,
       );
       return {
         roadCmds: scratches.roads.commandBuffer.length,
@@ -427,7 +437,8 @@ export class MainScene extends Phaser.Scene {
           scratches.flats.commandBuffer.length +
           scratches.roadFlats.commandBuffer.length +
           scratches.solids.commandBuffer.length,
-        hasAsphaltTex,
+        hasFlatTex,
+        hasRoadTex,
       };
     });
     // Traffic light LEDs stay emissive (unlit) at depth 4
@@ -3529,18 +3540,18 @@ export class MainScene extends Phaser.Scene {
   }
 
   /** Draws all layer-0 (ground) vector road ribbons intersecting `view + margin` into `g`.
-   *  When `asphaltCtx` & `asphaltPattern` are provided, asphalt carriageways are rasterized
+   *  When `roadCtx` & `roadPatterns` are provided, asphalt, cobble and dirt carriageways are rasterized
    *  as seamless textured polygons (baked once per static chunk) while markings stay crisp on `g`. */
   private drawGroundRoadsInto(
     g: Phaser.GameObjects.Graphics,
     view: Phaser.Geom.Rectangle,
     margin = 220,
-    asphaltCtx?: CanvasRenderingContext2D | null,
-    asphaltPattern?: CanvasPattern | null,
+    roadCtx?: CanvasRenderingContext2D | null,
+    roadPatterns?: RoadSurfacePatterns | null,
   ): boolean {
     const vx0 = view.x - margin, vy0 = view.y - margin;
     const vx1 = view.x + view.width + margin, vy1 = view.y + view.height + margin;
-    let drewAsphaltTex = false;
+    let drewRoadTex = false;
 
     for (const road of this.roadNetwork.roads) {
       if ((road.layer ?? 0) > 0) continue; // elevated bridges render above ground vehicles
@@ -3552,11 +3563,12 @@ export class MainScene extends Phaser.Scene {
       const samples = this.roadNetwork.getRoadSamples(road, 26);
       if (samples.length === 0) continue;
 
-      // 1. Carriageway ribbon (textured seamless polygon for asphalt chunks, vector quads for cobble/dirt/fallback)
+      // 1. Carriageway ribbon (seamless textured polygon for asphalt/cobble/dirt chunks, vector fallback otherwise)
       const inView = (s: RoadSample) => s.x >= vx0 - 200 && s.x <= vx1 + 200 && s.y >= vy0 - 200 && s.y <= vy1 + 200;
-      if (road.surface === 'asphalt' && asphaltCtx && asphaltPattern) {
-        if (this.fillTexturedAsphaltRibbon(asphaltCtx, asphaltPattern, samples, vx0, vy0, vx1, vy1)) {
-          drewAsphaltTex = true;
+      const surfacePattern = roadPatterns ? roadPatterns[road.surface] : null;
+      if (roadCtx && surfacePattern) {
+        if (this.fillTexturedRoadRibbon(roadCtx, surfacePattern, road.surface, samples, vx0, vy0, vx1, vy1)) {
+          drewRoadTex = true;
         }
       } else {
         let altIdx = 0;
@@ -3669,17 +3681,19 @@ export class MainScene extends Phaser.Scene {
         }
       }
     }
-    return drewAsphaltTex;
+    return drewRoadTex;
   }
 
   /**
-   * Traces contiguous non-cusp runs of an asphalt road as single Canvas2D polygons filled
-   * with the world-aligned seamless `road_asphalt` pattern + dark European tarmac glaze.
+   * Traces contiguous non-cusp runs of a road as single Canvas2D polygons filled
+   * with the world-aligned seamless surface pattern (`road_asphalt`, `road_cobble`, or `road_dirt`)
+   * plus a calibrated tonal glaze and lateral-only shoulder/curb definition.
    * Drawing contiguous polygons eliminates anti-aliasing hairlines between adjacent segments.
    */
-  private fillTexturedAsphaltRibbon(
+  private fillTexturedRoadRibbon(
     ctx: CanvasRenderingContext2D,
     pattern: CanvasPattern,
+    surface: RoadSurface,
     samples: RoadSample[],
     vx0: number,
     vy0: number,
@@ -3688,6 +3702,20 @@ export class MainScene extends Phaser.Scene {
   ): boolean {
     let drewAny = false;
     let runStart = -1;
+
+    const glaze =
+      surface === 'cobble'
+        ? 'rgba(18, 21, 28, 0.24)'
+        : surface === 'dirt'
+        ? 'rgba(38, 24, 12, 0.14)'
+        : 'rgba(13, 18, 26, 0.34)';
+    const edgeColor =
+      surface === 'cobble'
+        ? 'rgba(24, 28, 36, 0.65)'
+        : surface === 'dirt'
+        ? 'rgba(42, 28, 16, 0.45)'
+        : 'rgba(10, 14, 22, 0.55)';
+    const edgeWidth = surface === 'dirt' ? 3 : surface === 'cobble' ? 2.5 : 2;
 
     const flushRun = (startIdx: number, endIdx: number) => {
       if (endIdx <= startIdx) return;
@@ -3707,17 +3735,17 @@ export class MainScene extends Phaser.Scene {
       }
       ctx.closePath();
 
-      // 1. Seamless aggregate asphalt texture
+      // 1. Seamless road surface texture
       ctx.fillStyle = pattern;
       ctx.fill();
 
-      // 2. Subtle dark European tarmac glaze so yellow centreline dashes & white edge lines pop cleanly
-      ctx.fillStyle = 'rgba(13, 18, 26, 0.34)';
+      // 2. Calibrated tonal glaze so lane markings & vehicles pop cleanly
+      ctx.fillStyle = glaze;
       ctx.fill();
 
-      // 3. Subtle curb/shoulder edge definition ONLY along the two lateral edges (never across start/end caps at intersections)
-      ctx.strokeStyle = 'rgba(10, 14, 22, 0.55)';
-      ctx.lineWidth = 2;
+      // 3. Curb/shoulder edge definition ONLY along the two lateral edges (never across start/end caps at intersections)
+      ctx.strokeStyle = edgeColor;
+      ctx.lineWidth = edgeWidth;
       for (const side of [1, -1]) {
         ctx.beginPath();
         for (let k = startIdx; k <= endIdx; k++) {

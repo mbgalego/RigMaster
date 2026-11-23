@@ -168,7 +168,13 @@ public/assets/sprites/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.18.1** (Versão Atual — branch main)
+### **v2.18.2** (Versão Atual — branch main)
+- **Fase D1 (Lote 3) — Conclusão 10/10 dos Tiles Seamless de Terreno, Estradas & Pátios (`SpriteRegistry.ts`, `WorldTerrain.ts`, `StaticWorldChunks.ts`, `WorldObjects.ts`, `MainScene.ts`, `docs/TEXTURE_PROMPTS.md`)**:
+  - **7 Novas Texturas Convertidas (`512×512` PNG) & Registadas**: `tiles/pad_concrete.png`, `tiles/terrain_sand.png`, `tiles/terrain_forest.png`, `tiles/terrain_alpine_rock.png`, `tiles/terrain_alpine_summit.png`, `tiles/road_cobble.png` e `tiles/road_dirt.png` (completando **100%** dos 10 *tiles* base da Fase D1).
+  - **Biomas Completos em `WorldTerrain.ts` (custo `0 ms/frame`)**: composição por *bitmask* de células num único `tileMaskCanvas` reutilizável para praias costeiras (`terrain_sand`), falésias alpinas (`terrain_alpine_rock`), solo de floresta e pinhal alpino (`terrain_forest`), encostas rochosas (`terrain_alpine_rock`), planalto do cume (`terrain_alpine_summit`, preservando relevo NW e curvas de nível de `60m`), pátios portuários/industriais/urbanos (`pad_concrete` com velatura escura de alto contraste) e pavimento histórico em calçada (`road_cobble`).
+  - **Estradas & Pátios Texturizados em `StaticWorldChunks.ts`, `MainScene.ts` e `WorldObjects.ts`**: generalizado `fillTexturedRoadRibbon` para todas as superfícies rodoviárias (`asphalt`, `cobble` e `dirt`) e adicionado *scratch* dedicado para superfícies planas (`dock`, `parking_pad`, `pad_asphalt`, `pad_dirt` e `parking_lot`) com rotação alinhada ao objeto, mantendo marcações vetoriais nítidas por cima e fallback vetorial automático.
+
+### **v2.18.1**
 - **Fase D1/D2 (Lote 2) — Processador Chroma-Key & Primeiros Sprites de Veículos (`scripts/process-sprites.mjs`, `SpriteRegistry.ts`, `Truck.ts`, `Trailer.ts`, `ParkedTruckManager.ts`, `docs/TEXTURE_PROMPTS.md`)**:
   - **Utilitário Reutilizável de Recorte (`scripts/process-sprites.mjs`)**: remoção de chroma key em 2 fases (`#FF00FF` magenta e `#00FF00` verde néon) com deteção de aberturas interiores do chassi, *despill* anti-auréola nas bordas, recorte automático (*auto-trim*) com margem limpa, redimensionamento Lanczos e geração de folha de validação em fundo escuro/claro.
   - **Camiões 2D (`iveco_daily_4x2.png`, `scania_r_4x2.png`)**: integrados em `Truck.ts` (trator ativo) e `ParkedTruckManager.ts` (frota estacionada) com sombra de contacto no chão, rodas dianteiras giratórias Ackermann por baixo dos guarda-lamas, iluminação dinâmica WebGL (`setLighting`), sobreposição de danos estruturais, faróis/stop/marcha-atrás dinâmicos e fallback vetorial automático para os restantes 4 modelos.

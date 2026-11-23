@@ -49,8 +49,15 @@ export class WorldTerrain {
   private tileMaskCanvas: HTMLCanvasElement | null = null;
   private tileMaskCtx: CanvasRenderingContext2D | null = null;
   private tileCellTags: Uint8Array = new Uint8Array((RES / 8) * (RES / 8));
-  private waterTilePattern: CanvasPattern | null | undefined = undefined;
-  private grassTilePattern: CanvasPattern | null | undefined = undefined;
+  private tilePatternsReady = false;
+  private waterTilePattern: CanvasPattern | null = null;
+  private grassTilePattern: CanvasPattern | null = null;
+  private forestTilePattern: CanvasPattern | null = null;
+  private sandTilePattern: CanvasPattern | null = null;
+  private alpineRockTilePattern: CanvasPattern | null = null;
+  private alpineSummitTilePattern: CanvasPattern | null = null;
+  private padConcreteTilePattern: CanvasPattern | null = null;
+  private cobbleTilePattern: CanvasPattern | null = null;
 
   public setLightingEnabled(enabled: boolean) {
     if (this.lightingEnabled === enabled) return;
@@ -520,15 +527,23 @@ export class WorldTerrain {
     this.chunks.set(key, img);
   }
 
-  /** Lazily prepares reusable mask canvas and world-aligned seamless CanvasPatterns (256 texels = 512 world px). */
+  /** Lazily prepares reusable mask canvas and world-aligned seamless CanvasPatterns for all terrain biomes. */
   private ensureTilePatterns(): boolean {
-    if (this.waterTilePattern === undefined) {
+    if (!this.tilePatternsReady) {
+      this.tilePatternsReady = true;
       const waterImg = SpriteRegistry.getSourceImage(this.scene, 'tile_terrain_water');
       const grassImg = SpriteRegistry.getSourceImage(this.scene, 'tile_terrain_grass');
+      const forestImg = SpriteRegistry.getSourceImage(this.scene, 'tile_terrain_forest');
+      const sandImg = SpriteRegistry.getSourceImage(this.scene, 'tile_terrain_sand');
+      const alpineRockImg = SpriteRegistry.getSourceImage(this.scene, 'tile_terrain_alpine_rock');
+      const alpineSummitImg = SpriteRegistry.getSourceImage(this.scene, 'tile_terrain_alpine_summit');
+      const padConcreteImg = SpriteRegistry.getSourceImage(this.scene, 'tile_pad_concrete');
+      const cobbleImg = SpriteRegistry.getSourceImage(this.scene, 'tile_road_cobble');
 
-      if (!waterImg && !grassImg) {
-        this.waterTilePattern = null;
-        this.grassTilePattern = null;
+      if (
+        !waterImg && !grassImg && !forestImg && !sandImg &&
+        !alpineRockImg && !alpineSummitImg && !padConcreteImg && !cobbleImg
+      ) {
         return false;
       }
 
@@ -537,21 +552,85 @@ export class WorldTerrain {
       this.tileMaskCanvas.height = RES;
       this.tileMaskCtx = this.tileMaskCanvas.getContext('2d');
 
-      const buildScaledPattern = (img: HTMLImageElement | HTMLCanvasElement | null): CanvasPattern | null => {
+      // Every scale divides RES=512 cleanly (0.5 -> 256 texels = 512 world px, 0.25 -> 128 texels = 256 world px,
+      // 0.125 -> 64 texels = 128 world px), guaranteeing 0 seams across chunk boundaries without offsets.
+      const buildScaledPattern = (
+        img: HTMLImageElement | HTMLCanvasElement | null,
+        scale: number,
+      ): CanvasPattern | null => {
         if (!img || !this.tileMaskCtx) return null;
         const pat = this.tileMaskCtx.createPattern(img, 'repeat');
         if (!pat) return null;
-        // 512×512 PNG scaled 0.5 -> 256×256 texels = 512×512 world px (divides CHUNK=1024 evenly -> 0 seams across chunks)
         if (typeof DOMMatrix !== 'undefined' && typeof pat.setTransform === 'function') {
-          pat.setTransform(new DOMMatrix().scale(0.5, 0.5));
+          pat.setTransform(new DOMMatrix().scale(scale, scale));
         }
         return pat;
       };
 
-      this.waterTilePattern = buildScaledPattern(waterImg);
-      this.grassTilePattern = buildScaledPattern(grassImg);
+      this.waterTilePattern = buildScaledPattern(waterImg, 0.5);
+      this.grassTilePattern = buildScaledPattern(grassImg, 0.5);
+      this.forestTilePattern = buildScaledPattern(forestImg, 0.25);
+      this.sandTilePattern = buildScaledPattern(sandImg, 0.5);
+      this.alpineRockTilePattern = buildScaledPattern(alpineRockImg, 0.25);
+      this.alpineSummitTilePattern = buildScaledPattern(alpineSummitImg, 0.5);
+      this.padConcreteTilePattern = buildScaledPattern(padConcreteImg, 0.25);
+      this.cobbleTilePattern = buildScaledPattern(cobbleImg, 0.125);
     }
-    return Boolean(this.tileMaskCanvas && this.tileMaskCtx && (this.waterTilePattern || this.grassTilePattern));
+    return Boolean(
+      this.tileMaskCanvas &&
+      this.tileMaskCtx &&
+      (
+        this.waterTilePattern ||
+        this.grassTilePattern ||
+        this.forestTilePattern ||
+        this.sandTilePattern ||
+        this.alpineRockTilePattern ||
+        this.alpineSummitTilePattern ||
+        this.padConcreteTilePattern ||
+        this.cobbleTilePattern
+      ),
+    );
+  }
+
+  /** Helper: fills all cells matching `matchTag` (or `matchTag2`) with a world-aligned seamless pattern at `alpha`. */
+  private compositeTileTag(
+    ctx: CanvasRenderingContext2D,
+    mctx: CanvasRenderingContext2D,
+    tags: Uint8Array,
+    gridN: number,
+    cell: number,
+    pattern: CanvasPattern,
+    alpha: number,
+    matchTag: number,
+    matchTag2 = -1,
+  ) {
+    mctx.save();
+    mctx.globalCompositeOperation = 'source-over';
+    mctx.clearRect(0, 0, RES, RES);
+    mctx.fillStyle = '#ffffff';
+    for (let gy = 0; gy < gridN; gy++) {
+      const row = gy * gridN;
+      const ty = gy * cell;
+      for (let gx = 0; gx < gridN; gx++) {
+        const t = tags[row + gx];
+        if (t === matchTag || (matchTag2 >= 0 && t === matchTag2)) {
+          mctx.fillRect(gx * cell, ty, cell, cell);
+        }
+      }
+    }
+    mctx.globalCompositeOperation = 'source-in';
+    mctx.fillStyle = pattern;
+    mctx.fillRect(0, 0, RES, RES);
+    mctx.restore();
+
+    if (alpha >= 0.999) {
+      ctx.drawImage(this.tileMaskCanvas!, 0, 0);
+    } else {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(this.tileMaskCanvas!, 0, 0);
+      ctx.restore();
+    }
   }
 
   private paintChunk(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
@@ -564,8 +643,11 @@ export class WorldTerrain {
     const isMountainChunk = chunkBaseX < 400 || chunkBaseY < 400;
     const hasTileTextures = this.ensureTilePatterns();
 
-    let hasWaterCells = false;
-    let hasGrassCells = false;
+    // Cell tag bitmask for skipping absent biomes during pattern compositing:
+    // 1=deepOcean, 2=shallowWater, 3=beachSand, 4=coastalCliff, 5=meadow,
+    // 6=lowlandForest, 7=alpineForest, 8=alpineRock, 9=alpineSummit,
+    // 10=concreteYard(urban/industrial/port), 11=historicCobble
+    let presentMask = 0;
     const tags = this.tileCellTags;
 
     for (let gy = 0; gy < gridN; gy++) {
@@ -581,35 +663,33 @@ export class WorldTerrain {
         if (m < -60) {
           color = '#0a2338';
           tag = 1; // deep ocean
-          hasWaterCells = true;
         } else if (m < 40) {
           color = '#123a56';
           tag = 2; // shallow coastal water
-          hasWaterCells = true;
         } else if (m < 130) {
           if (wx < -1200 || wy < -1200) {
             const g = this.valueNoise(wx * 0.06, wy * 0.06);
             color = g > 0.5 ? '#596169' : '#4a5259';
+            tag = 4; // alpine coastal cliff rock
           } else {
             const g = this.valueNoise(wx * 0.09, wy * 0.09);
             color = g > 0.5 ? '#a9915f' : '#9c855a';
+            tag = 3; // coastal Atlantic beach sand
           }
         } else {
           const region = this.regionAt(wx, wy);
           color = this.landCellColor(wx, wy, region, isMountainChunk);
-          if (region === 0) {
-            tag = 3; // meadow grass
-            hasGrassCells = true;
-          } else if (region === 1) {
-            tag = 4; // lowland forest floor
-            hasGrassCells = true;
-          } else if (region === 7) {
-            tag = 5; // alpine conifer forest belt
-            hasGrassCells = true;
-          }
+          if (region === 0) tag = 5;
+          else if (region === 1) tag = 6;
+          else if (region === 7) tag = 7;
+          else if (region === 8) tag = 8;
+          else if (region === 9) tag = 9;
+          else if (region === 3 || region === 4 || region === 6) tag = 10;
+          else if (region === 5) tag = 11;
         }
 
         tags[gy * gridN + gx] = tag;
+        if (tag > 0) presentMask |= (1 << tag);
         ctx.fillStyle = color;
         ctx.fillRect(tx, ty, cell, cell);
       }
@@ -619,30 +699,10 @@ export class WorldTerrain {
     if (hasTileTextures && this.tileMaskCanvas && this.tileMaskCtx) {
       const mctx = this.tileMaskCtx;
 
-      // 1. Ocean water texture (`terrain_water.png`) with subtle deep-vs-shallow coastal bathymetry
-      if (hasWaterCells && this.waterTilePattern) {
-        mctx.save();
-        mctx.globalCompositeOperation = 'source-over';
-        mctx.clearRect(0, 0, RES, RES);
-        mctx.fillStyle = '#ffffff';
-        for (let gy = 0; gy < gridN; gy++) {
-          const row = gy * gridN;
-          const ty = gy * cell;
-          for (let gx = 0; gx < gridN; gx++) {
-            const t = tags[row + gx];
-            if (t === 1 || t === 2) {
-              mctx.fillRect(gx * cell, ty, cell, cell);
-            }
-          }
-        }
-        mctx.globalCompositeOperation = 'source-in';
-        mctx.fillStyle = this.waterTilePattern;
-        mctx.fillRect(0, 0, RES, RES);
-        mctx.restore();
+      // 1. Ocean water (`terrain_water.png`) with deep-vs-shallow coastal bathymetry
+      if ((presentMask & ((1 << 1) | (1 << 2))) !== 0 && this.waterTilePattern) {
+        this.compositeTileTag(ctx, mctx, tags, gridN, cell, this.waterTilePattern, 1, 1, 2);
 
-        ctx.drawImage(this.tileMaskCanvas, 0, 0);
-
-        // Preserve coastal shelf readability: subtle turquoise lift in shallow water, deep navy depth offshore
         for (let gy = 0; gy < gridN; gy++) {
           const row = gy * gridN;
           const ty = gy * cell;
@@ -659,68 +719,57 @@ export class WorldTerrain {
         }
       }
 
-      // 2. Meadow & woodland grass texture (`terrain_grass.png`) with biome tint & NW hillshade preservation
-      if (hasGrassCells && this.grassTilePattern) {
-        // 2a. Open meadow grass (region 0): full crisp texture blended gently over fbm macro patches
-        let hasMeadow = false;
-        let hasWoodland = false;
-        for (let i = 0; i < tags.length; i++) {
-          if (tags[i] === 3) hasMeadow = true;
-          else if (tags[i] === 4 || tags[i] === 5) hasWoodland = true;
+      // 2. Coastal Atlantic beach sand (`terrain_sand.png`)
+      if ((presentMask & (1 << 3)) !== 0 && this.sandTilePattern) {
+        this.compositeTileTag(ctx, mctx, tags, gridN, cell, this.sandTilePattern, 0.90, 3);
+      }
+
+      // 3. NW coastal alpine cliffs (`terrain_alpine_rock.png`)
+      if ((presentMask & (1 << 4)) !== 0 && this.alpineRockTilePattern) {
+        this.compositeTileTag(ctx, mctx, tags, gridN, cell, this.alpineRockTilePattern, 0.80, 4);
+      }
+
+      // 4. Open meadow grass (`terrain_grass.png`)
+      if ((presentMask & (1 << 5)) !== 0 && this.grassTilePattern) {
+        this.compositeTileTag(ctx, mctx, tags, gridN, cell, this.grassTilePattern, 0.86, 5);
+      }
+
+      // 5. Lowland forest floor (`terrain_forest.png`, fallback to subtle `terrain_grass`)
+      if ((presentMask & (1 << 6)) !== 0) {
+        if (this.forestTilePattern) {
+          this.compositeTileTag(ctx, mctx, tags, gridN, cell, this.forestTilePattern, 0.88, 6);
+        } else if (this.grassTilePattern) {
+          this.compositeTileTag(ctx, mctx, tags, gridN, cell, this.grassTilePattern, 0.52, 6);
         }
+      }
 
-        if (hasMeadow) {
-          mctx.save();
-          mctx.globalCompositeOperation = 'source-over';
-          mctx.clearRect(0, 0, RES, RES);
-          mctx.fillStyle = '#ffffff';
-          for (let gy = 0; gy < gridN; gy++) {
-            const row = gy * gridN;
-            const ty = gy * cell;
-            for (let gx = 0; gx < gridN; gx++) {
-              if (tags[row + gx] === 3) {
-                mctx.fillRect(gx * cell, ty, cell, cell);
-              }
-            }
-          }
-          mctx.globalCompositeOperation = 'source-in';
-          mctx.fillStyle = this.grassTilePattern;
-          mctx.fillRect(0, 0, RES, RES);
-          mctx.restore();
-
-          ctx.save();
-          ctx.globalAlpha = 0.86;
-          ctx.drawImage(this.tileMaskCanvas, 0, 0);
-          ctx.restore();
+      // 6. Alpine pine belt (`terrain_forest.png`) — blended at 0.54 so NW mountain hillshading stays vivid
+      if ((presentMask & (1 << 7)) !== 0) {
+        if (this.forestTilePattern) {
+          this.compositeTileTag(ctx, mctx, tags, gridN, cell, this.forestTilePattern, 0.54, 7);
+        } else if (this.grassTilePattern) {
+          this.compositeTileTag(ctx, mctx, tags, gridN, cell, this.grassTilePattern, 0.36, 7);
         }
+      }
 
-        // 2b. Forest floor (region 1) & alpine conifer slopes (region 7):
-        // Subtle texture overlay so darker forest tones & directional NW mountain hillshading stay vivid
-        if (hasWoodland) {
-          mctx.save();
-          mctx.globalCompositeOperation = 'source-over';
-          mctx.clearRect(0, 0, RES, RES);
-          for (let gy = 0; gy < gridN; gy++) {
-            const row = gy * gridN;
-            const ty = gy * cell;
-            for (let gx = 0; gx < gridN; gx++) {
-              const t = tags[row + gx];
-              if (t === 4) {
-                mctx.fillStyle = 'rgba(255, 255, 255, 0.52)';
-                mctx.fillRect(gx * cell, ty, cell, cell);
-              } else if (t === 5) {
-                mctx.fillStyle = 'rgba(255, 255, 255, 0.36)';
-                mctx.fillRect(gx * cell, ty, cell, cell);
-              }
-            }
-          }
-          mctx.globalCompositeOperation = 'source-in';
-          mctx.fillStyle = this.grassTilePattern;
-          mctx.fillRect(0, 0, RES, RES);
-          mctx.restore();
+      // 7. Exposed alpine rock & scree slopes (`terrain_alpine_rock.png`) — preserves directional NW hillshading
+      if ((presentMask & (1 << 8)) !== 0 && this.alpineRockTilePattern) {
+        this.compositeTileTag(ctx, mctx, tags, gridN, cell, this.alpineRockTilePattern, 0.56, 8);
+      }
 
-          ctx.drawImage(this.tileMaskCanvas, 0, 0);
-        }
+      // 8. Summit granite plateau (`terrain_alpine_summit.png`) — preserves NW relief & 60m contour isolines
+      if ((presentMask & (1 << 9)) !== 0 && this.alpineSummitTilePattern) {
+        this.compositeTileTag(ctx, mctx, tags, gridN, cell, this.alpineSummitTilePattern, 0.62, 9);
+      }
+
+      // 9. Urban / Industrial / Port concrete yards (`pad_concrete.png`) — weathered dark glaze for high vehicle/marking contrast
+      if ((presentMask & (1 << 10)) !== 0 && this.padConcreteTilePattern) {
+        this.compositeTileTag(ctx, mctx, tags, gridN, cell, this.padConcreteTilePattern, 0.30, 10);
+      }
+
+      // 10. Historic district cobblestone ground (`road_cobble.png`) — subtle slate glaze so streets & buildings pop
+      if ((presentMask & (1 << 11)) !== 0 && this.cobbleTilePattern) {
+        this.compositeTileTag(ctx, mctx, tags, gridN, cell, this.cobbleTilePattern, 0.46, 11);
       }
     }
 
@@ -939,8 +988,15 @@ export class WorldTerrain {
     this.order = [];
     this.tileMaskCanvas = null;
     this.tileMaskCtx = null;
-    this.waterTilePattern = undefined;
-    this.grassTilePattern = undefined;
+    this.tilePatternsReady = false;
+    this.waterTilePattern = null;
+    this.grassTilePattern = null;
+    this.forestTilePattern = null;
+    this.sandTilePattern = null;
+    this.alpineRockTilePattern = null;
+    this.alpineSummitTilePattern = null;
+    this.padConcreteTilePattern = null;
+    this.cobbleTilePattern = null;
     if (this.scene.textures.exists('terrain_overview')) this.scene.textures.remove('terrain_overview');
   }
 }

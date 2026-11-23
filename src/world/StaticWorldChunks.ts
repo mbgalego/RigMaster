@@ -16,22 +16,39 @@ import { SpriteRegistry } from '../systems/SpriteRegistry';
  * camera with a lookahead margin so driving across chunk borders is seamless.
  */
 
+export interface RoadSurfacePatterns {
+  asphalt: CanvasPattern | null;
+  cobble: CanvasPattern | null;
+  dirt: CanvasPattern | null;
+}
+
+export interface FlatSurfacePatterns {
+  concrete: CanvasPattern | null;
+  asphalt: CanvasPattern | null;
+  dirt: CanvasPattern | null;
+}
+
 export interface StaticChunkScratches {
   flats: Phaser.GameObjects.Graphics;
   roads: Phaser.GameObjects.Graphics;
   roadFlats: Phaser.GameObjects.Graphics;
   rampBase: Phaser.GameObjects.Graphics;
   solids: Phaser.GameObjects.Graphics;
-  /** Optional world-translated Canvas2D scratch context for textured asphalt road surfaces. */
-  asphaltCtx: CanvasRenderingContext2D | null;
-  /** World-aligned seamless CanvasPattern built from `road_asphalt.png`, or null if unavailable. */
-  asphaltPattern: CanvasPattern | null;
+  /** Optional world-translated Canvas2D scratch context for textured flat pads (docks, yards, parking bays). */
+  flatCtx: CanvasRenderingContext2D | null;
+  /** World-aligned seamless CanvasPatterns for flat pads, or null entries if unavailable. */
+  flatPatterns: FlatSurfacePatterns;
+  /** Optional world-translated Canvas2D scratch context for textured road surfaces (asphalt, cobble, dirt). */
+  roadCtx: CanvasRenderingContext2D | null;
+  /** World-aligned seamless CanvasPatterns for ground road surfaces, or null entries if unavailable. */
+  roadPatterns: RoadSurfacePatterns;
 }
 
 export interface StaticChunkBakeResult {
   roadCmds: number;
   objCmds: number;
-  hasAsphaltTex?: boolean;
+  hasFlatTex?: boolean;
+  hasRoadTex?: boolean;
 }
 
 export interface StaticChunkStats {
@@ -75,11 +92,15 @@ export class StaticWorldChunks {
   private maxChunkX = Math.ceil(WorldTerrain.WORLD_W / CHUNK_SIZE);
   private minChunkY = Math.floor(WorldTerrain.WORLD_MIN_Y / CHUNK_SIZE) - 1;
   private maxChunkY = Math.ceil(WorldTerrain.WORLD_H / CHUNK_SIZE);
-  private asphaltTex: Phaser.Textures.CanvasTexture | null = null;
-  private asphaltImg: Phaser.GameObjects.Image | null = null;
-  private asphaltPattern: CanvasPattern | null = null;
-  private asphaltInitDone = false;
-  private static readonly ASPHALT_SCRATCH_KEY = '__static_world_asphalt_scratch';
+  private flatTex: Phaser.Textures.CanvasTexture | null = null;
+  private flatImg: Phaser.GameObjects.Image | null = null;
+  private flatPatterns: FlatSurfacePatterns = { concrete: null, asphalt: null, dirt: null };
+  private roadTex: Phaser.Textures.CanvasTexture | null = null;
+  private roadImg: Phaser.GameObjects.Image | null = null;
+  private roadPatterns: RoadSurfacePatterns = { asphalt: null, cobble: null, dirt: null };
+  private surfaceInitDone = false;
+  private static readonly FLAT_SCRATCH_KEY = '__static_world_flat_scratch';
+  private static readonly ROAD_SCRATCH_KEY = '__static_world_road_scratch';
 
   constructor(
     scene: Phaser.Scene,
@@ -94,47 +115,93 @@ export class StaticWorldChunks {
       roadFlats: scene.make.graphics(undefined, false).setLighting(false),
       rampBase: scene.make.graphics(undefined, false).setLighting(false),
       solids: scene.make.graphics(undefined, false).setLighting(false),
-      asphaltCtx: null,
-      asphaltPattern: null,
+      flatCtx: null,
+      flatPatterns: { concrete: null, asphalt: null, dirt: null },
+      roadCtx: null,
+      roadPatterns: { asphalt: null, cobble: null, dirt: null },
     };
   }
 
-  /** Lazily initializes the reusable 1024×1024 offscreen CanvasTexture for seamless road_asphalt baking. */
-  private ensureAsphaltScratch(): boolean {
-    if (this.asphaltInitDone) return Boolean(this.asphaltTex && this.asphaltImg && this.asphaltPattern);
-    this.asphaltInitDone = true;
+  /** Lazily initializes reusable 1024×1024 offscreen CanvasTextures for seamless road & flat-pad baking. */
+  private ensureSurfaceScratches(): void {
+    if (this.surfaceInitDone) return;
+    this.surfaceInitDone = true;
 
-    const img = SpriteRegistry.getSourceImage(this.scene, 'tile_road_asphalt');
-    if (!img) return false;
+    const asphaltImg = SpriteRegistry.getSourceImage(this.scene, 'tile_road_asphalt');
+    const cobbleImg = SpriteRegistry.getSourceImage(this.scene, 'tile_road_cobble');
+    const dirtImg = SpriteRegistry.getSourceImage(this.scene, 'tile_road_dirt');
+    const concreteImg = SpriteRegistry.getSourceImage(this.scene, 'tile_pad_concrete');
 
-    if (this.scene.textures.exists(StaticWorldChunks.ASPHALT_SCRATCH_KEY)) {
-      this.scene.textures.remove(StaticWorldChunks.ASPHALT_SCRATCH_KEY);
+    const buildScaledPattern = (
+      ctx: CanvasRenderingContext2D,
+      img: HTMLImageElement | HTMLCanvasElement | null,
+      scale: number,
+    ): CanvasPattern | null => {
+      if (!img) return null;
+      const pat = ctx.createPattern(img, 'repeat');
+      if (!pat) return null;
+      // Every scale divides CHUNK_SIZE=1024 evenly -> 0 seams across chunk boundaries
+      if (typeof DOMMatrix !== 'undefined' && typeof pat.setTransform === 'function') {
+        pat.setTransform(new DOMMatrix().scale(scale, scale));
+      }
+      return pat;
+    };
+
+    if (asphaltImg || cobbleImg || dirtImg) {
+      if (this.scene.textures.exists(StaticWorldChunks.ROAD_SCRATCH_KEY)) {
+        this.scene.textures.remove(StaticWorldChunks.ROAD_SCRATCH_KEY);
+      }
+      const tex = this.scene.textures.createCanvas(StaticWorldChunks.ROAD_SCRATCH_KEY, CHUNK_SIZE, CHUNK_SIZE);
+      if (tex) {
+        const ctx = tex.getContext();
+        this.roadPatterns = {
+          asphalt: buildScaledPattern(ctx, asphaltImg, 0.5),
+          cobble: buildScaledPattern(ctx, cobbleImg, 0.25),
+          dirt: buildScaledPattern(ctx, dirtImg, 0.5),
+        };
+        if (this.roadPatterns.asphalt || this.roadPatterns.cobble || this.roadPatterns.dirt) {
+          this.roadTex = tex;
+          this.roadImg = new Phaser.GameObjects.Image(
+            this.scene,
+            0,
+            0,
+            StaticWorldChunks.ROAD_SCRATCH_KEY,
+          )
+            .setOrigin(0, 0)
+            .setLighting(false);
+        } else {
+          this.scene.textures.remove(StaticWorldChunks.ROAD_SCRATCH_KEY);
+        }
+      }
     }
-    const tex = this.scene.textures.createCanvas(StaticWorldChunks.ASPHALT_SCRATCH_KEY, CHUNK_SIZE, CHUNK_SIZE);
-    if (!tex) return false;
 
-    const ctx = tex.getContext();
-    const pat = ctx.createPattern(img, 'repeat');
-    if (!pat) {
-      this.scene.textures.remove(StaticWorldChunks.ASPHALT_SCRATCH_KEY);
-      return false;
+    if (concreteImg || asphaltImg || dirtImg) {
+      if (this.scene.textures.exists(StaticWorldChunks.FLAT_SCRATCH_KEY)) {
+        this.scene.textures.remove(StaticWorldChunks.FLAT_SCRATCH_KEY);
+      }
+      const tex = this.scene.textures.createCanvas(StaticWorldChunks.FLAT_SCRATCH_KEY, CHUNK_SIZE, CHUNK_SIZE);
+      if (tex) {
+        const ctx = tex.getContext();
+        this.flatPatterns = {
+          concrete: buildScaledPattern(ctx, concreteImg, 0.25),
+          asphalt: buildScaledPattern(ctx, asphaltImg, 0.5),
+          dirt: buildScaledPattern(ctx, dirtImg, 0.5),
+        };
+        if (this.flatPatterns.concrete || this.flatPatterns.asphalt || this.flatPatterns.dirt) {
+          this.flatTex = tex;
+          this.flatImg = new Phaser.GameObjects.Image(
+            this.scene,
+            0,
+            0,
+            StaticWorldChunks.FLAT_SCRATCH_KEY,
+          )
+            .setOrigin(0, 0)
+            .setLighting(false);
+        } else {
+          this.scene.textures.remove(StaticWorldChunks.FLAT_SCRATCH_KEY);
+        }
+      }
     }
-    // 512×512 PNG scaled 0.5 -> 256×256 world px per repeat (crisp tarmac aggregate, divides CHUNK_SIZE=1024 evenly)
-    if (typeof DOMMatrix !== 'undefined' && typeof pat.setTransform === 'function') {
-      pat.setTransform(new DOMMatrix().scale(0.5, 0.5));
-    }
-
-    this.asphaltTex = tex;
-    this.asphaltPattern = pat;
-    this.asphaltImg = new Phaser.GameObjects.Image(
-      this.scene,
-      0,
-      0,
-      StaticWorldChunks.ASPHALT_SCRATCH_KEY,
-    )
-      .setOrigin(0, 0)
-      .setLighting(false);
-    return true;
   }
 
   public setLightingEnabled(enabled: boolean) {
@@ -311,37 +378,55 @@ export class StaticWorldChunks {
     rampBase.clear();
     solids.clear();
 
-    const useAsphalt = this.ensureAsphaltScratch();
-    let actx: CanvasRenderingContext2D | null = null;
-    if (useAsphalt && this.asphaltTex && this.asphaltPattern) {
-      actx = this.asphaltTex.getContext();
-      actx.setTransform(1, 0, 0, 1, 0, 0);
-      actx.clearRect(0, 0, CHUNK_SIZE, CHUNK_SIZE);
-      actx.save();
-      // Translate into world-space so all road vertices & the seamless pattern align 1:1 across chunk borders
-      actx.translate(-worldX, -worldY);
-      this.scratches.asphaltCtx = actx;
-      this.scratches.asphaltPattern = this.asphaltPattern;
+    this.ensureSurfaceScratches();
+
+    let fctx: CanvasRenderingContext2D | null = null;
+    if (this.flatTex) {
+      fctx = this.flatTex.getContext();
+      fctx.setTransform(1, 0, 0, 1, 0, 0);
+      fctx.clearRect(0, 0, CHUNK_SIZE, CHUNK_SIZE);
+      fctx.save();
+      fctx.translate(-worldX, -worldY);
+      this.scratches.flatCtx = fctx;
+      this.scratches.flatPatterns = this.flatPatterns;
     } else {
-      this.scratches.asphaltCtx = null;
-      this.scratches.asphaltPattern = null;
+      this.scratches.flatCtx = null;
+      this.scratches.flatPatterns = { concrete: null, asphalt: null, dirt: null };
+    }
+
+    let rctx: CanvasRenderingContext2D | null = null;
+    if (this.roadTex) {
+      rctx = this.roadTex.getContext();
+      rctx.setTransform(1, 0, 0, 1, 0, 0);
+      rctx.clearRect(0, 0, CHUNK_SIZE, CHUNK_SIZE);
+      rctx.save();
+      // Translate into world-space so all road vertices & seamless patterns align 1:1 across chunk borders
+      rctx.translate(-worldX, -worldY);
+      this.scratches.roadCtx = rctx;
+      this.scratches.roadPatterns = this.roadPatterns;
+    } else {
+      this.scratches.roadCtx = null;
+      this.scratches.roadPatterns = { asphalt: null, cobble: null, dirt: null };
     }
 
     const chunkRect = new Phaser.Geom.Rectangle(worldX, worldY, CHUNK_SIZE, CHUNK_SIZE);
     const res = this.bakeFn(chunkRect, this.scratches);
 
-    if (actx) {
-      actx.restore();
-    }
+    if (fctx) fctx.restore();
+    if (rctx) rctx.restore();
 
     const rt = entry.rt;
     rt.clear();
-    // Draw layers in strict painter's order (flats -> textured asphalt -> road markings/other roads -> roadFlats -> low rampBase -> solids)
-    // Pass (-worldX, -worldY) so world-space vector coordinates map 1:1 into [0..CHUNK_SIZE]
+    // Draw layers in strict painter's order:
+    // textured flat pads -> flat vector markings/details -> textured roads -> road markings -> roadFlats -> rampBase -> solids
+    if (res.hasFlatTex && this.flatTex && this.flatImg) {
+      this.flatTex.refresh();
+      rt.draw(this.flatImg, 0, 0);
+    }
     if (flats.commandBuffer.length > 0) rt.draw(flats, -worldX, -worldY);
-    if (res.hasAsphaltTex && this.asphaltTex && this.asphaltImg) {
-      this.asphaltTex.refresh();
-      rt.draw(this.asphaltImg, 0, 0);
+    if (res.hasRoadTex && this.roadTex && this.roadImg) {
+      this.roadTex.refresh();
+      rt.draw(this.roadImg, 0, 0);
     }
     if (roads.commandBuffer.length > 0) rt.draw(roads, -worldX, -worldY);
     if (roadFlats.commandBuffer.length > 0) rt.draw(roadFlats, -worldX, -worldY);
@@ -397,12 +482,19 @@ export class StaticWorldChunks {
     this.scratches.roadFlats.destroy();
     this.scratches.rampBase.destroy();
     this.scratches.solids.destroy();
-    this.asphaltImg?.destroy();
-    this.asphaltImg = null;
-    this.asphaltTex = null;
-    this.asphaltPattern = null;
-    if (this.scene.textures.exists(StaticWorldChunks.ASPHALT_SCRATCH_KEY)) {
-      this.scene.textures.remove(StaticWorldChunks.ASPHALT_SCRATCH_KEY);
+    this.flatImg?.destroy();
+    this.flatImg = null;
+    this.flatTex = null;
+    this.flatPatterns = { concrete: null, asphalt: null, dirt: null };
+    this.roadImg?.destroy();
+    this.roadImg = null;
+    this.roadTex = null;
+    this.roadPatterns = { asphalt: null, cobble: null, dirt: null };
+    if (this.scene.textures.exists(StaticWorldChunks.FLAT_SCRATCH_KEY)) {
+      this.scene.textures.remove(StaticWorldChunks.FLAT_SCRATCH_KEY);
+    }
+    if (this.scene.textures.exists(StaticWorldChunks.ROAD_SCRATCH_KEY)) {
+      this.scene.textures.remove(StaticWorldChunks.ROAD_SCRATCH_KEY);
     }
   }
 }
