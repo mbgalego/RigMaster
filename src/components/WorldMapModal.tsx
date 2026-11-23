@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Crosshair, Maximize2, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { Cloud, Crosshair, Maximize2, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { GarageSystem, type HubId } from '../systems/GarageSystem';
 import { ReputationSystem, type FleetTruckState, type GameMode } from '../systems/ReputationSystem';
+import { WeatherSystem } from '../systems/WeatherSystem';
 import { TRUCK_CATALOG } from '../systems/TruckCatalog';
 import type { ActiveMissionState, MissionNavTarget } from '../systems/MissionSystem';
 import { World } from '../world/World';
@@ -73,6 +74,8 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
   const [selectedTruckId, setSelectedTruckId] = useState<string | null>(initialFocusTruckId ?? null);
   const [camera, setCamera] = useState<MapCamera>(DEFAULT_CAMERA);
   const [isDragging, setIsDragging] = useState(false);
+  const [showWeatherRadar, setShowWeatherRadar] = useState(true);
+  const [weatherTick, setWeatherTick] = useState(0);
 
   const svgRef = useRef<SVGSVGElement | null>(null);
   const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
@@ -104,6 +107,22 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
 
   const [hubsVersion, setHubsVersion] = useState(0);
   useEffect(() => GarageSystem.getInstance().subscribe(() => setHubsVersion((v) => v + 1)), []);
+
+  // Poll live weather cell positions softly while the Strategic World Map is open
+  useEffect(() => {
+    if (!open) return;
+    setWeatherTick((t) => t + 1);
+    const id = window.setInterval(() => setWeatherTick((t) => t + 1), 600);
+    return () => window.clearInterval(id);
+  }, [open]);
+
+  const weatherSys = WeatherSystem.getInstance();
+  const weatherRadarActive = showWeatherRadar && weatherSys.isDynamicEnabled();
+  const weatherCells = useMemo(
+    () => (open && weatherRadarActive ? weatherSys.getCells().map((c) => ({ ...c })) : []),
+    [open, weatherRadarActive, weatherTick],
+  );
+  const activeForcedWeather = GarageSystem.getInstance().getActiveModifier();
 
   const isSandbox = gameMode === 'sandbox';
   const hubs = useMemo(() => GarageSystem.getInstance().getHubs(), [open, hubsVersion]);
@@ -460,6 +479,21 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
               >
                 <Maximize2 className="w-3.5 h-3.5" />
               </button>
+              <div className="w-px h-4 bg-slate-700/80 mx-0.5" />
+              <button
+                type="button"
+                data-testid="btn-world-map-weather-toggle"
+                onClick={() => setShowWeatherRadar((prev) => !prev)}
+                title={showWeatherRadar ? 'Ocultar Radar Meteorológico' : 'Mostrar Radar Meteorológico'}
+                aria-label="Alternar Radar Meteorológico"
+                className={`p-1.5 rounded transition-colors ${
+                  showWeatherRadar
+                    ? 'text-sky-300 bg-sky-500/15 hover:bg-sky-500/25'
+                    : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                <Cloud className="w-3.5 h-3.5" />
+              </button>
             </div>
 
             <svg
@@ -474,6 +508,23 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                 isDragging ? 'cursor-grabbing' : camera.zoom > 1 ? 'cursor-grab' : 'cursor-default'
               }`}
             >
+              <defs>
+                <radialGradient id="wm-rain-grad" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.46" />
+                  <stop offset="55%" stopColor="#0284c7" stopOpacity="0.28" />
+                  <stop offset="100%" stopColor="#0284c7" stopOpacity="0" />
+                </radialGradient>
+                <radialGradient id="wm-fog-grad" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stopColor="#e2e8f0" stopOpacity="0.42" />
+                  <stop offset="60%" stopColor="#94a3b8" stopOpacity="0.22" />
+                  <stop offset="100%" stopColor="#94a3b8" stopOpacity="0" />
+                </radialGradient>
+                <radialGradient id="wm-cloud-grad" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stopColor="#f8fafc" stopOpacity="0.34" />
+                  <stop offset="58%" stopColor="#cbd5e1" stopOpacity="0.16" />
+                  <stop offset="100%" stopColor="#cbd5e1" stopOpacity="0" />
+                </radialGradient>
+              </defs>
               {/* Ocean background */}
               <rect x={WORLD_MIN_X} y={WORLD_MIN_Y} width={WORLD_SPAN_W} height={WORLD_SPAN_H} fill="#0b1927" />
               {/* Exact WorldTerrain coastline, foothills, alpine massif & topographic contour bands */}
@@ -547,6 +598,92 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
               {gasPumps.map((p, i) => (
                 <circle key={`gp-${i}`} cx={p.x} cy={p.y} r={80 * s} fill="#f59e0b" opacity={0.55} />
               ))}
+
+              {/* Live Weather Radar & Cloud Layer (seen from above on the Strategic Map) */}
+              {showWeatherRadar && (weatherRadarActive || activeForcedWeather === 'rain' || activeForcedWeather === 'fog') && (
+                <g data-testid="world-map-weather-layer" pointerEvents="none">
+                  {activeForcedWeather === 'rain' || activeForcedWeather === 'fog' ? (
+                    <rect
+                      x={WORLD_MIN_X}
+                      y={WORLD_MIN_Y}
+                      width={WORLD_SPAN_W}
+                      height={WORLD_SPAN_H}
+                      fill={activeForcedWeather === 'rain' ? '#0284c7' : '#cbd5e1'}
+                      opacity={0.18}
+                    />
+                  ) : (
+                    weatherCells.map((cell) => {
+                      const env = weatherSys.getCellEnvelope(cell);
+                      if (env <= 0.02) return null;
+                      const deg = (cell.angle * 180) / Math.PI;
+                      const fillUrl =
+                        cell.kind === 'rain'
+                          ? 'url(#wm-rain-grad)'
+                          : cell.kind === 'fog'
+                            ? 'url(#wm-fog-grad)'
+                            : 'url(#wm-cloud-grad)';
+                      const strokeColor =
+                        cell.kind === 'rain'
+                          ? '#38bdf8'
+                          : cell.kind === 'fog'
+                            ? '#cbd5e1'
+                            : '#e2e8f0';
+                      const label =
+                        cell.kind === 'rain'
+                          ? 'Chuva'
+                          : cell.kind === 'fog'
+                            ? 'Nevoeiro'
+                            : null;
+                      return (
+                        <g
+                          key={cell.id}
+                          transform={`translate(${Math.round(cell.x)}, ${Math.round(cell.y)}) rotate(${deg.toFixed(1)})`}
+                          opacity={Number((env * cell.intensity).toFixed(2))}
+                        >
+                          <ellipse
+                            cx={0}
+                            cy={0}
+                            rx={cell.radiusX}
+                            ry={cell.radiusY}
+                            fill={fillUrl}
+                            stroke={strokeColor}
+                            strokeWidth={cell.kind === 'clouds' ? 16 * s : 28 * s}
+                            strokeDasharray={cell.kind === 'rain' ? `${140 * s} ${90 * s}` : undefined}
+                            strokeOpacity={cell.kind === 'clouds' ? 0.2 : 0.45}
+                          />
+                          {/* Secondary organic cloud lobe for natural silhouette */}
+                          <ellipse
+                            cx={cell.radiusX * 0.24}
+                            cy={-cell.radiusY * 0.16}
+                            rx={cell.radiusX * 0.62}
+                            ry={cell.radiusY * 0.58}
+                            fill={fillUrl}
+                            opacity={0.75}
+                          />
+                          {label && (
+                            <text
+                              x={0}
+                              y={0}
+                              textAnchor="middle"
+                              fill={cell.kind === 'rain' ? '#7dd3fc' : '#e2e8f0'}
+                              fontSize={190 * s}
+                              fontWeight="700"
+                              opacity={0.85}
+                              style={{ paintOrder: 'stroke' }}
+                              stroke="#0b1927"
+                              strokeWidth={45 * s}
+                              strokeLinejoin="round"
+                              transform={`rotate(${(-deg).toFixed(1)})`}
+                            >
+                              {label}
+                            </text>
+                          )}
+                        </g>
+                      );
+                    })
+                  )}
+                </g>
+              )}
 
               {/* Hub labels */}
               {hubs.map((hub) => (
@@ -808,6 +945,7 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                   <div>Verde / Âmbar — Oficinas / Bombas</div>
                   <div>Rota âmbar / verde — Recolha / Entrega</div>
                   <div>Hélice branca — Torres Eólicas (Serra NW)</div>
+                  <div>Azul / Névoa / Branco — Frentes de chuva, nevoeiro e nuvens</div>
                 </div>
               </div>
 

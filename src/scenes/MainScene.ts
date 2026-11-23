@@ -9,6 +9,7 @@ import { WorldLightPools, type HubGlowSpot, type LightPoolStats } from '../world
 import { LicenseSystem, LicenseExam, LicenseId } from '../systems/LicenseSystem';
 import { GarageSystem, HubDockSpec, HubId, WeatherModifier } from '../systems/GarageSystem';
 import { TimeOfDaySystem, TimePeriod, TimeOfDaySnapshot } from '../systems/TimeOfDaySystem';
+import { WeatherSystem, type LocalWeatherSample, type WeatherCondition } from '../systems/WeatherSystem';
 import { TrailerManager, TRAILER_TYPE_TO_LICENSE, CouplingCandidate } from '../systems/TrailerManager';
 import { RoadNetwork, RoadData, RoadSample, BridgeRoadCache } from '../systems/RoadNetwork';
 import { IntersectionSystem } from '../systems/IntersectionSystem';
@@ -76,6 +77,7 @@ export class MainScene extends Phaser.Scene {
   public licenseSystem!: LicenseSystem;
   public garageSystem!: GarageSystem;
   public timeOfDaySystem!: TimeOfDaySystem;
+  public weatherSystem!: WeatherSystem;
   public reputationSystem!: ReputationSystem;
   public missionSystem!: MissionSystem;
   public parkedTruckManager!: ParkedTruckManager;
@@ -214,9 +216,13 @@ export class MainScene extends Phaser.Scene {
   private refuelOsc: OscillatorNode | null = null;
   private refuelGain: GainNode | null = null;
 
-  // Environmental layers
+  // Environmental layers (drifting ground cloud shadows, radial-cutout fog, slanted rain streaks)
   private weatherGraphics!: Phaser.GameObjects.Graphics;
+  private cloudShadowSprites: Phaser.GameObjects.Image[] = [];
+  private fogVignetteSprite: Phaser.GameObjects.Image | null = null;
   private rainParticles: Array<{ x: number; y: number; speed: number; length: number }> = [];
+  private localWeather: LocalWeatherSample = WeatherSystem.getInstance().getLatestSample();
+  private lastAppliedSurfaceGrip: number = 1.0;
 
   // Exam target dock handling (marker + guaranteed physical dock at the exam's coordinates)
   private examTargetMarker: Phaser.GameObjects.Graphics | null = null;
@@ -263,6 +269,12 @@ export class MainScene extends Phaser.Scene {
     currentGForce: number;
     peakGForce: number;
     weather: WeatherModifier;
+    weatherDynamic: boolean;
+    weatherCondition: WeatherCondition;
+    rainIntensity: number;
+    fogDensity: number;
+    cloudCover: number;
+    roadWetness: number;
     headlightMode: HeadlightMode;
     timePeriod: TimePeriod;
     timeClock: string;
@@ -321,6 +333,12 @@ export class MainScene extends Phaser.Scene {
     currentGForce: 0,
     peakGForce: 0,
     weather: 'clear',
+    weatherDynamic: true,
+    weatherCondition: 'clear',
+    rainIntensity: 0,
+    fogDensity: 0,
+    cloudCover: 0.22,
+    roadWetness: 0,
     headlightMode: 'low',
     timePeriod: 'day',
     timeClock: '09:07',
@@ -362,6 +380,7 @@ export class MainScene extends Phaser.Scene {
     this.licenseSystem = LicenseSystem.getInstance();
     this.garageSystem = GarageSystem.getInstance();
     this.timeOfDaySystem = TimeOfDaySystem.getInstance();
+    this.weatherSystem = WeatherSystem.getInstance();
     this.reputationSystem = ReputationSystem.getInstance();
     this.missionSystem = MissionSystem.getInstance();
     // Debug hook para testes headless (scripts/smoke-test.mjs usa window.__rig)
@@ -596,8 +615,9 @@ export class MainScene extends Phaser.Scene {
       }
     });
 
-    // 4. Weather Overlay
-    this.weatherGraphics = this.add.graphics();
+    // 4. Weather Layers (world-anchored cloud shadows, radial-cutout fog, screen rain)
+    this.initWeatherLayers();
+    this.weatherGraphics = this.add.graphics().setLighting(false);
     this.weatherGraphics.setDepth(20);
     this.weatherGraphics.setScrollFactor(0); // Fixed to screen
 
@@ -662,11 +682,30 @@ export class MainScene extends Phaser.Scene {
     this.input.keyboard?.once('keydown', () => this.initSyntheticAudio());
     this.input.once('pointerdown', () => this.initSyntheticAudio());
 
-    // Listen to garage system weather updates
-    this.garageSystem.subscribe(() => {
-      const grip = this.garageSystem.getSurfaceGrip();
-      this.truck.setSurfaceGrip(grip);
-    });
+    // Listen to garage system & dynamic weather updates
+    const syncWeatherGripNow = () => {
+      if (!this.sys?.isActive() || !this.truck?.body) return;
+      const mod = this.garageSystem.getActiveModifier();
+      const hours = this.timeOfDaySystem.getSnapshot(mod === 'night').dayProgress * 24;
+      this.localWeather = this.weatherSystem.stepPlayerWeather(
+        0,
+        this.truck.body.position.x,
+        this.truck.body.position.y,
+        this.truck.altitudeM,
+        hours,
+        mod,
+      );
+      this.lastAppliedSurfaceGrip = this.localWeather.surfaceGrip;
+      this.truck.setSurfaceGrip(this.localWeather.surfaceGrip);
+    };
+    const unsubGarWeather = this.garageSystem.subscribe(syncWeatherGripNow);
+    const unsubDynWeather = this.weatherSystem.subscribe(syncWeatherGripNow);
+    const cleanupWeatherSubs = () => {
+      unsubGarWeather();
+      unsubDynWeather();
+    };
+    this.events.once('shutdown', cleanupWeatherSubs);
+    this.events.once('destroy', cleanupWeatherSubs);
   }
 
   /**
@@ -2430,10 +2469,32 @@ export class MainScene extends Phaser.Scene {
   public update(time: number, delta: number) {
     const dt = Math.min(Math.max(delta / 1000, 0.001), 0.05);
 
-    // Time of day progression + coordinated traffic light cycle
+    // Time of day progression + dynamic regional weather fronts + coordinated traffic light cycle
     this.timeOfDaySystem.update(delta);
-    const forceNight = this.garageSystem.getActiveModifier() === 'night';
+    const activeWeatherMod = this.garageSystem.getActiveModifier();
+    const forceNight = activeWeatherMod === 'night';
     const timeSnap = this.timeOfDaySystem.getSnapshot(forceNight);
+    this.weatherSystem.update(
+      dt,
+      World.WORLD_MIN_X,
+      World.WORLD_MIN_Y,
+      World.WORLD_SPAN_W,
+      World.WORLD_SPAN_H,
+    );
+    if (this.truck) {
+      this.localWeather = this.weatherSystem.stepPlayerWeather(
+        dt,
+        this.truck.body.position.x,
+        this.truck.body.position.y,
+        this.truck.altitudeM,
+        timeSnap.dayProgress * 24,
+        activeWeatherMod,
+      );
+      if (Math.abs(this.localWeather.surfaceGrip - this.lastAppliedSurfaceGrip) > 0.004) {
+        this.lastAppliedSurfaceGrip = this.localWeather.surfaceGrip;
+        this.truck.setSurfaceGrip(this.localWeather.surfaceGrip);
+      }
+    }
     this.world.update(delta);
 
     // Keep exam target dock (marker + painted dock tile) in sync with the active exam
@@ -2806,7 +2867,8 @@ export class MainScene extends Phaser.Scene {
 
       // Sync live towing/weather flags into Truck physics (suspension empty grip, brake heat, wet tires)
       this.truck.hasCoupledTrailer = this.trailer !== null;
-      this.truck.isWeatherWet = this.garageSystem.getActiveModifier() === 'rain';
+      this.truck.isWeatherWet =
+        this.localWeather.roadWetness >= 0.25 || this.garageSystem.getActiveModifier() === 'rain';
 
       // Update Active License Exam
       const activeExam = this.licenseSystem.getActiveExam();
@@ -2960,6 +3022,12 @@ export class MainScene extends Phaser.Scene {
         currentGForce: this.currentGForce,
         peakGForce: this.peakGForce,
         weather: this.garageSystem.getActiveModifier(),
+        weatherDynamic: this.weatherSystem.isDynamicEnabled(),
+        weatherCondition: this.localWeather.dominantCondition,
+        rainIntensity: Math.round(this.localWeather.rainIntensity * 100) / 100,
+        fogDensity: Math.round(this.localWeather.fogDensity * 100) / 100,
+        cloudCover: Math.round(this.localWeather.cloudCover * 100) / 100,
+        roadWetness: Math.round(this.localWeather.roadWetness * 100) / 100,
         headlightMode: this.truck.headlightMode,
         timePeriod: timeSnap.period,
         timeClock: timeSnap.clockText,
@@ -4129,26 +4197,32 @@ export class MainScene extends Phaser.Scene {
       return;
     }
 
-    // Apply weather overcast attenuation subtly over time-of-day ambient
+    // Apply smooth weather overcast attenuation over time-of-day ambient
     const weather = this.garageSystem.getActiveModifier();
+    const lw = this.localWeather;
     let { r, g, b } = snap.ambientRgb;
-    if (weather === 'rain') {
-      r = Math.round(r * 0.78);
-      g = Math.round(g * 0.84);
-      b = Math.round(b * 0.95);
-    } else if (weather === 'fog') {
-      r = Math.round(r * 0.88);
-      g = Math.round(g * 0.90);
-      b = Math.round(b * 0.94);
+    const rainF = lw.rainIntensity;
+    const fogF = lw.fogDensity;
+    const overcastF = Math.max(0, lw.cloudCover - 0.35) / 0.65;
+    if (rainF > 0.02 || fogF > 0.02 || overcastF > 0.05) {
+      const rMul = 1 - rainF * 0.22 - fogF * 0.10 - overcastF * 0.06;
+      const gMul = 1 - rainF * 0.16 - fogF * 0.08 - overcastF * 0.05;
+      const bMul = 1 - rainF * 0.05 - fogF * 0.05 - overcastF * 0.02;
+      r = Math.round(r * Math.max(0.68, rMul));
+      g = Math.round(g * Math.max(0.74, gMul));
+      b = Math.round(b * Math.max(0.84, bMul));
     }
     const ambientHex = (r << 16) | (g << 8) | b;
 
-    // Only pay the WebGL lighting shader cost when dusk, night, dawn, or overcast weather meaningfully dims the scene
+    // Only pay the WebGL lighting shader cost when dusk, night, dawn, or real rain/fog meaningfully dims the scene
+    // (fair-weather cloud decks already cast drifting ground shadows via cloudShadowSprite without Light2D overhead)
     const needsWebGLLighting =
       snap.lampFactor >= 0.08 ||
-      r < 238 ||
-      g < 228 ||
-      b < 214 ||
+      snap.ambientRgb.r < 238 ||
+      snap.ambientRgb.g < 228 ||
+      snap.ambientRgb.b < 214 ||
+      rainF >= 0.22 ||
+      fogF >= 0.28 ||
       weather !== 'clear';
     this.setWebGLLightingActive(needsWebGLLighting);
     if (!needsWebGLLighting) {
@@ -4303,10 +4377,107 @@ export class MainScene extends Phaser.Scene {
     // (eliminating the 4-light slot pop-in at low zoom and halving Light2D shader cost).
   }
 
+  /**
+   * Generates lightweight procedural CanvasTextures once for:
+   * 1. Soft multi-lobe cloud shadow puff (`cloud_shadow_puff`, 128×128) rendered as
+   *    batched world-space Image sprites (zero TileSprite shader overhead, crisp sunlit gaps)
+   * 2. Radial-cutout atmospheric fog mask (`fog_cutout_mask`, 256×256) that keeps
+   *    the truck, trailer, and immediate road crystal clear while misting the perimeter.
+   */
+  private initWeatherLayers() {
+    const w = Math.max(1, this.scale.width);
+    const h = Math.max(1, this.scale.height);
+
+    if (!this.textures.exists('cloud_shadow_puff')) {
+      const size = 128;
+      const tex = this.textures.createCanvas('cloud_shadow_puff', size, size);
+      if (tex) {
+        const ctx = tex.getContext();
+        ctx.clearRect(0, 0, size, size);
+        // Organic 4-lobe cumulus silhouette with feathered radial edges
+        const lobes: Array<[number, number, number, number]> = [
+          [64, 64, 46, 0.72],
+          [44, 68, 34, 0.54],
+          [86, 62, 32, 0.52],
+          [60, 48, 30, 0.46],
+        ];
+        for (const [cx, cy, r, peak] of lobes) {
+          const grad = ctx.createRadialGradient(cx, cy, r * 0.1, cx, cy, r);
+          grad.addColorStop(0, `rgba(11, 20, 38, ${peak.toFixed(2)})`);
+          grad.addColorStop(0.55, `rgba(15, 23, 42, ${(peak * 0.48).toFixed(2)})`);
+          grad.addColorStop(1, 'rgba(15, 23, 42, 0)');
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        tex.refresh();
+      }
+    }
+
+    if (!this.textures.exists('fog_cutout_mask')) {
+      const size = 256;
+      const tex = this.textures.createCanvas('fog_cutout_mask', size, size);
+      if (tex) {
+        const ctx = tex.getContext();
+        const half = size / 2;
+        const grad = ctx.createRadialGradient(half, half, size * 0.06, half, half, half);
+        // Clear driving pocket right around the player's rig -> smooth atmospheric mist outward
+        grad.addColorStop(0, 'rgba(226, 232, 240, 0.06)');
+        grad.addColorStop(0.24, 'rgba(226, 232, 240, 0.14)');
+        grad.addColorStop(0.54, 'rgba(203, 213, 225, 0.56)');
+        grad.addColorStop(0.82, 'rgba(186, 200, 216, 0.84)');
+        grad.addColorStop(1, 'rgba(176, 192, 210, 0.94)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, size, size);
+        tex.refresh();
+      }
+    }
+
+    // Pool of 5 world-space drifting cloud shadow clusters (standard batched Images, depth 14)
+    this.cloudShadowSprites = [];
+    for (let i = 0; i < 5; i++) {
+      const img = this.add
+        .image(0, 0, 'cloud_shadow_puff')
+        .setOrigin(0.5, 0.5)
+        .setDepth(14)
+        .setLighting(false)
+        .setAlpha(0)
+        .setVisible(false);
+      this.cloudShadowSprites.push(img);
+    }
+
+    this.fogVignetteSprite = this.add
+      .image(w / 2, h / 2, 'fog_cutout_mask')
+      .setOrigin(0.5, 0.5)
+      .setScrollFactor(0)
+      .setDepth(19)
+      .setLighting(false)
+      .setDisplaySize(Math.max(w, h) * 1.65, Math.max(w, h) * 1.65)
+      .setAlpha(0)
+      .setVisible(false);
+
+    const onWeatherResize = (gameSize: Phaser.Structs.Size) => {
+      if (!this.sys?.isActive()) return;
+      const nw = Math.max(1, gameSize.width);
+      const nh = Math.max(1, gameSize.height);
+      const span = Math.max(nw, nh) * 1.65;
+      this.fogVignetteSprite?.setDisplaySize(span, span);
+    };
+    this.scale.on('resize', onWeatherResize);
+    this.events.once('shutdown', () => this.scale.off('resize', onWeatherResize));
+    this.events.once('destroy', () => this.scale.off('resize', onWeatherResize));
+  }
+
   private renderWeather(time: number, delta: number, snap: TimeOfDaySnapshot) {
     const g = this.weatherGraphics;
-    const weather = this.garageSystem.getActiveModifier();
-    if (weather === 'clear') {
+    const w = this.scale.width;
+    const h = this.scale.height;
+
+    // Keep Map Editor completely crisp and unobstructed
+    if (this.isEditorMode) {
+      for (const s of this.cloudShadowSprites) s.setVisible(false);
+      this.fogVignetteSprite?.setVisible(false);
       if (this.weatherGraphicsDirty) {
         g.clear();
         this.weatherGraphicsDirty = false;
@@ -4314,47 +4485,144 @@ export class MainScene extends Phaser.Scene {
       return;
     }
 
+    const lw = this.localWeather;
+    const cam = this.cameras.main;
+    const dt = Math.min(delta / 1000, 0.05);
+    const zoom = Math.max(0.05, cam.zoom);
+    const invZoom = 1 / zoom;
+    const viewW = w * invZoom;
+    const viewH = h * invZoom;
+    const viewMinX = w * 0.5 - viewW * 0.5;
+    const viewMinY = h * 0.5 - viewH * 0.5;
+
+    // 1. World-space drifting ground cloud shadows (imagined overhead above the camera -> zero obstruction!)
+    if (this.cloudShadowSprites.length > 0) {
+      const daylightFactor = Phaser.Math.Clamp(1 - snap.lampFactor * 1.15, 0.06, 1);
+      const baseAlpha = Phaser.Math.Clamp(lw.cloudCover * daylightFactor * 0.28, 0, 0.28);
+      if (baseAlpha > 0.01) {
+        const cloudOff = this.weatherSystem.getCloudOffset();
+        const midX = cam.midPoint.x;
+        const midY = cam.midPoint.y;
+        const halfViewW = (cam.width * 0.5) * invZoom;
+        const halfViewH = (cam.height * 0.5) * invZoom;
+        const wrapW = Math.max(2400, Math.ceil(halfViewW * 2.2));
+        const wrapH = Math.max(1900, Math.ceil(halfViewH * 2.2));
+        // Deterministic cloud shadow blueprint (x0, y0, widthPx, heightPx, rotRad, minCoverThreshold)
+        const specs: ReadonlyArray<[number, number, number, number, number, number]> = [
+          [260, 260, 620, 420, -0.18, 0.05],
+          [1420, 420, 680, 450, 0.12, 0.12],
+          [820, 1140, 640, 430, -0.09, 0.22],
+          [2020, 1380, 660, 440, 0.20, 0.40],
+          [420, 1680, 700, 460, -0.22, 0.58],
+        ];
+        for (let i = 0; i < this.cloudShadowSprites.length; i++) {
+          const sprite = this.cloudShadowSprites[i];
+          const [ox, oy, sw, sh, rot, minCov] = specs[i];
+          const presence = Phaser.Math.Clamp((lw.cloudCover - minCov) / 0.25, 0, 1);
+          if (presence <= 0.02) {
+            sprite.setVisible(false);
+            continue;
+          }
+          // Wrap each shadow smoothly into the nearest cell around the camera midpoint
+          const rawX = ox + cloudOff.x;
+          const rawY = oy + cloudOff.y;
+          const relX = ((((rawX - midX) % wrapW) + wrapW * 1.5) % wrapW) - wrapW * 0.5;
+          const relY = ((((rawY - midY) % wrapH) + wrapH * 1.5) % wrapH) - wrapH * 0.5;
+          // Frustum cull shadows outside the visible camera view to keep fill-rate minimal
+          if (Math.abs(relX) > halfViewW + sw * 0.55 || Math.abs(relY) > halfViewH + sh * 0.55) {
+            sprite.setVisible(false);
+            continue;
+          }
+          sprite
+            .setVisible(true)
+            .setPosition(midX + relX, midY + relY)
+            .setDisplaySize(sw, sh)
+            .setRotation(rot)
+            .setAlpha(Math.min(0.29, baseAlpha * (0.68 + 0.32 * presence)));
+        }
+      } else {
+        for (const s of this.cloudShadowSprites) s.setVisible(false);
+      }
+    }
+
+    // 2. Non-obstructive radial-cutout atmospheric fog & Serra summit mist (zoom-compensated to fill 100% of viewport)
+    if (this.fogVignetteSprite) {
+      if (lw.fogDensity >= 0.03) {
+        const isDark = snap.lampFactor > 0.5;
+        const fogTint = isDark ? 0x1e293b : 0xcbd5e1;
+        const breath = Math.sin(time * 0.0012) * 0.035 * lw.fogDensity;
+        const fogAlpha = Phaser.Math.Clamp(
+          lw.fogDensity * (isDark ? 0.68 : 0.78) + breath,
+          0,
+          0.8,
+        );
+        // Center the clear driving pocket over the truck in scrollFactor(0) camera-scaled coordinates
+        let cx = w * 0.5;
+        let cy = h * 0.5;
+        if (this.truck) {
+          const truckOffX = Phaser.Math.Clamp(this.truck.body.position.x - cam.midPoint.x, -viewW * 0.25, viewW * 0.25);
+          const truckOffY = Phaser.Math.Clamp(this.truck.body.position.y - cam.midPoint.y, -viewH * 0.25, viewH * 0.25);
+          cx = w * 0.5 + truckOffX;
+          cy = h * 0.5 + truckOffY;
+        }
+        const span = Math.max(viewW, viewH) * 1.75;
+        this.fogVignetteSprite
+          .setVisible(true)
+          .setPosition(cx, cy)
+          .setDisplaySize(span, span)
+          .setTint(fogTint)
+          .setAlpha(fogAlpha);
+      } else {
+        this.fogVignetteSprite.setVisible(false);
+      }
+    }
+
+    // 3. Intensity-scaled wind-slanted rain streaks & subtle wet sheen (zoom-compensated 1:1 to screen pixels)
+    if (lw.rainIntensity < 0.04) {
+      if (this.weatherGraphicsDirty) {
+        g.clear();
+        this.weatherGraphicsDirty = false;
+      }
+      return;
+    }
+
+    g.setPosition(viewMinX, viewMinY);
+    g.setScale(invZoom);
     g.clear();
     this.weatherGraphicsDirty = true;
 
-    const w = this.scale.width;
-    const h = this.scale.height;
-    const dt = Math.min(delta / 1000, 0.05);
+    const rInt = lw.rainIntensity;
+    g.fillStyle(0x0284c7, 0.075 * rInt);
+    g.fillRect(-4, -4, w + 8, h + 8);
 
-    if (weather === 'fog') {
-      // Atmospheric Fog (adapts tone to time of day)
-      const isDark = snap.lampFactor > 0.5;
-      const fogColor = isDark ? 0x1e293b : 0x64748b;
-      const fogAlpha = (isDark ? 0.38 : 0.45) + Math.sin(time * 0.001) * 0.06;
-      g.fillStyle(fogColor, fogAlpha);
-      g.fillRect(0, 0, w, h);
-    } else if (weather === 'rain') {
-      // Rain Streaks & Water Sheen
-      g.fillStyle(0x0284c7, 0.08);
-      g.fillRect(0, 0, w, h);
+    const maxDrops = 130;
+    while (this.rainParticles.length < maxDrops) {
+      this.rainParticles.push({
+        x: Phaser.Math.Between(0, w),
+        y: Phaser.Math.Between(0, h),
+        speed: Phaser.Math.Between(560, 880),
+        length: Phaser.Math.Between(14, 28),
+      });
+    }
 
-      // Rain drop simulation
-      if (this.rainParticles.length < 90) {
-        for (let i = 0; i < 90; i++) {
-          this.rainParticles.push({
-            x: Phaser.Math.Between(0, w),
-            y: Phaser.Math.Between(0, h),
-            speed: Phaser.Math.Between(550, 850),
-            length: Phaser.Math.Between(15, 28),
-          });
-        }
+    const activeDrops = Math.min(maxDrops, Math.round(16 + rInt * (maxDrops - 16)));
+    const slantVx = Phaser.Math.Clamp(lw.windVx * 4.8, -220, 220);
+    const slantDx = (slantVx / 700) * 20;
+
+    g.lineStyle(1.1 + rInt * 0.6, 0x93c5fd, 0.18 + rInt * 0.34);
+    for (let i = 0; i < activeDrops; i++) {
+      const drop = this.rainParticles[i];
+      drop.y += drop.speed * (0.85 + rInt * 0.25) * dt;
+      drop.x += slantVx * dt;
+      if (drop.y > h + 20) {
+        drop.y = -15;
+        drop.x = Phaser.Math.Between(-40, w + 40);
+      } else if (drop.x < -50) {
+        drop.x = w + 30;
+      } else if (drop.x > w + 50) {
+        drop.x = -30;
       }
-
-      g.lineStyle(1.5, 0x93c5fd, 0.45);
-      for (const drop of this.rainParticles) {
-        drop.y += drop.speed * dt;
-        drop.x -= 120 * dt;
-        if (drop.y > h) {
-          drop.y = -10;
-          drop.x = Phaser.Math.Between(0, w);
-        }
-        g.lineBetween(drop.x, drop.y, drop.x - 4, drop.y + drop.length);
-      }
+      g.lineBetween(drop.x, drop.y, drop.x + slantDx, drop.y + drop.length);
     }
   }
 

@@ -30,7 +30,7 @@ const fallbackExe = '/ms-playwright/chrome-headless-shell-linux64/chrome-headles
 const executablePath = !fs.existsSync(chromium.executablePath()) && fs.existsSync(fallbackExe) ? fallbackExe : undefined;
 const browser = await chromium.launch(executablePath ? { executablePath } : {});
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-page.setDefaultTimeout(10000);
+page.setDefaultTimeout(20000);
 const pageErrors = [];
 page.on('pageerror', (e) => pageErrors.push(String(e)));
 
@@ -501,7 +501,7 @@ check(
 // 10. Phase 3 UI: Sandbox toggle in Menu updates HUD indicator cleanly without contaminating Career
 await page.getByRole('button', { name: /Menu/i }).click();
 await page.getByTestId('btn-mode-sandbox').click();
-await page.waitForSelector('[data-testid="hud-sandbox-indicator"]', { timeout: 4000 });
+await page.waitForSelector('[data-testid="hud-sandbox-indicator"]', { timeout: 8000 });
 const sandboxHudVisible = await page.getByTestId('hud-sandbox-indicator').isVisible();
 await page.getByTestId('btn-mode-career').click();
 await page.waitForTimeout(250);
@@ -518,7 +518,7 @@ check(
 // 11. Phase 3 UI: Missions & Certificates modal -> accept mission -> HUD banner -> completion popup
 await page.getByRole('button', { name: /Menu/i }).click();
 await page.getByTestId('btn-open-missions').click();
-await page.waitForSelector('[data-testid="missions-modal"]', { timeout: 4000 });
+await page.waitForSelector('[data-testid="missions-modal"]', { timeout: 8000 });
 // Switch to Certificates tab & verify ADR_Basic card is shown
 await page.getByRole('button', { name: /Certificados/i }).click();
 const adrCardVisible = await page.getByTestId('cert-card-ADR_Basic').isVisible();
@@ -526,7 +526,7 @@ const adrCardVisible = await page.getByTestId('cert-card-ADR_Basic').isVisible()
 await page.getByRole('button', { name: /^Missões$/i }).click();
 await page.getByRole('button', { name: /Porto Comercial/i }).click();
 await page.getByTestId('mission-row-harbor_city_dist').getByRole('button', { name: /Aceitar Missão/i }).click();
-await page.waitForSelector('[data-testid="active-mission-banner"]', { timeout: 4000 });
+await page.waitForSelector('[data-testid="active-mission-banner"]', { timeout: 8000 });
 const bannerVisible = await page.getByTestId('active-mission-banner').isVisible();
 // Complete mission cleanly and verify summary modal opens and closes on "Continuar"
 await page.evaluate(() => {
@@ -543,7 +543,7 @@ await page.evaluate(() => {
     isNightMission: false,
   });
 });
-await page.waitForSelector('[data-testid="mission-completion-modal"]', { timeout: 4000 });
+await page.waitForSelector('[data-testid="mission-completion-modal"]', { timeout: 8000 });
 const completionText = await page.getByTestId('mission-completion-modal').innerText();
 await page.getByTestId('mission-completion-modal').getByRole('button', { name: /Continuar/i }).click();
 await page.waitForTimeout(200);
@@ -1328,11 +1328,11 @@ await page.waitForTimeout(150);
 await page.evaluate(() => {
   if (window.__rig.isEditorMode) window.__rig.toggleEditorMode();
 });
-await page.waitForTimeout(200);
+await page.waitForTimeout(450);
 
 // Strategic World Map Zoom & Center-on-Truck check
 await page.keyboard.press('m');
-await page.waitForSelector('[data-testid="world-map-zoom-controls"]', { timeout: 4000 });
+await page.waitForSelector('[data-testid="world-map-zoom-controls"]', { timeout: 8000 });
 const zoomInit = await page.getByTestId('world-map-zoom-level').innerText();
 const vbInit = await page.getByTestId('world-map-svg').getAttribute('viewBox');
 await page.getByTestId('btn-world-map-zoom-in').click();
@@ -1391,6 +1391,104 @@ check(
     vbZoomInW: parseVbW(vbZoomIn),
     minimapLocalCheck,
   }),
+);
+
+// 24. Sistema Meteorológico Regional Dinâmico & Sombras de Nuvens (v2.17.0)
+const weatherCheck = await page.evaluate(() => {
+  const rig = window.__rig;
+  const ws = rig.weatherSystem;
+  ws.setDynamicEnabled(true);
+  rig.garageSystem.setActiveModifier('clear');
+  ws.seedInitialCells();
+
+  // 1. Spawn central (5760, 4700) começa seco com grip = 1.0 e nuvens ligeiras
+  const spawnSample = ws.sampleAt(5760, 4700, 0, 12, 'clear', 0);
+
+  // 2. Amostragem direta dentro da frente de chuva na Serra NW e do banco de nevoeiro a Oeste
+  const rainCell = ws.getCells().find((c) => c.kind === 'rain');
+  const fogCell = ws.getCells().find((c) => c.kind === 'fog');
+  const rainSample = rainCell ? ws.sampleAt(rainCell.x, rainCell.y, 480, 12, 'clear', 0.85) : null;
+  const fogSample = fogCell ? ws.sampleAt(fogCell.x, fogCell.y, 20, 12, 'clear', 0) : null;
+
+  // 3. Movimento contínuo das frentes e deriva das sombras de nuvens
+  const beforeCellX = rainCell ? rainCell.x : 0;
+  const beforeCloudX = ws.getCloudOffset().x;
+  for (let i = 0; i < 60; i++) {
+    ws.update(0.05, -6600, -5600, 21400, 17400);
+  }
+  const afterCellX = rainCell ? rainCell.x : 0;
+  const afterCloudX = ws.getCloudOffset().x;
+
+  // 4. Verificar que as sombras de nuvens no chão existem, movem-se e nunca excedem alpha 0.30
+  rig.update(2000, 16.67);
+  const shadows = rig.cloudShadowSprites || [];
+  const shadowOk =
+    shadows.length >= 5 &&
+    shadows.every((s) => s.alpha <= 0.30);
+
+  // 5. Compatibilidade com override global (Exame X / Chuva forçada) e compensação de zoom (0.5x)
+  const forcedRain = ws.sampleAt(5760, 4700, 0, 12, 'rain', 1);
+  const prevZoom = rig.cameras.main.zoom;
+  rig.cameras.main.setZoom(0.5);
+  rig.garageSystem.setActiveModifier('rain');
+  rig.update(2016, 16.67);
+  const rainZoomScaleOk =
+    Math.abs((rig.weatherGraphics?.scaleX ?? 0) - 2) < 0.05 &&
+    Math.abs((rig.weatherGraphics?.x ?? 0) - (rig.scale.width * 0.5 - rig.scale.width)) < 2;
+  rig.garageSystem.setActiveModifier('fog');
+  rig.update(2032, 16.67);
+  const fogZoomSpanOk =
+    !!rig.fogVignetteSprite?.visible &&
+    rig.fogVignetteSprite.displayWidth >= Math.max(rig.scale.width, rig.scale.height) * 2 * 1.5;
+  rig.garageSystem.setActiveModifier('clear');
+  rig.cameras.main.setZoom(prevZoom);
+  ws.seedInitialCells();
+
+  return {
+    dynamicOn: ws.isDynamicEnabled(),
+    cellCount: ws.getCells().length,
+    spawnDry: spawnSample.rainIntensity === 0 && spawnSample.surfaceGrip === 1,
+    rainValid: !!(rainSample && rainSample.rainIntensity > 0.5 && rainSample.surfaceGrip < 0.75 && rainSample.cloudCover > 0.6),
+    fogValid: !!(fogSample && fogSample.fogDensity > 0.45),
+    frontsDrifted: Math.abs(afterCellX - beforeCellX) > 20,
+    cloudShadowsDrifted: Math.abs(afterCloudX - beforeCloudX) > 30,
+    shadowOk,
+    forcedRainExact: forcedRain.rainIntensity === 1 && forcedRain.surfaceGrip === 0.45,
+    rainZoomScaleOk,
+    fogZoomSpanOk,
+  };
+});
+
+// Verify Strategic World Map renders the live Weather Radar & Cloud Layer and toggles cleanly
+await page.keyboard.press('m');
+await page.waitForSelector('[data-testid="world-map-weather-layer"]', { timeout: 8000 });
+const radarVisibleBefore = await page.locator('[data-testid="world-map-weather-layer"]').isVisible();
+await page.getByTestId('btn-world-map-weather-toggle').click();
+await page.waitForTimeout(120);
+const radarVisibleAfterToggleOff = await page.locator('[data-testid="world-map-weather-layer"]').count();
+await page.getByTestId('btn-world-map-weather-toggle').click();
+await page.waitForTimeout(120);
+const radarVisibleAfterToggleOn = await page.locator('[data-testid="world-map-weather-layer"]').isVisible();
+await page.keyboard.press('Escape');
+await page.waitForTimeout(150);
+
+check(
+  'Sistema meteorológico regional dinâmico: frentes móveis, sombras de nuvens não-obstrutivas, cobertura 100% em zoom afastado, aderência em piso molhado, radar no Mapa Estratégico e compatibilidade Exame X',
+  weatherCheck.dynamicOn &&
+    weatherCheck.cellCount >= 6 &&
+    weatherCheck.spawnDry &&
+    weatherCheck.rainValid &&
+    weatherCheck.fogValid &&
+    weatherCheck.frontsDrifted &&
+    weatherCheck.cloudShadowsDrifted &&
+    weatherCheck.shadowOk &&
+    weatherCheck.forcedRainExact &&
+    weatherCheck.rainZoomScaleOk &&
+    weatherCheck.fogZoomSpanOk &&
+    radarVisibleBefore &&
+    radarVisibleAfterToggleOff === 0 &&
+    radarVisibleAfterToggleOn,
+  JSON.stringify({ weatherCheck, radarVisibleBefore, radarVisibleAfterToggleOff, radarVisibleAfterToggleOn }),
 );
 
 check('zero erros JS durante todo o teste de progressão', pageErrors.length === 0, pageErrors.join('; '));

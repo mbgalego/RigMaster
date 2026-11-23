@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { World } from '../world/World';
 import { TrailerManager } from '../systems/TrailerManager';
 import { TRUCK_CATALOG } from '../systems/TruckCatalog';
+import { WeatherSystem } from '../systems/WeatherSystem';
 import type { MainScene } from './MainScene';
 
 /**
@@ -338,6 +339,50 @@ export class MinimapScene extends Phaser.Scene {
     // Cyan border glow
     g.lineStyle(2, 0x22d3ee, 0.9);
     g.strokeRect(img.x - 1, img.y - 1, w + 2, h + 2);
+
+    // Subtle regional rain / fog radar overlay clipped cleanly inside the local 6.4 km window
+    const weatherSys = WeatherSystem.getInstance();
+    if (weatherSys.isDynamicEnabled() && mainScene.garageSystem.getActiveModifier() === 'clear') {
+      const cells = weatherSys.getCells();
+      for (const cell of cells) {
+        if (cell.kind === 'clouds') continue; // keep minimap super crisp; clouds are on Strategic Map
+        const env = weatherSys.getCellEnvelope(cell);
+        if (env <= 0.05) continue;
+        const rx = (cell.radiusX / span) * w;
+        const ry = (cell.radiusY / span) * h;
+        const cx = toMapX(cell.x);
+        const cy = toMapY(cell.y);
+        const maxR = Math.max(rx, ry);
+        if (cx + maxR < img.x || cx - maxR > img.x + w || cy + maxR < img.y || cy - maxR > img.y + h) {
+          continue;
+        }
+        // Sample clipped ellipse points clamped to the minimap frame
+        const color = cell.kind === 'rain' ? 0x38bdf8 : 0xcbd5e1;
+        const alpha = (cell.kind === 'rain' ? 0.24 : 0.20) * env * cell.intensity;
+        const steps = 18;
+        g.fillStyle(color, alpha);
+        g.beginPath();
+        for (let i = 0; i <= steps; i++) {
+          const theta = (i / steps) * Math.PI * 2;
+          const lx = Math.cos(theta) * rx;
+          const ly = Math.sin(theta) * ry;
+          const px = Phaser.Math.Clamp(
+            cx + lx * Math.cos(cell.angle) - ly * Math.sin(cell.angle),
+            img.x + 1,
+            img.x + w - 1,
+          );
+          const py = Phaser.Math.Clamp(
+            cy + lx * Math.sin(cell.angle) + ly * Math.cos(cell.angle),
+            img.y + 1,
+            img.y + h - 1,
+          );
+          if (i === 0) g.moveTo(px, py);
+          else g.lineTo(px, py);
+        }
+        g.closePath();
+        g.fillPath();
+      }
+    }
 
     // Camera viewport rectangle (clamped cleanly inside the minimap frame)
     const cam = mainScene.cameras.main;

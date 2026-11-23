@@ -10,6 +10,7 @@ import { MainScene, VehicleConfigType } from './scenes/MainScene';
 import { LicenseSystem, LicenseInfo, ExamStatus, LicenseId } from './systems/LicenseSystem';
 import { GarageSystem, HubData, WeatherModifier } from './systems/GarageSystem';
 import { TimeOfDaySystem, TimePeriod } from './systems/TimeOfDaySystem';
+import { WeatherSystem } from './systems/WeatherSystem';
 import { TRAILER_TYPE_TO_LICENSE } from './systems/TrailerManager';
 import type { TrailerType } from './entities/Trailer';
 import type { RoadSurface } from './systems/RoadNetwork';
@@ -100,6 +101,9 @@ import {
   FlaskConical,
   TrendingUp,
   TrendingDown,
+  Cloud,
+  CloudRain,
+  CloudFog,
 } from 'lucide-react';
 
 /** Catálogo do Criar, organizado por categorias — cada categoria tem o seu
@@ -323,6 +327,7 @@ export default function App() {
   const [licenses, setLicenses] = useState<LicenseInfo[]>([]);
   const [hubs, setHubs] = useState<HubData[]>([]);
   const [activeWeather, setActiveWeather] = useState<WeatherModifier>('clear');
+  const [weatherDynamic, setWeatherDynamic] = useState<boolean>(() => WeatherSystem.getInstance().isDynamicEnabled());
   const [editorTool, setEditorTool] = useState<'pan' | 'road' | 'object' | 'spawn' | 'add' | 'compound'>('pan');
   const editorToolRef = useRef<'pan' | 'road' | 'object' | 'spawn' | 'add' | 'compound'>('pan');
   // Catalog selection for the 'add' (Criar) tool
@@ -424,6 +429,12 @@ export default function App() {
     currentGForce: 0,
     peakGForce: 0,
     weather: 'clear',
+    weatherDynamic: true,
+    weatherCondition: 'clear',
+    rainIntensity: 0,
+    fogDensity: 0,
+    cloudCover: 0.22,
+    roadWetness: 0,
     headlightMode: 'low',
     timePeriod: 'day',
     timeClock: '09:07',
@@ -620,6 +631,12 @@ export default function App() {
       setCustomMissionCount(misSys.getCustomMissions().length);
     });
 
+    const weatherSys = WeatherSystem.getInstance();
+    setWeatherDynamic(weatherSys.isDynamicEnabled());
+    const unsubWeather = weatherSys.subscribe(() => {
+      setWeatherDynamic(weatherSys.isDynamicEnabled());
+    });
+
     // Telemetry polling loop from MainScene
     let lastTelKey = '';
     let lastEditorFlag: boolean | null = null;
@@ -642,7 +659,7 @@ export default function App() {
           `${Math.round(t.truckDamage.rearLights.brakeLeft)},${Math.round(t.truckDamage.rearLights.brakeRight)},${Math.round(t.truckDamage.rearLights.reverseLeft)},${Math.round(t.truckDamage.rearLights.reverseRight)}|` +
           `${Math.round(t.fuelPercent * 10)}|${Math.round(t.fuelLevel * 10)}|${t.isOutOfFuel ? 1 : 0}|` +
           `${t.isRefuelling ? 1 : 0}|${t.isRepairing ? 1 : 0}|${t.isJackknifed ? 1 : 0}|${t.isMechanicalLocked ? 1 : 0}|` +
-          `${t.articulationDeg}|${t.collisions}|${t.weather}|${t.currentGForce.toFixed(2)}|${t.peakGForce.toFixed(2)}|` +
+          `${t.articulationDeg}|${t.collisions}|${t.weather}|${t.weatherDynamic ? 1 : 0},${t.weatherCondition},${Math.round(t.rainIntensity * 10)},${Math.round(t.fogDensity * 10)}|${t.currentGForce.toFixed(2)}|${t.peakGForce.toFixed(2)}|` +
           `${t.headlightMode}|${t.timePeriod}|${t.timeClock}|${t.autoTimeCycle ? 1 : 0}|${t.timeRealTime ? 1 : 0}|` +
           `${t.nearbyPump ? `${t.nearbyPump.x},${t.nearbyPump.y}` : ''}|` +
           `${t.nearbyRepairBay ? `${t.nearbyRepairBay.x},${t.nearbyRepairBay.y}` : ''}|` +
@@ -706,6 +723,7 @@ export default function App() {
       unsubLic();
       unsubGar();
       unsubMis();
+      unsubWeather();
       destroyGame();
     };
   }, []);
@@ -842,7 +860,20 @@ export default function App() {
     }
     const garSys = GarageSystem.getInstance();
     if (!garSys.getUnlockedModifiers().includes(weather)) return;
+    if (weather === 'clear') {
+      WeatherSystem.getInstance().setDynamicEnabled(false);
+    }
     garSys.setActiveModifier(weather);
+  };
+
+  const handleSetDynamicWeather = () => {
+    const exam = LicenseSystem.getInstance().getActiveExam();
+    if (exam.active && exam.licenseId === 'X') {
+      addToast('Clima fixo em chuva durante o Exame X', 'blocked');
+      return;
+    }
+    WeatherSystem.getInstance().setDynamicEnabled(true);
+    GarageSystem.getInstance().setActiveModifier('clear');
   };
 
   // Start Exam
@@ -1108,6 +1139,25 @@ export default function App() {
               <PeriodIcon className="w-3 h-3 text-amber-300" />
               <span className="font-mono text-xs font-black text-amber-100 tabular-nums">{telemetry.timeClock}</span>
             </span>
+            {(telemetry.rainIntensity >= 0.15 || telemetry.fogDensity >= 0.18) && (
+              <span
+                data-testid="hud-weather-indicator"
+                className={`flex items-center ${
+                  telemetry.rainIntensity >= 0.15 ? 'text-sky-300' : 'text-slate-300'
+                }`}
+                title={
+                  telemetry.rainIntensity >= 0.15
+                    ? `Chuva ${telemetry.rainIntensity >= 0.65 ? 'forte' : 'local'} · Piso molhado (${Math.round(telemetry.roadWetness * 100)}%)`
+                    : `Nevoeiro local (${Math.round(telemetry.fogDensity * 100)}%)`
+                }
+              >
+                {telemetry.rainIntensity >= 0.15 ? (
+                  <CloudRain className="w-3.5 h-3.5" />
+                ) : (
+                  <CloudFog className="w-3.5 h-3.5" />
+                )}
+              </span>
+            )}
             {telemetry.gameMode === 'sandbox' && (
               <>
                 <div className="w-px h-3 bg-white/20" />
@@ -2832,11 +2882,30 @@ export default function App() {
             <div className="bg-slate-900/80 p-2.5 sm:p-3 rounded-xl border border-slate-800 mb-3 sm:mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shrink-0">
               <div className="min-w-0">
                 <div className="text-xs font-bold text-white">Modificadores de Ambiente</div>
-                <div className="text-[11px] text-slate-400">Condições meteorológicas desbloqueadas pelos hubs.</div>
+                <div className="text-[11px] text-slate-400">
+                  Dinâmico (frentes móveis e sombras de nuvens) ou clima fixo dos hubs.
+                </div>
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  data-testid="btn-weather-dynamic"
+                  onClick={handleSetDynamicWeather}
+                  className={`px-2.5 sm:px-3 py-1 rounded text-[11px] sm:text-xs font-semibold transition whitespace-nowrap flex items-center gap-1 ${
+                    activeWeather === 'clear' && weatherDynamic
+                      ? 'bg-sky-400 text-slate-950 font-bold shadow-md shadow-sky-400/30'
+                      : 'bg-slate-950 text-slate-300 hover:text-white border border-slate-800'
+                  }`}
+                >
+                  <Cloud className="w-3 h-3" />
+                  Dinâmico
+                </button>
                 {(['clear', 'rain', 'fog', 'night'] as const).map((weather) => {
                   const unlocked = GarageSystem.getInstance().getUnlockedModifiers().includes(weather);
+                  const isActive =
+                    weather === 'clear'
+                      ? activeWeather === 'clear' && !weatherDynamic
+                      : activeWeather === weather;
                   return (
                     <button
                       key={weather}
@@ -2844,7 +2913,7 @@ export default function App() {
                       disabled={!unlocked}
                       title={unlocked ? undefined : 'Bloqueado: domina o Hub correspondente a 100%'}
                       className={`px-2.5 sm:px-3 py-1 rounded text-[11px] sm:text-xs font-semibold capitalize transition whitespace-nowrap ${
-                        activeWeather === weather
+                        isActive
                           ? 'bg-cyan-500 text-black font-bold shadow-md shadow-cyan-500/30'
                           : unlocked
                             ? 'bg-slate-950 text-slate-300 hover:text-white border border-slate-800'
