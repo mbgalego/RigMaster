@@ -53,12 +53,25 @@ export const AVAILABLE_SPRITES: readonly SpriteAssetEntry[] = [
   { key: 'tile_terrain_alpine_summit', url: '/assets/sprites/tiles/terrain_alpine_summit.png', category: 'tile' },
   { key: 'tile_terrain_water', url: '/assets/sprites/tiles/terrain_water.png', category: 'tile' },
 
-  // Phase D1 — Tractor Trucks (RGBA PNG, facing UP / North)
+  // Phase D1 — Tractor Trucks (6/6 — 100% complete! RGBA PNG, facing UP / North)
   { key: 'truck_iveco_daily_4x2', url: '/assets/sprites/vehicles/trucks/iveco_daily_4x2.png', category: 'truck' },
   { key: 'truck_scania_r_4x2', url: '/assets/sprites/vehicles/trucks/scania_r_4x2.png', category: 'truck' },
+  { key: 'truck_man_tgx_6x4', url: '/assets/sprites/vehicles/trucks/man_tgx_6x4.png', category: 'truck' },
+  { key: 'truck_volvo_fh_6x4', url: '/assets/sprites/vehicles/trucks/volvo_fh_6x4.png', category: 'truck' },
+  { key: 'truck_scania_r_8x4', url: '/assets/sprites/vehicles/trucks/scania_r_8x4.png', category: 'truck' },
+  { key: 'truck_volvo_fh16_8x4', url: '/assets/sprites/vehicles/trucks/volvo_fh16_8x4.png', category: 'truck' },
 
-  // Phase D2 — Semi-Trailers (RGBA PNG, facing UP / North)
+  // Phase D2 — Semi-Trailers (10/14 — RGBA PNG, facing UP / North)
   { key: 'trailer_standard', url: '/assets/sprites/vehicles/trailers/standard.png', category: 'trailer' },
+  { key: 'trailer_reefer', url: '/assets/sprites/vehicles/trailers/reefer.png', category: 'trailer' },
+  { key: 'trailer_container', url: '/assets/sprites/vehicles/trailers/container.png', category: 'trailer' },
+  { key: 'trailer_tanker_milk', url: '/assets/sprites/vehicles/trailers/tanker_milk.png', category: 'trailer' },
+  { key: 'trailer_long_cargo', url: '/assets/sprites/vehicles/trailers/long_cargo.png', category: 'trailer' },
+  { key: 'trailer_flatbed_heavy', url: '/assets/sprites/vehicles/trailers/flatbed_heavy.png', category: 'trailer' },
+  { key: 'trailer_timber', url: '/assets/sprites/vehicles/trailers/timber.png', category: 'trailer' },
+  { key: 'trailer_tanker_fuel', url: '/assets/sprites/vehicles/trailers/tanker_fuel.png', category: 'trailer' },
+  { key: 'trailer_bitrem_lead', url: '/assets/sprites/vehicles/trailers/bitrem_lead.png', category: 'trailer' },
+  { key: 'trailer_bitrem_pup', url: '/assets/sprites/vehicles/trailers/bitrem_pup.png', category: 'trailer' },
 ] as const;
 
 export class SpriteRegistry {

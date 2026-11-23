@@ -168,7 +168,12 @@ public/assets/sprites/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.18.2** (Versão Atual — branch main)
+### **v2.18.3** (Versão Atual — branch main)
+- **Fase D1 Concluída a 100% & Fase D2 (10/14 Atrelados) — Processamento Chroma-Key & Integração de 13 Novas Sprites de Veículos (`SpriteRegistry.ts`, `docs/TEXTURE_PROMPTS.md`, `public/assets/sprites/vehicles/`)**:
+  - **Frota Completa de 6/6 Camiões Tratores (100% Fase D1)**: recortadas via `scripts/process-sprites.mjs` (magenta `#FF00FF` e verde `#00FF00` para `scania_r_8x4`), validadas em fundo escuro/claro e integradas `man_tgx_6x4.png`, `volvo_fh_6x4.png`, `scania_r_8x4.png` e `volvo_fh16_8x4.png` — ativas tanto no camião conduzido (`Truck.ts`, incluindo duplo eixo direcional nos `8×4`) como na frota estacionada no mundo (`ParkedTruckManager.ts`).
+  - **9 Novos Semi-Reboques & Cisternas (10/14 Fase D2)**: recortadas e integradas `reefer.png`, `container.png`, `tanker_milk.png`, `long_cargo.png` (pá eólica), `flatbed_heavy.png` (prancha com escavadora), `timber.png` (toros florestais), `tanker_fuel.png` (cisterna ADR), `bitrem_lead.png` (com quinta-roda traseira) e `bitrem_pup.png` (chroma verde `#00FF00`), mantendo fallback vetorial automático apenas para os 4 atrelados ainda pendentes (`bitrem_tanker_lead`, `bitrem_tanker_pup`, `fragile_glass`, `tanker_hazmat`).
+
+### **v2.18.2**
 - **Fase D1 (Lote 3) — Conclusão 10/10 dos Tiles Seamless de Terreno, Estradas & Pátios (`SpriteRegistry.ts`, `WorldTerrain.ts`, `StaticWorldChunks.ts`, `WorldObjects.ts`, `MainScene.ts`, `docs/TEXTURE_PROMPTS.md`)**:
   - **7 Novas Texturas Convertidas (`512×512` PNG) & Registadas**: `tiles/pad_concrete.png`, `tiles/terrain_sand.png`, `tiles/terrain_forest.png`, `tiles/terrain_alpine_rock.png`, `tiles/terrain_alpine_summit.png`, `tiles/road_cobble.png` e `tiles/road_dirt.png` (completando **100%** dos 10 *tiles* base da Fase D1).
   - **Biomas Completos em `WorldTerrain.ts` (custo `0 ms/frame`)**: composição por *bitmask* de células num único `tileMaskCanvas` reutilizável para praias costeiras (`terrain_sand`), falésias alpinas (`terrain_alpine_rock`), solo de floresta e pinhal alpino (`terrain_forest`), encostas rochosas (`terrain_alpine_rock`), planalto do cume (`terrain_alpine_summit`, preservando relevo NW e curvas de nível de `60m`), pátios portuários/industriais/urbanos (`pad_concrete` com velatura escura de alto contraste) e pavimento histórico em calçada (`road_cobble`).
