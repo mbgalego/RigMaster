@@ -55,9 +55,132 @@ Simulador de condução pesada em **2D Top-Down** (Phaser 4 + Matter.js + React 
 
 ---
 
+### 1.5 Pipeline de Texturas & Sprites 2D (Especificação Oficial — Fase D)
+
+Esta secção define o contrato técnico e artístico completo para a migração gradual de gráficos vetoriais (`Phaser.Graphics`) para **sprites e texturas 2D geradas externamente pelo utilizador**, garantindo coerência visual, alinhamento exato com a física Matter.js e ganho real de performance (GPU batching + cache `StaticWorldChunks`).
+
+> **Catálogo completo de prompts prontos a copiar:** ver **`docs/TEXTURE_PROMPTS.md`** (mantém o estado `[ ] Pendente` / `[x] Integrado` de cada asset).
+
+#### 1.5.1 Direção Artística & Regras Técnicas Obrigatórias
+- **Perspetiva**: estritamente **Top-Down Ortográfico a 90°** (câmara perpendicular ao chão, *zero* perspetiva isométrica, *zero* inclinação 3/4, *zero* fuga de paredes).
+- **Estilo**: semi-realista limpo e nítido inspirado em **ETS2 / simuladores logísticos europeus modernos** (pintura ligeiramente desgastada, painéis metálicos, relevo subtil por *ambient occlusion* interno, cores saturadas equilibradas — sem aspeto *cartoon/pixel-art* nem fotorrealismo ruidoso).
+- **Iluminação neutra (SEM sombras projetadas no chão)**: os sprites NÃO devem ter sombras compridas nem reflexos direcionais fortes cozidos na imagem; o motor já aplica ciclo dia/noite 24h, faróis WebGL, candeeiros e sombras de nuvens dinâmicas.
+- **Orientação canónica de veículos**: **frente sempre a apontar para CIMA (Norte / 12h / `-Y`)** — pára-choques/cabina no topo da imagem, traseira/farolins na base. Alinha 1:1 com `angle = 0` em `Truck.ts` e `Trailer.ts`.
+- **Elementos que permanecem dinâmicos no motor** (NÃO desenhar ligados/ativos na sprite):
+  - Feixes de faróis, luzes de travão/marcha-atrás acesas e piscas (renderizados por `Truck.ts`/`Trailer.ts` para respeitar danos ópticos e WebGL `ConeLight`);
+  - Rodas dianteiras giratórias do trator (os tratores usam a sprite da carroçaria/chassis com as cavas frontais limpas ou rodas discretas alinhadas, enquanto `wheelGraphics` anima o esterço Ackermann).
+- **Escala & Resolução Alvo**:
+  - **Sprites de veículos/objetos**: resolução alvo **4×** face aos pixéis do mundo Matter.js (ex.: trator `40×88` mundo → sprite recortada `160×352 px` ou maior mantendo a proporção exata `width : length`; o motor ajusta com `setDisplaySize(worldW, worldH)`).
+  - **Tiles contínuos (*seamless*) de terreno/estrada**: **`512×512 px`** PNG **sem fundo chroma key** (preenchimento total de ponta a ponta, 100% *tileable* em X e Y, sem vinheta nem gradientes).
+
+#### 1.5.2 Norma de Chroma Key & Processamento de Transparência
+Como o gerador externo de imagens produz fundos opacos, todos os sprites com recorte transparente seguem esta regra fixa de **Chroma Key**:
+1. **Chroma Key Padrão — Magenta Puro `#FF00FF` (`rgb(255, 0, 255)`)**: usar em **quase todos os sprites** (camiões azuis/vermelhos/amarelos/verdes, atrelados, edifícios, árvores, rochas, contentores, bombas, trânsito). Evita contaminação de cor com folhagem verde ou tintas metálicas.
+2. **Chroma Key Alternativo — Verde Néon `#00FF00` (`rgb(0, 255, 0)`)**: usar **exclusivamente** em sprites cuja pintura contenha **roxo, violeta ou rosa** (`scania_r_8x4` roxo, `bitrem_pup` roxo/magenta, ou carros AI roxos/rosa).
+3. **Sem Chroma Key (Full-Bleed Seamless)**: todas as texturas de superfície repetível (*tiles* de asfalto, calçada, terra, relva, floresta, areia, rocha alpina, água, betão).
+4. **Protocolo de limpeza (para qualquer agente)**:
+   - O utilizador pode enviar as imagens brutas no chat ou colocá-las em `public/assets/sprites/raw/`.
+   - Ao receber uma sprite bruta com chroma key, o agente DEVE processá-la (via script Node/Canvas/Sharp `scripts/process-sprites.mjs` a criar na primeira integração) com:
+     1. Remoção do chroma key por distância de matiz/cor + **despill** nos pixéis de borda (remove auréola magenta/verde);
+     2. Recorte automático (*auto-trim*) à *bounding box* opaca + margem limpa de `2 px` e verificação de orientação (**frente para cima**);
+     3. Validação visual obrigatória da transparência sobre fundo escuro (`#0c0f17`) e claro antes de integrar;
+     4. Gravação do PNG final em `public/assets/sprites/<categoria>/<id>.png` e atualização do estado `[x]` em `docs/TEXTURE_PROMPTS.md`.
+
+#### 1.5.3 Estrutura de Pastas Oficial (`public/assets/sprites/`)
+```text
+public/assets/sprites/
+├── raw/                      # Uploads brutos com chroma key (entrada temporária / arquivo)
+├── tiles/                    # Tiles seamless 512×512 (full-bleed, sem chroma key)
+│   ├── road_asphalt.png
+│   ├── road_cobble.png
+│   ├── road_dirt.png
+│   ├── pad_concrete.png
+│   ├── terrain_grass.png
+│   ├── terrain_forest.png
+│   ├── terrain_sand.png
+│   ├── terrain_alpine_rock.png
+│   ├── terrain_alpine_summit.png
+│   └── terrain_water.png
+├── vehicles/
+│   ├── trucks/               # 6 tratores oficiais (frente p/ cima)
+│   │   ├── iveco_daily_4x2.png     (mundo 36×76)
+│   │   ├── scania_r_4x2.png        (mundo 38×82)
+│   │   ├── man_tgx_6x4.png         (mundo 40×88)
+│   │   ├── volvo_fh_6x4.png        (mundo 40×90)
+│   │   ├── scania_r_8x4.png        (mundo 42×96 — chroma #00FF00)
+│   │   └── volvo_fh16_8x4.png      (mundo 42×98)
+│   ├── trailers/             # 14 atrelados/cisternas (frente p/ cima)
+│   │   ├── standard.png            (mundo 46×220)
+│   │   ├── reefer.png              (mundo 46×220)
+│   │   ├── container.png           (mundo 46×220)
+│   │   ├── tanker_milk.png         (mundo 46×220)
+│   │   ├── long_cargo.png          (mundo 46×310)
+│   │   ├── flatbed_heavy.png       (mundo 48×275)
+│   │   ├── timber.png              (mundo 46×255)
+│   │   ├── tanker_fuel.png         (mundo 46×248)
+│   │   ├── bitrem_lead.png         (mundo 46×155)
+│   │   ├── bitrem_pup.png          (mundo 46×155 — chroma #00FF00)
+│   │   ├── bitrem_tanker_lead.png  (mundo 46×155)
+│   │   ├── bitrem_tanker_pup.png   (mundo 46×155)
+│   │   ├── fragile_glass.png       (mundo 46×220)
+│   │   └── tanker_hazmat.png       (mundo 46×225)
+│   └── traffic/              # Futuro Trânsito AI (Fase C — frente p/ cima)
+│       ├── car_compact.png         (mundo 24×48)
+│       ├── car_sedan.png           (mundo 26×54)
+│       ├── van_delivery.png        (mundo 28×62)
+│       └── truck_rigid.png         (mundo 34×84)
+├── buildings/                # Telhados top-down 90° (chroma #FF00FF)
+│   ├── warehouse_big.png
+│   ├── warehouse_docks.png
+│   ├── shed.png
+│   ├── garage.png
+│   ├── warehouse.png
+│   ├── gabled.png
+│   ├── church.png
+│   └── convenience_store.png
+└── props/                    # Elementos de cenário (chroma #FF00FF)
+    ├── container_base.png    # Contentor ISO neutro/branco (permite tint por cor no motor)
+    ├── tree_deciduous_1.png
+    ├── tree_deciduous_2.png
+    ├── pine_alpine_1.png
+    ├── pine_alpine_2.png
+    ├── rock_outcrop.png
+    ├── log_pile.png
+    ├── wind_turbine_rotor.png
+    └── gas_canopy.png
+```
+
+#### 1.5.4 Plano de Integração Faseado (com Fallback Vetorial Seguro)
+> **Regra de ouro de integração:** o motor NUNCA deve quebrar se uma textura ainda não tiver sido fornecida. Cada sprite/tile é carregada de forma segura (`MainScene.preload` / manifesto de texturas) e **só substitui o desenho vetorial quando a textura existe no `TextureManager`**; caso contrário, mantém automaticamente o desenho vetorial atual como *fallback*.
+
+- **Fase D1 — Superfícies Base (`tiles/`) & Frota de 6 Camiões (`vehicles/trucks/`)**:
+  1. Criar o utilitário de processamento chroma-key (`scripts/process-sprites.mjs`) e o registo central de sprites (`src/systems/SpriteRegistry.ts`).
+  2. Integrar `tiles/` em `WorldTerrain.ts` e `RoadNetwork.ts` (cozidos em `StaticWorldChunks` `1024×1024` → **0 ms extra por frame**).
+  3. Substituir `cabGraphics` de `Truck.ts` por `Phaser.GameObjects.Image` com a sprite do trator (mantendo rodas frontais giratórias, luzes dinâmicas e sobreposição subtil de danos/fumo).
+- **Fase D2 — 14 Atrelados & Cisternas (`vehicles/trailers/`)**:
+  1. Substituir o corpo estático de `Trailer.ts` por `Phaser.GameObjects.Image` escalado às dimensões físicas exatas (`width × length`), preservando acoplamento quinta-roda, luzes traseiras e indicador de carga/danos.
+- **Fase D3 — Edifícios, Contentores & Natureza (`buildings/`, `props/`)**:
+  1. Integrar telhados, contentores ISO (com *tint* automático para as 7 cores), árvores, pinheiros alpinos, rochas, pilhas de toros e rotor das torres eólicas dentro do pipeline de chunks (`StaticWorldChunks` / `WorldObjects`).
+- **Fase D4 — Sprites de Trânsito AI (`vehicles/traffic/`)**:
+  1. Carregar os 4 veículos base (com *tint* de pintura variada no motor para multiplicar a variedade visual sem aumentar memória de textura) como arranque direto da **Fase C — Trânsito AI**.
+
+---
+
 ## 2. Histórico de Versões & Changelog
 
-### **v2.17.0** (Versão Atual — branch main)
+### **v2.18.1** (Versão Atual — branch main)
+- **Fase D1/D2 (Lote 2) — Processador Chroma-Key & Primeiros Sprites de Veículos (`scripts/process-sprites.mjs`, `SpriteRegistry.ts`, `Truck.ts`, `Trailer.ts`, `ParkedTruckManager.ts`, `docs/TEXTURE_PROMPTS.md`)**:
+  - **Utilitário Reutilizável de Recorte (`scripts/process-sprites.mjs`)**: remoção de chroma key em 2 fases (`#FF00FF` magenta e `#00FF00` verde néon) com deteção de aberturas interiores do chassi, *despill* anti-auréola nas bordas, recorte automático (*auto-trim*) com margem limpa, redimensionamento Lanczos e geração de folha de validação em fundo escuro/claro.
+  - **Camiões 2D (`iveco_daily_4x2.png`, `scania_r_4x2.png`)**: integrados em `Truck.ts` (trator ativo) e `ParkedTruckManager.ts` (frota estacionada) com sombra de contacto no chão, rodas dianteiras giratórias Ackermann por baixo dos guarda-lamas, iluminação dinâmica WebGL (`setLighting`), sobreposição de danos estruturais, faróis/stop/marcha-atrás dinâmicos e fallback vetorial automático para os restantes 4 modelos.
+  - **Atrelado Standard 13.6m (`standard.png`)**: integrado em `Trailer.ts` alinhado 1:1 à caixa de colisão física (`46×220`) e ao acoplamento quinta-roda, com sombra de contacto, iluminação WebGL e farolins traseiros dinâmicos (mantendo fallback vetorial nos restantes 13 atrelados).
+
+### **v2.18.0**
+- **Fase D1 (Lote 1) — Infraestrutura `SpriteRegistry` & Primeiras 3 Texturas Seamless 2D (`SpriteRegistry.ts`, `WorldTerrain.ts`, `StaticWorldChunks.ts`, `MainScene.ts`, `docs/TEXTURE_PROMPTS.md`)**:
+  - **Registo Central com Fallback Vetorial (`SpriteRegistry.ts`)**: criado o manifesto central `AVAILABLE_SPRITES` com pré-carregamento seguro em `MainScene.preload()` e tratamento resiliente de falhas (`loaderror`), mantendo fallback vetorial automático para qualquer textura ainda pendente.
+  - **Terreno Texturizado a Custo Zero por Frame (`WorldTerrain.ts`)**: convertidas para `512×512` PNG e integradas `tiles/terrain_water.png` (oceano profundo + batimetria costeira turquesa subtil em águas rasas) e `tiles/terrain_grass.png` (prados, transição suave em solo florestal e preservação integral do sombreamento direcional NW nas encostas da Serra dos Ventos), cozidas uma única vez por chunk `1024×1024` com alinhamento perfeito entre fronteiras.
+  - **Estradas de Asfalto Texturizadas (`StaticWorldChunks.ts`, `MainScene.ts`)**: integrada `tiles/road_asphalt.png` via buffer Canvas2D reutilizável cozido nos `RenderTexture` de `StaticWorldChunks` (polígonos contínuos alinhados em coordenadas de mundo sem linhas entre segmentos, velatura subtil de alcatrão escuro e definição de berma, preservando 100% nítidas as marcações rodoviárias amarelas/brancas, setas de sentido único e aclives alpinos por cima).
+
+### **v2.17.0**
 - **Sistema Meteorológico Regional Dinâmico & Sombras de Nuvens (`WeatherSystem.ts`, `MainScene.ts`, `WorldMapModal.tsx`, `MinimapScene.ts`, `App.tsx`, `scripts/smoke-progression.mjs`)**:
   - **Frentes Meteorológicas Móveis (`WeatherSystem.ts`)**: simulação contínua de células regionais de **chuva**, **nevoeiro** e **nuvens** a deslocarem-se sobre a ilha segundo um vento atlântico predominante com variação orgânica, ciclo de vida suave (*fade-in/fade-out* e regeneração a barlavento), microclima de altitude na **Serra dos Ventos** (`> 260 m` mais cobertura nublada e vento; `> 420 m` névoa subtil de cume), neblina costeira suave ao amanhecer (`05:15–07:45`) e **memória de pavimento molhado** (*road wetness*, secagem progressiva em ~25s após sair de uma frente de chuva) com redução contínua da aderência (`1.0 → 0.48`).
   - **Sombras de Nuvens no Chão sem Obstrução (`MainScene.ts`)**: pool de 5 sombras de nuvens orgânicas em espaço de mundo com *frustum culling* (`cloud_shadow_puff`, `128×128`, `depth: 14`, opacidade máxima `0.29` modulada pela luz solar do dia) em deriva contínua com o vento, deixando zonas soalheiras nítidas entre nuvens sem nunca tapar a estrada nem os veículos; chuva inclinada pelo vento e nevoeiro com **recorte radial nítido centrado no camião** (`fog_cutout_mask`, `depth: 19`) com compensação automática de `cam.zoom` (`1 / zoom`) para cobrir 100% do ecrã de ponta a ponta em qualquer nível de zoom.

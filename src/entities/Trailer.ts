@@ -14,6 +14,7 @@ import {
   impactSpeedPxSToG,
   localizeImpact,
 } from '../systems/DamageSystem';
+import { SpriteRegistry } from '../systems/SpriteRegistry';
 
 export type TrailerType =
   | 'standard'
@@ -65,7 +66,10 @@ export class Trailer {
   public body: MatterJS.BodyType;
   public container: Phaser.GameObjects.Container;
   public graphics: Phaser.GameObjects.Graphics;
+  public bodySprite: Phaser.GameObjects.Image | null = null;
   public lightsGraphics: Phaser.GameObjects.Graphics;
+  private usingBodySprite: boolean = false;
+  private lightingEnabled: boolean = false;
 
   public type: TrailerType;
   public width: number;
@@ -320,7 +324,9 @@ export class Trailer {
   }
 
   public setLightingEnabled(enabled: boolean) {
+    this.lightingEnabled = enabled;
     this.graphics.setLighting(enabled);
+    this.bodySprite?.setLighting(enabled);
   }
 
   private onCollisionStart = (event: any) => {
@@ -622,6 +628,32 @@ export class Trailer {
     const l = this.length;
     const hw = w / 2;
     const hl = l / 2;
+
+    const spriteKey = SpriteRegistry.getTrailerKey(this.type);
+    const hasSprite = SpriteRegistry.hasTexture(this.scene, spriteKey);
+    this.usingBodySprite = hasSprite;
+
+    if (hasSprite) {
+      // Grounded contact shadow directly beneath the trailer sprite
+      g.fillStyle(0x000000, 0.34);
+      g.fillRoundedRect(-hw + 3, -hl + 4, w, l, 5);
+
+      if (!this.bodySprite) {
+        this.bodySprite = this.scene.add.image(0, 0, spriteKey).setOrigin(0.5, 0.5).setLighting(this.lightingEnabled);
+        // Place between base shadow graphics and dynamic rear lightsGraphics
+        const insertIdx = this.container.getIndex(this.graphics) + 1;
+        this.container.addAt(this.bodySprite, insertIdx);
+      } else {
+        this.bodySprite.setTexture(spriteKey).setVisible(true).setLighting(this.lightingEnabled);
+      }
+      // Keep 1:1 physical hitbox alignment while letting crisp side rails/bumper frame the trailer cleanly
+      this.bodySprite.setDisplaySize(w + 4, l + 2);
+      return;
+    }
+
+    if (this.bodySprite) {
+      this.bodySprite.setVisible(false);
+    }
 
     const drawChassisFrame = (frameColor = 0x1e293b, borderColor = 0x475569) => {
       g.fillStyle(frameColor, 1);
@@ -1065,16 +1097,17 @@ export class Trailer {
 
     const drawBrakeLamp = (x: number, out: { active: boolean; factor: number }) => {
       if (!out.active) {
-        // Burnt out / broken stop & tail lamp stays dark even when braking
-        g.fillStyle(0x27272a, 0.9);
-        g.fillCircle(x, hl - 2, 3);
+        if (!this.usingBodySprite) {
+          g.fillStyle(0x27272a, 0.9);
+          g.fillCircle(x, hl - 2, 3);
+        }
       } else if (isBraking) {
         g.fillStyle(out.factor < 0.85 ? 0xbe123c : 0xff0055, 0.45 + 0.55 * out.factor);
-        g.fillCircle(x, hl - 2, 3.5 + 1.5 * out.factor);
+        g.fillCircle(x, hl - 2, 3.2 + 1.4 * out.factor);
       } else if (runningLightsOn) {
         g.fillStyle(0xef4444, 0.35 + 0.55 * out.factor);
-        g.fillCircle(x, hl - 2, 3.5);
-      } else {
+        g.fillCircle(x, hl - 2, 3.1);
+      } else if (!this.usingBodySprite) {
         g.fillStyle(0x7f1d1d, 0.75);
         g.fillCircle(x, hl - 2, 3);
       }
@@ -1085,13 +1118,14 @@ export class Trailer {
     // Reverse lamps (white): same style as the truck's, next to the brake lamps
     const drawReverseLamp = (x: number, out: { active: boolean; factor: number }) => {
       if (!out.active) {
-        // Burnt out / broken reverse lamp stays dark even when reversing
-        g.fillStyle(0x1e293b, 0.9);
-        g.fillCircle(x, hl - 2, 3);
+        if (!this.usingBodySprite) {
+          g.fillStyle(0x1e293b, 0.9);
+          g.fillCircle(x, hl - 2, 3);
+        }
       } else if (this.isReversing) {
         g.fillStyle(out.factor < 0.85 ? 0x94a3b8 : 0xffffff, 0.45 + 0.55 * out.factor);
-        g.fillCircle(x, hl - 2, 3.5 + 1.5 * out.factor);
-      } else {
+        g.fillCircle(x, hl - 2, 3.2 + 1.4 * out.factor);
+      } else if (!this.usingBodySprite) {
         g.fillStyle(0x64748b, 0.75);
         g.fillCircle(x, hl - 2, 3);
       }

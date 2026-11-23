@@ -6,6 +6,7 @@ import { World } from '../world/World';
 import { WorldObjects, RepairBay } from '../world/WorldObjects';
 import { StaticWorldChunks, type StaticChunkStats } from '../world/StaticWorldChunks';
 import { WorldLightPools, type HubGlowSpot, type LightPoolStats } from '../world/WorldLightPools';
+import { SpriteRegistry } from '../systems/SpriteRegistry';
 import { LicenseSystem, LicenseExam, LicenseId } from '../systems/LicenseSystem';
 import { GarageSystem, HubDockSpec, HubId, WeatherModifier } from '../systems/GarageSystem';
 import { TimeOfDaySystem, TimePeriod, TimeOfDaySnapshot } from '../systems/TimeOfDaySystem';
@@ -376,6 +377,10 @@ export class MainScene extends Phaser.Scene {
     super({ key: 'MainScene' });
   }
 
+  public preload() {
+    SpriteRegistry.preload(this);
+  }
+
   public create() {
     this.licenseSystem = LicenseSystem.getInstance();
     this.garageSystem = GarageSystem.getInstance();
@@ -409,13 +414,20 @@ export class MainScene extends Phaser.Scene {
         undefined,
         scratches.roadFlats,
       );
-      this.drawGroundRoadsInto(scratches.roads, chunkRect, 220);
+      const hasAsphaltTex = this.drawGroundRoadsInto(
+        scratches.roads,
+        chunkRect,
+        220,
+        scratches.asphaltCtx,
+        scratches.asphaltPattern,
+      );
       return {
         roadCmds: scratches.roads.commandBuffer.length,
         objCmds:
           scratches.flats.commandBuffer.length +
           scratches.roadFlats.commandBuffer.length +
           scratches.solids.commandBuffer.length,
+        hasAsphaltTex,
       };
     });
     // Traffic light LEDs stay emissive (unlit) at depth 4
@@ -3516,14 +3528,19 @@ export class MainScene extends Phaser.Scene {
     this.drawGroundRoadsInto(this.roadGraphics, view, 220);
   }
 
-  /** Draws all layer-0 (ground) vector road ribbons intersecting `view + margin` into `g`. */
+  /** Draws all layer-0 (ground) vector road ribbons intersecting `view + margin` into `g`.
+   *  When `asphaltCtx` & `asphaltPattern` are provided, asphalt carriageways are rasterized
+   *  as seamless textured polygons (baked once per static chunk) while markings stay crisp on `g`. */
   private drawGroundRoadsInto(
     g: Phaser.GameObjects.Graphics,
     view: Phaser.Geom.Rectangle,
     margin = 220,
-  ) {
+    asphaltCtx?: CanvasRenderingContext2D | null,
+    asphaltPattern?: CanvasPattern | null,
+  ): boolean {
     const vx0 = view.x - margin, vy0 = view.y - margin;
     const vx1 = view.x + view.width + margin, vy1 = view.y + view.height + margin;
+    let drewAsphaltTex = false;
 
     for (const road of this.roadNetwork.roads) {
       if ((road.layer ?? 0) > 0) continue; // elevated bridges render above ground vehicles
@@ -3535,18 +3552,24 @@ export class MainScene extends Phaser.Scene {
       const samples = this.roadNetwork.getRoadSamples(road, 26);
       if (samples.length === 0) continue;
 
-      // 1. Carriageway ribbon (quads perpendicular to the tangent)
+      // 1. Carriageway ribbon (textured seamless polygon for asphalt chunks, vector quads for cobble/dirt/fallback)
       const inView = (s: RoadSample) => s.x >= vx0 - 200 && s.x <= vx1 + 200 && s.y >= vy0 - 200 && s.y <= vy1 + 200;
-      let altIdx = 0;
-      for (let i = 0; i < samples.length - 1; i++) {
-        const a = samples[i], bS = samples[i + 1];
-        // Cusp guard: at near-reversals the perpendicular quad folds into a bowtie spike
-        if (a.tx * bS.tx + a.ty * bS.ty < 0.2) { altIdx++; continue; }
-        const mx = (a.x + bS.x) / 2, my = (a.y + bS.y) / 2;
-        if (mx < vx0 || mx > vx1 || my < vy0 || my > vy1) { altIdx++; continue; }
-        const fill = road.surface === 'asphalt' ? style.fill : (altIdx % 6 < 3 ? style.fill : style.fillAlt);
-        this.fillRibbonQuad(g, a, bS, fill);
-        altIdx++;
+      if (road.surface === 'asphalt' && asphaltCtx && asphaltPattern) {
+        if (this.fillTexturedAsphaltRibbon(asphaltCtx, asphaltPattern, samples, vx0, vy0, vx1, vy1)) {
+          drewAsphaltTex = true;
+        }
+      } else {
+        let altIdx = 0;
+        for (let i = 0; i < samples.length - 1; i++) {
+          const a = samples[i], bS = samples[i + 1];
+          // Cusp guard: at near-reversals the perpendicular quad folds into a bowtie spike
+          if (a.tx * bS.tx + a.ty * bS.ty < 0.2) { altIdx++; continue; }
+          const mx = (a.x + bS.x) / 2, my = (a.y + bS.y) / 2;
+          if (mx < vx0 || mx > vx1 || my < vy0 || my > vy1) { altIdx++; continue; }
+          const fill = road.surface === 'asphalt' ? style.fill : (altIdx % 6 < 3 ? style.fill : style.fillAlt);
+          this.fillRibbonQuad(g, a, bS, fill);
+          altIdx++;
+        }
       }
 
       // 2. Edge lines (skip on dirt — degraded roads have no markings)
@@ -3646,6 +3669,90 @@ export class MainScene extends Phaser.Scene {
         }
       }
     }
+    return drewAsphaltTex;
+  }
+
+  /**
+   * Traces contiguous non-cusp runs of an asphalt road as single Canvas2D polygons filled
+   * with the world-aligned seamless `road_asphalt` pattern + dark European tarmac glaze.
+   * Drawing contiguous polygons eliminates anti-aliasing hairlines between adjacent segments.
+   */
+  private fillTexturedAsphaltRibbon(
+    ctx: CanvasRenderingContext2D,
+    pattern: CanvasPattern,
+    samples: RoadSample[],
+    vx0: number,
+    vy0: number,
+    vx1: number,
+    vy1: number,
+  ): boolean {
+    let drewAny = false;
+    let runStart = -1;
+
+    const flushRun = (startIdx: number, endIdx: number) => {
+      if (endIdx <= startIdx) return;
+      ctx.beginPath();
+      for (let k = startIdx; k <= endIdx; k++) {
+        const s = samples[k];
+        const nx = -s.ty * (s.w / 2);
+        const ny = s.tx * (s.w / 2);
+        if (k === startIdx) ctx.moveTo(s.x + nx, s.y + ny);
+        else ctx.lineTo(s.x + nx, s.y + ny);
+      }
+      for (let k = endIdx; k >= startIdx; k--) {
+        const s = samples[k];
+        const nx = -s.ty * (s.w / 2);
+        const ny = s.tx * (s.w / 2);
+        ctx.lineTo(s.x - nx, s.y - ny);
+      }
+      ctx.closePath();
+
+      // 1. Seamless aggregate asphalt texture
+      ctx.fillStyle = pattern;
+      ctx.fill();
+
+      // 2. Subtle dark European tarmac glaze so yellow centreline dashes & white edge lines pop cleanly
+      ctx.fillStyle = 'rgba(13, 18, 26, 0.34)';
+      ctx.fill();
+
+      // 3. Subtle curb/shoulder edge definition ONLY along the two lateral edges (never across start/end caps at intersections)
+      ctx.strokeStyle = 'rgba(10, 14, 22, 0.55)';
+      ctx.lineWidth = 2;
+      for (const side of [1, -1]) {
+        ctx.beginPath();
+        for (let k = startIdx; k <= endIdx; k++) {
+          const s = samples[k];
+          const nx = -s.ty * (s.w / 2) * side;
+          const ny = s.tx * (s.w / 2) * side;
+          if (k === startIdx) ctx.moveTo(s.x + nx, s.y + ny);
+          else ctx.lineTo(s.x + nx, s.y + ny);
+        }
+        ctx.stroke();
+      }
+
+      drewAny = true;
+    };
+
+    for (let i = 0; i < samples.length - 1; i++) {
+      const a = samples[i];
+      const bS = samples[i + 1];
+      const cusp = a.tx * bS.tx + a.ty * bS.ty < 0.2;
+      const mx = (a.x + bS.x) * 0.5;
+      const my = (a.y + bS.y) * 0.5;
+      const visible = !cusp && mx >= vx0 && mx <= vx1 && my >= vy0 && my <= vy1;
+
+      if (visible) {
+        if (runStart < 0) runStart = i;
+      } else if (runStart >= 0) {
+        flushRun(runStart, i);
+        runStart = -1;
+      }
+    }
+    if (runStart >= 0) {
+      flushRun(runStart, samples.length - 1);
+    }
+
+    return drewAny;
   }
 
   /** Syncs static Matter rectangles for ramp retaining walls & elevated deck guardrails. */

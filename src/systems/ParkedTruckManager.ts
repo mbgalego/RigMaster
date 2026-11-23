@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { COLLISION_CAT, COLLISION_MASK } from '../physics/CollisionLayers';
 import { ReputationSystem, type FleetTruckState } from './ReputationSystem';
 import { TRUCK_CATALOG } from './TruckCatalog';
+import { SpriteRegistry } from './SpriteRegistry';
 
 export interface ParkedTruckVisual {
   fleet: FleetTruckState;
@@ -152,12 +153,28 @@ export class ParkedTruckManager {
 
     const highlightGfx = this.scene.add.graphics().setLighting(false);
     const gfx = this.scene.add.graphics().setLighting(this.lightingEnabled);
+    const spriteKey = SpriteRegistry.getTruckKey(fleet.type);
+    const hasSprite = SpriteRegistry.hasTexture(this.scene, spriteKey);
 
     // Subtle ground shadow
-    gfx.fillStyle(0x000000, 0.32);
-    gfx.fillRoundedRect(-hw + 3, -hl + 4, w, l, 7);
+    gfx.fillStyle(0x000000, 0.34);
+    gfx.fillRoundedRect(-hw + 2, -hl + 3, w, l, 7);
 
-    // Chassis & cab silhouette matching active Truck visuals
+    if (hasSprite) {
+      const sprite = this.scene.add
+        .image(0, 0, spriteKey)
+        .setOrigin(0.5, 0.5)
+        .setDisplaySize(w * 1.18, l + 4)
+        .setLighting(this.lightingEnabled);
+      const markerGfx = this.scene.add.graphics().setLighting(false);
+      markerGfx.fillStyle(0xf59e0b, 0.75);
+      markerGfx.fillCircle(-hw + 6, -hl + 1, 2.2);
+      markerGfx.fillCircle(hw - 6, -hl + 1, 2.2);
+      container.add([highlightGfx, gfx, sprite, markerGfx]);
+      return { fleet, body, container, highlightGfx };
+    }
+
+    // Procedural vector fallback for tractors without 2D sprite yet
     gfx.fillStyle(0x131a29, 1);
     gfx.lineStyle(2, spec.cabColor, 0.9);
     gfx.fillRoundedRect(-hw, -hl, w, l, 6);

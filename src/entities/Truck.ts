@@ -28,6 +28,7 @@ import {
   type TruckWearState,
 } from '../systems/ReputationSystem';
 import type { HubId } from '../systems/GarageSystem';
+import { SpriteRegistry } from '../systems/SpriteRegistry';
 
 export type HeadlightMode = 'off' | 'low' | 'high';
 
@@ -49,11 +50,15 @@ export class Truck {
   public body: MatterJS.BodyType;
   public container: Phaser.GameObjects.Container;
   public cabGraphics: Phaser.GameObjects.Graphics;
+  public cabSprite: Phaser.GameObjects.Image | null = null;
+  public damageGraphics: Phaser.GameObjects.Graphics;
   public wheelGraphics: Phaser.GameObjects.Graphics;
-  // Rear dual tires draw ABOVE the chassis so both tires of each pair stay visible
+  // Rear dual tires draw ABOVE the chassis so both tires of each pair stay visible (vector fallback)
   public rearWheelsGraphics: Phaser.GameObjects.Graphics;
   public lightsGraphics: Phaser.GameObjects.Graphics;
   public beamGraphics: Phaser.GameObjects.Graphics;
+  private usingCabSprite: boolean = false;
+  private lightingEnabled: boolean = false;
 
   public width: number;
   public length: number;
@@ -477,6 +482,7 @@ export class Truck {
     this.wheelGraphics = scene.add.graphics().setLighting(false);
     this.rearWheelsGraphics = scene.add.graphics().setLighting(false);
     this.cabGraphics = scene.add.graphics().setLighting(false);
+    this.damageGraphics = scene.add.graphics().setLighting(false);
     this.beamGraphics = scene.add.graphics().setBlendMode(Phaser.BlendModes.ADD).setLighting(false);
     this.lightsGraphics = scene.add.graphics().setLighting(false);
 
@@ -484,6 +490,7 @@ export class Truck {
       this.wheelGraphics,
       this.cabGraphics,
       this.rearWheelsGraphics,
+      this.damageGraphics,
       this.beamGraphics,
       this.lightsGraphics,
     ]);
@@ -657,9 +664,12 @@ export class Truck {
   }
 
   public setLightingEnabled(enabled: boolean) {
+    this.lightingEnabled = enabled;
     this.wheelGraphics.setLighting(enabled);
     this.rearWheelsGraphics.setLighting(enabled);
     this.cabGraphics.setLighting(enabled);
+    this.damageGraphics.setLighting(enabled);
+    this.cabSprite?.setLighting(enabled);
   }
 
   public setHeadlightMode(mode: HeadlightMode) {
@@ -1071,7 +1081,9 @@ export class Truck {
 
   private drawTruck() {
     const g = this.cabGraphics;
+    const dg = this.damageGraphics;
     g.clear();
+    dg.clear();
 
     const spec = TRUCK_CATALOG[this.truckType] ?? TRUCK_CATALOG.iveco_daily_4x2;
     const cabAccent = spec.cabColor;
@@ -1082,76 +1094,102 @@ export class Truck {
     const hw = w / 2;
     const hl = l / 2;
 
-    // Chassis frame
-    g.fillStyle(0x131a29, 1);
-    g.lineStyle(2, cabAccent, 0.92);
-    g.fillRoundedRect(-hw, -hl, w, l, 6);
-    g.strokeRoundedRect(-hw, -hl, w, l, 6);
+    const spriteKey = SpriteRegistry.getTruckKey(this.truckType);
+    const hasSprite = SpriteRegistry.hasTexture(this.scene, spriteKey);
+    this.usingCabSprite = hasSprite;
 
-    // Heavy-duty bullbar / front bumper (reinforced on 6x4 and 8x4)
-    g.fillStyle(0x0a0e17, 1);
-    g.fillRect(-hw + 2, -hl, w - 4, spec.axleRank >= 2 ? 12 : 10);
-    g.lineStyle(1.4, trimAccent, 0.75);
-    g.strokeRect(-hw + 2, -hl, w - 4, spec.axleRank >= 2 ? 12 : 10);
+    if (hasSprite) {
+      // Subtle grounded contact shadow beneath the tractor
+      g.fillStyle(0x000000, 0.34);
+      g.fillRoundedRect(-hw + 2, -hl + 3, w, l, 7);
 
-    // Cab roof colored by truck model (scaled to chassis length)
-    const cabH = Math.min(spec.axleRank === 3 ? 46 : spec.axleRank === 2 ? 43 : 35, l * 0.48);
-    g.fillStyle(cabAccent, 0.38);
-    g.fillRoundedRect(-hw + 4, -hl + 8, w - 8, cabH, 4);
-    g.lineStyle(2, trimAccent, 0.88);
-    g.strokeRoundedRect(-hw + 4, -hl + 8, w - 8, cabH, 4);
-
-    // Roof racing / fleet stripe (differentiates 6x4 / 8x4 heavy tractors)
-    g.fillStyle(trimAccent, 0.55);
-    if (spec.axleRank >= 2) {
-      g.fillRect(-5, -hl + 24, 10, Math.max(8, cabH - 20));
+      if (!this.cabSprite) {
+        this.cabSprite = this.scene.add.image(0, 0, spriteKey).setOrigin(0.5, 0.5).setLighting(this.lightingEnabled);
+        // Place right after cabGraphics (above ground shadow & steered front wheels, below damage & lights)
+        const insertIdx = this.container.getIndex(this.cabGraphics) + 1;
+        this.container.addAt(this.cabSprite, insertIdx);
+      } else {
+        this.cabSprite.setTexture(spriteKey).setVisible(true).setLighting(this.lightingEnabled);
+      }
+      // Side mirrors extend ~18% beyond the physical cab width while chassis aligns 1:1 with Matter.js
+      this.cabSprite.setDisplaySize(w * 1.18, l + 4);
+      this.rearWheelsGraphics.clear();
     } else {
-      g.fillRect(-3, -hl + 24, 6, Math.max(6, cabH - 20));
+      if (this.cabSprite) {
+        this.cabSprite.setVisible(false);
+      }
+
+      // Procedural vector fallback
+      g.fillStyle(0x131a29, 1);
+      g.lineStyle(2, cabAccent, 0.92);
+      g.fillRoundedRect(-hw, -hl, w, l, 6);
+      g.strokeRoundedRect(-hw, -hl, w, l, 6);
+
+      // Heavy-duty bullbar / front bumper (reinforced on 6x4 and 8x4)
+      g.fillStyle(0x0a0e17, 1);
+      g.fillRect(-hw + 2, -hl, w - 4, spec.axleRank >= 2 ? 12 : 10);
+      g.lineStyle(1.4, trimAccent, 0.75);
+      g.strokeRect(-hw + 2, -hl, w - 4, spec.axleRank >= 2 ? 12 : 10);
+
+      // Cab roof colored by truck model (scaled to chassis length)
+      const cabH = Math.min(spec.axleRank === 3 ? 46 : spec.axleRank === 2 ? 43 : 35, l * 0.48);
+      g.fillStyle(cabAccent, 0.38);
+      g.fillRoundedRect(-hw + 4, -hl + 8, w - 8, cabH, 4);
+      g.lineStyle(2, trimAccent, 0.88);
+      g.strokeRoundedRect(-hw + 4, -hl + 8, w - 8, cabH, 4);
+
+      // Roof racing / fleet stripe (differentiates 6x4 / 8x4 heavy tractors)
+      g.fillStyle(trimAccent, 0.55);
+      if (spec.axleRank >= 2) {
+        g.fillRect(-5, -hl + 24, 10, Math.max(8, cabH - 20));
+      } else {
+        g.fillRect(-3, -hl + 24, 6, Math.max(6, cabH - 20));
+      }
+
+      // Heavy air-intake / beacon bar behind cab on 8x4 models
+      if (spec.axleRank === 3) {
+        g.fillStyle(0x1e293b, 1);
+        g.fillRect(-hw + 6, -hl + cabH + 9, w - 12, 7);
+        g.fillStyle(0xf59e0b, 0.95);
+        g.fillCircle(-hw + 12, -hl + cabH + 12, 2.5);
+        g.fillCircle(hw - 12, -hl + cabH + 12, 2.5);
+      }
+
+      // Windshield
+      g.fillStyle(0x0284c7, 0.85);
+      g.fillRoundedRect(-hw + 7, -hl + 11, w - 14, 12, 2);
+
+      // Side Mirrors
+      g.fillStyle(trimAccent, 0.95);
+      g.fillRect(-hw - 4, -hl + 12, 3.5, 11);
+      g.fillRect(hw + 0.5, -hl + 12, 3.5, 11);
+
+      // Fifth Wheel Plate (positioned at dynamic hitchOffsetY)
+      const hitchY = this.hitchOffsetY;
+      const plateR = Math.min(13, hw - 4);
+      g.fillStyle(0x0f172a, 1);
+      g.lineStyle(2, 0xfacc15, 0.95);
+      g.fillCircle(0, hitchY, plateR);
+      g.strokeCircle(0, hitchY, plateR);
+
+      g.lineStyle(3, 0xfacc15, 1);
+      g.beginPath();
+      g.moveTo(0, hitchY);
+      g.lineTo(0, Math.min(hl - 1, hitchY + plateR));
+      g.strokePath();
     }
 
-    // Heavy air-intake / beacon bar behind cab on 8x4 models
-    if (spec.axleRank === 3) {
-      g.fillStyle(0x1e293b, 1);
-      g.fillRect(-hw + 6, -hl + cabH + 9, w - 12, 7);
-      g.fillStyle(0xf59e0b, 0.95);
-      g.fillCircle(-hw + 12, -hl + cabH + 12, 2.5);
-      g.fillCircle(hw - 12, -hl + cabH + 12, 2.5);
-    }
-
-    // Windshield
-    g.fillStyle(0x0284c7, 0.85);
-    g.fillRoundedRect(-hw + 7, -hl + 11, w - 14, 12, 2);
-
-    // Side Mirrors
-    g.fillStyle(trimAccent, 0.95);
-    g.fillRect(-hw - 4, -hl + 12, 3.5, 11);
-    g.fillRect(hw + 0.5, -hl + 12, 3.5, 11);
-
-    // Fifth Wheel Plate (positioned at dynamic hitchOffsetY)
-    const hitchY = this.hitchOffsetY;
-    const plateR = Math.min(13, hw - 4);
-    g.fillStyle(0x0f172a, 1);
-    g.lineStyle(2, 0xfacc15, 0.95);
-    g.fillCircle(0, hitchY, plateR);
-    g.strokeCircle(0, hitchY, plateR);
-
-    g.lineStyle(3, 0xfacc15, 1);
-    g.beginPath();
-    g.moveTo(0, hitchY);
-    g.lineTo(0, Math.min(hl - 1, hitchY + plateR));
-    g.strokePath();
-
-    // Subtle visual wear marks when chassis is damaged
+    // Subtle visual wear marks when chassis is damaged (renders cleanly over both sprite and vector cab)
     if (this.damage.chassis < 80) {
       const wearAlpha = this.damage.chassis < 45 ? 0.85 : 0.55;
-      g.lineStyle(1.8, 0xf97316, wearAlpha);
-      g.lineBetween(-hw + 5, -hl + 3, -hw + 14, -hl + 14);
-      g.lineBetween(hw - 6, -hl + 18, hw - 15, -hl + 28);
+      dg.lineStyle(1.8, 0xf97316, wearAlpha);
+      dg.lineBetween(-hw + 5, -hl + 3, -hw + 14, -hl + 14);
+      dg.lineBetween(hw - 6, -hl + 18, hw - 15, -hl + 28);
       if (this.damage.chassis < 45) {
-        g.lineStyle(2, 0xef4444, 0.8);
-        g.lineBetween(-hw + 10, -hl + 12, hw - 10, -hl + 24);
-        g.fillStyle(0x1f2937, 0.85);
-        g.fillRect(-6, -hl - 1, 12, 4); // dented front grille
+        dg.lineStyle(2, 0xef4444, 0.8);
+        dg.lineBetween(-hw + 10, -hl + 12, hw - 10, -hl + 24);
+        dg.fillStyle(0x1f2937, 0.85);
+        dg.fillRect(-6, -hl - 1, 12, 4); // dented front grille
       }
     }
   }
@@ -1203,15 +1241,20 @@ export class Truck {
       }
     };
 
-    // Steered front axle #1
-    drawTire(g, -hw - 1, frontY, this.currentSteerAngle, 8, 19, spec.accentColor, false);
-    drawTire(g, hw + 1, frontY, this.currentSteerAngle, 8, 19, spec.accentColor, false);
+    // Steered front axle #1 (tucked cleanly under front fenders when sprite is active so steering pivots visibly)
+    const frontOffsetX = this.usingCabSprite ? hw - 2 : hw + 1;
+    const frontRimColor = this.usingCabSprite ? 0x334155 : spec.accentColor;
+    drawTire(g, -frontOffsetX, frontY, this.currentSteerAngle, 7, 17, frontRimColor, false);
+    drawTire(g, frontOffsetX, frontY, this.currentSteerAngle, 7, 17, frontRimColor, false);
 
     // Second steered front axle on 8x4 heavy haulers
     if (spec.axleConfig === '8x4') {
-      drawTire(g, -hw - 1, frontY + 20, this.currentSteerAngle * 0.72, 8, 18, spec.accentColor, false);
-      drawTire(g, hw + 1, frontY + 20, this.currentSteerAngle * 0.72, 8, 18, spec.accentColor, false);
+      drawTire(g, -frontOffsetX, frontY + 20, this.currentSteerAngle * 0.72, 7, 16, frontRimColor, false);
+      drawTire(g, frontOffsetX, frontY + 20, this.currentSteerAngle * 0.72, 7, 16, frontRimColor, false);
     }
+
+    // Rear mudguards/tires are already rendered in high detail inside 2D truck sprites
+    if (this.usingCabSprite) return;
 
     const drawRearDualAxle = (ay: number, th: number) => {
       drawTire(gRear, -hw - 3, ay, 0, 8, th, 0x64748b, true);
@@ -1261,11 +1304,15 @@ export class Truck {
         }
       }
 
-      // Emissive warm-white headlamp lenses (dark glass when broken)
+      // Emissive warm-white headlamp lenses (dark glass when broken; sleek compact lenses on 2D sprites)
+      const lx = this.usingCabSprite ? -hw + 6.5 : -hw + 8;
+      const rx = this.usingCabSprite ? hw - 6.5 : hw - 8;
+      const ly = this.usingCabSprite ? -hl + 0.5 : -hl + 2;
+      const lr = this.usingCabSprite ? 2.5 : 4;
       g.fillStyle(!leftOut.active ? 0x1e293b : leftOut.factor < 0.85 ? 0x94a3b8 : 0xfff6dc, !leftOut.active ? 0.9 : 0.4 + 0.6 * leftOut.factor);
-      g.fillCircle(-hw + 8, -hl + 2, 4);
+      g.fillCircle(lx, ly, lr);
       g.fillStyle(!rightOut.active ? 0x1e293b : rightOut.factor < 0.85 ? 0x94a3b8 : 0xfff6dc, !rightOut.active ? 0.9 : 0.4 + 0.6 * rightOut.factor);
-      g.fillCircle(hw - 8, -hl + 2, 4);
+      g.fillCircle(rx, ly, lr);
     } else if (this.headlightMode === 'high') {
       // Subtle near-lens cool-white bloom (real long-range beam comes from Phaser 4 WebGL ConeLights)
       if (dark > 0.05) {
@@ -1284,12 +1331,16 @@ export class Truck {
       }
 
       // Intense cool-white high-beam lenses (dark glass when broken)
+      const lx = this.usingCabSprite ? -hw + 6.5 : -hw + 8;
+      const rx = this.usingCabSprite ? hw - 6.5 : hw - 8;
+      const ly = this.usingCabSprite ? -hl + 0.5 : -hl + 2;
+      const hr = this.usingCabSprite ? 3.0 : 4.5;
       g.fillStyle(!leftOut.active ? 0x1e293b : leftOut.factor < 0.85 ? 0x94a3b8 : 0xffffff, !leftOut.active ? 0.9 : 0.4 + 0.6 * leftOut.factor);
-      g.fillCircle(-hw + 8, -hl + 2, 4.5);
+      g.fillCircle(lx, ly, hr);
       g.fillStyle(!rightOut.active ? 0x1e293b : rightOut.factor < 0.85 ? 0x94a3b8 : 0xffffff, !rightOut.active ? 0.9 : 0.4 + 0.6 * rightOut.factor);
-      g.fillCircle(hw - 8, -hl + 2, 4.5);
-    } else {
-      // Unlit headlamps
+      g.fillCircle(rx, ly, hr);
+    } else if (!this.usingCabSprite) {
+      // Unlit headlamps (only needed on vector fallback; sprite already renders realistic unlit lenses)
       g.fillStyle(0x475569, 0.85);
       g.fillCircle(-hw + 8, -hl + 2, 3.5);
       g.fillCircle(hw - 8, -hl + 2, 3.5);
@@ -1297,16 +1348,17 @@ export class Truck {
 
     const drawRearBrakeLamp = (x: number, out: { active: boolean; factor: number }) => {
       if (!out.active) {
-        // Burnt out / broken stop & tail lamp stays dark even when braking
-        g.fillStyle(0x27272a, 0.9);
-        g.fillCircle(x, hl - 2, 3);
+        if (!this.usingCabSprite) {
+          g.fillStyle(0x27272a, 0.9);
+          g.fillCircle(x, hl - 2, 3);
+        }
       } else if (this.isBraking) {
         g.fillStyle(out.factor < 0.85 ? 0xbe123c : 0xff0055, 0.45 + 0.55 * out.factor);
-        g.fillCircle(x, hl - 2, 3.5 + 1.5 * out.factor);
+        g.fillCircle(x, hl - 1, 3.2 + 1.4 * out.factor);
       } else if (this.headlightMode !== 'off') {
         g.fillStyle(0xef4444, 0.35 + 0.55 * out.factor);
-        g.fillCircle(x, hl - 2, 3.5);
-      } else {
+        g.fillCircle(x, hl - 1, 3);
+      } else if (!this.usingCabSprite) {
         g.fillStyle(0x7f1d1d, 0.75);
         g.fillCircle(x, hl - 2, 3);
       }
@@ -1316,13 +1368,14 @@ export class Truck {
 
     const drawRearReverseLamp = (x: number, out: { active: boolean; factor: number }) => {
       if (!out.active) {
-        // Burnt out / broken reverse lamp stays dark even in reverse gear
-        g.fillStyle(0x1e293b, 0.9);
-        g.fillCircle(x, hl - 2, 3);
+        if (!this.usingCabSprite) {
+          g.fillStyle(0x1e293b, 0.9);
+          g.fillCircle(x, hl - 2, 3);
+        }
       } else if (this.isReversing) {
         g.fillStyle(out.factor < 0.85 ? 0x94a3b8 : 0xffffff, 0.45 + 0.55 * out.factor);
-        g.fillCircle(x, hl - 2, 3.5 + 1.5 * out.factor);
-      } else {
+        g.fillCircle(x, hl - 1, 3.2 + 1.4 * out.factor);
+      } else if (!this.usingCabSprite) {
         g.fillStyle(0x64748b, 0.75);
         g.fillCircle(x, hl - 2, 3);
       }

@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { SpriteRegistry } from '../systems/SpriteRegistry';
 
 /**
  * Procedural island terrain — the tile ground is GONE.
@@ -44,6 +45,12 @@ export class WorldTerrain {
   private order: string[] = [];
   /** Rects of guaranteed land (coastal hubs: port, shipyard, mountain causeways…) */
   private landPatches: Array<{ x0: number; y0: number; x1: number; y1: number }> = [];
+  /** Reusable offscreen mask canvas & tag buffer for zero-allocation seamless tile baking. */
+  private tileMaskCanvas: HTMLCanvasElement | null = null;
+  private tileMaskCtx: CanvasRenderingContext2D | null = null;
+  private tileCellTags: Uint8Array = new Uint8Array((RES / 8) * (RES / 8));
+  private waterTilePattern: CanvasPattern | null | undefined = undefined;
+  private grassTilePattern: CanvasPattern | null | undefined = undefined;
 
   public setLightingEnabled(enabled: boolean) {
     if (this.lightingEnabled === enabled) return;
@@ -513,20 +520,207 @@ export class WorldTerrain {
     this.chunks.set(key, img);
   }
 
+  /** Lazily prepares reusable mask canvas and world-aligned seamless CanvasPatterns (256 texels = 512 world px). */
+  private ensureTilePatterns(): boolean {
+    if (this.waterTilePattern === undefined) {
+      const waterImg = SpriteRegistry.getSourceImage(this.scene, 'tile_terrain_water');
+      const grassImg = SpriteRegistry.getSourceImage(this.scene, 'tile_terrain_grass');
+
+      if (!waterImg && !grassImg) {
+        this.waterTilePattern = null;
+        this.grassTilePattern = null;
+        return false;
+      }
+
+      this.tileMaskCanvas = document.createElement('canvas');
+      this.tileMaskCanvas.width = RES;
+      this.tileMaskCanvas.height = RES;
+      this.tileMaskCtx = this.tileMaskCanvas.getContext('2d');
+
+      const buildScaledPattern = (img: HTMLImageElement | HTMLCanvasElement | null): CanvasPattern | null => {
+        if (!img || !this.tileMaskCtx) return null;
+        const pat = this.tileMaskCtx.createPattern(img, 'repeat');
+        if (!pat) return null;
+        // 512×512 PNG scaled 0.5 -> 256×256 texels = 512×512 world px (divides CHUNK=1024 evenly -> 0 seams across chunks)
+        if (typeof DOMMatrix !== 'undefined' && typeof pat.setTransform === 'function') {
+          pat.setTransform(new DOMMatrix().scale(0.5, 0.5));
+        }
+        return pat;
+      };
+
+      this.waterTilePattern = buildScaledPattern(waterImg);
+      this.grassTilePattern = buildScaledPattern(grassImg);
+    }
+    return Boolean(this.tileMaskCanvas && this.tileMaskCtx && (this.waterTilePattern || this.grassTilePattern));
+  }
+
   private paintChunk(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
     const cell = 8; // texels per cell → 16 world px per cell
+    const gridN = RES / cell; // 64
     const pxToWorld = CHUNK / RES;
     const chunkBaseX = cx * CHUNK;
     const chunkBaseY = cy * CHUNK;
     // Fast check: does this chunk overlap the Serra dos Ventos mountain zone?
     const isMountainChunk = chunkBaseX < 400 || chunkBaseY < 400;
+    const hasTileTextures = this.ensureTilePatterns();
 
-    for (let ty = 0; ty < RES; ty += cell) {
-      for (let tx = 0; tx < RES; tx += cell) {
+    let hasWaterCells = false;
+    let hasGrassCells = false;
+    const tags = this.tileCellTags;
+
+    for (let gy = 0; gy < gridN; gy++) {
+      const ty = gy * cell;
+      const wy = chunkBaseY + ty * pxToWorld + pxToWorld * cell / 2;
+      for (let gx = 0; gx < gridN; gx++) {
+        const tx = gx * cell;
         const wx = chunkBaseX + tx * pxToWorld + pxToWorld * cell / 2;
-        const wy = chunkBaseY + ty * pxToWorld + pxToWorld * cell / 2;
-        ctx.fillStyle = this.cellColor(wx, wy, isMountainChunk);
+        const m = this.coastMetric(wx, wy);
+        let tag = 0;
+        let color: string;
+
+        if (m < -60) {
+          color = '#0a2338';
+          tag = 1; // deep ocean
+          hasWaterCells = true;
+        } else if (m < 40) {
+          color = '#123a56';
+          tag = 2; // shallow coastal water
+          hasWaterCells = true;
+        } else if (m < 130) {
+          if (wx < -1200 || wy < -1200) {
+            const g = this.valueNoise(wx * 0.06, wy * 0.06);
+            color = g > 0.5 ? '#596169' : '#4a5259';
+          } else {
+            const g = this.valueNoise(wx * 0.09, wy * 0.09);
+            color = g > 0.5 ? '#a9915f' : '#9c855a';
+          }
+        } else {
+          const region = this.regionAt(wx, wy);
+          color = this.landCellColor(wx, wy, region, isMountainChunk);
+          if (region === 0) {
+            tag = 3; // meadow grass
+            hasGrassCells = true;
+          } else if (region === 1) {
+            tag = 4; // lowland forest floor
+            hasGrassCells = true;
+          } else if (region === 7) {
+            tag = 5; // alpine conifer forest belt
+            hasGrassCells = true;
+          }
+        }
+
+        tags[gy * gridN + gx] = tag;
+        ctx.fillStyle = color;
         ctx.fillRect(tx, ty, cell, cell);
+      }
+    }
+
+    // Composite seamless 2D surface textures (baked ONCE per chunk -> 0 ms/frame runtime overhead)
+    if (hasTileTextures && this.tileMaskCanvas && this.tileMaskCtx) {
+      const mctx = this.tileMaskCtx;
+
+      // 1. Ocean water texture (`terrain_water.png`) with subtle deep-vs-shallow coastal bathymetry
+      if (hasWaterCells && this.waterTilePattern) {
+        mctx.save();
+        mctx.globalCompositeOperation = 'source-over';
+        mctx.clearRect(0, 0, RES, RES);
+        mctx.fillStyle = '#ffffff';
+        for (let gy = 0; gy < gridN; gy++) {
+          const row = gy * gridN;
+          const ty = gy * cell;
+          for (let gx = 0; gx < gridN; gx++) {
+            const t = tags[row + gx];
+            if (t === 1 || t === 2) {
+              mctx.fillRect(gx * cell, ty, cell, cell);
+            }
+          }
+        }
+        mctx.globalCompositeOperation = 'source-in';
+        mctx.fillStyle = this.waterTilePattern;
+        mctx.fillRect(0, 0, RES, RES);
+        mctx.restore();
+
+        ctx.drawImage(this.tileMaskCanvas, 0, 0);
+
+        // Preserve coastal shelf readability: subtle turquoise lift in shallow water, deep navy depth offshore
+        for (let gy = 0; gy < gridN; gy++) {
+          const row = gy * gridN;
+          const ty = gy * cell;
+          for (let gx = 0; gx < gridN; gx++) {
+            const t = tags[row + gx];
+            if (t === 2) {
+              ctx.fillStyle = 'rgba(28, 120, 152, 0.24)';
+              ctx.fillRect(gx * cell, ty, cell, cell);
+            } else if (t === 1) {
+              ctx.fillStyle = 'rgba(4, 15, 30, 0.20)';
+              ctx.fillRect(gx * cell, ty, cell, cell);
+            }
+          }
+        }
+      }
+
+      // 2. Meadow & woodland grass texture (`terrain_grass.png`) with biome tint & NW hillshade preservation
+      if (hasGrassCells && this.grassTilePattern) {
+        // 2a. Open meadow grass (region 0): full crisp texture blended gently over fbm macro patches
+        let hasMeadow = false;
+        let hasWoodland = false;
+        for (let i = 0; i < tags.length; i++) {
+          if (tags[i] === 3) hasMeadow = true;
+          else if (tags[i] === 4 || tags[i] === 5) hasWoodland = true;
+        }
+
+        if (hasMeadow) {
+          mctx.save();
+          mctx.globalCompositeOperation = 'source-over';
+          mctx.clearRect(0, 0, RES, RES);
+          mctx.fillStyle = '#ffffff';
+          for (let gy = 0; gy < gridN; gy++) {
+            const row = gy * gridN;
+            const ty = gy * cell;
+            for (let gx = 0; gx < gridN; gx++) {
+              if (tags[row + gx] === 3) {
+                mctx.fillRect(gx * cell, ty, cell, cell);
+              }
+            }
+          }
+          mctx.globalCompositeOperation = 'source-in';
+          mctx.fillStyle = this.grassTilePattern;
+          mctx.fillRect(0, 0, RES, RES);
+          mctx.restore();
+
+          ctx.save();
+          ctx.globalAlpha = 0.86;
+          ctx.drawImage(this.tileMaskCanvas, 0, 0);
+          ctx.restore();
+        }
+
+        // 2b. Forest floor (region 1) & alpine conifer slopes (region 7):
+        // Subtle texture overlay so darker forest tones & directional NW mountain hillshading stay vivid
+        if (hasWoodland) {
+          mctx.save();
+          mctx.globalCompositeOperation = 'source-over';
+          mctx.clearRect(0, 0, RES, RES);
+          for (let gy = 0; gy < gridN; gy++) {
+            const row = gy * gridN;
+            const ty = gy * cell;
+            for (let gx = 0; gx < gridN; gx++) {
+              const t = tags[row + gx];
+              if (t === 4) {
+                mctx.fillStyle = 'rgba(255, 255, 255, 0.52)';
+                mctx.fillRect(gx * cell, ty, cell, cell);
+              } else if (t === 5) {
+                mctx.fillStyle = 'rgba(255, 255, 255, 0.36)';
+                mctx.fillRect(gx * cell, ty, cell, cell);
+              }
+            }
+          }
+          mctx.globalCompositeOperation = 'source-in';
+          mctx.fillStyle = this.grassTilePattern;
+          mctx.fillRect(0, 0, RES, RES);
+          mctx.restore();
+
+          ctx.drawImage(this.tileMaskCanvas, 0, 0);
+        }
       }
     }
 
@@ -575,21 +769,7 @@ export class WorldTerrain {
     return `rgb(${r},${g},${b})`;
   }
 
-  private cellColor(x: number, y: number, allowMountainShade = false): string {
-    const m = this.coastMetric(x, y);
-    if (m < -60) return '#0a2338';          // deep ocean
-    if (m < 40) return '#123a56';           // shallow water
-    if (m < 130) {
-      // Rocky alpine cliffs near NW cape vs warm beach sand on main island
-      if (x < -1200 || y < -1200) {
-        const g = this.valueNoise(x * 0.06, y * 0.06);
-        return g > 0.5 ? '#596169' : '#4a5259';
-      }
-      const g = this.valueNoise(x * 0.09, y * 0.09);
-      return g > 0.5 ? '#a9915f' : '#9c855a';
-    }
-
-    const region = this.regionAt(x, y);
+  private landCellColor(x: number, y: number, region: number, allowMountainShade = false): string {
     const v = this.fbm(x * 0.02, y * 0.02, 2); // fine variation
 
     let base: string;
@@ -757,6 +937,10 @@ export class WorldTerrain {
     }
     this.chunks.clear();
     this.order = [];
+    this.tileMaskCanvas = null;
+    this.tileMaskCtx = null;
+    this.waterTilePattern = undefined;
+    this.grassTilePattern = undefined;
     if (this.scene.textures.exists('terrain_overview')) this.scene.textures.remove('terrain_overview');
   }
 }
