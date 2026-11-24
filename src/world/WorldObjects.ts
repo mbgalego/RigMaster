@@ -2,11 +2,18 @@ import Phaser from 'phaser';
 import { RoadNetwork, SURFACE_GRIP } from '../systems/RoadNetwork';
 import { WorldTerrain } from './WorldTerrain';
 import { COLLISION_CAT, COLLISION_MASK } from '../physics/CollisionLayers';
-import type { FlatSurfacePatterns } from './StaticWorldChunks';
+import type { FlatSurfacePatterns, SolidSpriteImages } from './StaticWorldChunks';
+import { SpriteRegistry } from '../systems/SpriteRegistry';
 
 export interface FlatSurfaceTarget {
   ctx: CanvasRenderingContext2D;
   patterns: FlatSurfacePatterns;
+  markUsed: () => void;
+}
+
+export interface SolidSpriteTarget {
+  ctx: CanvasRenderingContext2D;
+  images: SolidSpriteImages;
   markUsed: () => void;
 }
 
@@ -1069,6 +1076,7 @@ export class WorldObjects {
     overhead?: Phaser.GameObjects.Graphics,
     roadFlats?: Phaser.GameObjects.Graphics,
     flatTex?: FlatSurfaceTarget | null,
+    solidTex?: SolidSpriteTarget | null,
   ) {
     const M = 120;
     const x0 = Math.floor((view.x - M) / OBJ_CELL), x1 = Math.floor((view.x + view.width + M) / OBJ_CELL);
@@ -1102,7 +1110,7 @@ export class WorldObjects {
               } else if (isFlatType(p.type)) {
                 flatObjs.push(p);
               } else {
-                this.drawSolid(solids, p);
+                this.drawSolid(solids, p, solidTex);
                 if (p.type === 'lamp' && overhead) this.drawOverhead(overhead, p);
               }
             }
@@ -1120,7 +1128,7 @@ export class WorldObjects {
             // can never cover it — parking lots always sit on top of pads.
             flatObjs.push(o);
           } else {
-            this.drawSolid(solids, o);
+            this.drawSolid(solids, o, solidTex);
             if (o.type === 'lamp' && overhead) {
               this.drawOverhead(overhead, o);
             }
@@ -2414,7 +2422,40 @@ export class WorldObjects {
     });
   }
 
-  private drawSolid(g: Phaser.GameObjects.Graphics, o: WorldObject) {
+  private drawTexturedBuilding(
+    solidTex: SolidSpriteTarget,
+    o: WorldObject,
+    img: HTMLImageElement | HTMLCanvasElement,
+    autoRotateTall: boolean,
+  ) {
+    const ctx = solidTex.ctx;
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    if (o.angle !== 0) ctx.rotate(o.angle);
+
+    let drawW = o.w;
+    let drawH = o.h;
+    if (autoRotateTall && o.h > o.w * 1.12) {
+      ctx.rotate(Math.PI / 2);
+      drawW = o.h;
+      drawH = o.w;
+    }
+
+    // Consistent SE silhouette drop shadow (Canvas2D shadowOffset is in chunk/world space, not rotated)
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.42)';
+    ctx.shadowBlur = 10;
+    ctx.shadowOffsetX = 6;
+    ctx.shadowOffsetY = 8;
+    ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+    ctx.restore();
+    solidTex.markUsed();
+  }
+
+  private drawSolid(
+    g: Phaser.GameObjects.Graphics,
+    o: WorldObject,
+    solidTex?: SolidSpriteTarget | null,
+  ) {
     this.rotated(g, o, () => {
       const x0 = o.x - o.w / 2, y0 = o.y - o.h / 2;
       switch (o.type) {
@@ -2608,7 +2649,54 @@ export class WorldObjects {
           break;
         }
         case 'building': {
-          // Drop shadow shared across buildings
+          const buildingKey = SpriteRegistry.getBuildingKey(o.variant);
+          const buildingImg = buildingKey ? solidTex?.images[buildingKey] : undefined;
+          if (buildingImg && solidTex) {
+            // Preserve external functional apron fixtures (dock bumpers, garage service bay & bollards)
+            if (o.variant === 'warehouse_docks') {
+              const nd = Math.max(1, Math.floor(Number(o.params?.docks) || 5));
+              const spacing = o.w / nd;
+              for (let i = 0; i < nd; i++) {
+                const cx = x0 + (i + 0.5) * spacing;
+                g.fillStyle(0x5a616c, 1);
+                g.fillRect(cx - 22, y0 + o.h, 44, 7);
+                g.fillStyle(0x22262e, 1);
+                g.fillRect(cx - 28, y0 + o.h + 7, 8, 6);
+                g.fillRect(cx + 20, y0 + o.h + 7, 8, 6);
+              }
+            } else if (o.variant === 'garage') {
+              const bays = o.w >= 360 ? 3 : o.w >= 210 ? 2 : 1;
+              const bayW = Math.min(72, (o.w - 36 - (bays - 1) * 16) / bays);
+              const totalW = bays * bayW + (bays - 1) * 16;
+              const startX = o.x - totalW / 2;
+              for (let i = 0; i < bays; i++) {
+                const bx = startX + i * (bayW + 16);
+                g.fillStyle(0xfacc15, 1);
+                g.fillCircle(bx - 3, y0 + o.h + 4, 3.5);
+                g.fillCircle(bx + bayW + 3, y0 + o.h + 4, 3.5);
+              }
+              const svcW = Math.min(Math.max(120, o.w - 20), 230);
+              const svcH = 115;
+              g.lineStyle(1.5, 0x38bdf8, 0.28);
+              g.strokeRect(o.x - svcW / 2, y0 + o.h + 10, svcW, svcH);
+            } else if (o.variant === 'convenience_store') {
+              const doorW = Math.min(54, o.w * 0.24);
+              for (const bx of [o.x - doorW / 2 - 12, o.x + doorW / 2 + 12, x0 + 52, x0 + o.w - 52]) {
+                g.fillStyle(0xfacc15, 1);
+                g.fillCircle(bx, y0 + o.h + 2, 3.2);
+              }
+            }
+
+            const directional =
+              o.variant === 'garage' ||
+              o.variant === 'warehouse_docks' ||
+              o.variant === 'convenience_store' ||
+              o.variant === 'church';
+            this.drawTexturedBuilding(solidTex, o, buildingImg, !directional);
+            break;
+          }
+
+          // Drop shadow shared across buildings (procedural vector fallback)
           g.fillStyle(0x000000, 0.28);
           g.fillRect(x0 + 6, y0 + 8, o.w, o.h);
 

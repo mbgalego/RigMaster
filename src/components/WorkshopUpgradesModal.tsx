@@ -16,6 +16,7 @@ import {
   type UpgradeSlot,
 } from '../systems/TruckCatalog';
 import type { GameMode, TruckWearState } from '../systems/ReputationSystem';
+import { TruckPreviewStage } from './TruckPreviewStage';
 
 interface WorkshopUpgradesModalProps {
   open: boolean;
@@ -268,15 +269,17 @@ export const WorkshopUpgradesModal: React.FC<WorkshopUpgradesModalProps> = ({
           </div>
 
           {/* Right: Live Physics Trade-off Comparator */}
-          <div className="lg:col-span-5 bg-slate-900/45 border border-slate-800 rounded-xl p-4 h-fit space-y-3">
-            <div>
-              <h3 className="text-sm font-semibold text-white">
-                Comparador Físico Efetivo
-              </h3>
-              <p className="text-[11px] text-slate-400 mt-0.5">
-                Toque ou passe o rato numa opção à esquerda para pré-visualizar o impacto real na física.
-              </p>
-            </div>
+          <div className="lg:col-span-5 bg-slate-900/45 border border-slate-800 rounded-xl overflow-hidden h-fit">
+            <TruckPreviewStage spec={spec} active compact />
+            <div className="p-4 space-y-3">
+              <div>
+                <h3 className="text-sm font-semibold text-white">
+                  Comparador Físico Efetivo
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Toque ou passe o rato numa opção à esquerda para pré-visualizar o impacto real na física.
+                </p>
+              </div>
 
             <div className="divide-y divide-slate-800/80 text-xs">
               <div className="py-2 flex items-center justify-between">
@@ -373,6 +376,7 @@ export const WorkshopUpgradesModal: React.FC<WorkshopUpgradesModalProps> = ({
                   ×{previewStats.engineWearMult.toFixed(2)} / ×{previewStats.tireWearMult.toFixed(2)}
                 </span>
               </div>
+            </div>
             </div>
           </div>
         </div>

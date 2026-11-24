@@ -44,10 +44,11 @@ Simulador de condução pesada em **2D Top-Down** (Phaser 4 + Matter.js + React 
    - Automóveis ligeiros e comerciais;
    - Outros camiões rígidos e conjuntos articulados com atrelados.
 
-#### Fase D — Evolução Visual (Texturas 2D & Iluminação WebGL)
+#### Fase D — Evolução Visual (Texturas 2D, Iluminação WebGL & Menus Gráficos)
 9. **Pipeline 2D Totalmente Texturizado**: substituir desenhos vetoriais simples por sprites e texturas detalhadas (asfalto com desgaste, bermas/passeios, terreno, edifícios industriais, água, cabines de camiões e reboques) mantendo estética 2D nítida e apelativa.
 10. **Sistema de Iluminação Realista em WebGL**: iluminação dinâmica (Light2D / shaders WebGL) com faróis volumétricos, lanternas de travagem/marcha-atrás, postes de iluminação, semáforos e reflexão atmosférica ajustada a dia, noite, chuva e nevoeiro.
 11. **Oclusão de Luz com Ray2D / Sombras**: raycasting 2D para bloquear e projetar sombras reais dos faróis e candeeiros contra edifícios, muros e restantes elementos do mapa.
+12. **Evolução Visual dos Menus & Interface Gráfica (Fase D5)**: elevar o acabamento visual de todos os modais e painéis (Frota, Oficina, Missões, Tipologias, Hubs/Garagens e Licenças/Certificados), enriquecendo-os com **itens gráficos dedicados** (perfis laterais *sideview* dos camiões e atrelados, ilustrações de upgrades mecânicos, emblemas de certificados/cartas e postais dos hubs) que não só elevam a estética como funcionam como **guia visual imediato** para o jogador identificar cada veículo, carga ou destino no mundo.
 
 ### 1.4 Regras de Manutenção
 - Manter sempre o **`agents.md`** e o **`package.json`** atualizados a cada versão.
@@ -108,7 +109,14 @@ public/assets/sprites/
 │   │   ├── man_tgx_6x4.png         (mundo 40×88)
 │   │   ├── volvo_fh_6x4.png        (mundo 40×90)
 │   │   ├── scania_r_8x4.png        (mundo 42×96 — chroma #00FF00)
-│   │   └── volvo_fh16_8x4.png      (mundo 42×98)
+│   │   ├── volvo_fh16_8x4.png      (mundo 42×98)
+│   │   └── menu/             # Perfis laterais sideview p/ Menus (frente p/ ESQUERDA, maxH=320)
+│   │       ├── iveco_daily_4x2_sideview.png
+│   │       ├── scania_r_4x2_sideview.png
+│   │       ├── man_tgx_6x4_sideview.png
+│   │       ├── volvo_fh_6x4_sideview.png
+│   │       ├── scania_r_8x4_sideview.png   (chroma #00FF00)
+│   │       └── volvo_fh16_8x4_sideview.png
 │   ├── trailers/             # 14 atrelados/cisternas (frente p/ cima)
 │   │   ├── standard.png            (mundo 46×220)
 │   │   ├── reefer.png              (mundo 46×220)
@@ -123,7 +131,8 @@ public/assets/sprites/
 │   │   ├── bitrem_tanker_lead.png  (mundo 46×155)
 │   │   ├── bitrem_tanker_pup.png   (mundo 46×155)
 │   │   ├── fragile_glass.png       (mundo 46×220)
-│   │   └── tanker_hazmat.png       (mundo 46×225)
+│   │   ├── tanker_hazmat.png       (mundo 46×225)
+│   │   └── menu/             # (Futuro Fase D5) Perfis laterais / ícones de atrelados p/ Missões & Tipologias
 │   └── traffic/              # Futuro Trânsito AI (Fase C — frente p/ cima)
 │       ├── car_compact.png         (mundo 24×48)
 │       ├── car_sedan.png           (mundo 26×54)
@@ -138,16 +147,20 @@ public/assets/sprites/
 │   ├── gabled.png
 │   ├── church.png
 │   └── convenience_store.png
-└── props/                    # Elementos de cenário (chroma #FF00FF)
-    ├── container_base.png    # Contentor ISO neutro/branco (permite tint por cor no motor)
-    ├── tree_deciduous_1.png
-    ├── tree_deciduous_2.png
-    ├── pine_alpine_1.png
-    ├── pine_alpine_2.png
-    ├── rock_outcrop.png
-    ├── log_pile.png
-    ├── wind_turbine_rotor.png
-    └── gas_canopy.png
+├── props/                    # Elementos de cenário (chroma #FF00FF)
+│   ├── container_base.png    # Contentor ISO neutro/branco (permite tint por cor no motor)
+│   ├── tree_deciduous_1.png
+│   ├── tree_deciduous_2.png
+│   ├── pine_alpine_1.png
+│   ├── pine_alpine_2.png
+│   ├── rock_outcrop.png
+│   ├── log_pile.png
+│   ├── wind_turbine_rotor.png
+│   └── gas_canopy.png
+└── ui/                       # (Futuro Fase D5) Itens gráficos para menus (upgrades, hubs, certificados/cartas)
+    ├── upgrades/             # Ilustrações de motor, travões, suspensão e pneus (Oficina)
+    ├── hubs/                 # Postais/emblemas dos 5 hubs regionais (Missões & Garagens)
+    └── badges/               # Emblemas de cartas (C, CE, H, X) e 6 certificados de mestria
 ```
 
 #### 1.5.4 Plano de Integração Faseado (com Fallback Vetorial Seguro)
@@ -163,12 +176,36 @@ public/assets/sprites/
   1. Integrar telhados, contentores ISO (com *tint* automático para as 7 cores), árvores, pinheiros alpinos, rochas, pilhas de toros e rotor das torres eólicas dentro do pipeline de chunks (`StaticWorldChunks` / `WorldObjects`).
 - **Fase D4 — Sprites de Trânsito AI (`vehicles/traffic/`)**:
   1. Carregar os 4 veículos base (com *tint* de pintura variada no motor para multiplicar a variedade visual sem aumentar memória de textura) como arranque direto da **Fase C — Trânsito AI**.
+- **Fase D5 — Melhoria Visual Geral dos Menus & Itens Gráficos de UI (`vehicles/*/menu/`, `ui/`)**:
+  1. **Objetivo**: modernizar e dar identidade visual a todos os modais e ecrãs do jogo (*Frota*, *Oficina*, *Missões*, *Tipologias*, *Garagens/Hubs* e *Licenças/Certificados*), substituindo cartões puramente textuais por **apresentações limpas com palco gráfico** que ajudam o jogador a reconhecer visualmente cada camião, atrelado, peça ou destino no mapa.
+  2. **Regras técnicas dos gráficos de menu**:
+     - **Perfis laterais (*sideview*) de veículos**: perfil ortográfico lateral puro, **frente voltada para a ESQUERDA**, cores exatamente idênticas às sprites top-down do jogo, processados via `scripts/process-sprites.mjs --maxH=320 --pad=4` (chroma `#FF00FF`, ou `#00FF00` para pinturas roxas como `scania_r_8x4`).
+     - **Manifesto sem 404 & fallback automático**: registar apenas ficheiros fisicamente presentes em `SpriteRegistry.ts` (ex.: `TRUCK_SIDEVIEW_SPRITES` + `SpriteRegistry.getTruckMenuPreview()`). Enquanto um item gráfico de menu ainda não tiver sido fornecido, a UI mostra automaticamente a sprite top-down real rodada (ou um *fallback* vetorial/SVG limpo em `onError`), sem nunca gerar imagens quebradas nem pedidos HTTP 404.
+     - **Direção estética dos modais**: palco de estúdio escuro com iluminação subtil na cor do veículo, sombra de contacto no chão, sem excesso de etiquetas/cápsulas (*zero-pill*) sobre a arte, tipografia tabular (`tabular-nums`), barras de telemetria limpas e adaptação fluida em desktop e mobile.
+  3. **Roadmap de menus gráficos**:
+     - **Menu da Frota & Oficina (`TruckPreviewStage.tsx`)**: perfis laterais dos 6 tratores (`4/6` já ativos; pendentes `iveco_daily_4x2_sideview.png` e `scania_r_4x2_sideview.png`).
+     - **Menu de Missões & Tipologias**: perfis laterais/ilustrações dos 14 atrelados e cisternas + insígnias dos 6 certificados.
+     - **Oficina Mecânica**: ilustrações técnicas para os 4 slots de upgrades (*Motor*, *Travões*, *Suspensão*, *Pneus*).
+     - **Hubs, Garagens & Licenças**: postais/ilustrações dos 5 hubs regionais e insígnias das cartas (`C`, `C+E`, `H`, `X`).
 
 ---
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.18.4** (Versão Atual — branch main)
+### **v2.18.6** (Versão Atual — branch main)
+- **Fase D3.1 Concluída a 100% (8/8 Telhados de Edifícios Texturizados a Custo `0 ms/frame`) (`SpriteRegistry.ts`, `StaticWorldChunks.ts`, `WorldObjects.ts`, `MainScene.ts`, `docs/TEXTURE_PROMPTS.md`, `public/assets/sprites/buildings/`)**:
+  - **8 Sprites de Coberturas Processadas (`#FF00FF` → RGBA PNG `maxH=512`)**: recortadas via `scripts/process-sprites.mjs` e validadas em fundo escuro/claro `warehouse_big.png`, `warehouse_docks.png`, `shed.png`, `garage.png`, `warehouse.png`, `gabled.png`, `church.png` e `convenience_store.png`.
+  - **Camada Reutilizável `solidTex` em `StaticWorldChunks.ts` (`0 ms/frame`)**: todos os edifícios texturizados são cozidos uma única vez nos `RenderTexture` `1024×1024` de cada chunk (com reamostragem `high`, iluminação WebGL completa, atualização instantânea no Editor e suporte preparado para os próximos props da Fase D3.2).
+  - **Sombra de Silhueta Real & Alinhamento Inteligente (`WorldObjects.ts`)**: sombra projetada consistente para Sudeste respeitando o recorte alfa exato (incluindo a planta em cruz da `church.png` e as palas de cobertura), rotação automática `+90°` em edifícios verticais (`h > w`) para evitar distorção de telhas/clarabóias, preservação dos elementos funcionais externos (baias de serviço e pilaretes em `garage`, niveladores/batentes em `warehouse_docks` e pilaretes em `convenience_store`) e fallback vetorial automático para `archway` ou vistas de emergência.
+
+### **v2.18.5**
+- **Fase D5 (Lote 1) — Perfis Laterais (*Sideview*) no Menu da Frota & Oficina + Plano Visual de Menus (`SpriteRegistry.ts`, `TruckPreviewStage.tsx`, `FleetGarageModal.tsx`, `WorkshopUpgradesModal.tsx`, `agents.md`, `docs/TEXTURE_PROMPTS.md`)**:
+  - **4 Perfis Laterais Processados (`public/assets/sprites/vehicles/trucks/menu/`)**: removidos fundos chroma key (`#FF00FF` magenta e `#00FF00` verde para o `scania_r_8x4`) via `scripts/process-sprites.mjs --maxH=320 --pad=4` e validados em fundo escuro e claro para `man_tgx_6x4_sideview.png`, `volvo_fh_6x4_sideview.png`, `scania_r_8x4_sideview.png` e `volvo_fh16_8x4_sideview.png`.
+  - **Novo Componente `TruckPreviewStage.tsx` & Manifesto Sem 404 (`SpriteRegistry.ts`)**: palco de estúdio com iluminação ambiente subtil na cor da cabina, linha de piso e sombra de contacto realista; camiões com *sideview* (`4/6`) exibem o perfil lateral completo e os restantes (`iveco_daily_4x2`, `scania_r_4x2`) recorrem automaticamente à sprite top-down 2D rodada para a esquerda com *fallback* seguro em `onError`.
+  - **Menu da Frota (`FleetGarageModal.tsx`) & Oficina (`WorkshopUpgradesModal.tsx`)**: cartões redesenhados com palco visual *full-bleed* no topo (ajudando o jogador a identificar de imediato o camião certo no mapa), tratamento visual suave para camiões bloqueados mantendo legibilidade total, barras compactas de combustível/estado mecânico e pré-visualização do camião ativo no topo do comparador físico da Oficina.
+  - **Plano Oficial de Evolução Visual de Menus (Fase D5)**: documentado em `agents.md` (§1.3 e §1.5) e adicionada a secção Fase D5 em `docs/TEXTURE_PROMPTS.md` com os prompts prontos para os 2 perfis laterais em falta (`iveco_daily_4x2` e `scania_r_4x2`).
+
+### **v2.18.4**
 - **Fase D2 Concluída a 100% (14/14 Atrelados & Cisternas) — Frota Integralmente Texturizada em 2D (`SpriteRegistry.ts`, `docs/TEXTURE_PROMPTS.md`, `public/assets/sprites/vehicles/trailers/`)**:
   - Recortadas via `scripts/process-sprites.mjs` (magenta `#FF00FF`), validadas em fundo escuro/claro e integradas as últimas 4 sprites da frota de reboques: `bitrem_tanker_lead.png` (bitrem cisterna da frente com quinta-roda traseira), `bitrem_tanker_pup.png` (bitrem cisterna traseiro em inox/turquesa), `fragile_glass.png` (porta-vidros óticos com painéis translúcidos em cavalete A) e `tanker_hazmat.png` (cisterna química pressurizada ADR com gaiola reforçada amarela).
   - **Marco Fase D1 + D2 a 100%**: todas as **30 texturas base de superfície e frota** (`10/10` *tiles* contínuos + `6/6` tratores + `14/14` semi-reboques e cisternas) estão integradas no motor com fallback vetorial automático.

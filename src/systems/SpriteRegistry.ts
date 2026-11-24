@@ -27,7 +27,28 @@ export type TileAssetKey =
 export type TruckAssetKey = `truck_${TruckType}`;
 export type TrailerAssetKey = `trailer_${TrailerType}`;
 
-export type SpriteAssetKey = TileAssetKey | TruckAssetKey | TrailerAssetKey;
+export type BuildingAssetKey =
+  | 'building_warehouse_big'
+  | 'building_warehouse_docks'
+  | 'building_shed'
+  | 'building_garage'
+  | 'building_warehouse'
+  | 'building_gabled'
+  | 'building_church'
+  | 'building_convenience_store';
+
+export const BUILDING_ASSET_KEYS: readonly BuildingAssetKey[] = [
+  'building_warehouse_big',
+  'building_warehouse_docks',
+  'building_shed',
+  'building_garage',
+  'building_warehouse',
+  'building_gabled',
+  'building_church',
+  'building_convenience_store',
+] as const;
+
+export type SpriteAssetKey = TileAssetKey | TruckAssetKey | TrailerAssetKey | BuildingAssetKey;
 
 export interface SpriteAssetEntry {
   key: SpriteAssetKey;
@@ -76,7 +97,34 @@ export const AVAILABLE_SPRITES: readonly SpriteAssetEntry[] = [
   { key: 'trailer_bitrem_tanker_pup', url: '/assets/sprites/vehicles/trailers/bitrem_tanker_pup.png', category: 'trailer' },
   { key: 'trailer_fragile_glass', url: '/assets/sprites/vehicles/trailers/fragile_glass.png', category: 'trailer' },
   { key: 'trailer_tanker_hazmat', url: '/assets/sprites/vehicles/trailers/tanker_hazmat.png', category: 'trailer' },
+
+  // Phase D3.1 — Building Roofs (8/8 — 100% complete! RGBA PNG, top-down 90°)
+  { key: 'building_warehouse_big', url: '/assets/sprites/buildings/warehouse_big.png', category: 'building' },
+  { key: 'building_warehouse_docks', url: '/assets/sprites/buildings/warehouse_docks.png', category: 'building' },
+  { key: 'building_shed', url: '/assets/sprites/buildings/shed.png', category: 'building' },
+  { key: 'building_garage', url: '/assets/sprites/buildings/garage.png', category: 'building' },
+  { key: 'building_warehouse', url: '/assets/sprites/buildings/warehouse.png', category: 'building' },
+  { key: 'building_gabled', url: '/assets/sprites/buildings/gabled.png', category: 'building' },
+  { key: 'building_church', url: '/assets/sprites/buildings/church.png', category: 'building' },
+  { key: 'building_convenience_store', url: '/assets/sprites/buildings/convenience_store.png', category: 'building' },
 ] as const;
+
+/**
+ * Manifest of processed UI side-view illustrations for trucks (`public/assets/sprites/vehicles/trucks/menu/`).
+ * Only files physically present on disk are listed here so React menus never emit 404 requests.
+ * Trucks without a dedicated side-view automatically fall back to their top-down 2D sprite.
+ */
+export const TRUCK_SIDEVIEW_SPRITES: Partial<Record<TruckType, string>> = {
+  man_tgx_6x4: '/assets/sprites/vehicles/trucks/menu/man_tgx_6x4_sideview.png',
+  volvo_fh_6x4: '/assets/sprites/vehicles/trucks/menu/volvo_fh_6x4_sideview.png',
+  scania_r_8x4: '/assets/sprites/vehicles/trucks/menu/scania_r_8x4_sideview.png',
+  volvo_fh16_8x4: '/assets/sprites/vehicles/trucks/menu/volvo_fh16_8x4_sideview.png',
+};
+
+export interface TruckMenuPreview {
+  url: string;
+  kind: 'sideview' | 'topdown';
+}
 
 export class SpriteRegistry {
   public static getTruckKey(type: TruckType): TruckAssetKey {
@@ -85,6 +133,45 @@ export class SpriteRegistry {
 
   public static getTrailerKey(type: TrailerType): TrailerAssetKey {
     return `trailer_${type}`;
+  }
+
+  /** Resolves a building variant name to its BuildingAssetKey, or null for procedural-only variants (e.g. archway). */
+  public static getBuildingKey(variant?: string): BuildingAssetKey | null {
+    switch (variant ?? 'warehouse') {
+      case 'warehouse_big':
+        return 'building_warehouse_big';
+      case 'warehouse_docks':
+        return 'building_warehouse_docks';
+      case 'shed':
+        return 'building_shed';
+      case 'garage':
+        return 'building_garage';
+      case 'warehouse':
+        return 'building_warehouse';
+      case 'gabled':
+        return 'building_gabled';
+      case 'church':
+        return 'building_church';
+      case 'convenience_store':
+        return 'building_convenience_store';
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Returns the best available UI graphic for a truck in React menus (Fleet, Workshop, etc.):
+   * dedicated side-view profile if available, otherwise its top-down 2D sprite.
+   */
+  public static getTruckMenuPreview(type: TruckType): TruckMenuPreview {
+    const sideview = TRUCK_SIDEVIEW_SPRITES[type];
+    if (sideview) {
+      return { url: sideview, kind: 'sideview' };
+    }
+    return {
+      url: `/assets/sprites/vehicles/trucks/${type}.png`,
+      kind: 'topdown',
+    };
   }
 
   /**

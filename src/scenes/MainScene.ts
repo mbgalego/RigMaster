@@ -408,6 +408,7 @@ export class MainScene extends Phaser.Scene {
     // Chunked GPU RenderTexture cache for static flats + ground roads + roadFlats + solids (depth 3)
     this.staticWorldChunks = new StaticWorldChunks(this, (chunkRect, scratches) => {
       let hasFlatTex = false;
+      let hasSolidTex = false;
       this.world.objects.render(
         scratches.flats,
         scratches.solids,
@@ -420,6 +421,15 @@ export class MainScene extends Phaser.Scene {
               patterns: scratches.flatPatterns,
               markUsed: () => {
                 hasFlatTex = true;
+              },
+            }
+          : null,
+        scratches.solidCtx
+          ? {
+              ctx: scratches.solidCtx,
+              images: scratches.solidImages,
+              markUsed: () => {
+                hasSolidTex = true;
               },
             }
           : null,
@@ -439,6 +449,7 @@ export class MainScene extends Phaser.Scene {
           scratches.solids.commandBuffer.length,
         hasFlatTex,
         hasRoadTex,
+        hasSolidTex,
       };
     });
     // Traffic light LEDs stay emissive (unlit) at depth 4
