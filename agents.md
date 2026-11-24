@@ -192,7 +192,15 @@ public/assets/sprites/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.18.6** (Versão Atual — branch main)
+### **v2.18.7** (Versão Atual — branch main)
+- **Fase D3.2 Concluída a 100% (9/9 Props, Vegetação, Rochas, Contentores, Torres Eólicas & Coberturas de Postos) (`SpriteRegistry.ts`, `StaticWorldChunks.ts`, `WorldTerrain.ts`, `WorldObjects.ts`, `MainScene.ts`, `docs/TEXTURE_PROMPTS.md`, `public/assets/sprites/props/`)**:
+  - **9 Sprites de Props Processadas (`#FF00FF` → RGBA PNG)**: recortadas via `scripts/process-sprites.mjs` com *despill* fino anti-magenta nas copas das 4 árvores e centragem exata do cubo do rotor (`512×512`, pivô exato em `(256, 256)` sem oscilação) para `container_base.png`, `tree_deciduous_1.png`, `tree_deciduous_2.png`, `pine_alpine_1.png`, `pine_alpine_2.png`, `rock_outcrop.png`, `log_pile.png`, `wind_turbine_rotor.png` e `gas_canopy.png`.
+  - **Florestas, Pinhal Alpino & Encostas Rochosas Texturizadas a `0 ms/frame` (`WorldTerrain.ts`)**: `paintDetail()` passa a estampar as sprites rodadas aleatoriamente com sombra projetada subtil (árvores frondosas em prados/florestas, pinheiros alpinos na Serra dos Ventos e afloramentos graníticos nas encostas rochosas) diretamente no *bake* único de cada chunk de terreno.
+  - **Props Estáticos Cozidos em `StaticWorldChunks` (`WorldObjects.ts`)**: `container_stack` (tintagem *multiply* em cache para todas as 8 cores de contentor ISO com rotação automática), `log_pile` (pilhas de toros na serraria), `rock_outcrop` (com espelhamento determinístico para variedade natural) e `pine_tree` (alternância determinística das 2 variantes com rotação única) cozidos a custo `0 ms/frame` com sombra pela silhueta alfa.
+  - **Rotores Eólicos Animados & Coberturas Inteligentes de Postos (`WorldObjects.ts`, `MainScene.ts`)**: rotores `wind_turbine_rotor.png` em pool GPU sincronizados com iluminação WebGL e sombra rotativa dedicada no solo; coberturas `gas_canopy.png` sobrepostas acima dos veículos/bombas (`depth 17.5`) com **transparência automática por proximidade** (`0.96 → 0.22`) quando o jogador entra sob a pala para abastecer (e `0.42` em modo Editor), mantendo pistas e bombas 100% legíveis.
+  - **Marco Fase D3 a 100%**: todas as **47 texturas de mundo** (`10/10` terreno/estradas + `6/6` tratores + `14/14` atrelados + `8/8` edifícios + `9/9` props/natureza) integradas com fallback vetorial automático.
+
+### **v2.18.6**
 - **Fase D3.1 Concluída a 100% (8/8 Telhados de Edifícios Texturizados a Custo `0 ms/frame`) (`SpriteRegistry.ts`, `StaticWorldChunks.ts`, `WorldObjects.ts`, `MainScene.ts`, `docs/TEXTURE_PROMPTS.md`, `public/assets/sprites/buildings/`)**:
   - **8 Sprites de Coberturas Processadas (`#FF00FF` → RGBA PNG `maxH=512`)**: recortadas via `scripts/process-sprites.mjs` e validadas em fundo escuro/claro `warehouse_big.png`, `warehouse_docks.png`, `shed.png`, `garage.png`, `warehouse.png`, `gabled.png`, `church.png` e `convenience_store.png`.
   - **Camada Reutilizável `solidTex` em `StaticWorldChunks.ts` (`0 ms/frame`)**: todos os edifícios texturizados são cozidos uma única vez nos `RenderTexture` `1024×1024` de cada chunk (com reamostragem `high`, iluminação WebGL completa, atualização instantânea no Editor e suporte preparado para os próximos props da Fase D3.2).

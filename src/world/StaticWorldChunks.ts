@@ -2,8 +2,10 @@ import Phaser from 'phaser';
 import { WorldTerrain } from './WorldTerrain';
 import {
   BUILDING_ASSET_KEYS,
+  STATIC_PROP_SOLID_KEYS,
   SpriteRegistry,
   type BuildingAssetKey,
+  type PropAssetKey,
 } from '../systems/SpriteRegistry';
 
 /**
@@ -33,7 +35,7 @@ export interface FlatSurfacePatterns {
 }
 
 export type SolidSpriteImages = Partial<
-  Record<BuildingAssetKey, HTMLImageElement | HTMLCanvasElement>
+  Record<BuildingAssetKey | PropAssetKey, HTMLImageElement | HTMLCanvasElement>
 >;
 
 export interface StaticChunkScratches {
@@ -224,7 +226,7 @@ export class StaticWorldChunks {
 
     const loadedSolids: SolidSpriteImages = {};
     let loadedSolidCount = 0;
-    for (const key of BUILDING_ASSET_KEYS) {
+    for (const key of [...BUILDING_ASSET_KEYS, ...STATIC_PROP_SOLID_KEYS]) {
       const img = SpriteRegistry.getSourceImage(this.scene, key);
       if (img) {
         loadedSolids[key] = img;

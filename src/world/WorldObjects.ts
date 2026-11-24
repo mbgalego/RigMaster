@@ -230,6 +230,16 @@ export class WorldObjects {
   private lightClock = 0;
   private cachedRepairBays: RepairBay[] = [];
   private cachedRepairBaysVersion = -1;
+  private lightingEnabled = false;
+  private containerTintCache = new Map<string, HTMLCanvasElement>();
+  private turbineSprites = new Map<
+    string,
+    { shadow: Phaser.GameObjects.Image; rotor: Phaser.GameObjects.Image }
+  >();
+  private gasCanopySprites = new Map<
+    string,
+    { shadow: Phaser.GameObjects.Image; roof: Phaser.GameObjects.Image; alpha: number }
+  >();
 
   /** World position of the streetlamp luminaire head (offset +22px along its arm). */
   public static getLampBulbPos(o: WorldObject): { x: number; y: number } {
@@ -242,6 +252,28 @@ export class WorldObjects {
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
+  }
+
+  public setLightingEnabled(enabled: boolean) {
+    if (this.lightingEnabled === enabled) return;
+    this.lightingEnabled = enabled;
+    for (const pair of this.turbineSprites.values()) {
+      pair.rotor.setLighting(enabled);
+    }
+    for (const pair of this.gasCanopySprites.values()) {
+      pair.roof.setLighting(enabled);
+    }
+  }
+
+  public hideDynamicSprites() {
+    for (const pair of this.turbineSprites.values()) {
+      pair.shadow.setVisible(false);
+      pair.rotor.setVisible(false);
+    }
+    for (const pair of this.gasCanopySprites.values()) {
+      pair.shadow.setVisible(false);
+      pair.roof.setVisible(false);
+    }
   }
 
   // ======================================================================
@@ -1296,6 +1328,7 @@ export class WorldObjects {
   /**
    * Renders animated 3-blade wind turbine rotors, translucent ground shadows,
    * nacelles, and pulsing red aviation warning beacons above vehicles & roads.
+   * Uses the hub-centered `prop_wind_turbine_rotor` sprite when loaded, falling back to vector blades.
    */
   public renderWindTurbines(
     g: Phaser.GameObjects.Graphics,
@@ -1308,6 +1341,8 @@ export class WorldObjects {
     const x0 = Math.floor((view.x - margin) / OBJ_CELL), x1 = Math.floor((view.x + view.width + margin) / OBJ_CELL);
     const y0 = Math.floor((view.y - margin) / OBJ_CELL), y1 = Math.floor((view.y + view.height + margin) / OBJ_CELL);
     const drawn = new Set<string>();
+    const hasRotorSprite = SpriteRegistry.hasTexture(this.scene, 'prop_wind_turbine_rotor');
+    const seenSpriteIds = new Set<string>();
 
     const drawRotor = (o: WorldObject) => {
       const bladeLen = Math.max(135, Math.max(o.w, o.h) * 1.45);
@@ -1322,28 +1357,7 @@ export class WorldObjects {
       const hubX = o.x + Math.cos(yaw) * 26;
       const hubY = o.y + Math.sin(yaw) * 26;
 
-      // 1. Translucent ground shadow cast to SE (+34, +40)
-      const shX = hubX + 36;
-      const shY = hubY + 42;
-      g.fillStyle(0x020617, 0.16);
-      for (let i = 0; i < 3; i++) {
-        const a = rotorAng + (i * Math.PI * 2) / 3;
-        const tipX = shX + Math.cos(a) * bladeLen;
-        const tipY = shY + Math.sin(a) * bladeLen;
-        const px = -Math.sin(a);
-        const py = Math.cos(a);
-        g.beginPath();
-        g.moveTo(shX + px * 6, shY + py * 6);
-        g.lineTo(shX + Math.cos(a) * bladeLen * 0.25 + px * 11, shY + Math.sin(a) * bladeLen * 0.25 + py * 11);
-        g.lineTo(tipX + px * 2, tipY + py * 2);
-        g.lineTo(tipX - px * 2, tipY - py * 2);
-        g.lineTo(shX + Math.cos(a) * bladeLen * 0.25 - px * 6, shY + Math.sin(a) * bladeLen * 0.25 - py * 6);
-        g.lineTo(shX - px * 6, shY - py * 6);
-        g.closePath();
-        g.fillPath();
-      }
-
-      // 2. Nacelle housing (elongated white aerodynamic pod rotated to wind yaw)
+      // 1. Nacelle housing (elongated white aerodynamic pod rotated to wind yaw)
       const nx = Math.cos(yaw);
       const ny = Math.sin(yaw);
       const lx = -ny;
@@ -1366,52 +1380,97 @@ export class WorldObjects {
       g.fillStyle(0x475569, 0.85);
       g.fillCircle(o.x + nx * -16, o.y + ny * -16, 6);
 
-      // 3. Three aerodynamic white blades with red aviation tips
-      for (let i = 0; i < 3; i++) {
-        const a = rotorAng + (i * Math.PI * 2) / 3;
-        const ca = Math.cos(a);
-        const sa = Math.sin(a);
-        const px = -sa;
-        const py = ca;
-        const tipX = hubX + ca * bladeLen;
-        const tipY = hubY + sa * bladeLen;
-        const midX = hubX + ca * bladeLen * 0.24;
-        const midY = hubY + sa * bladeLen * 0.24;
-
-        // Main white composite blade
-        g.fillStyle(0xf8fafc, 0.98);
-        g.beginPath();
-        g.moveTo(hubX + px * 5.5, hubY + py * 5.5);
-        g.lineTo(midX + px * 11, midY + py * 11);
-        g.lineTo(tipX + px * 2.2, tipY + py * 2.2);
-        g.lineTo(tipX - px * 2.2, tipY - py * 2.2);
-        g.lineTo(midX - px * 5.5, midY - py * 5.5);
-        g.lineTo(hubX - px * 5.5, hubY - py * 5.5);
-        g.closePath();
-        g.fillPath();
-        g.lineStyle(1, 0x94a3b8, 0.8);
-        g.strokePath();
-
-        // Red aviation warning stripe on outer 18% of blade
-        const r0X = hubX + ca * bladeLen * 0.82;
-        const r0Y = hubY + sa * bladeLen * 0.82;
-        g.fillStyle(0xdc2626, 0.95);
-        g.beginPath();
-        g.moveTo(r0X + px * 4.6, r0Y + py * 4.6);
-        g.lineTo(tipX + px * 2.2, tipY + py * 2.2);
-        g.lineTo(tipX - px * 2.2, tipY - py * 2.2);
-        g.lineTo(r0X - px * 3.0, r0Y - py * 3.0);
-        g.closePath();
-        g.fillPath();
+      if (hasRotorSprite) {
+        seenSpriteIds.add(o.id);
+        let pair = this.turbineSprites.get(o.id);
+        if (!pair) {
+          const shadow = this.scene.add
+            .image(hubX + 36, hubY + 42, 'prop_wind_turbine_rotor')
+            .setOrigin(0.5, 0.5)
+            .setDepth(23.5)
+            .setTint(0x020617)
+            .setAlpha(0.18)
+            .setLighting(false);
+          const rotor = this.scene.add
+            .image(hubX, hubY, 'prop_wind_turbine_rotor')
+            .setOrigin(0.5, 0.5)
+            .setDepth(24.2)
+            .setLighting(this.lightingEnabled);
+          pair = { shadow, rotor };
+          this.turbineSprites.set(o.id, pair);
+        }
+        const diam = bladeLen * 2.04;
+        pair.shadow
+          .setPosition(hubX + 36, hubY + 42)
+          .setDisplaySize(diam, diam)
+          .setRotation(rotorAng)
+          .setVisible(true);
+        pair.rotor
+          .setPosition(hubX, hubY)
+          .setDisplaySize(diam, diam)
+          .setRotation(rotorAng)
+          .setVisible(true);
+      } else {
+        // Vector fallback: translucent SE shadow + 3 aerodynamic blades + spinner
+        const shX = hubX + 36;
+        const shY = hubY + 42;
+        g.fillStyle(0x020617, 0.16);
+        for (let i = 0; i < 3; i++) {
+          const a = rotorAng + (i * Math.PI * 2) / 3;
+          const tipX = shX + Math.cos(a) * bladeLen;
+          const tipY = shY + Math.sin(a) * bladeLen;
+          const px = -Math.sin(a);
+          const py = Math.cos(a);
+          g.beginPath();
+          g.moveTo(shX + px * 6, shY + py * 6);
+          g.lineTo(shX + Math.cos(a) * bladeLen * 0.25 + px * 11, shY + Math.sin(a) * bladeLen * 0.25 + py * 11);
+          g.lineTo(tipX + px * 2, tipY + py * 2);
+          g.lineTo(tipX - px * 2, tipY - py * 2);
+          g.lineTo(shX + Math.cos(a) * bladeLen * 0.25 - px * 6, shY + Math.sin(a) * bladeLen * 0.25 - py * 6);
+          g.lineTo(shX - px * 6, shY - py * 6);
+          g.closePath();
+          g.fillPath();
+        }
+        for (let i = 0; i < 3; i++) {
+          const a = rotorAng + (i * Math.PI * 2) / 3;
+          const ca = Math.cos(a);
+          const sa = Math.sin(a);
+          const px = -sa;
+          const py = ca;
+          const tipX = hubX + ca * bladeLen;
+          const tipY = hubY + sa * bladeLen;
+          const midX = hubX + ca * bladeLen * 0.24;
+          const midY = hubY + sa * bladeLen * 0.24;
+          g.fillStyle(0xf8fafc, 0.98);
+          g.beginPath();
+          g.moveTo(hubX + px * 5.5, hubY + py * 5.5);
+          g.lineTo(midX + px * 11, midY + py * 11);
+          g.lineTo(tipX + px * 2.2, tipY + py * 2.2);
+          g.lineTo(tipX - px * 2.2, tipY - py * 2.2);
+          g.lineTo(midX - px * 5.5, midY - py * 5.5);
+          g.lineTo(hubX - px * 5.5, hubY - py * 5.5);
+          g.closePath();
+          g.fillPath();
+          g.lineStyle(1, 0x94a3b8, 0.8);
+          g.strokePath();
+          const r0X = hubX + ca * bladeLen * 0.82;
+          const r0Y = hubY + sa * bladeLen * 0.82;
+          g.fillStyle(0xdc2626, 0.95);
+          g.beginPath();
+          g.moveTo(r0X + px * 4.6, r0Y + py * 4.6);
+          g.lineTo(tipX + px * 2.2, tipY + py * 2.2);
+          g.lineTo(tipX - px * 2.2, tipY - py * 2.2);
+          g.lineTo(r0X - px * 3.0, r0Y - py * 3.0);
+          g.closePath();
+          g.fillPath();
+        }
+        g.fillStyle(0xf1f5f9, 1);
+        g.fillCircle(hubX, hubY, 12);
+        g.lineStyle(1.5, 0x64748b, 0.9);
+        g.strokeCircle(hubX, hubY, 12);
       }
 
-      // 4. Nose cone spinner
-      g.fillStyle(0xf1f5f9, 1);
-      g.fillCircle(hubX, hubY, 12);
-      g.lineStyle(1.5, 0x64748b, 0.9);
-      g.strokeCircle(hubX, hubY, 12);
-
-      // 5. Pulsing red aviation obstruction beacon on top of nacelle
+      // 2. Pulsing red aviation obstruction beacon on rear top of nacelle
       const blink = Math.sin(timeMs * 0.004 + phaseOffset) > -0.15 ? 1 : 0.2;
       const beaconX = o.x + nx * -6;
       const beaconY = o.y + ny * -6;
@@ -1444,6 +1503,118 @@ export class WorldObjects {
             }
           }
         }
+      }
+    }
+
+    for (const [id, pair] of this.turbineSprites.entries()) {
+      if (!seenSpriteIds.has(id)) {
+        pair.shadow.setVisible(false);
+        pair.rotor.setVisible(false);
+      }
+    }
+  }
+
+  /**
+   * Renders overhead fuel station canopy roofs (`prop_gas_canopy`) above vehicles & pumps,
+   * with smooth proximity translucency when the player drives beneath so pumps & lanes stay 100% readable.
+   */
+  public renderGasCanopies(
+    view: Phaser.Geom.Rectangle,
+    focusX: number,
+    focusY: number,
+    isEditorMode: boolean,
+    dtSec: number,
+    margin = 440,
+  ) {
+    if (!SpriteRegistry.hasTexture(this.scene, 'prop_gas_canopy')) return;
+    const x0 = Math.floor((view.x - margin) / OBJ_CELL), x1 = Math.floor((view.x + view.width + margin) / OBJ_CELL);
+    const y0 = Math.floor((view.y - margin) / OBJ_CELL), y1 = Math.floor((view.y + view.height + margin) / OBJ_CELL);
+    const seen = new Set<string>();
+    const lerpK = Math.min(1, Math.max(0.08, dtSec * 8));
+
+    const updateCanopy = (o: WorldObject) => {
+      if (seen.has(o.id)) return;
+      seen.add(o.id);
+
+      let targetAlpha = 0.96;
+      if (isEditorMode) {
+        targetAlpha = 0.42;
+      } else {
+        const dx = focusX - o.x;
+        const dy = focusY - o.y;
+        const cos = Math.cos(-o.angle);
+        const sin = Math.sin(-o.angle);
+        const lx = dx * cos - dy * sin;
+        const ly = dx * sin + dy * cos;
+        if (Math.abs(lx) < o.w * 0.56 && Math.abs(ly) < o.h * 0.58) {
+          targetAlpha = 0.22;
+        }
+      }
+
+      let entry = this.gasCanopySprites.get(o.id);
+      if (!entry) {
+        const shadow = this.scene.add
+          .image(o.x + 10, o.y + 14, 'prop_gas_canopy')
+          .setOrigin(0.5, 0.5)
+          .setDepth(17.2)
+          .setTint(0x020617)
+          .setAlpha(targetAlpha * 0.34)
+          .setLighting(false);
+        const roof = this.scene.add
+          .image(o.x, o.y, 'prop_gas_canopy')
+          .setOrigin(0.5, 0.5)
+          .setDepth(17.5)
+          .setAlpha(targetAlpha)
+          .setLighting(this.lightingEnabled);
+        entry = { shadow, roof, alpha: targetAlpha };
+        this.gasCanopySprites.set(o.id, entry);
+      } else {
+        entry.alpha += (targetAlpha - entry.alpha) * lerpK;
+      }
+
+      // Canopy roof spans cleanly across the pump islands while leaving entry/exit lane arrows visible
+      const roofW = o.w * 0.92;
+      const roofH = Math.min(o.h * 0.62, Math.max(138, roofW / 2.45));
+      entry.shadow
+        .setPosition(o.x + 10, o.y + 14)
+        .setDisplaySize(roofW, roofH)
+        .setRotation(o.angle)
+        .setAlpha(entry.alpha * 0.34)
+        .setVisible(true);
+      entry.roof
+        .setPosition(o.x, o.y)
+        .setDisplaySize(roofW, roofH)
+        .setRotation(o.angle)
+        .setAlpha(entry.alpha)
+        .setVisible(true);
+    };
+
+    for (let cy = y0; cy <= y1; cy++) {
+      for (let cx = x0; cx <= x1; cx++) {
+        const list = this.grid.get(`${cx}_${cy}`);
+        if (!list) continue;
+        for (const o of list) {
+          if (o.type === 'gas_canopy') {
+            updateCanopy(o);
+          } else if (o.type === 'compound') {
+            const parts = compoundParts(o);
+            for (let i = 0; i < parts.length; i++) {
+              if (parts[i].type !== 'gas_canopy') continue;
+              const p = compoundPartWorldObject(o, i);
+              if (!p) continue;
+              if (p.x + margin < view.x || p.x - margin > view.x + view.width) continue;
+              if (p.y + margin < view.y || p.y - margin > view.y + view.height) continue;
+              updateCanopy(p);
+            }
+          }
+        }
+      }
+    }
+
+    for (const [id, entry] of this.gasCanopySprites.entries()) {
+      if (!seen.has(id)) {
+        entry.shadow.setVisible(false);
+        entry.roof.setVisible(false);
       }
     }
   }
@@ -2422,6 +2593,34 @@ export class WorldObjects {
     });
   }
 
+  /** Lazily caches a multiply-tinted offscreen canvas of `prop_container_base` per hex color. */
+  private getTintedContainerCanvas(
+    baseImg: HTMLImageElement | HTMLCanvasElement,
+    hexColor: string,
+  ): HTMLCanvasElement {
+    const cached = this.containerTintCache.get(hexColor);
+    if (cached) return cached;
+    const cw = 320;
+    const ch = 76;
+    const canvas = document.createElement('canvas');
+    canvas.width = cw;
+    canvas.height = ch;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(baseImg, 0, 0, cw, ch);
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.fillStyle = hexColor;
+      ctx.fillRect(0, 0, cw, ch);
+      ctx.globalCompositeOperation = 'destination-in';
+      ctx.drawImage(baseImg, 0, 0, cw, ch);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    this.containerTintCache.set(hexColor, canvas);
+    return canvas;
+  }
+
   private drawTexturedBuilding(
     solidTex: SolidSpriteTarget,
     o: WorldObject,
@@ -3074,7 +3273,57 @@ export class WorldObjects {
           break;
         }
         case 'container_stack': {
-          // Contentores ISO com vigas perimetrais, cantoneiras twist-lock, nervuras de chapa e portas traseiras
+          // Contentores ISO com base sprite neutra (`container_base.png`) + tintagem por variante de cor
+          const CONTAINER_TINTS: Record<string, [string, string]> = {
+            blue:   ['#3b82f6', '#2563eb'],
+            red:    ['#dc2626', '#b91c1c'],
+            green:  ['#22a055', '#15803d'],
+            rust:   ['#b86c2d', '#9a5620'],
+            orange: ['#f97316', '#ea580c'],
+            yellow: ['#facc15', '#eab308'],
+            white:  ['#f8fafc', '#e2e8f0'],
+            teal:   ['#14b8a6', '#0d9488'],
+          };
+          const containerBaseImg = solidTex?.images.prop_container_base;
+          const horiz = o.w >= o.h;
+          const shortSide = horiz ? o.h : o.w;
+          const count = Math.max(1, Math.round(shortSide / 44));
+          const step = shortSide / count;
+          const gap = count > 1 ? 3 : 0;
+
+          if (solidTex && containerBaseImg) {
+            const [hexLit, hexDark] = CONTAINER_TINTS[o.variant ?? 'rust'] ?? CONTAINER_TINTS.rust;
+            const ctx = solidTex.ctx;
+            ctx.save();
+            ctx.translate(o.x, o.y);
+            if (o.angle !== 0) ctx.rotate(o.angle);
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.38)';
+            ctx.shadowBlur = 7;
+            ctx.shadowOffsetX = 5;
+            ctx.shadowOffsetY = 6;
+
+            for (let i = 0; i < count; i++) {
+              const tinted = this.getTintedContainerCanvas(containerBaseImg, i % 2 === 0 ? hexLit : hexDark);
+              if (horiz) {
+                const cy = -o.h / 2 + i * step;
+                const ch = step - gap;
+                ctx.drawImage(tinted, -o.w / 2, cy, o.w, ch);
+              } else {
+                const cx = -o.w / 2 + i * step;
+                const cw = step - gap;
+                ctx.save();
+                ctx.translate(cx + cw / 2, 0);
+                ctx.rotate(Math.PI / 2);
+                ctx.drawImage(tinted, -o.h / 2, -cw / 2, o.h, cw);
+                ctx.restore();
+              }
+            }
+            ctx.restore();
+            solidTex.markUsed();
+            break;
+          }
+
+          // Vector fallback when sprite texture is unavailable
           const CONTAINER_COLORS: Record<string, [number, number]> = {
             blue:   [0x2563eb, 0x1d4ed8],
             red:    [0xb91c1c, 0x991b1b],
@@ -3089,12 +3338,6 @@ export class WorldObjects {
           g.fillStyle(0x000000, 0.28);
           g.fillRect(x0 + 5, y0 + 6, o.w, o.h);
 
-          const horiz = o.w >= o.h;
-          const shortSide = horiz ? o.h : o.w;
-          const count = Math.max(1, Math.round(shortSide / 44));
-          const step = shortSide / count;
-          const gap = count > 1 ? 3 : 0;
-
           for (let i = 0; i < count; i++) {
             const cx = horiz ? x0 : x0 + i * step;
             const cy = horiz ? y0 + i * step : y0;
@@ -3102,16 +3345,13 @@ export class WorldObjects {
             const ch = horiz ? step - gap : o.h;
             const baseCol = i % 2 === 0 ? colLit : colDark;
 
-            // Corpo principal + moldura estrutural
             g.fillStyle(baseCol, 1);
             g.fillRect(cx, cy, cw, ch);
-            // Bordo iluminado (topo/esquerda) e sombra (base/direita)
             g.fillStyle(0xffffff, 0.16);
             g.fillRect(cx + 2, cy + 2, cw - 4, 3);
             g.fillStyle(0x000000, 0.24);
             g.fillRect(cx + 2, cy + ch - 4, cw - 4, 2.5);
 
-            // Chapas onduladas transversais (pares luz/sombra)
             if (horiz) {
               for (let rx = cx + 10; rx < cx + cw - 12; rx += 10) {
                 g.fillStyle(0x000000, 0.22);
@@ -3119,7 +3359,6 @@ export class WorldObjects {
                 g.fillStyle(0xffffff, 0.1);
                 g.fillRect(rx + 3.5, cy + 5, 1.5, ch - 10);
               }
-              // Portas traseiras (extremidade direita) com barras de tranca
               g.fillStyle(0x000000, 0.35);
               g.fillRect(cx + cw - 5, cy + 3, 4, ch - 6);
               g.fillStyle(0xcbd5e1, 0.75);
@@ -3139,7 +3378,6 @@ export class WorldObjects {
               g.fillRect(cx + cw * 0.56, cy + ch - 3, cw * 0.16, 2);
             }
 
-            // Cantoneiras metálicas ISO (twist-lock castings)
             g.fillStyle(0x1e293b, 0.95);
             for (const [kx, ky] of [
               [cx, cy], [cx + cw - 5, cy],
@@ -3291,14 +3529,17 @@ export class WorldObjects {
           break;
         }
         case 'log_pile': {
-          // Pilha de toros de madeira empilhados em berços metálicos (zona madeireira)
+          const logImg = solidTex?.images.prop_log_pile;
+          if (solidTex && logImg) {
+            this.drawTexturedBuilding(solidTex, o, logImg, true);
+            break;
+          }
+          // Vector fallback: pilha de toros de madeira empilhados em berços metálicos
           g.fillStyle(0x000000, 0.30);
           g.fillRoundedRect(x0 + 5, y0 + 6, o.w, o.h, 5);
-          // Berços / estacas metálicas laterais
           g.fillStyle(0x334155, 1);
           g.fillRect(x0 + o.w * 0.14, y0 - 3, 7, o.h + 6);
           g.fillRect(x0 + o.w * 0.86 - 7, y0 - 3, 7, o.h + 6);
-          // Filas de troncos horizontais com variação tonal de casca
           const rows = Math.max(3, Math.round(o.h / 14));
           const logH = o.h / rows;
           const barks = [0x6b4423, 0x7c502b, 0x5c3a1e, 0x855830];
@@ -3306,22 +3547,38 @@ export class WorldObjects {
             const ly = y0 + i * logH;
             g.fillStyle(barks[i % barks.length], 1);
             g.fillRoundedRect(x0 + 2, ly + 1, o.w - 4, logH - 2, 3);
-            // Reflexo superior da casca
             g.fillStyle(0xa67446, 0.35);
             g.fillRect(x0 + 8, ly + 2, o.w - 16, Math.max(2, (logH - 2) * 0.28));
-            // Topo cortado (madeira clara nas extremidades)
             g.fillStyle(0xd9b382, 0.95);
             g.fillRect(x0 + 1, ly + 2, 5, logH - 4);
             g.fillRect(x0 + o.w - 6, ly + 2, 5, logH - 4);
           }
-          // Cintas de amarração metálicas
           g.lineStyle(2, 0xf59e0b, 0.85);
           g.lineBetween(x0 + o.w * 0.28, y0, x0 + o.w * 0.28, y0 + o.h);
           g.lineBetween(x0 + o.w * 0.72, y0, x0 + o.w * 0.72, y0 + o.h);
           break;
         }
         case 'rock_outcrop': {
-          // Afloramento rochoso de granito alpino com facetas iluminadas a NO e sombra a SE
+          const rockImg = solidTex?.images.prop_rock_outcrop;
+          if (solidTex && rockImg) {
+            const ctx = solidTex.ctx;
+            const idHash = o.id.split('').reduce((acc, ch) => acc * 31 + ch.charCodeAt(0), 13);
+            const flipX = (idHash & 1) === 0 ? 1 : -1;
+            const flipY = (idHash & 2) === 0 ? 1 : -1;
+            ctx.save();
+            ctx.translate(o.x, o.y);
+            if (o.angle !== 0) ctx.rotate(o.angle);
+            ctx.scale(flipX, flipY);
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.42)';
+            ctx.shadowBlur = 8;
+            ctx.shadowOffsetX = 6;
+            ctx.shadowOffsetY = 8;
+            ctx.drawImage(rockImg, -o.w * 0.56, -o.h * 0.56, o.w * 1.12, o.h * 1.12);
+            ctx.restore();
+            solidTex.markUsed();
+            break;
+          }
+          // Vector fallback: afloramento rochoso de granito alpino
           const rx = o.w / 2;
           const ry = o.h / 2;
           const pts = 7;
@@ -3350,7 +3607,27 @@ export class WorldObjects {
           break;
         }
         case 'pine_tree': {
-          // Pinheiro alpino em camadas cónicas vistas de topo
+          const p1 = solidTex?.images.prop_pine_alpine_1;
+          const p2 = solidTex?.images.prop_pine_alpine_2;
+          if (solidTex && (p1 || p2)) {
+            const idHash = Math.abs(o.id.split('').reduce((acc, ch) => acc * 31 + ch.charCodeAt(0), 19));
+            const pineImg = p1 && p2 ? (idHash % 2 === 0 ? p1 : p2) : (p1 || p2)!;
+            const ctx = solidTex.ctx;
+            const canopy = Math.max(o.w, o.h) * 1.16;
+            const rot = o.angle + ((idHash % 360) * Math.PI) / 180;
+            ctx.save();
+            ctx.translate(o.x, o.y);
+            ctx.rotate(rot);
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.44)';
+            ctx.shadowBlur = 9;
+            ctx.shadowOffsetX = 6;
+            ctx.shadowOffsetY = 8;
+            ctx.drawImage(pineImg, -canopy / 2, -canopy / 2, canopy, canopy);
+            ctx.restore();
+            solidTex.markUsed();
+            break;
+          }
+          // Vector fallback: pinheiro alpino em camadas cónicas vistas de topo
           const r = Math.min(o.w, o.h) / 2;
           g.fillStyle(0x020617, 0.30);
           g.fillCircle(o.x + 6, o.y + 7, r * 0.92);
@@ -3833,6 +4110,17 @@ export class WorldObjects {
 
   public destroy() {
     this.dematerializeAll();
+    for (const pair of this.turbineSprites.values()) {
+      pair.shadow.destroy();
+      pair.rotor.destroy();
+    }
+    this.turbineSprites.clear();
+    for (const entry of this.gasCanopySprites.values()) {
+      entry.shadow.destroy();
+      entry.roof.destroy();
+    }
+    this.gasCanopySprites.clear();
+    this.containerTintCache.clear();
     this.objects = [];
   }
 }

@@ -48,7 +48,45 @@ export const BUILDING_ASSET_KEYS: readonly BuildingAssetKey[] = [
   'building_convenience_store',
 ] as const;
 
-export type SpriteAssetKey = TileAssetKey | TruckAssetKey | TrailerAssetKey | BuildingAssetKey;
+export type PropAssetKey =
+  | 'prop_container_base'
+  | 'prop_tree_deciduous_1'
+  | 'prop_tree_deciduous_2'
+  | 'prop_pine_alpine_1'
+  | 'prop_pine_alpine_2'
+  | 'prop_rock_outcrop'
+  | 'prop_log_pile'
+  | 'prop_wind_turbine_rotor'
+  | 'prop_gas_canopy';
+
+export const PROP_ASSET_KEYS: readonly PropAssetKey[] = [
+  'prop_container_base',
+  'prop_tree_deciduous_1',
+  'prop_tree_deciduous_2',
+  'prop_pine_alpine_1',
+  'prop_pine_alpine_2',
+  'prop_rock_outcrop',
+  'prop_log_pile',
+  'prop_wind_turbine_rotor',
+  'prop_gas_canopy',
+] as const;
+
+export const STATIC_PROP_SOLID_KEYS: readonly PropAssetKey[] = [
+  'prop_container_base',
+  'prop_tree_deciduous_1',
+  'prop_tree_deciduous_2',
+  'prop_pine_alpine_1',
+  'prop_pine_alpine_2',
+  'prop_rock_outcrop',
+  'prop_log_pile',
+] as const;
+
+export type SpriteAssetKey =
+  | TileAssetKey
+  | TruckAssetKey
+  | TrailerAssetKey
+  | BuildingAssetKey
+  | PropAssetKey;
 
 export interface SpriteAssetEntry {
   key: SpriteAssetKey;
@@ -107,6 +145,17 @@ export const AVAILABLE_SPRITES: readonly SpriteAssetEntry[] = [
   { key: 'building_gabled', url: '/assets/sprites/buildings/gabled.png', category: 'building' },
   { key: 'building_church', url: '/assets/sprites/buildings/church.png', category: 'building' },
   { key: 'building_convenience_store', url: '/assets/sprites/buildings/convenience_store.png', category: 'building' },
+
+  // Phase D3.2 — Containers, Vegetation, Rocks & Industrial Props (9/9 — 100% complete! RGBA PNG)
+  { key: 'prop_container_base', url: '/assets/sprites/props/container_base.png', category: 'prop' },
+  { key: 'prop_tree_deciduous_1', url: '/assets/sprites/props/tree_deciduous_1.png', category: 'prop' },
+  { key: 'prop_tree_deciduous_2', url: '/assets/sprites/props/tree_deciduous_2.png', category: 'prop' },
+  { key: 'prop_pine_alpine_1', url: '/assets/sprites/props/pine_alpine_1.png', category: 'prop' },
+  { key: 'prop_pine_alpine_2', url: '/assets/sprites/props/pine_alpine_2.png', category: 'prop' },
+  { key: 'prop_rock_outcrop', url: '/assets/sprites/props/rock_outcrop.png', category: 'prop' },
+  { key: 'prop_log_pile', url: '/assets/sprites/props/log_pile.png', category: 'prop' },
+  { key: 'prop_wind_turbine_rotor', url: '/assets/sprites/props/wind_turbine_rotor.png', category: 'prop' },
+  { key: 'prop_gas_canopy', url: '/assets/sprites/props/gas_canopy.png', category: 'prop' },
 ] as const;
 
 /**

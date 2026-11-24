@@ -538,6 +538,7 @@ export class MainScene extends Phaser.Scene {
       this.staticWorldChunks = null;
       this.worldLightPools?.destroy();
       this.worldLightPools = null;
+      this.world?.objects?.hideDynamicSprites();
       this.parkedTruckManager?.destroyAll();
       TrailerManager.resetInstance();
     });
@@ -2546,7 +2547,7 @@ export class MainScene extends Phaser.Scene {
     this.renderStaticWorldAndRoads(cam, liveView);
     // Gas pump highlight (nearby / refuelling)
     this.renderPumps();
-    // Spinning wind turbine rotors & aviation beacons (visible in Drive & Editor modes)
+    // Spinning wind turbine rotors, aviation beacons & proximity-fading overhead fuel station canopies
     if (this.windTurbineGraphics) {
       if (cam.zoom >= 0.08) {
         this.world.objects.renderWindTurbines(
@@ -2555,8 +2556,18 @@ export class MainScene extends Phaser.Scene {
           time,
           this.isEditorMode ? 0 : timeSnap.lampFactor,
         );
+        const focusX = this.truck ? this.truck.body.position.x : liveView.centerX;
+        const focusY = this.truck ? this.truck.body.position.y : liveView.centerY;
+        this.world.objects.renderGasCanopies(
+          liveView,
+          focusX,
+          focusY,
+          this.isEditorMode,
+          dt,
+        );
       } else {
         this.windTurbineGraphics.clear();
+        this.world.objects.hideDynamicSprites();
       }
     }
 
@@ -4314,6 +4325,7 @@ export class MainScene extends Phaser.Scene {
     }
 
     this.world?.terrain?.setLightingEnabled(enabled);
+    this.world?.objects?.setLightingEnabled(enabled);
     this.staticWorldChunks?.setLightingEnabled(enabled);
     this.flatsGraphics?.setLighting(enabled);
     this.roadGraphics?.setLighting(enabled);

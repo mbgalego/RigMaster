@@ -58,6 +58,10 @@ export class WorldTerrain {
   private alpineSummitTilePattern: CanvasPattern | null = null;
   private padConcreteTilePattern: CanvasPattern | null = null;
   private cobbleTilePattern: CanvasPattern | null = null;
+  private detailSpritesReady = false;
+  private deciduousTreeImgs: Array<HTMLImageElement | HTMLCanvasElement> = [];
+  private alpinePineImgs: Array<HTMLImageElement | HTMLCanvasElement> = [];
+  private rockOutcropImg: HTMLImageElement | HTMLCanvasElement | null = null;
 
   public setLightingEnabled(enabled: boolean) {
     if (this.lightingEnabled === enabled) return;
@@ -592,6 +596,21 @@ export class WorldTerrain {
     );
   }
 
+  /** Lazily caches top-down foliage & rock prop sprites for zero-cost terrain chunk detail baking. */
+  private ensureDetailSprites(): void {
+    if (this.detailSpritesReady) return;
+    this.detailSpritesReady = true;
+    const dec1 = SpriteRegistry.getSourceImage(this.scene, 'prop_tree_deciduous_1');
+    const dec2 = SpriteRegistry.getSourceImage(this.scene, 'prop_tree_deciduous_2');
+    this.deciduousTreeImgs = [dec1, dec2].filter((img): img is HTMLImageElement | HTMLCanvasElement => Boolean(img));
+
+    const pine1 = SpriteRegistry.getSourceImage(this.scene, 'prop_pine_alpine_1');
+    const pine2 = SpriteRegistry.getSourceImage(this.scene, 'prop_pine_alpine_2');
+    this.alpinePineImgs = [pine1, pine2].filter((img): img is HTMLImageElement | HTMLCanvasElement => Boolean(img));
+
+    this.rockOutcropImg = SpriteRegistry.getSourceImage(this.scene, 'prop_rock_outcrop');
+  }
+
   /** Helper: fills all cells matching `matchTag` (or `matchTag2`) with a world-aligned seamless pattern at `alpha`. */
   private compositeTileTag(
     ctx: CanvasRenderingContext2D,
@@ -885,6 +904,7 @@ export class WorldTerrain {
   }
 
   private paintDetail(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
+    this.ensureDetailSprites();
     const pxToWorld = CHUNK / RES;
     const chunkBaseX = cx * CHUNK;
     const chunkBaseY = cy * CHUNK;
@@ -892,6 +912,28 @@ export class WorldTerrain {
       let h = (ix + cx * 997) * 374761393 + (iy + cy * 991) * 668265263 + salt * 97 + this.seed;
       h = (h ^ (h >>> 13)) * 1274126177;
       return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+    };
+
+    const stampProp = (
+      img: HTMLImageElement | HTMLCanvasElement,
+      lx: number,
+      ly: number,
+      w: number,
+      h: number,
+      rot: number,
+      shadowAlpha: number,
+    ) => {
+      ctx.save();
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.shadowColor = `rgba(0, 0, 0, ${shadowAlpha})`;
+      ctx.shadowBlur = 3;
+      ctx.shadowOffsetX = 2.4;
+      ctx.shadowOffsetY = 3.0;
+      ctx.translate(lx, ly);
+      ctx.rotate(rot);
+      ctx.drawImage(img, -w / 2, -h / 2, w, h);
+      ctx.restore();
     };
 
     // Trees on land (conifers in alpine forest region 7, deciduous in region 1, sparse elsewhere)
@@ -909,18 +951,25 @@ export class WorldTerrain {
           // Sparse alpine boulders & scree rocks on rocky slopes
           if (rand(ix, iy, 11) > 0.14) continue;
           const r = 4 + rand(ix, iy, 13) * 5;
-          ctx.fillStyle = 'rgba(15, 23, 34, 0.35)';
-          ctx.beginPath();
-          ctx.arc(lx + 2, ly + 2.5, r, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = '#6c757e';
-          ctx.beginPath();
-          ctx.arc(lx, ly, r, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = '#8b95a0';
-          ctx.beginPath();
-          ctx.arc(lx - r * 0.25, ly - r * 0.25, r * 0.5, 0, Math.PI * 2);
-          ctx.fill();
+          if (this.rockOutcropImg) {
+            const rot = rand(ix, iy, 17) * Math.PI * 2;
+            const rw = r * 2.85;
+            const rh = rw / 1.38;
+            stampProp(this.rockOutcropImg, lx, ly, rw, rh, rot, 0.40);
+          } else {
+            ctx.fillStyle = 'rgba(15, 23, 34, 0.35)';
+            ctx.beginPath();
+            ctx.arc(lx + 2, ly + 2.5, r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#6c757e';
+            ctx.beginPath();
+            ctx.arc(lx, ly, r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#8b95a0';
+            ctx.beginPath();
+            ctx.arc(lx - r * 0.25, ly - r * 0.25, r * 0.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
           continue;
         }
 
@@ -931,18 +980,29 @@ export class WorldTerrain {
         if (region === 7 && wx > -2720 && wx < -1960 && wy > -920 && wy < -200) continue;
 
         const r = region === 7 ? 7 + rand(ix, iy, 13) * 5.5 : 9 + rand(ix, iy, 13) * 7;
-        ctx.fillStyle = region === 7 ? '#0d1d13' : '#152410';
-        ctx.beginPath();
-        ctx.arc(lx + 2, ly + 2.5, r + 1.8, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = region === 7 ? '#1d4229' : region === 1 ? '#2e5424' : '#2b4e22';
-        ctx.beginPath();
-        ctx.arc(lx, ly, r, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = region === 7 ? '#2c5c3b' : '#3c6a2c';
-        ctx.beginPath();
-        ctx.arc(lx - r * 0.22, ly - r * 0.28, r * 0.52, 0, Math.PI * 2);
-        ctx.fill();
+        const rot = rand(ix, iy, 19) * Math.PI * 2;
+        if (region === 7 && this.alpinePineImgs.length > 0) {
+          const img = this.alpinePineImgs[Math.floor(rand(ix, iy, 29) * this.alpinePineImgs.length) % this.alpinePineImgs.length];
+          const size = r * 2.65;
+          stampProp(img, lx, ly, size, size, rot, 0.42);
+        } else if (region !== 7 && this.deciduousTreeImgs.length > 0) {
+          const img = this.deciduousTreeImgs[Math.floor(rand(ix, iy, 29) * this.deciduousTreeImgs.length) % this.deciduousTreeImgs.length];
+          const size = r * 2.5;
+          stampProp(img, lx, ly, size, size, rot, 0.38);
+        } else {
+          ctx.fillStyle = region === 7 ? '#0d1d13' : '#152410';
+          ctx.beginPath();
+          ctx.arc(lx + 2, ly + 2.5, r + 1.8, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = region === 7 ? '#1d4229' : region === 1 ? '#2e5424' : '#2b4e22';
+          ctx.beginPath();
+          ctx.arc(lx, ly, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = region === 7 ? '#2c5c3b' : '#3c6a2c';
+          ctx.beginPath();
+          ctx.arc(lx - r * 0.22, ly - r * 0.28, r * 0.52, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
     }
 
@@ -997,6 +1057,10 @@ export class WorldTerrain {
     this.alpineSummitTilePattern = null;
     this.padConcreteTilePattern = null;
     this.cobbleTilePattern = null;
+    this.detailSpritesReady = false;
+    this.deciduousTreeImgs = [];
+    this.alpinePineImgs = [];
+    this.rockOutcropImg = null;
     if (this.scene.textures.exists('terrain_overview')) this.scene.textures.remove('terrain_overview');
   }
 }
