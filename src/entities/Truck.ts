@@ -101,7 +101,9 @@ export class Truck {
   public isAccelerating: boolean = false;
   public peakImpactSpeed: number = 0;
   public collisionCount: number = 0;
-  public headlightMode: HeadlightMode = 'low';
+  public headlightMode: HeadlightMode = 'off';
+  /** When true, ambient light & adverse weather automatically toggle low beams ON/OFF (manual controls override cleanly). */
+  public autoHeadlights: boolean = true;
   public ambientDarkness: number = 0; // 0 = day, 1 = night (drives volumetric beam scatter)
 
   // Truck Model, Sidegrade Upgrades & Operational Wear
@@ -673,19 +675,49 @@ export class Truck {
   }
 
   public setHeadlightMode(mode: HeadlightMode) {
+    if (this.headlightMode === mode) return;
     this.headlightMode = mode;
     this.drawLights();
   }
 
+  public setAutoHeadlights(enabled: boolean) {
+    this.autoHeadlights = enabled;
+    if (enabled && this.headlightMode === 'high') {
+      this.setHeadlightMode('low');
+    }
+  }
+
+  public toggleAutoHeadlights() {
+    this.setAutoHeadlights(!this.autoHeadlights);
+  }
+
+  /**
+   * Called each frame by MainScene's ambient-light/weather sensor when `autoHeadlights` is active.
+   * Respects manual high-beam engagement until the driver switches high beams back off.
+   */
+  public applyAutoHeadlights(shouldTurnOn: boolean) {
+    if (!this.autoHeadlights || this.headlightMode === 'high') return;
+    const target: HeadlightMode = shouldTurnOn ? 'low' : 'off';
+    if (this.headlightMode !== target) {
+      this.setHeadlightMode(target);
+    }
+  }
+
   public toggleLowBeam() {
+    this.autoHeadlights = false;
     this.setHeadlightMode(this.headlightMode === 'low' ? 'off' : 'low');
   }
 
   public toggleHighBeam() {
-    this.setHeadlightMode(this.headlightMode === 'high' ? 'off' : 'high');
+    if (this.headlightMode === 'high') {
+      this.setHeadlightMode(this.autoHeadlights ? 'low' : 'off');
+    } else {
+      this.setHeadlightMode('high');
+    }
   }
 
   public cycleHeadlights() {
+    this.autoHeadlights = false;
     const next: HeadlightMode =
       this.headlightMode === 'off' ? 'low' : this.headlightMode === 'low' ? 'high' : 'off';
     this.setHeadlightMode(next);

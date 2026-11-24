@@ -249,6 +249,7 @@ export class MainScene extends Phaser.Scene {
   private engineGain: GainNode | null = null;
   private soundEnabled: boolean = true;
   private lastReverseBeepTime: number = 0;
+  private autoLightsActive: boolean = false;
 
   // Latest Telemetry Cache for React / HUD
   public telemetry: {
@@ -277,6 +278,7 @@ export class MainScene extends Phaser.Scene {
     cloudCover: number;
     roadWetness: number;
     headlightMode: HeadlightMode;
+    autoHeadlights: boolean;
     timePeriod: TimePeriod;
     timeClock: string;
     autoTimeCycle: boolean;
@@ -340,7 +342,8 @@ export class MainScene extends Phaser.Scene {
     fogDensity: 0,
     cloudCover: 0.22,
     roadWetness: 0,
-    headlightMode: 'low',
+    headlightMode: 'off',
+    autoHeadlights: true,
     timePeriod: 'day',
     timeClock: '09:07',
     autoTimeCycle: true,
@@ -704,11 +707,15 @@ export class MainScene extends Phaser.Scene {
         this.trySwapTruck();
       });
 
-      // Cycle headlights (Off -> Low -> High -> Off) with L
+      // Cycle headlights manually (Off -> Low -> High -> Off) with L; Shift+L toggles Auto-Headlights sensor
       this.input.keyboard.on('keydown-L', (event: KeyboardEvent) => {
         if (this.isTypingInInput(event) || this.isEditorMode) return;
         if (this.truck) {
-          this.truck.cycleHeadlights();
+          if (event.shiftKey) {
+            this.truck.toggleAutoHeadlights();
+          } else {
+            this.truck.cycleHeadlights();
+          }
         }
       });
     }
@@ -2565,6 +2572,13 @@ export class MainScene extends Phaser.Scene {
           this.isEditorMode,
           dt,
         );
+        this.world.objects.renderPineCanopies(
+          liveView,
+          focusX,
+          focusY,
+          this.isEditorMode,
+          dt,
+        );
       } else {
         this.windTurbineGraphics.clear();
         this.world.objects.hideDynamicSprites();
@@ -3074,6 +3088,7 @@ export class MainScene extends Phaser.Scene {
         cloudCover: Math.round(this.localWeather.cloudCover * 100) / 100,
         roadWetness: Math.round(this.localWeather.roadWetness * 100) / 100,
         headlightMode: this.truck.headlightMode,
+        autoHeadlights: this.truck.autoHeadlights,
         timePeriod: timeSnap.period,
         timeClock: timeSnap.clockText,
         autoTimeCycle: timeSnap.autoCycle,
@@ -4371,6 +4386,16 @@ export class MainScene extends Phaser.Scene {
       b = Math.round(b * Math.max(0.84, bMul));
     }
     const ambientHex = (r << 16) | (g << 8) | b;
+
+    // Automatic ambient-light & adverse-weather headlight sensor (with hysteresis to avoid twilight flicker)
+    const ambientLum = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
+    const wantAutoOn = this.autoLightsActive
+      ? !(ambientLum > 0.84 && snap.lampFactor < 0.14 && rainF < 0.18 && fogF < 0.20 && weather === 'clear')
+      : (ambientLum < 0.76 || snap.lampFactor >= 0.24 || rainF >= 0.30 || fogF >= 0.34 || weather !== 'clear');
+    this.autoLightsActive = wantAutoOn;
+    if (this.truck.autoHeadlights) {
+      this.truck.applyAutoHeadlights(wantAutoOn);
+    }
 
     // Only pay the WebGL lighting shader cost when dusk, night, dawn, or real rain/fog meaningfully dims the scene
     // (fair-weather cloud decks already cast drifting ground shadows via cloudShadowSprite without Light2D overhead)

@@ -81,12 +81,26 @@ export const STATIC_PROP_SOLID_KEYS: readonly PropAssetKey[] = [
   'prop_log_pile',
 ] as const;
 
+export type TrafficAssetKey =
+  | 'traffic_car_compact'
+  | 'traffic_car_sedan'
+  | 'traffic_van_delivery'
+  | 'traffic_truck_rigid';
+
+export const TRAFFIC_ASSET_KEYS: readonly TrafficAssetKey[] = [
+  'traffic_car_compact',
+  'traffic_car_sedan',
+  'traffic_van_delivery',
+  'traffic_truck_rigid',
+] as const;
+
 export type SpriteAssetKey =
   | TileAssetKey
   | TruckAssetKey
   | TrailerAssetKey
   | BuildingAssetKey
-  | PropAssetKey;
+  | PropAssetKey
+  | TrafficAssetKey;
 
 export interface SpriteAssetEntry {
   key: SpriteAssetKey;
@@ -156,14 +170,21 @@ export const AVAILABLE_SPRITES: readonly SpriteAssetEntry[] = [
   { key: 'prop_log_pile', url: '/assets/sprites/props/log_pile.png', category: 'prop' },
   { key: 'prop_wind_turbine_rotor', url: '/assets/sprites/props/wind_turbine_rotor.png', category: 'prop' },
   { key: 'prop_gas_canopy', url: '/assets/sprites/props/gas_canopy.png', category: 'prop' },
+
+  // Phase D4 — AI Traffic Vehicles (4/4 — 100% complete! Neutral RGBA PNGs facing UP / North for GPU tinting)
+  { key: 'traffic_car_compact', url: '/assets/sprites/vehicles/traffic/car_compact.png', category: 'traffic' },
+  { key: 'traffic_car_sedan', url: '/assets/sprites/vehicles/traffic/car_sedan.png', category: 'traffic' },
+  { key: 'traffic_van_delivery', url: '/assets/sprites/vehicles/traffic/van_delivery.png', category: 'traffic' },
+  { key: 'traffic_truck_rigid', url: '/assets/sprites/vehicles/traffic/truck_rigid.png', category: 'traffic' },
 ] as const;
 
 /**
  * Manifest of processed UI side-view illustrations for trucks (`public/assets/sprites/vehicles/trucks/menu/`).
- * Only files physically present on disk are listed here so React menus never emit 404 requests.
- * Trucks without a dedicated side-view automatically fall back to their top-down 2D sprite.
+ * All 6/6 fleet tractor units now have dedicated side-view profiles (Phase D5.1 — 100% complete).
  */
-export const TRUCK_SIDEVIEW_SPRITES: Partial<Record<TruckType, string>> = {
+export const TRUCK_SIDEVIEW_SPRITES: Record<TruckType, string> = {
+  iveco_daily_4x2: '/assets/sprites/vehicles/trucks/menu/iveco_daily_4x2_sideview.png',
+  scania_r_4x2: '/assets/sprites/vehicles/trucks/menu/scania_r_4x2_sideview.png',
   man_tgx_6x4: '/assets/sprites/vehicles/trucks/menu/man_tgx_6x4_sideview.png',
   volvo_fh_6x4: '/assets/sprites/vehicles/trucks/menu/volvo_fh_6x4_sideview.png',
   scania_r_8x4: '/assets/sprites/vehicles/trucks/menu/scania_r_8x4_sideview.png',

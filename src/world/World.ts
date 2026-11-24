@@ -54,6 +54,13 @@ export class World {
     this.terrain.ensureOverview();
     this.objects = new WorldObjects(scene);
     this.roads = RoadNetwork.getInstance();
+    this.terrain.setTreeClearanceFn((wx, wy, pad) => {
+      // Keep overhead procedural trees clear of all roads, shoulders, bridges & authored world objects
+      const rq = this.roads.query(wx, wy, Math.max(140, pad + 88));
+      if (rq && rq.dist < rq.width * 0.5 + pad + 18) return false;
+      if (this.objects.hasTreeBlockerAt(wx, wy, pad + 12)) return false;
+      return true;
+    });
     // Se houver rascunho guardado em browser storage, restaura-o automaticamente;
     // caso contrário carrega rigworld.json (ou seed() como fallback).
     if (this.restoreDraft()) {
@@ -71,6 +78,7 @@ export class World {
     this.objects.seedWorld(this.terrain);
     GarageSystem.getInstance().syncFromWorld(this.objects);
     MissionSystem.getInstance().setCustomMissions([]);
+    this.terrain.invalidateChunks();
     this.version++;
   }
 
@@ -157,6 +165,7 @@ export class World {
       // evitando fixar snapshots obsoletos só por abrir/fechar o Editor.
       if (this.version !== this.lastSavedVersion) {
         this.saveDraft();
+        this.terrain.invalidateChunks();
       }
     } else if (this.sessionSnapshot) {
       this.importJSON(this.sessionSnapshot);
@@ -317,6 +326,7 @@ export class World {
       MissionSystem.getInstance().setCustomMissions(
         Array.isArray(d.customMissions) ? d.customMissions : [],
       );
+      this.terrain.invalidateChunks();
       this.version++;
       return true;
     } catch (e) {

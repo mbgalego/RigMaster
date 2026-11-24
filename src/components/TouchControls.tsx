@@ -13,6 +13,8 @@ interface TouchControlsProps {
   cargoHealth?: number;
   nearbyRepairBay?: { x: number; y: number } | null;
   headlightMode?: HeadlightMode;
+  autoHeadlights?: boolean;
+  onToggleAutoLights?: () => void;
   onToggleLowBeam?: () => void;
   onToggleHighBeam?: () => void;
   onDecouple?: () => void;
@@ -28,7 +30,9 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
   trailerHealth = 100,
   cargoHealth = 100,
   nearbyRepairBay = null,
-  headlightMode = 'low',
+  headlightMode = 'off',
+  autoHeadlights = true,
+  onToggleAutoLights,
   onToggleLowBeam,
   onToggleHighBeam,
   onDecouple,
@@ -313,8 +317,30 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
         <div className="flex items-end gap-2">
           {/* Esquerda do mostrador de combustível & D/R: Luzes (Médios/Máximos) por cima de Desengate + (P) */}
           <div className="flex flex-col items-end gap-1.5">
-            {/* Botões de Luzes (Médios e Máximos) — logo acima do desengate e (P), ao lado esquerdo do combustível */}
+            {/* Botões de Luzes (Auto, Médios e Máximos) — logo acima do desengate e (P), ao lado esquerdo do combustível */}
             <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                data-testid="btn-auto-lights"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (onToggleAutoLights) onToggleAutoLights();
+                  else getMainScene()?.truck?.toggleAutoHeadlights();
+                }}
+                style={{ touchAction: 'none' }}
+                className={`w-8 h-7 rounded-lg border transition flex items-center justify-center shadow-md select-none touch-none text-[10px] font-black tracking-tight ${
+                  autoHeadlights
+                    ? 'bg-amber-400/90 text-slate-950 border-amber-200 shadow-amber-400/40'
+                    : 'bg-black/45 backdrop-blur-sm text-slate-300 border-white/20 hover:text-white'
+                }`}
+                title="Luzes Automáticas — sensor crepuscular & chuva/nevoeiro (Shift+L)"
+                aria-label="Luzes Automáticas"
+                aria-pressed={autoHeadlights}
+              >
+                <span className="leading-none">AUTO</span>
+              </button>
+
               <button
                 type="button"
                 data-testid="btn-low-beam"

@@ -183,16 +183,28 @@ public/assets/sprites/
      - **Manifesto sem 404 & fallback automático**: registar apenas ficheiros fisicamente presentes em `SpriteRegistry.ts` (ex.: `TRUCK_SIDEVIEW_SPRITES` + `SpriteRegistry.getTruckMenuPreview()`). Enquanto um item gráfico de menu ainda não tiver sido fornecido, a UI mostra automaticamente a sprite top-down real rodada (ou um *fallback* vetorial/SVG limpo em `onError`), sem nunca gerar imagens quebradas nem pedidos HTTP 404.
      - **Direção estética dos modais**: palco de estúdio escuro com iluminação subtil na cor do veículo, sombra de contacto no chão, sem excesso de etiquetas/cápsulas (*zero-pill*) sobre a arte, tipografia tabular (`tabular-nums`), barras de telemetria limpas e adaptação fluida em desktop e mobile.
   3. **Roadmap de menus gráficos**:
-     - **Menu da Frota & Oficina (`TruckPreviewStage.tsx`)**: perfis laterais dos 6 tratores (`4/6` já ativos; pendentes `iveco_daily_4x2_sideview.png` e `scania_r_4x2_sideview.png`).
-     - **Menu de Missões & Tipologias**: perfis laterais/ilustrações dos 14 atrelados e cisternas + insígnias dos 6 certificados.
-     - **Oficina Mecânica**: ilustrações técnicas para os 4 slots de upgrades (*Motor*, *Travões*, *Suspensão*, *Pneus*).
-     - **Hubs, Garagens & Licenças**: postais/ilustrações dos 5 hubs regionais e insígnias das cartas (`C`, `C+E`, `H`, `X`).
+     - **Menu da Frota & Oficina (`TruckPreviewStage.tsx`)**: perfis laterais dos 6 tratores (**`6/6` concluídos — 100%**).
+     - **Menu de Missões & Tipologias (`5.2.1`)**: perfis laterais/ilustrações dos 14 atrelados e cisternas + insígnias dos 6 certificados (prompts prontos em `docs/TEXTURE_PROMPTS.md`).
+     - **Oficina Mecânica (`5.2.2`)**: ilustrações técnicas para os 4 slots de upgrades (*Motor*, *Travões*, *Suspensão*, *Pneus*).
+     - **Hubs, Garagens & Licenças (`5.2.3`)**: postais/ilustrações dos 5 hubs regionais e insígnias das cartas (`C`, `C+E`, `H`, `X`).
 
 ---
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.18.7** (Versão Atual — branch main)
+### **v2.18.8** (Versão Atual — branch main)
+- **Fase D4 (4/4 Trânsito AI) + Fase D5.1 (6/6 Sideviews de Camiões) Concluídas a 100% + Prompts Fase 5.2 (`SpriteRegistry.ts`, `docs/TEXTURE_PROMPTS.md`, `public/assets/sprites/vehicles/traffic/`, `public/assets/sprites/vehicles/trucks/menu/`)**:
+  - **4 Sprites Base de Trânsito AI Processadas (`#FF00FF` → RGBA PNG)**: `car_compact.png` (`160×320`), `car_sedan.png` (`146×320`), `van_delivery.png` (`128×320`) e `truck_rigid.png` (`145×384`), orientadas a Norte em tons neutros prontas para tintagem GPU e pré-carregadas via `SpriteRegistry` (`TRAFFIC_ASSET_KEYS`) para o arranque da **Fase C — Trânsito AI**.
+  - **Últimos 2 Perfis Laterais da Frota (`iveco_daily_4x2_sideview.png`, `scania_r_4x2_sideview.png`)**: completam **6/6 (100%)** dos tratores com ilustração lateral de estúdio nos modais *Frota* e *Oficina*.
+  - **Prompts Fase 5.2 Completos (`docs/TEXTURE_PROMPTS.md`)**: adicionados todos os prompts prontos a copiar para os **14 perfis laterais de atrelados/cisternas** (`5.2.1`), **4 ilustrações técnicas da Oficina Mecânica** (`5.2.2`), **5 postais de Hubs Regionais** e **10 emblemas de Cartas/Certificados** (`5.2.3`).
+- **Altura Real de Árvores & Pinheiros sobre os Camiões (`WorldObjects.ts`, `WorldTerrain.ts`, `World.ts`, `MainScene.ts`)**:
+  - **Pinheiros (`pine_tree`)**: sombra projetada e tronco de madeira alinhado com o colisor físico ficam cozidos no solo (`depth 3`), enquanto a copa (`prop_pine_alpine_1`/`2`) passa a renderizar em pool GPU **por cima dos camiões e atrelados (`depth 13.9`, abaixo de viadutos `16`)** com transparência suave (`1.0 → 0.68`) apenas quando a cabina entra diretamente sob os ramos.
+  - **Árvores & Florestas Procedurais (`WorldTerrain.ts` + `World.ts`)**: separação entre sombra+tronco no chunk de terreno (`depth 0`) e camada aérea transparente `terrain_canopy_*` (`depth 13.8`, `0 ms/frame`, alocada apenas em chunks com árvores) protegida por validação espacial de estradas, viadutos, pátios e edifícios (`hasTreeBlockerAt` + `RoadNetwork.query`) para que nenhuma árvore nasça sobre vias ou telhados.
+- **Luzes Automáticas por Luminosidade & Meteorologia (`Truck.ts`, `MainScene.ts`, `App.tsx`, `TouchControls.tsx`)**:
+  - Novo sensor crepuscular e meteorológico com histerese (`autoHeadlights`, ativo por omissão): liga automaticamente os **Médios** quando a luminosidade ambiente baixa (entardecer/noite/madrugada) ou sob chuva/nevoeiro denso, e desliga em dia claro, preservando integralmente todos os controlos manuais (`L`, botão Médios e botão Máximos).
+  - Novo botão compacto **`AUTO`** (`data-testid="btn-auto-lights"`, atalho `Shift+L`) junto aos botões de Médios e Máximos no HUD.
+
+### **v2.18.7**
 - **Fase D3.2 Concluída a 100% (9/9 Props, Vegetação, Rochas, Contentores, Torres Eólicas & Coberturas de Postos) (`SpriteRegistry.ts`, `StaticWorldChunks.ts`, `WorldTerrain.ts`, `WorldObjects.ts`, `MainScene.ts`, `docs/TEXTURE_PROMPTS.md`, `public/assets/sprites/props/`)**:
   - **9 Sprites de Props Processadas (`#FF00FF` → RGBA PNG)**: recortadas via `scripts/process-sprites.mjs` com *despill* fino anti-magenta nas copas das 4 árvores e centragem exata do cubo do rotor (`512×512`, pivô exato em `(256, 256)` sem oscilação) para `container_base.png`, `tree_deciduous_1.png`, `tree_deciduous_2.png`, `pine_alpine_1.png`, `pine_alpine_2.png`, `rock_outcrop.png`, `log_pile.png`, `wind_turbine_rotor.png` e `gas_canopy.png`.
   - **Florestas, Pinhal Alpino & Encostas Rochosas Texturizadas a `0 ms/frame` (`WorldTerrain.ts`)**: `paintDetail()` passa a estampar as sprites rodadas aleatoriamente com sombra projetada subtil (árvores frondosas em prados/florestas, pinheiros alpinos na Serra dos Ventos e afloramentos graníticos nas encostas rochosas) diretamente no *bake* único de cada chunk de terreno.

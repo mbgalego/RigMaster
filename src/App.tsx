@@ -435,7 +435,8 @@ export default function App() {
     fogDensity: 0,
     cloudCover: 0.22,
     roadWetness: 0,
-    headlightMode: 'low',
+    headlightMode: 'off',
+    autoHeadlights: true,
     timePeriod: 'day',
     timeClock: '09:07',
     autoTimeCycle: true,
@@ -660,7 +661,7 @@ export default function App() {
           `${Math.round(t.fuelPercent * 10)}|${Math.round(t.fuelLevel * 10)}|${t.isOutOfFuel ? 1 : 0}|` +
           `${t.isRefuelling ? 1 : 0}|${t.isRepairing ? 1 : 0}|${t.isJackknifed ? 1 : 0}|${t.isMechanicalLocked ? 1 : 0}|` +
           `${t.articulationDeg}|${t.collisions}|${t.weather}|${t.weatherDynamic ? 1 : 0},${t.weatherCondition},${Math.round(t.rainIntensity * 10)},${Math.round(t.fogDensity * 10)}|${t.currentGForce.toFixed(2)}|${t.peakGForce.toFixed(2)}|` +
-          `${t.headlightMode}|${t.timePeriod}|${t.timeClock}|${t.autoTimeCycle ? 1 : 0}|${t.timeRealTime ? 1 : 0}|` +
+          `${t.headlightMode}|${t.autoHeadlights ? 1 : 0}|${t.timePeriod}|${t.timeClock}|${t.autoTimeCycle ? 1 : 0}|${t.timeRealTime ? 1 : 0}|` +
           `${t.nearbyPump ? `${t.nearbyPump.x},${t.nearbyPump.y}` : ''}|` +
           `${t.nearbyRepairBay ? `${t.nearbyRepairBay.x},${t.nearbyRepairBay.y}` : ''}|` +
           `${t.gameMode}|${t.activeTruckId}|${t.activeTruckUpgrades.engine},${t.activeTruckUpgrades.brakes},${t.activeTruckUpgrades.suspension},${t.activeTruckUpgrades.tires}|` +
@@ -3235,6 +3236,11 @@ export default function App() {
         cargoHealth={telemetry.cargoHealth}
         nearbyRepairBay={telemetry.nearbyRepairBay}
         headlightMode={telemetry.headlightMode}
+        autoHeadlights={telemetry.autoHeadlights}
+        onToggleAutoLights={() => {
+          const scene = getMainScene();
+          if (scene?.truck) scene.truck.toggleAutoHeadlights();
+        }}
         onToggleLowBeam={() => {
           const scene = getMainScene();
           if (scene?.truck) scene.truck.toggleLowBeam();

@@ -40,14 +40,19 @@ export class WorldTerrain {
   private scene: Phaser.Scene;
   private seed: number;
   private chunks = new Map<string, Phaser.GameObjects.Image>();
+  private canopyChunks = new Map<string, Phaser.GameObjects.Image>();
   private overviewImg: Phaser.GameObjects.Image | null = null;
   private lightingEnabled: boolean = false;
   private order: string[] = [];
   /** Rects of guaranteed land (coastal hubs: port, shipyard, mountain causeways…) */
   private landPatches: Array<{ x0: number; y0: number; x1: number; y1: number }> = [];
+  /** Optional clearance predicate (roads, buildings, yards) so overhead terrain trees never spawn over roadways/roofs. */
+  private treeClearanceFn: ((wx: number, wy: number, pad: number) => boolean) | null = null;
   /** Reusable offscreen mask canvas & tag buffer for zero-allocation seamless tile baking. */
   private tileMaskCanvas: HTMLCanvasElement | null = null;
   private tileMaskCtx: CanvasRenderingContext2D | null = null;
+  private canopyScratchCanvas: HTMLCanvasElement | null = null;
+  private canopyScratchCtx: CanvasRenderingContext2D | null = null;
   private tileCellTags: Uint8Array = new Uint8Array((RES / 8) * (RES / 8));
   private tilePatternsReady = false;
   private waterTilePattern: CanvasPattern | null = null;
@@ -69,6 +74,9 @@ export class WorldTerrain {
     for (const img of this.chunks.values()) {
       img.setLighting(enabled);
     }
+    for (const img of this.canopyChunks.values()) {
+      img.setLighting(enabled);
+    }
     if (this.overviewImg) {
       this.overviewImg.setLighting(enabled);
     }
@@ -81,6 +89,15 @@ export class WorldTerrain {
 
   public setLandPatches(patches: Array<{ x0: number; y0: number; x1: number; y1: number }>) {
     this.landPatches = patches;
+  }
+
+  public setTreeClearanceFn(fn: ((wx: number, wy: number, pad: number) => boolean) | null) {
+    this.treeClearanceFn = fn;
+  }
+
+  /** Invalidates all baked terrain & overhead canopy chunks (e.g. after world load or editor commit). */
+  public invalidateChunks() {
+    this.evictAll();
   }
 
   /** Negative NW origin for the expanded Serra dos Ventos massif & northern/western foothills (existing island stays at 0..13824, 0..10240). */
@@ -446,6 +463,12 @@ export class WorldTerrain {
         this.chunks.get(key)!.destroy();
         this.chunks.delete(key);
         this.scene.textures.remove(`terrain_${key}`);
+        const canopy = this.canopyChunks.get(key);
+        if (canopy) {
+          canopy.destroy();
+          this.canopyChunks.delete(key);
+          this.scene.textures.remove(`terrain_canopy_${key}`);
+        }
       }
     }
   }
@@ -459,6 +482,11 @@ export class WorldTerrain {
       this.scene.textures.remove(`terrain_${key}`);
     }
     this.chunks.clear();
+    for (const [key, img] of Array.from(this.canopyChunks.entries())) {
+      img.destroy();
+      this.scene.textures.remove(`terrain_canopy_${key}`);
+    }
+    this.canopyChunks.clear();
   }
 
   /**
@@ -520,7 +548,17 @@ export class WorldTerrain {
     const tex = this.scene.textures.createCanvas(texKey, RES, RES);
     if (!tex) return;
     const ctx = tex.getContext();
-    this.paintChunk(ctx, cx, cy);
+
+    if (!this.canopyScratchCanvas) {
+      this.canopyScratchCanvas = document.createElement('canvas');
+      this.canopyScratchCanvas.width = RES;
+      this.canopyScratchCanvas.height = RES;
+      this.canopyScratchCtx = this.canopyScratchCanvas.getContext('2d');
+    }
+    const canopyCtx = this.canopyScratchCtx;
+    if (canopyCtx) canopyCtx.clearRect(0, 0, RES, RES);
+
+    const canopyCount = this.paintChunk(ctx, canopyCtx, cx, cy);
     tex.refresh();
 
     const img = this.scene.add.image(cx * CHUNK, cy * CHUNK, texKey)
@@ -529,6 +567,24 @@ export class WorldTerrain {
       .setDepth(0)
       .setLighting(this.lightingEnabled);
     this.chunks.set(key, img);
+
+    // Only allocate an overhead tree canopy chunk (depth 13.8 — above trucks/trailers, below bridges)
+    // when this chunk actually contains procedural trees.
+    const canopyKey = `terrain_canopy_${key}`;
+    if (this.scene.textures.exists(canopyKey)) this.scene.textures.remove(canopyKey);
+    if (canopyCount > 0 && this.canopyScratchCanvas) {
+      const cTex = this.scene.textures.createCanvas(canopyKey, RES, RES);
+      if (cTex) {
+        cTex.getContext().drawImage(this.canopyScratchCanvas, 0, 0);
+        cTex.refresh();
+        const cImg = this.scene.add.image(cx * CHUNK, cy * CHUNK, canopyKey)
+          .setOrigin(0, 0)
+          .setDisplaySize(CHUNK, CHUNK)
+          .setDepth(13.8)
+          .setLighting(this.lightingEnabled);
+        this.canopyChunks.set(key, cImg);
+      }
+    }
   }
 
   /** Lazily prepares reusable mask canvas and world-aligned seamless CanvasPatterns for all terrain biomes. */
@@ -652,7 +708,12 @@ export class WorldTerrain {
     }
   }
 
-  private paintChunk(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
+  private paintChunk(
+    ctx: CanvasRenderingContext2D,
+    canopyCtx: CanvasRenderingContext2D | null,
+    cx: number,
+    cy: number,
+  ): number {
     const cell = 8; // texels per cell → 16 world px per cell
     const gridN = RES / cell; // 64
     const pxToWorld = CHUNK / RES;
@@ -797,8 +858,8 @@ export class WorldTerrain {
       this.paintMountainContours(ctx, cx, cy);
     }
 
-    // Sparse detail: grass tufts / pine trees / rocks / ripples in chunk-local px
-    this.paintDetail(ctx, cx, cy);
+    // Sparse detail: grass tufts / pine trees (ground shadows + overhead canopies) / rocks / ripples
+    return this.paintDetail(ctx, canopyCtx, cx, cy);
   }
 
   /** Paints crisp subtle topographic contour lines every 60m of elevation across mountain chunks. */
@@ -903,11 +964,17 @@ export class WorldTerrain {
     return base;
   }
 
-  private paintDetail(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
+  private paintDetail(
+    ctx: CanvasRenderingContext2D,
+    canopyCtx: CanvasRenderingContext2D | null,
+    cx: number,
+    cy: number,
+  ): number {
     this.ensureDetailSprites();
     const pxToWorld = CHUNK / RES;
     const chunkBaseX = cx * CHUNK;
     const chunkBaseY = cy * CHUNK;
+    let canopyCount = 0;
     const rand = (ix: number, iy: number, salt: number) => {
       let h = (ix + cx * 997) * 374761393 + (iy + cy * 991) * 668265263 + salt * 97 + this.seed;
       h = (h ^ (h >>> 13)) * 1274126177;
@@ -915,6 +982,7 @@ export class WorldTerrain {
     };
 
     const stampProp = (
+      targetCtx: CanvasRenderingContext2D,
       img: HTMLImageElement | HTMLCanvasElement,
       lx: number,
       ly: number,
@@ -923,17 +991,19 @@ export class WorldTerrain {
       rot: number,
       shadowAlpha: number,
     ) => {
-      ctx.save();
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-      ctx.shadowColor = `rgba(0, 0, 0, ${shadowAlpha})`;
-      ctx.shadowBlur = 3;
-      ctx.shadowOffsetX = 2.4;
-      ctx.shadowOffsetY = 3.0;
-      ctx.translate(lx, ly);
-      ctx.rotate(rot);
-      ctx.drawImage(img, -w / 2, -h / 2, w, h);
-      ctx.restore();
+      targetCtx.save();
+      targetCtx.imageSmoothingEnabled = true;
+      targetCtx.imageSmoothingQuality = 'high';
+      if (shadowAlpha > 0) {
+        targetCtx.shadowColor = `rgba(0, 0, 0, ${shadowAlpha})`;
+        targetCtx.shadowBlur = 3;
+        targetCtx.shadowOffsetX = 2.0;
+        targetCtx.shadowOffsetY = 2.6;
+      }
+      targetCtx.translate(lx, ly);
+      targetCtx.rotate(rot);
+      targetCtx.drawImage(img, -w / 2, -h / 2, w, h);
+      targetCtx.restore();
     };
 
     // Trees on land (conifers in alpine forest region 7, deciduous in region 1, sparse elsewhere)
@@ -948,14 +1018,14 @@ export class WorldTerrain {
         if (region === 3 || region === 4 || region === 6 || region === 5 || region === 9) continue;
 
         if (region === 8) {
-          // Sparse alpine boulders & scree rocks on rocky slopes
+          // Sparse alpine boulders & scree rocks on rocky slopes (ground layer)
           if (rand(ix, iy, 11) > 0.14) continue;
           const r = 4 + rand(ix, iy, 13) * 5;
           if (this.rockOutcropImg) {
             const rot = rand(ix, iy, 17) * Math.PI * 2;
             const rw = r * 2.85;
             const rh = rw / 1.38;
-            stampProp(this.rockOutcropImg, lx, ly, rw, rh, rot, 0.40);
+            stampProp(ctx, this.rockOutcropImg, lx, ly, rw, rh, rot, 0.40);
           } else {
             ctx.fillStyle = 'rgba(15, 23, 34, 0.35)';
             ctx.beginPath();
@@ -980,29 +1050,44 @@ export class WorldTerrain {
         if (region === 7 && wx > -2720 && wx < -1960 && wy > -920 && wy < -200) continue;
 
         const r = region === 7 ? 7 + rand(ix, iy, 13) * 5.5 : 9 + rand(ix, iy, 13) * 7;
+        const worldCanopyRadius = r * 1.28 * pxToWorld;
+
+        // Because canopies render ABOVE ground vehicles (depth 13.8), enforce road/building/yard clearance!
+        if (this.treeClearanceFn && !this.treeClearanceFn(wx, wy, worldCanopyRadius)) continue;
+
         const rot = rand(ix, iy, 19) * Math.PI * 2;
+        const targetCanopyCtx = canopyCtx ?? ctx;
+
+        // 1. Ground cast shadow + trunk base stays on ground chunk (depth 0 — under truck wheels)
+        ctx.fillStyle = 'rgba(4, 12, 8, 0.34)';
+        ctx.beginPath();
+        ctx.arc(lx + 2.8, ly + 3.4, r * 0.96, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#3f2817';
+        ctx.beginPath();
+        ctx.arc(lx, ly, Math.max(2.0, r * 0.22), 0, Math.PI * 2);
+        ctx.fill();
+
+        // 2. Foliage canopy renders on overhead chunk (depth 13.8 — above truck roofs & trailers!)
         if (region === 7 && this.alpinePineImgs.length > 0) {
           const img = this.alpinePineImgs[Math.floor(rand(ix, iy, 29) * this.alpinePineImgs.length) % this.alpinePineImgs.length];
           const size = r * 2.65;
-          stampProp(img, lx, ly, size, size, rot, 0.42);
+          stampProp(targetCanopyCtx, img, lx, ly, size, size, rot, 0.22);
         } else if (region !== 7 && this.deciduousTreeImgs.length > 0) {
           const img = this.deciduousTreeImgs[Math.floor(rand(ix, iy, 29) * this.deciduousTreeImgs.length) % this.deciduousTreeImgs.length];
           const size = r * 2.5;
-          stampProp(img, lx, ly, size, size, rot, 0.38);
+          stampProp(targetCanopyCtx, img, lx, ly, size, size, rot, 0.20);
         } else {
-          ctx.fillStyle = region === 7 ? '#0d1d13' : '#152410';
-          ctx.beginPath();
-          ctx.arc(lx + 2, ly + 2.5, r + 1.8, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = region === 7 ? '#1d4229' : region === 1 ? '#2e5424' : '#2b4e22';
-          ctx.beginPath();
-          ctx.arc(lx, ly, r, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = region === 7 ? '#2c5c3b' : '#3c6a2c';
-          ctx.beginPath();
-          ctx.arc(lx - r * 0.22, ly - r * 0.28, r * 0.52, 0, Math.PI * 2);
-          ctx.fill();
+          targetCanopyCtx.fillStyle = region === 7 ? '#1d4229' : region === 1 ? '#2e5424' : '#2b4e22';
+          targetCanopyCtx.beginPath();
+          targetCanopyCtx.arc(lx, ly, r, 0, Math.PI * 2);
+          targetCanopyCtx.fill();
+          targetCanopyCtx.fillStyle = region === 7 ? '#2c5c3b' : '#3c6a2c';
+          targetCanopyCtx.beginPath();
+          targetCanopyCtx.arc(lx - r * 0.22, ly - r * 0.28, r * 0.52, 0, Math.PI * 2);
+          targetCanopyCtx.fill();
         }
+        if (canopyCtx) canopyCount++;
       }
     }
 
@@ -1036,6 +1121,7 @@ export class WorldTerrain {
       ctx.lineTo(ix + 12, iy + 3);
       ctx.stroke();
     }
+    return canopyCount;
   }
 
   public destroy() {
@@ -1045,9 +1131,16 @@ export class WorldTerrain {
       this.scene.textures.remove(`terrain_${key}`);
     }
     this.chunks.clear();
+    for (const [key, img] of Array.from(this.canopyChunks.entries())) {
+      img.destroy();
+      this.scene.textures.remove(`terrain_canopy_${key}`);
+    }
+    this.canopyChunks.clear();
     this.order = [];
     this.tileMaskCanvas = null;
     this.tileMaskCtx = null;
+    this.canopyScratchCanvas = null;
+    this.canopyScratchCtx = null;
     this.tilePatternsReady = false;
     this.waterTilePattern = null;
     this.grassTilePattern = null;

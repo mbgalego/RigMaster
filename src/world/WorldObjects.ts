@@ -240,6 +240,10 @@ export class WorldObjects {
     string,
     { shadow: Phaser.GameObjects.Image; roof: Phaser.GameObjects.Image; alpha: number }
   >();
+  private pineCanopySprites = new Map<
+    string,
+    { canopy: Phaser.GameObjects.Image; alpha: number }
+  >();
 
   /** World position of the streetlamp luminaire head (offset +22px along its arm). */
   public static getLampBulbPos(o: WorldObject): { x: number; y: number } {
@@ -263,6 +267,9 @@ export class WorldObjects {
     for (const pair of this.gasCanopySprites.values()) {
       pair.roof.setLighting(enabled);
     }
+    for (const entry of this.pineCanopySprites.values()) {
+      entry.canopy.setLighting(enabled);
+    }
   }
 
   public hideDynamicSprites() {
@@ -273,6 +280,9 @@ export class WorldObjects {
     for (const pair of this.gasCanopySprites.values()) {
       pair.shadow.setVisible(false);
       pair.roof.setVisible(false);
+    }
+    for (const entry of this.pineCanopySprites.values()) {
+      entry.canopy.setVisible(false);
     }
   }
 
@@ -562,6 +572,50 @@ export class WorldObjects {
       if (best >= SURFACE_GRIP.asphalt) return SURFACE_GRIP.asphalt;
     }
     return best;
+  }
+
+  /**
+   * Returns true if world position (x, y) within `pad` overlaps any world object
+   * (buildings, paved pads, docks, roundabouts, parking, fuel stations, placed props, etc.)
+   * so procedural overhead terrain trees never sprout over yards, docks, roads, or roofs.
+   */
+  public hasTreeBlockerAt(x: number, y: number, pad = 28): boolean {
+    const x0 = Math.floor((x - pad) / OBJ_CELL);
+    const x1 = Math.floor((x + pad) / OBJ_CELL);
+    const y0 = Math.floor((y - pad) / OBJ_CELL);
+    const y1 = Math.floor((y + pad) / OBJ_CELL);
+
+    const hits = (o: WorldObject): boolean => {
+      if (o.type === 'roundabout') {
+        return Math.hypot(x - o.x, y - o.y) <= o.w * 0.5 + pad;
+      }
+      const dx = x - o.x;
+      const dy = y - o.y;
+      const cos = Math.cos(-o.angle);
+      const sin = Math.sin(-o.angle);
+      const lx = dx * cos - dy * sin;
+      const ly = dx * sin + dy * cos;
+      return Math.abs(lx) <= o.w * 0.5 + pad && Math.abs(ly) <= o.h * 0.5 + pad;
+    };
+
+    for (let cy = y0; cy <= y1; cy++) {
+      for (let cx = x0; cx <= x1; cx++) {
+        const list = this.grid.get(`${cx}_${cy}`);
+        if (!list) continue;
+        for (const o of list) {
+          if (o.type === 'compound') {
+            const parts = compoundParts(o);
+            for (let i = 0; i < parts.length; i++) {
+              const p = compoundPartWorldObject(o, i);
+              if (p && hits(p)) return true;
+            }
+          } else if (hits(o)) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
   }
 
   // ======================================================================
@@ -1615,6 +1669,102 @@ export class WorldObjects {
       if (!seen.has(id)) {
         entry.shadow.setVisible(false);
         entry.roof.setVisible(false);
+      }
+    }
+  }
+
+  /**
+   * Renders overhead alpine pine canopies (`prop_pine_alpine_1` / `prop_pine_alpine_2`)
+   * ABOVE ground trucks & trailers (depth 13.9, below bridges at 16) so overhanging boughs
+   * give unmistakable vertical height while ground shadows & solid trunks remain on the ground.
+   */
+  public renderPineCanopies(
+    view: Phaser.Geom.Rectangle,
+    focusX: number,
+    focusY: number,
+    isEditorMode: boolean,
+    dtSec: number,
+    margin = 220,
+  ) {
+    const hasP1 = SpriteRegistry.hasTexture(this.scene, 'prop_pine_alpine_1');
+    const hasP2 = SpriteRegistry.hasTexture(this.scene, 'prop_pine_alpine_2');
+    if (!hasP1 && !hasP2) return;
+
+    const x0 = Math.floor((view.x - margin) / OBJ_CELL), x1 = Math.floor((view.x + view.width + margin) / OBJ_CELL);
+    const y0 = Math.floor((view.y - margin) / OBJ_CELL), y1 = Math.floor((view.y + view.height + margin) / OBJ_CELL);
+    const seen = new Set<string>();
+    const lerpK = Math.min(1, Math.max(0.1, dtSec * 9));
+
+    const updatePine = (o: WorldObject) => {
+      if (seen.has(o.id)) return;
+      seen.add(o.id);
+
+      const idHash = Math.abs(o.id.split('').reduce((acc, ch) => acc * 31 + ch.charCodeAt(0), 19));
+      const texKey = hasP1 && hasP2
+        ? (idHash % 2 === 0 ? 'prop_pine_alpine_1' : 'prop_pine_alpine_2')
+        : (hasP1 ? 'prop_pine_alpine_1' : 'prop_pine_alpine_2');
+      const canopySize = Math.max(o.w, o.h) * 1.18;
+      const rot = o.angle + ((idHash % 360) * Math.PI) / 180;
+
+      // Keep branches vividly overhanging over the truck, with gentle translucency only when
+      // the cab itself slides directly beneath the boughs so the player never loses orientation.
+      let targetAlpha = 1.0;
+      if (isEditorMode) {
+        targetAlpha = 0.84;
+      } else {
+        const d = Math.hypot(focusX - o.x, focusY - o.y);
+        if (d < canopySize * 0.44) {
+          targetAlpha = 0.68;
+        }
+      }
+
+      let entry = this.pineCanopySprites.get(o.id);
+      if (!entry) {
+        const canopy = this.scene.add
+          .image(o.x, o.y, texKey)
+          .setOrigin(0.5, 0.5)
+          .setDepth(13.9)
+          .setAlpha(targetAlpha)
+          .setLighting(this.lightingEnabled);
+        entry = { canopy, alpha: targetAlpha };
+        this.pineCanopySprites.set(o.id, entry);
+      } else {
+        entry.alpha += (targetAlpha - entry.alpha) * lerpK;
+      }
+
+      entry.canopy
+        .setPosition(o.x, o.y)
+        .setDisplaySize(canopySize, canopySize)
+        .setRotation(rot)
+        .setAlpha(entry.alpha)
+        .setVisible(true);
+    };
+
+    for (let cy = y0; cy <= y1; cy++) {
+      for (let cx = x0; cx <= x1; cx++) {
+        const list = this.grid.get(`${cx}_${cy}`);
+        if (!list) continue;
+        for (const o of list) {
+          if (o.type === 'pine_tree') {
+            updatePine(o);
+          } else if (o.type === 'compound') {
+            const parts = compoundParts(o);
+            for (let i = 0; i < parts.length; i++) {
+              if (parts[i].type !== 'pine_tree') continue;
+              const p = compoundPartWorldObject(o, i);
+              if (!p) continue;
+              if (p.x + margin < view.x || p.x - margin > view.x + view.width) continue;
+              if (p.y + margin < view.y || p.y - margin > view.y + view.height) continue;
+              updatePine(p);
+            }
+          }
+        }
+      }
+    }
+
+    for (const [id, entry] of this.pineCanopySprites.entries()) {
+      if (!seen.has(id)) {
+        entry.canopy.setVisible(false);
       }
     }
   }
@@ -3609,22 +3759,19 @@ export class WorldObjects {
         case 'pine_tree': {
           const p1 = solidTex?.images.prop_pine_alpine_1;
           const p2 = solidTex?.images.prop_pine_alpine_2;
-          if (solidTex && (p1 || p2)) {
-            const idHash = Math.abs(o.id.split('').reduce((acc, ch) => acc * 31 + ch.charCodeAt(0), 19));
-            const pineImg = p1 && p2 ? (idHash % 2 === 0 ? p1 : p2) : (p1 || p2)!;
-            const ctx = solidTex.ctx;
-            const canopy = Math.max(o.w, o.h) * 1.16;
-            const rot = o.angle + ((idHash % 360) * Math.PI) / 180;
-            ctx.save();
-            ctx.translate(o.x, o.y);
-            ctx.rotate(rot);
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.44)';
-            ctx.shadowBlur = 9;
-            ctx.shadowOffsetX = 6;
-            ctx.shadowOffsetY = 8;
-            ctx.drawImage(pineImg, -canopy / 2, -canopy / 2, canopy, canopy);
-            ctx.restore();
-            solidTex.markUsed();
+          if (p1 || p2 || SpriteRegistry.hasTexture(this.scene, 'prop_pine_alpine_1') || SpriteRegistry.hasTexture(this.scene, 'prop_pine_alpine_2')) {
+            // Bake ground cast shadow + sturdy wooden trunk at ground depth (depth 3, matching the
+            // solid Matter.js trunk collider); the overhead canopy sprite renders above trucks at depth 13.9!
+            const r = Math.min(o.w, o.h) * 0.5;
+            const trunkR = Math.max(8, Math.min(o.w, o.h) * 0.16);
+            g.fillStyle(0x020617, 0.30);
+            g.fillCircle(o.x + 8, o.y + 10, r * 0.90);
+            g.fillStyle(0x020617, 0.22);
+            g.fillCircle(o.x + 4, o.y + 5, trunkR * 1.45);
+            g.fillStyle(0x3b2314, 1);
+            g.fillCircle(o.x, o.y, trunkR);
+            g.fillStyle(0x5c3a21, 1);
+            g.fillCircle(o.x - trunkR * 0.12, o.y - trunkR * 0.12, trunkR * 0.72);
             break;
           }
           // Vector fallback: pinheiro alpino em camadas cónicas vistas de topo
@@ -4120,6 +4267,10 @@ export class WorldObjects {
       entry.roof.destroy();
     }
     this.gasCanopySprites.clear();
+    for (const entry of this.pineCanopySprites.values()) {
+      entry.canopy.destroy();
+    }
+    this.pineCanopySprites.clear();
     this.containerTintCache.clear();
     this.objects = [];
   }
