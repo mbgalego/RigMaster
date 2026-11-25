@@ -217,9 +217,10 @@ export class MainScene extends Phaser.Scene {
   private refuelOsc: OscillatorNode | null = null;
   private refuelGain: GainNode | null = null;
 
-  // Environmental layers (drifting ground cloud shadows, radial-cutout fog, slanted rain streaks)
+  // Environmental layers (drifting ground cloud shadows, volumetric fog wisps, radial-cutout fog, slanted rain streaks)
   private weatherGraphics!: Phaser.GameObjects.Graphics;
   private cloudShadowSprites: Phaser.GameObjects.Image[] = [];
+  private fogWispSprites: Phaser.GameObjects.Image[] = [];
   private fogVignetteSprite: Phaser.GameObjects.Image | null = null;
   private rainParticles: Array<{ x: number; y: number; speed: number; length: number }> = [];
   private localWeather: LocalWeatherSample = WeatherSystem.getInstance().getLatestSample();
@@ -2572,16 +2573,34 @@ export class MainScene extends Phaser.Scene {
           this.isEditorMode,
           dt,
         );
+        const timeSec = time * 0.001;
         this.world.objects.renderPineCanopies(
           liveView,
           focusX,
           focusY,
           this.isEditorMode,
           dt,
+          220,
+          timeSec,
+          this.localWeather.windVx,
+          this.localWeather.windVy,
+          this.localWeather.windSpeedKmh,
+          this.localWeather.rainIntensity,
+        );
+        this.world.terrain.updateCanopyWind(
+          timeSec,
+          this.localWeather.windVx,
+          this.localWeather.windVy,
+          this.localWeather.windSpeedKmh,
+          this.localWeather.rainIntensity,
+          liveView,
+          cam.zoom,
+          this.isEditorMode,
         );
       } else {
         this.windTurbineGraphics.clear();
         this.world.objects.hideDynamicSprites();
+        this.world.terrain.updateCanopyWind(0, 0, 0, 0, 0, liveView, cam.zoom, true);
       }
     }
 
@@ -2720,10 +2739,17 @@ export class MainScene extends Phaser.Scene {
         this.pupTrailer.setElevation(pElev.layer, pElev.z, rigElevatedVisual);
       }
 
-      // Surface grip from road network (layer-aware) + ground paved floor prefabs
+      // Surface grip from road network (layer-aware), ground paved floor prefabs & painted terrain surfaces
       const roadGrip = this.roadNetwork.gripAt(tx, ty, this.truck.layer);
       const padGrip = this.truck.layer === 0 ? this.world.objects.pavedGripAt(tx, ty) : 0;
-      this.truck.setRoadGrip(Math.max(roadGrip, padGrip));
+      const paintedGrip = this.truck.layer === 0 ? this.world.terrain.paintedGripAt(tx, ty) : 0;
+      const effectiveGrip =
+        roadGrip > 0.56 || padGrip > 0
+          ? Math.max(roadGrip, padGrip)
+          : paintedGrip > 0
+            ? paintedGrip
+            : roadGrip;
+      this.truck.setRoadGrip(effectiveGrip);
 
       // Mountain terrain elevation & longitudinal slope physics along truck heading
       const slope = this.world.terrain.slopeAt(tx, ty);
@@ -4400,10 +4426,10 @@ export class MainScene extends Phaser.Scene {
     // Only pay the WebGL lighting shader cost when dusk, night, dawn, or real rain/fog meaningfully dims the scene
     // (fair-weather cloud decks already cast drifting ground shadows via cloudShadowSprite without Light2D overhead)
     const needsWebGLLighting =
-      snap.lampFactor >= 0.08 ||
-      snap.ambientRgb.r < 238 ||
-      snap.ambientRgb.g < 228 ||
-      snap.ambientRgb.b < 214 ||
+      snap.lampFactor >= 0.05 ||
+      snap.ambientRgb.r < 244 ||
+      snap.ambientRgb.g < 240 ||
+      snap.ambientRgb.b < 230 ||
       rainF >= 0.22 ||
       fogF >= 0.28 ||
       weather !== 'clear';
@@ -4598,19 +4624,48 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
-    if (!this.textures.exists('fog_cutout_mask')) {
+    if (!this.textures.exists('fog_wisp_puff')) {
       const size = 256;
+      const tex = this.textures.createCanvas('fog_wisp_puff', size, size);
+      if (tex) {
+        const ctx = tex.getContext();
+        ctx.clearRect(0, 0, size, size);
+        const lobes: Array<[number, number, number, number]> = [
+          [128, 128, 108, 0.55],
+          [82, 134, 82, 0.42],
+          [176, 122, 78, 0.40],
+          [118, 92, 72, 0.36],
+          [148, 160, 70, 0.34],
+        ];
+        for (const [cx, cy, r, peak] of lobes) {
+          const grad = ctx.createRadialGradient(cx, cy, r * 0.08, cx, cy, r);
+          grad.addColorStop(0, `rgba(255, 255, 255, ${peak.toFixed(2)})`);
+          grad.addColorStop(0.55, `rgba(255, 255, 255, ${(peak * 0.44).toFixed(2)})`);
+          grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        tex.refresh();
+      }
+    }
+
+    if (!this.textures.exists('fog_cutout_mask')) {
+      const size = 512;
       const tex = this.textures.createCanvas('fog_cutout_mask', size, size);
       if (tex) {
         const ctx = tex.getContext();
         const half = size / 2;
-        const grad = ctx.createRadialGradient(half, half, size * 0.06, half, half, half);
-        // Clear driving pocket right around the player's rig -> smooth atmospheric mist outward
-        grad.addColorStop(0, 'rgba(226, 232, 240, 0.06)');
-        grad.addColorStop(0.24, 'rgba(226, 232, 240, 0.14)');
-        grad.addColorStop(0.54, 'rgba(203, 213, 225, 0.56)');
-        grad.addColorStop(0.82, 'rgba(186, 200, 216, 0.84)');
-        grad.addColorStop(1, 'rgba(176, 192, 210, 0.94)');
+        // Pure white RGB so setTint() cleanly controls daytime mist vs moonlight night fog.
+        // Outer gradient reaches solid opacity at 0.72*half so all 4 viewport corners stay seamlessly fogged
+        // while keeping the driving pocket right around the truck & immediate lane readable.
+        const grad = ctx.createRadialGradient(half, half, half * 0.03, half, half, half * 0.60);
+        grad.addColorStop(0, 'rgba(255, 255, 255, 0.20)');
+        grad.addColorStop(0.22, 'rgba(255, 255, 255, 0.30)');
+        grad.addColorStop(0.46, 'rgba(255, 255, 255, 0.70)');
+        grad.addColorStop(0.72, 'rgba(255, 255, 255, 0.93)');
+        grad.addColorStop(1, 'rgba(255, 255, 255, 1.0)');
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, size, size);
         tex.refresh();
@@ -4630,13 +4685,26 @@ export class MainScene extends Phaser.Scene {
       this.cloudShadowSprites.push(img);
     }
 
+    // Pool of 6 world-space drifting volumetric fog banks (depth 18.6 — above trees/bridges, below fog veil)
+    this.fogWispSprites = [];
+    for (let i = 0; i < 6; i++) {
+      const img = this.add
+        .image(0, 0, 'fog_wisp_puff')
+        .setOrigin(0.5, 0.5)
+        .setDepth(18.6)
+        .setLighting(false)
+        .setAlpha(0)
+        .setVisible(false);
+      this.fogWispSprites.push(img);
+    }
+
     this.fogVignetteSprite = this.add
       .image(w / 2, h / 2, 'fog_cutout_mask')
       .setOrigin(0.5, 0.5)
       .setScrollFactor(0)
       .setDepth(19)
       .setLighting(false)
-      .setDisplaySize(Math.max(w, h) * 1.65, Math.max(w, h) * 1.65)
+      .setDisplaySize(Math.hypot(w, h) * 1.25, Math.hypot(w, h) * 1.25)
       .setAlpha(0)
       .setVisible(false);
 
@@ -4644,7 +4712,7 @@ export class MainScene extends Phaser.Scene {
       if (!this.sys?.isActive()) return;
       const nw = Math.max(1, gameSize.width);
       const nh = Math.max(1, gameSize.height);
-      const span = Math.max(nw, nh) * 1.65;
+      const span = Math.hypot(nw, nh) * 1.25;
       this.fogVignetteSprite?.setDisplaySize(span, span);
     };
     this.scale.on('resize', onWeatherResize);
@@ -4660,6 +4728,7 @@ export class MainScene extends Phaser.Scene {
     // Keep Map Editor completely crisp and unobstructed
     if (this.isEditorMode) {
       for (const s of this.cloudShadowSprites) s.setVisible(false);
+      for (const s of this.fogWispSprites) s.setVisible(false);
       this.fogVignetteSprite?.setVisible(false);
       if (this.weatherGraphicsDirty) {
         g.clear();
@@ -4728,27 +4797,91 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
-    // 2. Non-obstructive radial-cutout atmospheric fog & Serra summit mist (zoom-compensated to fill 100% of viewport)
+    // 2. Atmospheric fog: drifting world-space mist banks + calibrated visibility-pocket fog veil
+    const fogRaw = Phaser.Math.Clamp(lw.fogDensity, 0, 1);
+    const fogVis = fogRaw >= 0.03 ? Math.pow(fogRaw, 0.72) : 0;
+    // Smoothly blend fog color between crisp coastal daylight mist and moonlight-lit night mist
+    const nightT = Phaser.Math.Clamp(snap.lampFactor, 0, 1);
+    const fogR = Math.round(Phaser.Math.Linear(224, 82, nightT));
+    const fogG = Math.round(Phaser.Math.Linear(234, 102, nightT));
+    const fogB = Math.round(Phaser.Math.Linear(244, 126, nightT));
+    const fogTint = (fogR << 16) | (fogG << 8) | fogB;
+
+    if (this.fogWispSprites.length > 0) {
+      if (fogVis >= 0.06) {
+        const cloudOff = this.weatherSystem.getCloudOffset();
+        const midX = cam.midPoint.x;
+        const midY = cam.midPoint.y;
+        const halfViewW = (cam.width * 0.5) * invZoom;
+        const halfViewH = (cam.height * 0.5) * invZoom;
+        const wrapW = Math.max(1800, Math.ceil(halfViewW * 2.15));
+        const wrapH = Math.max(1400, Math.ceil(halfViewH * 2.15));
+        const wispSpecs: ReadonlyArray<[number, number, number, number, number, number]> = [
+          [180, 210, 740, 520, 0.14, 0.55],
+          [920, 480, 820, 560, -0.22, 0.42],
+          [1540, 160, 700, 490, 0.28, 0.65],
+          [420, 1040, 860, 580, -0.11, 0.48],
+          [1280, 960, 760, 520, 0.19, 0.58],
+          [760, 1340, 800, 540, -0.26, 0.38],
+        ];
+        const wispR = Math.round(Phaser.Math.Linear(240, 128, nightT));
+        const wispG = Math.round(Phaser.Math.Linear(246, 150, nightT));
+        const wispB = Math.round(Phaser.Math.Linear(252, 174, nightT));
+        const wispTint = (wispR << 16) | (wispG << 8) | wispB;
+        for (let i = 0; i < this.fogWispSprites.length; i++) {
+          const sprite = this.fogWispSprites[i];
+          const [ox, oy, sw, sh, rot, driftMul] = wispSpecs[i];
+          const rawX = ox + cloudOff.x * driftMul + Math.sin(time * 0.00025 + i * 1.7) * 45;
+          const rawY = oy + cloudOff.y * driftMul + Math.cos(time * 0.00021 + i * 1.3) * 35;
+          const relX = ((((rawX - midX) % wrapW) + wrapW * 1.5) % wrapW) - wrapW * 0.5;
+          const relY = ((((rawY - midY) % wrapH) + wrapH * 1.5) % wrapH) - wrapH * 0.5;
+          if (Math.abs(relX) > halfViewW + sw * 0.55 || Math.abs(relY) > halfViewH + sh * 0.55) {
+            sprite.setVisible(false);
+            continue;
+          }
+          const pulse = 0.86 + Math.sin(time * 0.0009 + i * 2.1) * 0.14;
+          sprite
+            .setVisible(true)
+            .setPosition(midX + relX, midY + relY)
+            .setDisplaySize(sw, sh)
+            .setRotation(rot + Math.sin(time * 0.00018 + i) * 0.08)
+            .setTint(wispTint)
+            .setAlpha(Phaser.Math.Clamp(fogVis * 0.42 * pulse, 0, 0.44));
+        }
+      } else {
+        for (const s of this.fogWispSprites) s.setVisible(false);
+      }
+    }
+
     if (this.fogVignetteSprite) {
-      if (lw.fogDensity >= 0.03) {
-        const isDark = snap.lampFactor > 0.5;
-        const fogTint = isDark ? 0x1e293b : 0xcbd5e1;
-        const breath = Math.sin(time * 0.0012) * 0.035 * lw.fogDensity;
+      if (fogVis >= 0.03) {
+        const breath = Math.sin(time * 0.0012) * 0.025 * fogVis;
         const fogAlpha = Phaser.Math.Clamp(
-          lw.fogDensity * (isDark ? 0.68 : 0.78) + breath,
+          fogVis * Phaser.Math.Linear(0.90, 0.84, nightT) + breath,
           0,
-          0.8,
+          0.92,
         );
-        // Center the clear driving pocket over the truck in scrollFactor(0) camera-scaled coordinates
+        // Center the visibility pocket over the truck (+ slight forward shift when headlights pierce the mist)
         let cx = w * 0.5;
         let cy = h * 0.5;
         if (this.truck) {
-          const truckOffX = Phaser.Math.Clamp(this.truck.body.position.x - cam.midPoint.x, -viewW * 0.25, viewW * 0.25);
-          const truckOffY = Phaser.Math.Clamp(this.truck.body.position.y - cam.midPoint.y, -viewH * 0.25, viewH * 0.25);
+          const beamMode = this.truck.headlightMode;
+          const beamForward = beamMode === 'high' ? 78 : beamMode === 'low' ? 46 : 0;
+          const tAng = this.truck.body.angle;
+          const targetWorldX = this.truck.body.position.x + Math.sin(tAng) * beamForward;
+          const targetWorldY = this.truck.body.position.y - Math.cos(tAng) * beamForward;
+          const truckOffX = Phaser.Math.Clamp(targetWorldX - cam.midPoint.x, -viewW * 0.22, viewW * 0.22);
+          const truckOffY = Phaser.Math.Clamp(targetWorldY - cam.midPoint.y, -viewH * 0.22, viewH * 0.22);
           cx = w * 0.5 + truckOffX;
           cy = h * 0.5 + truckOffY;
         }
-        const span = Math.max(viewW, viewH) * 1.75;
+        // Tight visibility pocket well inside the screen, while guaranteeing 100% corner coverage at any zoom/offset
+        const offsetMargin = Math.hypot(cx - w * 0.5, cy - h * 0.5) * 2.1;
+        const diag = Math.hypot(viewW, viewH);
+        const span = Math.max(
+          diag * Phaser.Math.Linear(1.66, 1.32, fogVis),
+          Math.max(viewW, viewH) * 1.54 + offsetMargin,
+        );
         this.fogVignetteSprite
           .setVisible(true)
           .setPosition(cx, cy)

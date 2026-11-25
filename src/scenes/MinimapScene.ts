@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { World } from '../world/World';
+import { TERRAIN_PAINT_MAP } from '../world/WorldTerrain';
 import { TrailerManager } from '../systems/TrailerManager';
 import { TRUCK_CATALOG } from '../systems/TruckCatalog';
 import { WeatherSystem } from '../systems/WeatherSystem';
@@ -187,6 +188,53 @@ export class MinimapScene extends Phaser.Scene {
       }
     }
 
+    const paintStrokes = terrain.getPaintStrokes();
+    if (paintStrokes.length > 0) {
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      for (const s of paintStrokes) {
+        if (s.points.length === 0) continue;
+        const color = TERRAIN_PAINT_MAP[s.material]?.minimapColor ?? '#64748b';
+        const r = Math.max(1.2, s.radius * scale);
+        ctx.fillStyle = color;
+        ctx.strokeStyle = color;
+        if (s.points.length === 1) {
+          ctx.beginPath();
+          ctx.arc((s.points[0].x - minX) * scaleX, (s.points[0].y - minY) * scaleY, r, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.lineWidth = r * 2;
+          ctx.beginPath();
+          s.points.forEach((p, i) => {
+            const mx = (p.x - minX) * scaleX;
+            const my = (p.y - minY) * scaleY;
+            if (i === 0) ctx.moveTo(mx, my);
+            else ctx.lineTo(mx, my);
+          });
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+
+      if (paintStrokes.some((s) => s.clipWater && s.material !== 'water')) {
+        for (let my = 0; my < mmH; my += px) {
+          for (let mx = 0; mx < mmW; mx += px) {
+            const wx = minX + mx / scaleX;
+            const wy = minY + my / scaleY;
+            const m = terrain.coastMetric(wx, wy);
+            if (m < -60) {
+              ctx.fillStyle = '#091f33';
+              ctx.fillRect(mx, my, px, px);
+            } else if (m < 40) {
+              ctx.fillStyle = '#11344e';
+              ctx.fillRect(mx, my, px, px);
+            }
+          }
+        }
+      }
+    }
+
     const roadColors: Record<string, string> = { asphalt: '#64748b', cobble: '#7c8598', dirt: '#9a7140' };
     const sortedRoads = [...mainScene.roadNetwork.roads].sort((a, b) => (a.layer ?? 0) - (b.layer ?? 0));
     for (const road of sortedRoads) {
@@ -340,12 +388,17 @@ export class MinimapScene extends Phaser.Scene {
     g.lineStyle(2, 0x22d3ee, 0.9);
     g.strokeRect(img.x - 1, img.y - 1, w + 2, h + 2);
 
-    // Subtle regional rain / fog radar overlay clipped cleanly inside the local 6.4 km window
+    // Regional rain / fog radar overlay clipped cleanly inside the local 6.4 km window
     const weatherSys = WeatherSystem.getInstance();
-    if (weatherSys.isDynamicEnabled() && mainScene.garageSystem.getActiveModifier() === 'clear') {
+    const forcedMod = mainScene.garageSystem.getActiveModifier();
+    if (forcedMod === 'rain' || forcedMod === 'fog') {
+      const washColor = forcedMod === 'rain' ? 0x38bdf8 : 0xe2e8f0;
+      g.fillStyle(washColor, forcedMod === 'rain' ? 0.22 : 0.18);
+      g.fillRect(img.x + 1, img.y + 1, w - 2, h - 2);
+    } else if (weatherSys.isDynamicEnabled()) {
       const cells = weatherSys.getCells();
       for (const cell of cells) {
-        if (cell.kind === 'clouds') continue; // keep minimap super crisp; clouds are on Strategic Map
+        if (cell.kind === 'clouds') continue; // keep minimap crisp; clouds are on Strategic Map
         const env = weatherSys.getCellEnvelope(cell);
         if (env <= 0.05) continue;
         const rx = (cell.radiusX / span) * w;
@@ -357,22 +410,26 @@ export class MinimapScene extends Phaser.Scene {
           continue;
         }
         // Sample clipped ellipse points clamped to the minimap frame
-        const color = cell.kind === 'rain' ? 0x38bdf8 : 0xcbd5e1;
-        const alpha = (cell.kind === 'rain' ? 0.24 : 0.20) * env * cell.intensity;
-        const steps = 18;
-        g.fillStyle(color, alpha);
+        const color = cell.kind === 'rain' ? 0x38bdf8 : 0xe2e8f0;
+        const fillAlpha = (cell.kind === 'rain' ? 0.36 : 0.30) * env * cell.intensity;
+        const strokeAlpha = (cell.kind === 'rain' ? 0.78 : 0.66) * env * cell.intensity;
+        const steps = 22;
+        const cosA = Math.cos(cell.angle);
+        const sinA = Math.sin(cell.angle);
+        g.fillStyle(color, fillAlpha);
+        g.lineStyle(1.4, color, strokeAlpha);
         g.beginPath();
         for (let i = 0; i <= steps; i++) {
           const theta = (i / steps) * Math.PI * 2;
           const lx = Math.cos(theta) * rx;
           const ly = Math.sin(theta) * ry;
           const px = Phaser.Math.Clamp(
-            cx + lx * Math.cos(cell.angle) - ly * Math.sin(cell.angle),
+            cx + lx * cosA - ly * sinA,
             img.x + 1,
             img.x + w - 1,
           );
           const py = Phaser.Math.Clamp(
-            cy + lx * Math.sin(cell.angle) + ly * Math.cos(cell.angle),
+            cy + lx * sinA + ly * cosA,
             img.y + 1,
             img.y + h - 1,
           );
@@ -381,6 +438,7 @@ export class MinimapScene extends Phaser.Scene {
         }
         g.closePath();
         g.fillPath();
+        g.strokePath();
       }
     }
 

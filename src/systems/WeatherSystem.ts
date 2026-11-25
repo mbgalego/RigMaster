@@ -78,8 +78,8 @@ export class WeatherSystem {
 
   // Gently evolving global prevailing wind (Atlantic WNW -> ESE)
   private elapsedSec: number = 0;
-  private windVx: number = 22;
-  private windVy: number = 9;
+  private windVx: number = 48;
+  private windVy: number = 19;
 
   // Player-local road wetness memory (0 = dry, 1 = soaked)
   private roadWetness: number = 0;
@@ -91,9 +91,9 @@ export class WeatherSystem {
     fogDensity: 0,
     cloudCover: 0.24,
     roadWetness: 0,
-    windVx: 22,
-    windVy: 9,
-    windSpeedKmh: 19,
+    windVx: 48,
+    windVy: 19,
+    windSpeedKmh: 23,
     surfaceGrip: 1.0,
     dominantCondition: 'clear',
     isForcedOverride: false,
@@ -101,32 +101,22 @@ export class WeatherSystem {
   };
 
   private constructor() {
-    this.loadPreference();
+    this.clearLegacyDisabledFlag();
     this.seedInitialCells();
   }
 
-  private loadPreference(): void {
+  /**
+   * Clears any stale `rigmaster_weather_dynamic_v1=0` saved by earlier builds when
+   * players clicked "Limpo" to cancel forced rain/fog, ensuring every session starts
+   * with live regional weather fronts enabled (consistent with GarageSystem & TimeOfDaySystem).
+   */
+  private clearLegacyDisabledFlag(): void {
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
-        const raw = window.localStorage.getItem(STORAGE_KEY);
-        if (raw === '0' || raw === 'false') {
-          this.dynamicEnabled = false;
-        } else if (raw === '1' || raw === 'true') {
-          this.dynamicEnabled = true;
-        }
+        window.localStorage.removeItem(STORAGE_KEY);
       }
     } catch {
       // Ignore storage failures in restricted contexts
-    }
-  }
-
-  private savePreference(): void {
-    try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.setItem(STORAGE_KEY, this.dynamicEnabled ? '1' : '0');
-      }
-    } catch {
-      // Ignore storage failures
     }
   }
 
@@ -145,12 +135,27 @@ export class WeatherSystem {
         radiusX: 2550,
         radiusY: 1950,
         angle: -0.35,
-        vx: 20,
-        vy: 8,
+        vx: 48,
+        vy: 18,
         intensity: 0.92,
-        lifeSec: 90,
-        maxLifeSec: 420,
+        lifeSec: 60,
+        maxLifeSec: 560,
         seed: 11,
+      },
+      {
+        id: 'rain-central-approach',
+        kind: 'rain',
+        x: 2650,
+        y: 3150,
+        radiusX: 1650,
+        radiusY: 1250,
+        angle: -0.18,
+        vx: 50,
+        vy: 18,
+        intensity: 0.84,
+        lifeSec: 45,
+        maxLifeSec: 520,
+        seed: 17,
       },
       {
         id: 'fog-atlantic-west',
@@ -160,26 +165,26 @@ export class WeatherSystem {
         radiusX: 2250,
         radiusY: 1750,
         angle: 0.22,
-        vx: 15,
-        vy: 6,
+        vx: 38,
+        vy: 14,
         intensity: 0.85,
-        lifeSec: 75,
-        maxLifeSec: 390,
+        lifeSec: 55,
+        maxLifeSec: 580,
         seed: 23,
       },
       {
         id: 'rain-shipyard-ne',
         kind: 'rain',
-        x: 11250,
+        x: 9200,
         y: 1250,
-        radiusX: 2200,
-        radiusY: 1650,
+        radiusX: 2250,
+        radiusY: 1700,
         angle: -0.2,
-        vx: 24,
-        vy: 10,
+        vx: 50,
+        vy: 20,
         intensity: 0.8,
-        lifeSec: 60,
-        maxLifeSec: 360,
+        lifeSec: 40,
+        maxLifeSec: 520,
         seed: 37,
       },
       {
@@ -190,26 +195,26 @@ export class WeatherSystem {
         radiusX: 2950,
         radiusY: 1950,
         angle: 0.14,
-        vx: 26,
-        vy: 9,
+        vx: 54,
+        vy: 19,
         intensity: 0.78,
-        lifeSec: 100,
-        maxLifeSec: 460,
+        lifeSec: 60,
+        maxLifeSec: 600,
         seed: 51,
       },
       {
         id: 'clouds-industrial-se',
         kind: 'clouds',
-        x: 11500,
-        y: 7850,
+        x: 9400,
+        y: 7450,
         radiusX: 2700,
         radiusY: 1950,
         angle: -0.26,
-        vx: 21,
-        vy: 11,
+        vx: 46,
+        vy: 20,
         intensity: 0.72,
-        lifeSec: 80,
-        maxLifeSec: 440,
+        lifeSec: 50,
+        maxLifeSec: 580,
         seed: 67,
       },
       {
@@ -220,11 +225,11 @@ export class WeatherSystem {
         radiusX: 2600,
         radiusY: 1800,
         angle: 0.18,
-        vx: 19,
-        vy: 7,
+        vx: 44,
+        vy: 16,
         intensity: 0.66,
-        lifeSec: 110,
-        maxLifeSec: 450,
+        lifeSec: 70,
+        maxLifeSec: 590,
         seed: 83,
       },
     ];
@@ -252,7 +257,6 @@ export class WeatherSystem {
     if (!enabled) {
       this.roadWetness = 0;
     }
-    this.savePreference();
     this.notify();
   }
 
@@ -269,7 +273,7 @@ export class WeatherSystem {
     return {
       vx: this.windVx,
       vy: this.windVy,
-      speedKmh: Math.round(mag * 0.8),
+      speedKmh: Math.round(mag * 0.45),
     };
   }
 
@@ -290,15 +294,15 @@ export class WeatherSystem {
     const dt = Math.min(Math.max(dtSec, 0), 0.1);
     this.elapsedSec += dt;
 
-    // Gentle prevailing Atlantic wind drift (shifts slowly over ~6 minutes)
-    const windAngle = 0.36 + Math.sin(this.elapsedSec * 0.017) * 0.32;
-    const windSpeed = 24 + Math.sin(this.elapsedSec * 0.029 + 1.2) * 6;
+    // Gentle prevailing Atlantic wind drift (shifts slowly over ~4 minutes; fast enough for fronts to traverse the island)
+    const windAngle = 0.34 + Math.sin(this.elapsedSec * 0.024) * 0.34;
+    const windSpeed = 54 + Math.sin(this.elapsedSec * 0.041 + 1.2) * 14;
     this.windVx = Math.cos(windAngle) * windSpeed;
     this.windVy = Math.sin(windAngle) * windSpeed;
 
-    // Cloud shadows glide slightly faster than the synoptic fronts (aloft breeze)
-    this.cloudOffsetX += this.windVx * 1.45 * dt;
-    this.cloudOffsetY += this.windVy * 1.45 * dt;
+    // Cloud shadows glide smoothly overhead in sync with the synoptic breeze
+    this.cloudOffsetX += this.windVx * 0.95 * dt;
+    this.cloudOffsetY += this.windVy * 0.95 * dt;
 
     if (!this.dynamicEnabled) return;
 
@@ -311,8 +315,9 @@ export class WeatherSystem {
     for (let i = 0; i < this.cells.length; i++) {
       const c = this.cells[i];
       // Blend each cell's velocity gently toward the prevailing wind
-      c.vx += (this.windVx * (c.kind === 'fog' ? 0.65 : 0.95) - c.vx) * Math.min(1, dt * 0.12);
-      c.vy += (this.windVy * (c.kind === 'fog' ? 0.65 : 0.95) - c.vy) * Math.min(1, dt * 0.12);
+      const kindMul = c.kind === 'fog' ? 0.78 : 1.0;
+      c.vx += (this.windVx * kindMul - c.vx) * Math.min(1, dt * 0.16);
+      c.vy += (this.windVy * kindMul - c.vy) * Math.min(1, dt * 0.16);
       c.x += c.vx * dt;
       c.y += c.vy * dt;
       c.lifeSec += dt;
@@ -336,24 +341,25 @@ export class WeatherSystem {
     const h1 = Math.abs(Math.sin(this.nextCellSeq * 12.9898 + cell.seed * 78.233) * 43758.5453) % 1;
     const h2 = Math.abs(Math.sin(this.nextCellSeq * 39.346 + cell.seed * 11.135) * 24634.6345) % 1;
 
-    // Enter from the windward ocean margin (west or north-west edge)
+    // Enter near the windward island coast so fronts traverse the full island instead of expiring in the ocean
     const fromWest = h1 < 0.68;
     cell.id = `${cell.kind}-${this.nextCellSeq}`;
     if (fromWest) {
-      cell.x = worldMinX - 1100;
-      cell.y = worldMinY + h2 * worldSpanH;
+      cell.x = worldMinX - 250;
+      cell.y = worldMinY + h2 * (worldSpanH * 0.85);
     } else {
-      cell.x = worldMinX + h2 * (worldSpanW * 0.85);
-      cell.y = worldMinY - 1100;
+      cell.x = worldMinX + h2 * (worldSpanW * 0.72);
+      cell.y = worldMinY - 250;
     }
-    cell.radiusX = 1900 + h1 * 1200;
-    cell.radiusY = 1450 + h2 * 850;
+    cell.radiusX = 2050 + h1 * 1150;
+    cell.radiusY = 1550 + h2 * 850;
     cell.angle = (h1 - 0.5) * 0.7;
-    cell.intensity = cell.kind === 'clouds' ? 0.62 + h2 * 0.25 : 0.72 + h2 * 0.26;
+    cell.intensity = cell.kind === 'clouds' ? 0.64 + h2 * 0.24 : 0.74 + h2 * 0.24;
     cell.lifeSec = 0;
-    cell.maxLifeSec = 360 + h1 * 180;
-    cell.vx = this.windVx * (cell.kind === 'fog' ? 0.65 : 0.95);
-    cell.vy = this.windVy * (cell.kind === 'fog' ? 0.65 : 0.95);
+    cell.maxLifeSec = 480 + h1 * 200;
+    const kindMul = cell.kind === 'fog' ? 0.78 : 1.0;
+    cell.vx = this.windVx * kindMul;
+    cell.vy = this.windVy * kindMul;
   }
 
   /** Computes the normalized life envelope (0..1) of a cell so fronts fade in/out cleanly. */
@@ -378,7 +384,7 @@ export class WeatherSystem {
     const localWindScale = 1 + altBoost * 0.35;
     const windVx = this.windVx * localWindScale;
     const windVy = this.windVy * localWindScale;
-    const windSpeedKmh = Math.round(Math.hypot(windVx, windVy) * 0.8);
+    const windSpeedKmh = Math.round(Math.hypot(windVx, windVy) * 0.45);
 
     // 1. Forced global overrides from Exam X or Garages / Hubs quick bar
     if (forcedModifier === 'rain') {
@@ -447,7 +453,10 @@ export class WeatherSystem {
       const distSq = lx * lx + ly * ly;
       if (distSq >= 1) continue;
 
-      const falloff = 1 - smoothstep(0.18, 1.0, Math.sqrt(distSq));
+      const distNorm = Math.sqrt(distSq);
+      const falloff = c.kind === 'fog'
+        ? 1 - smoothstep(0.32, 1.0, distNorm)
+        : 1 - smoothstep(0.18, 1.0, distNorm);
       const contrib = falloff * c.intensity * env;
 
       if (c.kind === 'rain') {

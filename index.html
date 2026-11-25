@@ -95,21 +95,24 @@
             retried = true;
             var status = document.getElementById('boot-status');
             if (status) status.textContent = 'A reconectar ao servidor…';
-            setTimeout(function () {
-              if (window.__rigAppMounted) return;
-              import(/* @vite-ignore */ src + (src.indexOf('?') >= 0 ? '&' : '?') + '_retry=' + Date.now())
-                .catch(function (err) {
-                  if (window.__rigAppMounted) return;
-                  var detail = (err && err.message) ? err.message : String(err);
-                  fetch(src, { cache: 'no-store' })
-                    .then(function (r) {
-                      showBootError(detail + ' [' + src + ': HTTP ' + r.status + ' ' + (r.headers.get('content-type') || '') + ']');
-                    })
-                    .catch(function (fe) {
-                      showBootError(detail + ' [fetch: ' + (fe && fe.message ? fe.message : String(fe)) + ']');
-                    });
-                });
-            }, 1500);
+            // Chrome caches failed transitive ES module sub-imports for the lifetime of the document,
+            // so retrying `import()` in the same document fails again even when `/src/main.tsx` is HTTP 200.
+            // Perform one clean fresh-document reload (guarded per 15s) to clear the module map.
+            var now = Date.now();
+            var lastAutoReload = 0;
+            try {
+              lastAutoReload = Number(sessionStorage.getItem('rigmaster_boot_retry_ts') || '0');
+            } catch (_) {}
+            if (!lastAutoReload || now - lastAutoReload > 15000) {
+              try { sessionStorage.setItem('rigmaster_boot_retry_ts', String(now)); } catch (_) {}
+              setTimeout(function () {
+                if (!window.__rigAppMounted) {
+                  window.location.replace(window.location.pathname + '?_r=' + Date.now());
+                }
+              }, 1200);
+              return;
+            }
+            showBootError('Falha temporária ao carregar módulos (' + src + '). Clique em Recarregar para tentar novamente.');
             return;
           }
           showBootError('Falha ao carregar ' + src);

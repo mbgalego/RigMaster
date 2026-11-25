@@ -9,21 +9,22 @@ interface TimeKeyframe {
 }
 
 const KEYFRAMES: TimeKeyframe[] = [
-  { t: 0.00, r: 34, g: 48, b: 78, lamp: 1.0 },   // 00:00 Noite
-  { t: 0.20, r: 44, g: 58, b: 92, lamp: 0.95 },  // 04:48 Madrugada
+  { t: 0.00, r: 34, g: 48, b: 78, lamp: 1.0 },    // 00:00 Noite
+  { t: 0.20, r: 44, g: 58, b: 92, lamp: 0.95 },   // 04:48 Madrugada
   { t: 0.26, r: 230, g: 164, b: 132, lamp: 0.55 }, // 06:15 Amanhecer
   { t: 0.34, r: 248, g: 245, b: 238, lamp: 0.0 },  // 08:10 Manhã
-  { t: 0.52, r: 255, g: 255, b: 255, lamp: 0.0 },  // 12:30 Dia
-  { t: 0.72, r: 252, g: 232, b: 202, lamp: 0.1 },  // 17:15 Tarde
+  { t: 0.50, r: 255, g: 255, b: 255, lamp: 0.0 },  // 12:00 Meio-dia
+  { t: 0.65, r: 255, g: 242, b: 214, lamp: 0.0 },  // 15:36 Tarde quente
+  { t: 0.73, r: 246, g: 198, b: 148, lamp: 0.30 }, // 17:31 Hora dourada
   { t: 0.79, r: 214, g: 126, b: 108, lamp: 0.85 }, // 19:00 Entardecer
-  { t: 0.85, r: 68, g: 72, b: 112, lamp: 1.0 },  // 20:24 Crepúsculo
-  { t: 0.94, r: 34, g: 48, b: 78, lamp: 1.0 },   // 22:34 Noite
-  { t: 1.00, r: 34, g: 48, b: 78, lamp: 1.0 },   // Wrap 24:00
+  { t: 0.85, r: 68, g: 72, b: 112, lamp: 1.0 },   // 20:24 Crepúsculo
+  { t: 0.94, r: 34, g: 48, b: 78, lamp: 1.0 },    // 22:34 Noite
+  { t: 1.00, r: 34, g: 48, b: 78, lamp: 1.0 },    // Wrap 24:00
 ];
 
 const PERIOD_TARGETS: Record<TimePeriod, number> = {
   dawn: 0.26,
-  day: 0.52,
+  day: 0.50,
   dusk: 0.79,
   night: 0.95,
 };
@@ -42,13 +43,13 @@ export interface TimeOfDaySnapshot {
 export class TimeOfDaySystem {
   private static instance: TimeOfDaySystem;
 
-  private dayProgress: number = 0.38;
+  private dayProgress: number = 0.46;
   private targetProgress: number | null = null;
   // In-game 24h day/night cycle is the default mode.
   private autoCycle: boolean = true;
   private realTime: boolean = false;
-  // 1 full 24h in-game cycle in 24 real minutes (1440s -> 1 real min = 1 in-game hour)
-  private cycleSpeedPerSec: number = 1 / 1440;
+  // 1 full 24h in-game cycle in 12 real minutes (720s -> 30 real sec = 1 in-game hour)
+  private cycleSpeedPerSec: number = 1 / 720;
   private listeners: Array<() => void> = [];
   private lastNotifiedPeriod: TimePeriod = 'day';
   private lastNotifiedMinute: number = -1;

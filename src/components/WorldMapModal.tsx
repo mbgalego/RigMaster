@@ -483,17 +483,67 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
               <button
                 type="button"
                 data-testid="btn-world-map-weather-toggle"
-                onClick={() => setShowWeatherRadar((prev) => !prev)}
-                title={showWeatherRadar ? 'Ocultar Radar Meteorológico' : 'Mostrar Radar Meteorológico'}
+                onClick={() => {
+                  if (!weatherSys.isDynamicEnabled() && activeForcedWeather === 'clear') {
+                    weatherSys.setDynamicEnabled(true);
+                    setShowWeatherRadar(true);
+                    setWeatherTick((t) => t + 1);
+                  } else {
+                    setShowWeatherRadar((prev) => !prev);
+                  }
+                }}
+                title={
+                  !weatherSys.isDynamicEnabled() && activeForcedWeather === 'clear'
+                    ? 'Meteorologia dinâmica desativada — clicar para ativar'
+                    : showWeatherRadar
+                      ? 'Ocultar Radar Meteorológico'
+                      : 'Mostrar Radar Meteorológico'
+                }
                 aria-label="Alternar Radar Meteorológico"
                 className={`p-1.5 rounded transition-colors ${
-                  showWeatherRadar
-                    ? 'text-sky-300 bg-sky-500/15 hover:bg-sky-500/25'
+                  showWeatherRadar && (weatherSys.isDynamicEnabled() || activeForcedWeather === 'rain' || activeForcedWeather === 'fog')
+                    ? 'text-sky-300 bg-sky-500/20 hover:bg-sky-500/30'
                     : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
                 }`}
               >
                 <Cloud className="w-3.5 h-3.5" />
               </button>
+            </div>
+
+            {/* Live Weather Radar Status Badge (bottom-left of Strategic Map) */}
+            <div className="absolute bottom-3.5 left-3.5 sm:bottom-5 sm:left-5 z-10 flex items-center gap-2 bg-slate-950/90 border border-slate-700/80 rounded-lg px-2.5 py-1.5 shadow-lg backdrop-blur-sm text-[10px] sm:text-[11px] font-mono text-slate-300">
+              {activeForcedWeather === 'rain' || activeForcedWeather === 'fog' ? (
+                <span className="text-sky-300 font-bold">
+                  Clima Fixo: {activeForcedWeather === 'rain' ? 'Chuva' : 'Nevoeiro'}
+                </span>
+              ) : weatherSys.isDynamicEnabled() ? (
+                <>
+                  <span className="inline-flex items-center gap-1 text-sky-300">
+                    <span className="w-2 h-2 rounded-full bg-sky-400" />
+                    Chuva
+                  </span>
+                  <span className="inline-flex items-center gap-1 text-slate-200">
+                    <span className="w-2 h-2 rounded-full bg-slate-300" />
+                    Nevoeiro
+                  </span>
+                  <span className="text-slate-500">·</span>
+                  <span className="text-cyan-300 tabular-nums">
+                    Vento {weatherSys.getWindVector().speedKmh} km/h
+                  </span>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    weatherSys.setDynamicEnabled(true);
+                    setShowWeatherRadar(true);
+                    setWeatherTick((t) => t + 1);
+                  }}
+                  className="text-amber-300 hover:text-amber-200 font-semibold"
+                >
+                  Clima Fixo (Limpo) · Ativar Dinâmico
+                </button>
+              )}
             </div>
 
             <svg
@@ -510,18 +560,18 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
             >
               <defs>
                 <radialGradient id="wm-rain-grad" cx="50%" cy="50%" r="50%">
-                  <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.46" />
-                  <stop offset="55%" stopColor="#0284c7" stopOpacity="0.28" />
+                  <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.60" />
+                  <stop offset="55%" stopColor="#0284c7" stopOpacity="0.38" />
                   <stop offset="100%" stopColor="#0284c7" stopOpacity="0" />
                 </radialGradient>
                 <radialGradient id="wm-fog-grad" cx="50%" cy="50%" r="50%">
-                  <stop offset="0%" stopColor="#e2e8f0" stopOpacity="0.42" />
-                  <stop offset="60%" stopColor="#94a3b8" stopOpacity="0.22" />
+                  <stop offset="0%" stopColor="#f1f5f9" stopOpacity="0.54" />
+                  <stop offset="60%" stopColor="#cbd5e1" stopOpacity="0.30" />
                   <stop offset="100%" stopColor="#94a3b8" stopOpacity="0" />
                 </radialGradient>
                 <radialGradient id="wm-cloud-grad" cx="50%" cy="50%" r="50%">
-                  <stop offset="0%" stopColor="#f8fafc" stopOpacity="0.34" />
-                  <stop offset="58%" stopColor="#cbd5e1" stopOpacity="0.16" />
+                  <stop offset="0%" stopColor="#f8fafc" stopOpacity="0.36" />
+                  <stop offset="58%" stopColor="#cbd5e1" stopOpacity="0.18" />
                   <stop offset="100%" stopColor="#cbd5e1" stopOpacity="0" />
                 </radialGradient>
               </defs>
@@ -647,9 +697,9 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                             ry={cell.radiusY}
                             fill={fillUrl}
                             stroke={strokeColor}
-                            strokeWidth={cell.kind === 'clouds' ? 16 * s : 28 * s}
-                            strokeDasharray={cell.kind === 'rain' ? `${140 * s} ${90 * s}` : undefined}
-                            strokeOpacity={cell.kind === 'clouds' ? 0.2 : 0.45}
+                            strokeWidth={cell.kind === 'clouds' ? 20 * s : 36 * s}
+                            strokeDasharray={cell.kind === 'rain' ? `${150 * s} ${90 * s}` : undefined}
+                            strokeOpacity={cell.kind === 'clouds' ? 0.28 : 0.68}
                           />
                           {/* Secondary organic cloud lobe for natural silhouette */}
                           <ellipse
@@ -658,20 +708,20 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                             rx={cell.radiusX * 0.62}
                             ry={cell.radiusY * 0.58}
                             fill={fillUrl}
-                            opacity={0.75}
+                            opacity={0.78}
                           />
                           {label && (
                             <text
                               x={0}
                               y={0}
                               textAnchor="middle"
-                              fill={cell.kind === 'rain' ? '#7dd3fc' : '#e2e8f0'}
-                              fontSize={190 * s}
-                              fontWeight="700"
-                              opacity={0.85}
+                              fill={cell.kind === 'rain' ? '#bae6fd' : '#f8fafc'}
+                              fontSize={220 * s}
+                              fontWeight="800"
+                              opacity={0.95}
                               style={{ paintOrder: 'stroke' }}
                               stroke="#0b1927"
-                              strokeWidth={45 * s}
+                              strokeWidth={55 * s}
                               strokeLinejoin="round"
                               transform={`rotate(${(-deg).toFixed(1)})`}
                             >

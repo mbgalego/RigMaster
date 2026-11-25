@@ -699,6 +699,22 @@ export class WorldObjects {
             bodies.push(this.scene.matter.add.circle(px, py, Math.min(part.w, part.h) * 0.225, {
               ...staticOpts, angle: pa,
             }) as unknown as MatterJS.BodyType);
+          } else if (part.type === 'pine_tree') {
+            // Apenas o tronco central é sólido (a copa passa por cima dos veículos)
+            bodies.push(this.scene.matter.add.circle(px, py, Math.max(7, Math.min(part.w, part.h) * 0.14), {
+              ...staticOpts,
+              label: 'obstacle_pine_tree',
+            }) as unknown as MatterJS.BodyType);
+          } else if (part.type === 'wind_turbine') {
+            bodies.push(this.scene.matter.add.circle(px, py, Math.max(18, Math.min(part.w, part.h) * 0.22), {
+              ...staticOpts,
+              label: 'obstacle_wind_turbine',
+            }) as unknown as MatterJS.BodyType);
+          } else if (part.type === 'rock_outcrop') {
+            bodies.push(this.scene.matter.add.circle(px, py, Math.max(16, Math.min(part.w, part.h) * 0.42), {
+              ...staticOpts,
+              label: 'obstacle_rock_outcrop',
+            }) as unknown as MatterJS.BodyType);
           } else {
             bodies.push(this.scene.matter.add.rectangle(px, py, part.w, part.h, {
               ...staticOpts, angle: pa,
@@ -762,8 +778,8 @@ export class WorldObjects {
           collisionFilter: { category: COLLISION_CAT.GROUND_OBS, mask: COLLISION_MASK.GROUND_OBS },
         }) as unknown as MatterJS.BodyType;
       } else if (o.type === 'pine_tree') {
-        // Only the narrow trunk is solid (canopy overhangs naturally)
-        body = this.scene.matter.add.circle(o.x, o.y, Math.max(8, Math.min(o.w, o.h) * 0.16), {
+        // Only the narrow trunk is solid (canopy overhangs naturally above trucks)
+        body = this.scene.matter.add.circle(o.x, o.y, Math.max(7, Math.min(o.w, o.h) * 0.14), {
           isStatic: true,
           friction: 0.8,
           restitution: 0.1,
@@ -1685,6 +1701,11 @@ export class WorldObjects {
     isEditorMode: boolean,
     dtSec: number,
     margin = 220,
+    timeSec = 0,
+    windVx = 22,
+    windVy = 9,
+    windSpeedKmh = 18,
+    rainIntensity = 0,
   ) {
     const hasP1 = SpriteRegistry.hasTexture(this.scene, 'prop_pine_alpine_1');
     const hasP2 = SpriteRegistry.hasTexture(this.scene, 'prop_pine_alpine_2');
@@ -1695,6 +1716,16 @@ export class WorldObjects {
     const seen = new Set<string>();
     const lerpK = Math.min(1, Math.max(0.1, dtSec * 9));
 
+    // Precompute normalized wind direction & gentle sway amplitude once per frame (0 allocations)
+    const windMag = Math.hypot(windVx, windVy);
+    const wDirX = windMag > 0.01 ? windVx / windMag : 0.92;
+    const wDirY = windMag > 0.01 ? windVy / windMag : 0.39;
+    const wPerpX = -wDirY;
+    const wPerpY = wDirX;
+    const windNorm = Phaser.Math.Clamp((windSpeedKmh - 6) / 34, 0, 1);
+    const swayPx = isEditorMode ? 0 : Phaser.Math.Clamp(1.4 + windNorm * 1.3 + rainIntensity * 0.75, 0, 3.4);
+    const rotAmp = isEditorMode ? 0 : Phaser.Math.Clamp(0.024 + windNorm * 0.024 + rainIntensity * 0.016, 0, 0.068);
+
     const updatePine = (o: WorldObject) => {
       if (seen.has(o.id)) return;
       seen.add(o.id);
@@ -1704,7 +1735,26 @@ export class WorldObjects {
         ? (idHash % 2 === 0 ? 'prop_pine_alpine_1' : 'prop_pine_alpine_2')
         : (hasP1 ? 'prop_pine_alpine_1' : 'prop_pine_alpine_2');
       const canopySize = Math.max(o.w, o.h) * 1.18;
-      const rot = o.angle + ((idHash % 360) * Math.PI) / 180;
+      const baseRot = o.angle + ((idHash % 360) * Math.PI) / 180;
+
+      // Deterministic spatially-phased breeze & gust wave (keeps crowns anchored over their trunks)
+      let ox = o.x;
+      let oy = o.y;
+      let rot = baseRot;
+      let sizeScale = 1;
+      if (swayPx > 0.01) {
+        const gustPhase = (o.x * wDirX + o.y * wDirY) * 0.0075 - timeSec * 1.95;
+        const gust = 0.55 + 0.45 * Math.sin(gustPhase + Math.sin((o.x * wPerpX + o.y * wPerpY) * 0.0045 + timeSec * 0.65));
+        const treePhase = timeSec * (2.25 + (idHash % 7) * 0.14) + o.x * 0.036 + o.y * 0.029 + (idHash % 19) * 0.37;
+        const primary = Math.sin(treePhase);
+        const flutter = Math.sin(treePhase * 1.73 + 1.1);
+        const along = (0.34 * gust + 0.66 * primary * (0.65 + 0.35 * gust)) * swayPx;
+        const across = flutter * swayPx * 0.28;
+        ox += wDirX * along + wPerpX * across;
+        oy += wDirY * along + wPerpY * across;
+        rot += (primary * 0.72 + flutter * 0.28) * rotAmp * (0.65 + 0.35 * gust);
+        sizeScale = 1 + primary * 0.013 * (0.6 + 0.4 * windNorm);
+      }
 
       // Keep branches vividly overhanging over the truck, with gentle translucency only when
       // the cab itself slides directly beneath the boughs so the player never loses orientation.
@@ -1721,7 +1771,7 @@ export class WorldObjects {
       let entry = this.pineCanopySprites.get(o.id);
       if (!entry) {
         const canopy = this.scene.add
-          .image(o.x, o.y, texKey)
+          .image(ox, oy, texKey)
           .setOrigin(0.5, 0.5)
           .setDepth(13.9)
           .setAlpha(targetAlpha)
@@ -1732,9 +1782,10 @@ export class WorldObjects {
         entry.alpha += (targetAlpha - entry.alpha) * lerpK;
       }
 
+      const drawSize = canopySize * sizeScale;
       entry.canopy
-        .setPosition(o.x, o.y)
-        .setDisplaySize(canopySize, canopySize)
+        .setPosition(ox, oy)
+        .setDisplaySize(drawSize, drawSize)
         .setRotation(rot)
         .setAlpha(entry.alpha)
         .setVisible(true);
@@ -3763,7 +3814,7 @@ export class WorldObjects {
             // Bake ground cast shadow + sturdy wooden trunk at ground depth (depth 3, matching the
             // solid Matter.js trunk collider); the overhead canopy sprite renders above trucks at depth 13.9!
             const r = Math.min(o.w, o.h) * 0.5;
-            const trunkR = Math.max(8, Math.min(o.w, o.h) * 0.16);
+            const trunkR = Math.max(7, Math.min(o.w, o.h) * 0.14);
             g.fillStyle(0x020617, 0.30);
             g.fillCircle(o.x + 8, o.y + 10, r * 0.90);
             g.fillStyle(0x020617, 0.22);

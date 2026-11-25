@@ -16,6 +16,11 @@ import type { TrailerType } from './entities/Trailer';
 import type { RoadSurface } from './systems/RoadNetwork';
 import type { AddObjectSpec } from './scenes/EditorScene';
 import { compoundParts } from './world/WorldObjects';
+import {
+  TERRAIN_PAINT_CATALOG,
+  type TerrainPaintMaterial,
+  type TerrainPaintSoftness,
+} from './world/WorldTerrain';
 import { createCleanTruckDamage } from './systems/DamageSystem';
 import { DEFAULT_TRUCK_UPGRADES, TRUCK_CATALOG, type UpgradeSlot } from './systems/TruckCatalog';
 import {
@@ -104,6 +109,10 @@ import {
   Cloud,
   CloudRain,
   CloudFog,
+  Paintbrush,
+  Eraser,
+  Waves,
+  Trash2,
 } from 'lucide-react';
 
 /** Catálogo do Criar, organizado por categorias — cada categoria tem o seu
@@ -328,11 +337,28 @@ export default function App() {
   const [hubs, setHubs] = useState<HubData[]>([]);
   const [activeWeather, setActiveWeather] = useState<WeatherModifier>('clear');
   const [weatherDynamic, setWeatherDynamic] = useState<boolean>(() => WeatherSystem.getInstance().isDynamicEnabled());
-  const [editorTool, setEditorTool] = useState<'pan' | 'road' | 'object' | 'spawn' | 'add' | 'compound'>('pan');
-  const editorToolRef = useRef<'pan' | 'road' | 'object' | 'spawn' | 'add' | 'compound'>('pan');
+  const [editorTool, setEditorTool] = useState<'pan' | 'road' | 'terrain' | 'object' | 'spawn' | 'add' | 'compound'>('pan');
+  const editorToolRef = useRef<'pan' | 'road' | 'terrain' | 'object' | 'spawn' | 'add' | 'compound'>('pan');
   // Catalog selection for the 'add' (Criar) tool
   const [addType, setAddType] = useState<AddObjectSpec>({ type: 'wall', w: 220, h: 26, label: 'Muro' });
   const [addCat, setAddCat] = useState<string>('barreiras');
+
+  // Terrain brush tool live state (polled from EditorScene)
+  const [terrainUI, setTerrainUI] = useState<{
+    material: TerrainPaintMaterial;
+    mode: 'paint' | 'erase';
+    radius: number;
+    softness: TerrainPaintSoftness;
+    clipWater: boolean;
+    strokeCount: number;
+  }>({
+    material: 'concrete',
+    mode: 'paint',
+    radius: 96,
+    softness: 'soft',
+    clipWater: true,
+    strokeCount: 0,
+  });
 
   // Road tool live state (polled from EditorScene in the telemetry loop)
   const [roadUI, setRoadUI] = useState<{
@@ -700,6 +726,7 @@ export default function App() {
       if (edScene && scene?.isEditorMode) {
         setRoadUI(edScene.getRoadUIState());
         setObjectUI(edScene.getObjectUIState());
+        setTerrainUI(edScene.getTerrainUIState());
         // The scene can switch tools by itself (e.g. Criar → Objectos after placing)
         if (edScene.editorTool !== editorToolRef.current) {
           editorToolRef.current = edScene.editorTool;
@@ -934,7 +961,7 @@ export default function App() {
     scene.installTruckUpgrade(slot, value as never);
   };
 
-  const handleSetEditorTool = (tool: 'pan' | 'road' | 'object' | 'spawn' | 'add' | 'compound') => {
+  const handleSetEditorTool = (tool: 'pan' | 'road' | 'terrain' | 'object' | 'spawn' | 'add' | 'compound') => {
     setEditorTool(tool);
     editorToolRef.current = tool;
     const edScene = getEditorScene();
@@ -1578,6 +1605,29 @@ export default function App() {
                           {telemetry.timeRealTime ? 'ON' : 'OFF'}
                         </span>
                       </button>
+                      <button
+                        data-testid="btn-menu-weather-dynamic"
+                        onClick={() => {
+                          if (weatherDynamic && activeWeather === 'clear') {
+                            WeatherSystem.getInstance().setDynamicEnabled(false);
+                          } else {
+                            handleSetDynamicWeather();
+                          }
+                        }}
+                        className={`mt-1 w-full text-left px-2 py-1.5 rounded flex items-center justify-between transition border ${
+                          weatherDynamic && activeWeather === 'clear'
+                            ? 'bg-sky-500/20 border-sky-400/60 text-sky-200 font-bold'
+                            : 'bg-slate-900/50 border-slate-800/80 text-slate-300 hover:bg-slate-900'
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5 text-[11px]">
+                          <Cloud className="w-3.5 h-3.5 text-sky-400" />
+                          <span>Meteorologia Dinâmica</span>
+                        </span>
+                        <span className="text-[10px] font-mono">
+                          {weatherDynamic && activeWeather === 'clear' ? 'ON' : activeWeather !== 'clear' ? 'FIXO' : 'OFF'}
+                        </span>
+                      </button>
                     </div>
                   );
                 })()}
@@ -2003,6 +2053,21 @@ export default function App() {
                 <span className="ed-fs-xs font-bold mt-0.5">Estrada</span>
               </button>
 
+              {/* Tool: Terreno (freeform surface brush + eraser with automatic shoreline clipping) */}
+              <button
+                data-testid="btn-editor-terrain"
+                onClick={() => handleSetEditorTool('terrain')}
+                className={`w-[66px] h-14 md:w-[80px] md:h-16 rounded-lg flex flex-col items-center justify-center transition border shrink-0 ${
+                  editorTool === 'terrain'
+                    ? 'bg-teal-400 text-black border-teal-200 shadow-md shadow-teal-500/40 animate-pulse'
+                    : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+                }`}
+                title="Pintar Terreno — Pincel livre para betão, alcatrão, calçada, terra, areia, relva, floresta, rocha ou água"
+              >
+                <Paintbrush className="ed-icon" />
+                <span className="ed-fs-xs font-bold mt-0.5">Terreno</span>
+              </button>
+
               {/* Tool: Objectos (select / move / rotate / delete / duplicate any prefab) */}
               <button
                 onClick={() => handleSetEditorTool('object')}
@@ -2171,6 +2236,192 @@ export default function App() {
                   </button>
                 ))}
                 <div className="ed-fs-sm text-slate-500 px-1 pt-0.5 shrink-0">clica no mapa para colocar</div>
+              </div>
+            )}
+
+            {/* FLYOUT — Pincel de Terreno (pintar superfícies arbitrárias + borracha + corte de costa) */}
+            {editorTool === 'terrain' && (
+              <div
+                data-testid="panel-editor-terrain"
+                className="absolute top-2 left-[74px] md:left-[90px] z-40 w-60 sm:w-64 max-w-[calc(100vw-4.75rem)] max-h-[calc(100dvh-9rem)] overflow-y-auto overflow-x-hidden no-scrollbar overscroll-contain touch-pan-y bg-slate-950/95 border border-teal-400/60 rounded-xl shadow-2xl backdrop-blur-md p-2 flex flex-col gap-2"
+              >
+                <div className="flex items-center justify-between px-0.5">
+                  <span className="ed-fs-sm font-mono uppercase tracking-wider text-teal-300 font-bold">
+                    Pincel Terreno
+                  </span>
+                  <span className="ed-fs-xs font-mono text-slate-400">
+                    {terrainUI.strokeCount} {terrainUI.strokeCount === 1 ? 'traço' : 'traços'}
+                  </span>
+                </div>
+
+                {/* Mode: Pintar vs Apagar */}
+                <div className="grid grid-cols-2 gap-1">
+                  <button
+                    type="button"
+                    data-testid="btn-terrain-mode-paint"
+                    onClick={() => getEditorScene()?.setTerrainBrushMode('paint')}
+                    className={`flex items-center justify-center gap-1.5 ed-fs font-bold py-1.5 px-2 rounded border transition ${
+                      terrainUI.mode === 'paint'
+                        ? 'bg-teal-400 text-slate-950 border-teal-200'
+                        : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+                    }`}
+                  >
+                    <Paintbrush className="w-3.5 h-3.5" />
+                    <span>Pintar</span>
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="btn-terrain-mode-erase"
+                    onClick={() => getEditorScene()?.setTerrainBrushMode('erase')}
+                    className={`flex items-center justify-center gap-1.5 ed-fs font-bold py-1.5 px-2 rounded border transition ${
+                      terrainUI.mode === 'erase'
+                        ? 'bg-rose-500 text-white border-rose-300'
+                        : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+                    }`}
+                  >
+                    <Eraser className="w-3.5 h-3.5" />
+                    <span>Apagar</span>
+                  </button>
+                </div>
+
+                {/* Surface Material Palette (10 seamless surfaces) */}
+                <div>
+                  <div className="ed-fs-xs font-mono uppercase tracking-wider text-slate-400 mb-1 px-0.5">
+                    Textura de Superfície
+                  </div>
+                  <div className="grid grid-cols-2 gap-1">
+                    {TERRAIN_PAINT_CATALOG.map((mat) => {
+                      const active = terrainUI.mode === 'paint' && terrainUI.material === mat.id;
+                      return (
+                        <button
+                          key={mat.id}
+                          type="button"
+                          data-testid={`btn-terrain-mat-${mat.id}`}
+                          onClick={() => getEditorScene()?.setTerrainBrushMaterial(mat.id)}
+                          className={`flex items-center gap-1.5 px-2 py-1.5 rounded border text-left transition ${
+                            active
+                              ? 'bg-teal-500/25 border-teal-300 text-white shadow-sm shadow-teal-500/30'
+                              : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:bg-slate-800 hover:text-white'
+                          }`}
+                          title={`${mat.label} · Aderência ${Math.round(mat.grip * 100)}%${mat.clearsTrees ? ' · Limpa árvores' : ''}`}
+                        >
+                          <span
+                            className="w-3.5 h-3.5 rounded-sm border border-white/25 shrink-0"
+                            style={{ backgroundColor: mat.swatch }}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="ed-fs-xs font-bold leading-tight truncate">{mat.shortLabel}</div>
+                            <div className="text-[9px] font-mono text-slate-400 leading-tight">
+                              {Math.round(mat.grip * 100)}% ader.
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Brush Radius Slider & Quick Presets */}
+                <div className="bg-slate-900/70 border border-slate-800 rounded-lg p-2 flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="ed-fs-xs font-mono uppercase text-slate-400">Raio do Pincel</span>
+                    <span className="ed-fs-xs font-mono font-bold text-teal-300">{terrainUI.radius} px</span>
+                  </div>
+                  <input
+                    type="range"
+                    data-testid="input-terrain-radius"
+                    min={24}
+                    max={360}
+                    step={8}
+                    value={terrainUI.radius}
+                    onChange={(e) => getEditorScene()?.setTerrainBrushRadius(Number(e.target.value))}
+                    className="w-full accent-teal-400 cursor-pointer h-1.5"
+                  />
+                  <div className="grid grid-cols-4 gap-1">
+                    {[48, 96, 180, 300].map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => getEditorScene()?.setTerrainBrushRadius(r)}
+                        className={`py-0.5 rounded text-[10px] font-mono font-bold border transition ${
+                          Math.abs(terrainUI.radius - r) <= 8
+                            ? 'bg-teal-400/20 text-teal-200 border-teal-400/70'
+                            : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'
+                        }`}
+                      >
+                        {r}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Edge Softness + Water Clipping */}
+                <div className="flex flex-col gap-1.5">
+                  <div className="grid grid-cols-2 gap-1">
+                    <button
+                      type="button"
+                      data-testid="btn-terrain-soft"
+                      onClick={() => getEditorScene()?.setTerrainBrushSoftness('soft')}
+                      className={`py-1 px-2 rounded ed-fs-xs font-bold border transition ${
+                        terrainUI.softness === 'soft'
+                          ? 'bg-slate-700 text-white border-teal-400/80'
+                          : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
+                      }`}
+                    >
+                      Borda Suave
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="btn-terrain-hard"
+                      onClick={() => getEditorScene()?.setTerrainBrushSoftness('hard')}
+                      className={`py-1 px-2 rounded ed-fs-xs font-bold border transition ${
+                        terrainUI.softness === 'hard'
+                          ? 'bg-slate-700 text-white border-teal-400/80'
+                          : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
+                      }`}
+                    >
+                      Borda Nítida
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    data-testid="btn-terrain-clip-water"
+                    onClick={() => getEditorScene()?.setTerrainBrushClipWater(!terrainUI.clipWater)}
+                    className={`flex items-center justify-between px-2 py-1.5 rounded border ed-fs-xs font-bold transition ${
+                      terrainUI.clipWater
+                        ? 'bg-cyan-500/20 text-cyan-200 border-cyan-400/60'
+                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
+                    }`}
+                    title="Quando ativo, a pintura nunca ultrapassa margens, lagos ou oceano (exceto ao pintar Água)"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Waves className="w-3.5 h-3.5" />
+                      <span>Respeitar Costa / Água</span>
+                    </span>
+                    <span className="font-mono text-[10px] uppercase">
+                      {terrainUI.clipWater ? 'ON' : 'OFF'}
+                    </span>
+                  </button>
+                </div>
+
+                {/* Clear All (undoable via Ctrl+Z) */}
+                <button
+                  type="button"
+                  data-testid="btn-terrain-clear-all"
+                  disabled={terrainUI.strokeCount === 0}
+                  onClick={() => getEditorScene()?.clearAllTerrainPaints()}
+                  className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded border border-red-900/70 bg-red-950/60 text-red-300 hover:bg-red-900/70 disabled:opacity-35 disabled:cursor-not-allowed ed-fs-xs font-bold transition"
+                  title="Apaga todas as pinturas de terreno (reversível com Desfazer / Ctrl+Z)"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Limpar Pintura</span>
+                </button>
+
+                <div className="text-[10px] text-slate-400 leading-snug px-0.5">
+                  Arrasta para pintar · <span className="font-mono text-slate-300">[ ]</span> tamanho ·{' '}
+                  <span className="font-mono text-slate-300">X</span> borracha · botão direito move o mapa
+                </div>
               </div>
             )}
             {/* FLYOUT — submenu da ferramenta Estrada (superfície, sentido, largura, tangente) */}

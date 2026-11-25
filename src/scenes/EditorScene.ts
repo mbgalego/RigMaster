@@ -5,6 +5,7 @@ import { RoadNetwork, RoadData, RoadPoint, RoadSurface, RoadSnapResult, RoadSamp
 import { IntersectionSystem, IntersectionNode, TrafficLightSpec } from '../systems/IntersectionSystem';
 import { WorldObject, WObjType, CompoundPart, compoundParts, isCompound, compoundBoundsFromParts } from '../world/WorldObjects';
 import { World } from '../world/World';
+import { TerrainPaintMaterial, TerrainPaintSoftness, TERRAIN_PAINT_MAP } from '../world/WorldTerrain';
 import { TrailerManager } from '../systems/TrailerManager';
 
 /** Catalog entry for the 'add' tool (chosen in the UI panel). */
@@ -27,7 +28,7 @@ export class EditorScene extends Phaser.Scene {
   public mainScene!: MainScene;
   public garageSystem!: GarageSystem;
 
-  public editorTool: 'pan' | 'road' | 'object' | 'spawn' | 'add' | 'compound' = 'pan';
+  public editorTool: 'pan' | 'road' | 'terrain' | 'object' | 'spawn' | 'add' | 'compound' = 'pan';
 
   private isDraggingPan: boolean = false;
   private lastDragX: number = 0;
@@ -104,6 +105,14 @@ export class EditorScene extends Phaser.Scene {
   // ---- Add tool (place new objects from the catalog) ----
   public addType: AddObjectSpec = { type: 'wall', w: 220, h: 26, label: 'Muro' };
 
+  // ---- Terrain brush tool state ----
+  public terrainBrushMaterial: TerrainPaintMaterial = 'concrete';
+  public terrainBrushMode: 'paint' | 'erase' = 'paint';
+  public terrainBrushRadius: number = 96;
+  public terrainBrushSoftness: TerrainPaintSoftness = 'soft';
+  public terrainBrushClipWater: boolean = true;
+  private terrainDrag: { points: Array<{ x: number; y: number }> } | null = null;
+
   /** Rotação com snap para ângulos múltiplos de 45° (ativo por padrão). */
   public rotationSnap: boolean = true;
 
@@ -154,6 +163,7 @@ export class EditorScene extends Phaser.Scene {
     this.selectedPointIndex = null;
     this.roadDrag = null;
     this.pendingRoad = null;
+    this.terrainDrag = null;
     this.rightClickPending = null;
     this.isolateSelectedRoad = false;
     this.overlappingRoads = [];
@@ -171,6 +181,7 @@ export class EditorScene extends Phaser.Scene {
     this.selectedObject = null;
     this.objectDrag = null;
     this.compoundDrag = null;
+    this.terrainDrag = null;
     this.selectedRoad = null;
     this.selectedPointIndex = null;
     this.roadDrag = null;
@@ -357,7 +368,8 @@ export class EditorScene extends Phaser.Scene {
         const gs = this.gesture;
         if (!gs.decided) {
           const moved = Phaser.Math.Distance.Between(pointer.x, pointer.y, gs.screenX, gs.screenY);
-          if (moved > 12) {
+          const threshold = this.editorTool === 'terrain' ? 4 : 12;
+          if (moved > threshold) {
             gs.decided = true;
             gs.toolDrag = this.tryStartToolDrag(gs.worldX, gs.worldY);
             if (!gs.toolDrag) {
@@ -406,6 +418,7 @@ export class EditorScene extends Phaser.Scene {
       if (this.gesture && !this.gesture.isPan && !this.gesture.toolDrag) {
         const gs = this.gesture;
         if (this.editorTool === 'road') this.roadTap(gs.worldX, gs.worldY);
+        else if (this.editorTool === 'terrain') this.terrainTap(gs.worldX, gs.worldY);
         else if (this.editorTool === 'object') this.objectTap(gs.worldX, gs.worldY);
         else if (this.editorTool === 'spawn') this.spawnTap(gs.worldX, gs.worldY);
         else if (this.editorTool === 'add') this.addTap(gs.worldX, gs.worldY);
@@ -414,6 +427,10 @@ export class EditorScene extends Phaser.Scene {
       // Fim de um marquee da ferramenta Composto → consolidar
       if (this.gesture && this.gesture.toolDrag && this.editorTool === 'compound') {
         this.finishCompoundDrag();
+      }
+      // Fim de um traço da ferramenta Terreno → gravar e re-renderizar chunks tocados
+      if (this.gesture && this.gesture.toolDrag && this.editorTool === 'terrain') {
+        this.finishTerrainDrag();
       }
       this.cancelGesture();
       this.lastSnapResult = null;
@@ -436,11 +453,13 @@ export class EditorScene extends Phaser.Scene {
     this.roadDrag = null;
     this.objectDrag = null;
     this.compoundDrag = null;
+    this.terrainDrag = null;
   }
 
   /** On first significant move of a gesture: begin a tool drag when the press started on something editable. */
   private tryStartToolDrag(x: number, y: number): boolean {
     if (this.editorTool === 'road') return this.tryStartRoadDrag(x, y);
+    if (this.editorTool === 'terrain') return this.tryStartTerrainDrag(x, y);
     if (this.editorTool === 'object') return this.tryStartObjectDrag(x, y);
     if (this.editorTool === 'compound') return this.tryStartCompoundDrag(x, y);
     return false; // pan / spawn / add gestures become a pan
@@ -448,6 +467,7 @@ export class EditorScene extends Phaser.Scene {
 
   private applyToolDrag(wp: { x: number; y: number }) {
     if (this.roadDrag) this.applyRoadDrag(wp);
+    else if (this.terrainDrag) this.applyTerrainDrag(wp);
     else if (this.objectDrag) this.applyObjectDrag(wp);
     else if (this.compoundDrag) this.applyCompoundDrag(wp);
   }
@@ -507,6 +527,9 @@ export class EditorScene extends Phaser.Scene {
         this.selectedObject = null;
       } else if (this.editorTool === 'compound') {
         this.selectedObject = null;
+      } else if (this.editorTool === 'terrain') {
+        if (this.terrainDrag) this.terrainDrag = null;
+        else if (this.terrainBrushMode === 'erase') this.terrainBrushMode = 'paint';
       }
     });
     this.input.keyboard.on('keydown-BACKSPACE', (e: KeyboardEvent) => {
@@ -578,13 +601,27 @@ export class EditorScene extends Phaser.Scene {
       this.lastPasteKeyAt = now;
       this.pasteClipboard();
     });
+
+    // Terrain brush shortcuts: [ / ] size, X toggle paint/erase
+    this.input.keyboard.on('keydown-OPEN_BRACKET', (e: KeyboardEvent) => {
+      if (this.isTypingInInput(e) || this.editorTool !== 'terrain') return;
+      this.setTerrainBrushRadius(this.terrainBrushRadius - 16);
+    });
+    this.input.keyboard.on('keydown-CLOSED_BRACKET', (e: KeyboardEvent) => {
+      if (this.isTypingInInput(e) || this.editorTool !== 'terrain') return;
+      this.setTerrainBrushRadius(this.terrainBrushRadius + 16);
+    });
+    this.input.keyboard.on('keydown-X', (e: KeyboardEvent) => {
+      if (this.isTypingInInput(e) || this.editorTool !== 'terrain' || e.ctrlKey || e.metaKey) return;
+      this.terrainBrushMode = this.terrainBrushMode === 'paint' ? 'erase' : 'paint';
+    });
   }
 
   // ======================================================================
   // TOOL SWITCHING
   // ======================================================================
 
-  public setTool(tool: 'pan' | 'road' | 'object' | 'spawn' | 'add' | 'compound') {
+  public setTool(tool: 'pan' | 'road' | 'terrain' | 'object' | 'spawn' | 'add' | 'compound') {
     this.editorTool = tool;
     if (tool !== 'road') {
       this.pendingRoad = null;
@@ -601,8 +638,121 @@ export class EditorScene extends Phaser.Scene {
       this.objectDrag = null;
     }
     if (tool !== 'compound') this.compoundDrag = null;
+    if (tool !== 'terrain') this.terrainDrag = null;
     // Intersection selection persists across tools so the user can toggle
     // signals from any tool; cleared explicitly via clearIntersectionSelection.
+  }
+
+  // ======================================================================
+  // TERRAIN BRUSH TOOL (freeform surface painting + shoreline-safe eraser)
+  // ======================================================================
+
+  private terrainTap(x: number, y: number) {
+    const pt = { x: Math.round(x), y: Math.round(y) };
+    if (this.terrainBrushMode === 'erase') {
+      const snap = this.captureUndoSnapshot();
+      const changed = this.mainScene.world.terrain.erasePaintAt([pt], this.terrainBrushRadius);
+      if (changed) {
+        this.commitUndoSnapshot(snap);
+        this.mainScene.world.version++;
+      }
+      return;
+    }
+    this.pushUndo();
+    this.mainScene.world.terrain.addPaintStroke({
+      material: this.terrainBrushMaterial,
+      radius: this.terrainBrushRadius,
+      softness: this.terrainBrushSoftness,
+      clipWater: this.terrainBrushClipWater,
+      points: [pt],
+    });
+    this.mainScene.world.version++;
+  }
+
+  private tryStartTerrainDrag(x: number, y: number): boolean {
+    this.terrainDrag = { points: [{ x: Math.round(x), y: Math.round(y) }] };
+    return true;
+  }
+
+  private applyTerrainDrag(wp: { x: number; y: number }) {
+    if (!this.terrainDrag) return;
+    const pts = this.terrainDrag.points;
+    const last = pts[pts.length - 1];
+    const minStep = Math.max(6, this.terrainBrushRadius * 0.14);
+    if (!last || Phaser.Math.Distance.Between(wp.x, wp.y, last.x, last.y) >= minStep) {
+      pts.push({ x: Math.round(wp.x), y: Math.round(wp.y) });
+    }
+  }
+
+  private finishTerrainDrag() {
+    if (!this.terrainDrag || this.terrainDrag.points.length === 0) {
+      this.terrainDrag = null;
+      return;
+    }
+    const pts = this.terrainDrag.points;
+    this.terrainDrag = null;
+
+    if (this.terrainBrushMode === 'erase') {
+      const snap = this.captureUndoSnapshot();
+      const changed = this.mainScene.world.terrain.erasePaintAt(pts, this.terrainBrushRadius);
+      if (changed) {
+        this.commitUndoSnapshot(snap);
+        this.mainScene.world.version++;
+      }
+      return;
+    }
+
+    this.pushUndo();
+    this.mainScene.world.terrain.addPaintStroke({
+      material: this.terrainBrushMaterial,
+      radius: this.terrainBrushRadius,
+      softness: this.terrainBrushSoftness,
+      clipWater: this.terrainBrushClipWater,
+      points: pts,
+    });
+    this.mainScene.world.version++;
+  }
+
+  public setTerrainBrushMaterial(material: TerrainPaintMaterial) {
+    this.terrainBrushMaterial = material;
+    this.terrainBrushMode = 'paint';
+  }
+
+  public setTerrainBrushMode(mode: 'paint' | 'erase') {
+    this.terrainBrushMode = mode;
+  }
+
+  public setTerrainBrushRadius(radius: number) {
+    this.terrainBrushRadius = Phaser.Math.Clamp(Math.round(radius), 24, 360);
+  }
+
+  public setTerrainBrushSoftness(softness: TerrainPaintSoftness) {
+    this.terrainBrushSoftness = softness;
+  }
+
+  public setTerrainBrushClipWater(clipWater: boolean) {
+    this.terrainBrushClipWater = clipWater;
+  }
+
+  public clearAllTerrainPaints() {
+    if (this.mainScene.world.terrain.getPaintStrokeCount() === 0) return;
+    const snap = this.captureUndoSnapshot();
+    const changed = this.mainScene.world.terrain.clearAllPaintStrokes();
+    if (changed) {
+      this.commitUndoSnapshot(snap);
+      this.mainScene.world.version++;
+    }
+  }
+
+  public getTerrainUIState() {
+    return {
+      material: this.terrainBrushMaterial,
+      mode: this.terrainBrushMode,
+      radius: this.terrainBrushRadius,
+      softness: this.terrainBrushSoftness,
+      clipWater: this.terrainBrushClipWater,
+      strokeCount: this.mainScene?.world?.terrain?.getPaintStrokeCount() ?? 0,
+    };
   }
 
   // ======================================================================
@@ -2097,6 +2247,68 @@ export class EditorScene extends Phaser.Scene {
           g.strokeRect(wp.x - 14 / z, wp.y - 14 / z, 28 / z, 28 / z);
           g.lineBetween(wp.x - 20 / z, wp.y, wp.x + 20 / z, wp.y);
           g.lineBetween(wp.x, wp.y - 20 / z, wp.x, wp.y + 20 / z);
+        }
+      }
+    }
+
+    // Terrain brush tool: live brush footprint cursor & active stroke preview
+    if (this.editorTool === 'terrain') {
+      const isErase = this.terrainBrushMode === 'erase';
+      const brushCol = isErase
+        ? 0xf43f5e
+        : parseHexColor(TERRAIN_PAINT_MAP[this.terrainBrushMaterial]?.swatch, 0x38bdf8);
+      const r = this.terrainBrushRadius;
+
+      if (this.terrainDrag && this.terrainDrag.points.length > 0) {
+        const pts = this.terrainDrag.points;
+        // Centerline trace
+        if (pts.length >= 2) {
+          g.lineStyle(2.4 / z, brushCol, 0.9);
+          g.beginPath();
+          pts.forEach((p, i) => (i === 0 ? g.moveTo(p.x, p.y) : g.lineTo(p.x, p.y)));
+          g.strokePath();
+        }
+        // Sampled brush footprint rings along the live drag path (zero alpha-stacking mud)
+        const ringSpacing = Math.max(16, r * 0.65);
+        let acc = ringSpacing;
+        g.lineStyle(1.4 / z, brushCol, 0.45);
+        for (let i = 0; i < pts.length; i++) {
+          const p = pts[i];
+          if (i === 0) {
+            g.strokeCircle(p.x, p.y, r);
+            acc = 0;
+          } else {
+            const prev = pts[i - 1];
+            acc += Phaser.Math.Distance.Between(prev.x, prev.y, p.x, p.y);
+            if (acc >= ringSpacing || i === pts.length - 1) {
+              g.strokeCircle(p.x, p.y, r);
+              acc = 0;
+            }
+          }
+        }
+      }
+
+      // Active brush cursor ring at pointer
+      const wp = this.pointerWorld;
+      if (wp && (!this.lastPointerIsTouch || this.terrainDrag)) {
+        g.fillStyle(brushCol, isErase ? 0.14 : 0.22);
+        g.fillCircle(wp.x, wp.y, r);
+        g.lineStyle(2.4 / z, brushCol, 0.95);
+        g.strokeCircle(wp.x, wp.y, r);
+        g.lineStyle(1.1 / z, 0x0b1220, 0.7);
+        g.strokeCircle(wp.x, wp.y, r + 2 / z);
+        if (!isErase && this.terrainBrushSoftness === 'soft') {
+          g.lineStyle(1.2 / z, 0xffffff, 0.42);
+          g.strokeCircle(wp.x, wp.y, r * 0.68);
+        }
+        const ch = 6 / z;
+        g.lineStyle(1.8 / z, isErase ? 0xfda4af : 0xffffff, 0.85);
+        if (isErase) {
+          g.lineBetween(wp.x - ch, wp.y - ch, wp.x + ch, wp.y + ch);
+          g.lineBetween(wp.x - ch, wp.y + ch, wp.x + ch, wp.y - ch);
+        } else {
+          g.lineBetween(wp.x - ch, wp.y, wp.x + ch, wp.y);
+          g.lineBetween(wp.x, wp.y - ch, wp.x, wp.y + ch);
         }
       }
     }

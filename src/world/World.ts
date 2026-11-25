@@ -76,6 +76,7 @@ export class World {
   public seed() {
     this.seedRoads();
     this.objects.seedWorld(this.terrain);
+    this.terrain.fromPaintJSON([]);
     GarageSystem.getInstance().syncFromWorld(this.objects);
     MissionSystem.getInstance().setCustomMissions([]);
     this.terrain.invalidateChunks();
@@ -281,6 +282,7 @@ export class World {
   public updateActiveChunks(centerX: number, centerY: number, view?: Phaser.Geom.Rectangle) {
     this.objects.updateActiveChunks(centerX, centerY);
     if (view) this.terrain.updateView(view);
+    this.terrain.updateTrunkColliders(centerX, centerY);
   }
 
   // ======================================================================
@@ -289,6 +291,7 @@ export class World {
 
   public exportJSON(): string {
     const customMissions = MissionSystem.getInstance().getCustomMissions();
+    const terrainPaints = this.terrain.toPaintJSON();
     const data: Record<string, any> = {
       version: World.OFFICIAL_VERSION,
       name: this.name,
@@ -300,6 +303,7 @@ export class World {
       roads: this.roads.toJSON(),
       objects: this.objects.toJSON(),
       customMissions,
+      ...(terrainPaints.length > 0 ? { terrainPaints } : {}),
     };
     return JSON.stringify(data, null, 2);
   }
@@ -316,6 +320,7 @@ export class World {
       if (!Array.isArray(d.roads) && !Array.isArray(d.objects)) return false;
       this.roads.fromJSON(d.roads || []);
       this.objects.fromJSON(d.objects || []);
+      this.terrain.fromPaintJSON(Array.isArray(d.terrainPaints) ? d.terrainPaints : []);
       if (d.spawn && Number.isFinite(d.spawn.x) && Number.isFinite(d.spawn.y)) {
         this.spawnPoint = { x: d.spawn.x, y: d.spawn.y, angle: d.spawn.angle || 0 };
       }
