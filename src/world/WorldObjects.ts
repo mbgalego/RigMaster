@@ -54,7 +54,7 @@ export type WObjType =
   | 'crosswalk'       // flat zebra crossing (stripes along w, spans h)
   | 'wall'            // solid masonry wall (rotatable, any length)
   | 'jersey_barrier'  // solid concrete barrier (rotatable)
-  | 'building'        // solid box with roof detail (variant: 'warehouse'|'warehouse_big'|'warehouse_docks'|'shed'|'garage'|'gabled'|'church'|'archway'|'convenience_store')
+  | 'building'        // solid box with roof detail (variant: 'warehouse'|'warehouse_big'|'warehouse_docks'|'shed'|'garage'|'gabled'|'church'|'archway'|'convenience_store'|'restaurant')
   | 'container_stack' // solid stack of shipping containers (variant: colour)
   | 'crane'           // port gantry crane (decor)
   | 'silo'            // industrial silo (solid)
@@ -1009,32 +1009,59 @@ export class WorldObjects {
     this.add('jersey_barrier', 1530, 1680, 26, 360, { angle: Math.PI / 2 });
     // X exam (700,700): wet run — open approach, no barriers
 
-    // ---- Gas stations (pátio em alcatrão, zonas de abastecimento, loja de conveniência e serviços) ----
-    // Estação 1 (junto à arterial x=3456; bombas mantidas em 3140,2350 e 3260,2350 com pista livre a oeste em x=3060)
-    this.add('pad_asphalt', 3065, 2350, 680, 480);
-    this.add('road_entry', 3412, 2220, 100, 72, { angle: -Math.PI / 2, params: { lanes: 1 } });
-    this.add('road_entry', 3412, 2480, 100, 72, { angle: -Math.PI / 2, params: { lanes: 1 } });
-    this.add('gas_canopy', 3200, 2350, 420, 340);
-    this.add('gas_pump', 3140, 2350, 48, 110);
-    this.add('gas_pump', 3260, 2350, 48, 110);
-    this.add('price_sign', 3372, 2120, 50, 96);
-    this.add('building', 2815, 2340, 240, 136, { variant: 'convenience_store', angle: -Math.PI / 2 });
-    this.add('parking_lot', 3060, 2020, 320, 180);
-    this.add('air_water', 2930, 2545, 64, 36);
-    this.add('lamp', 2935, 2165, 14, 14, { angle: Math.PI / 2 });
+    // ---- Áreas de Serviço amplas inspiradas em Aveiras de Cima (A1 Brisa): amplas áreas de manobra, pistas PESADOS/LIGEIROS, loja, restauração e parque TIR ----
+    // Estação 1 (junto à arterial x=3456; bomba 2 em 3140,2350 com faixa PESADOS ampla e 450px+ de aproximação/saída)
+    this.add('pad_asphalt', 2780, 2495, 1220, 940);
+    this.add('pad_asphalt', 3100, 1865, 580, 370);
+    this.add('gas_canopy', 3030, 2350, 540, 320);
+    this.add('gas_pump', 2960, 2350, 48, 116);
+    this.add('gas_pump', 3140, 2350, 48, 116);
+    this.add('price_sign', 3345, 2090, 56, 120);
+    this.add('building', 2615, 2245, 210, 124, { variant: 'convenience_store', angle: -Math.PI / 2 });
+    this.add('building', 2610, 2500, 250, 144, { variant: 'restaurant', angle: -Math.PI / 2 });
+    this.add('parking_lot', 2610, 2835, 320, 136);
+    this.add('parking_pad', 2260, 2445, 128, 340, { variant: 'asphalt' });
+    this.add('parking_pad', 2410, 2445, 128, 340, { variant: 'asphalt' });
+    this.add('air_water', 2730, 2680, 84, 42);
+    this.add('lamp', 2705, 2195, 14, 14, { angle: Math.PI / 2 });
+    this.add('lamp', 2705, 2505, 14, 14, { angle: Math.PI / 2 });
+    this.add('lamp', 2495, 2240, 14, 14);
+    this.add('lamp', 2495, 2650, 14, 14);
 
-    // Estação 2 (a sul da arterial y=7168, com entradas duplas, bombas, loja de conveniência, parque e ar/água)
-    this.add('pad_asphalt', 8780, 7485, 680, 490);
-    this.add('road_entry', 8620, 7222, 110, 84, { angle: Math.PI, params: { lanes: 1 } });
-    this.add('road_entry', 8940, 7222, 110, 84, { angle: Math.PI, params: { lanes: 1 } });
-    this.add('gas_canopy', 8760, 7420, 420, 300);
-    this.add('gas_pump', 8700, 7420, 48, 110);
-    this.add('gas_pump', 8820, 7420, 48, 110);
-    this.add('price_sign', 9045, 7275, 50, 96);
-    this.add('building', 8760, 7648, 260, 136, { variant: 'convenience_store', angle: Math.PI });
-    this.add('parking_lot', 9065, 7550, 180, 280);
-    this.add('air_water', 8540, 7645, 64, 36);
-    this.add('lamp', 8555, 7295, 14, 14, { angle: Math.PI / 2 });
+    // Estação 2 (Área de Serviço Sul paralela à arterial y=7168 — formato Aveiras A1 com rampas suaves, pistas E-O e fila de estacionamento TIR)
+    {
+      const rns = RoadNetwork.getInstance();
+      rns.addRoad('asphalt', [
+        { x: 8220, y: 7168, w: 132 },
+        { x: 8350, y: 7208, w: 134 },
+        { x: 8455, y: 7312, w: 142 },
+      ]);
+      rns.addRoad('asphalt', [
+        { x: 9945, y: 7312, w: 142 },
+        { x: 10050, y: 7208, w: 134 },
+        { x: 10180, y: 7168, w: 132 },
+      ]);
+    }
+    this.add('pad_asphalt', 9200, 7910, 1660, 1220);
+    this.add('gas_canopy', 9040, 7585, 540, 360, { angle: Math.PI / 2 });
+    this.add('gas_pump', 9040, 7515, 48, 116, { angle: Math.PI / 2 });
+    this.add('gas_pump', 9040, 7693, 48, 116, { angle: Math.PI / 2 });
+    this.add('price_sign', 8795, 7355, 56, 120);
+    this.add('building', 9020, 7965, 240, 136, { variant: 'convenience_store', angle: Math.PI });
+    this.add('building', 9315, 7970, 280, 154, { variant: 'restaurant', angle: Math.PI });
+    this.add('parking_lot', 9655, 7790, 340, 136);
+    this.add('parking_lot', 8695, 7965, 280, 136);
+    this.add('parking_pad', 8730, 8375, 128, 260, { variant: 'asphalt' });
+    this.add('parking_pad', 8880, 8375, 128, 260, { variant: 'asphalt' });
+    this.add('parking_pad', 9030, 8375, 128, 260, { variant: 'asphalt' });
+    this.add('parking_pad', 9180, 8375, 128, 260, { variant: 'asphalt' });
+    this.add('parking_pad', 9330, 8375, 128, 260, { variant: 'asphalt' });
+    this.add('parking_pad', 9640, 8375, 136, 320, { variant: 'asphalt', angle: Math.PI / 2 });
+    this.add('air_water', 9565, 7965, 84, 42);
+    this.add('lamp', 8870, 7875, 14, 14, { angle: Math.PI / 2 });
+    this.add('lamp', 9200, 7875, 14, 14, { angle: Math.PI / 2 });
+    this.add('lamp', 8520, 8165, 14, 14);
+    this.add('lamp', 9860, 8165, 14, 14);
 
     // ---- Demo industrial business park (SE, south of the arterial y=9216) ----
     {
@@ -1642,9 +1669,9 @@ export class WorldObjects {
         entry.alpha += (targetAlpha - entry.alpha) * lerpK;
       }
 
-      // Canopy roof spans cleanly across the pump islands while leaving entry/exit lane arrows visible
-      const roofW = o.w * 0.92;
-      const roofH = Math.min(o.h * 0.62, Math.max(138, roofW / 2.45));
+      // Canopy roof spans cleanly across the pump islands while leaving entry/exit PESADOS/LIGEIROS floor markings clearly visible
+      const roofW = o.w * 0.94;
+      const roofH = Math.min(o.h * 0.50, Math.max(132, roofW / 2.95));
       entry.shadow
         .setPosition(o.x + 10, o.y + 14)
         .setDisplaySize(roofW, roofH)
@@ -1848,7 +1875,7 @@ export class WorldObjects {
     const seen = new Set<string>();
     const out: WorldObject[] = [];
     const isEmitter = (t: WorldObject['type']) =>
-      t === 'lamp' || t === 'traffic_light' || t === 'gas_canopy' || t === 'gas_pump';
+      t === 'lamp' || t === 'traffic_light' || t === 'gas_canopy' || t === 'gas_pump' || t === 'price_sign';
     for (let cy = y0; cy <= y1; cy++) {
       for (let cx = x0; cx <= x1; cx++) {
         const list = this.grid.get(`${cx}_${cy}`);
@@ -2652,60 +2679,84 @@ export class WorldObjects {
           break;
         }
         case 'gas_canopy': {
-          // Superfície em alcatrão realista do posto de combustível (sem teto aéreo):
-          // pistas de abastecimento pintadas, setas direcionais, passadeira pedonal,
-          // grelhas de drenagem e bocais dos depósitos subterrâneos.
-          g.fillStyle(0x11151d, 0.6);
-          g.fillRoundedRect(x0 - 4, y0 - 4, o.w + 8, o.h + 8, 10);
-          // Reborbo / lancil em betão a contornar o pátio
-          g.fillStyle(0x3a4457, 1);
-          g.fillRoundedRect(x0 - 2, y0 - 2, o.w + 4, o.h + 4, 8);
-          // Alcatrão principal (mesma tonalidade da rede viária)
-          g.fillStyle(0x1e2634, 1);
-          g.fillRoundedRect(x0, y0, o.w, o.h, 6);
-
-          // Textura subtil do asfalto (agregado e remendos de alcatrão)
-          const num = parseInt(o.id.replace(/\D/g, ''), 10) || 1;
-          for (let i = 0; i < 22; i++) {
-            const s1 = Math.sin(num * 19.3 + i * 83.7) * 43758.5453;
-            const s2 = Math.sin(num * 7.9 + i * 41.3) * 24634.63;
-            const fx = s1 - Math.floor(s1);
-            const fy = s2 - Math.floor(s2);
-            g.fillStyle(i % 2 === 0 ? 0x263040 : 0x171d28, 0.55);
-            g.fillRect(x0 + 12 + fx * Math.max(10, o.w - 28), y0 + 12 + fy * Math.max(10, o.h - 28), 7, 5);
+          // Pátio de abastecimento estilo Área de Serviço A1 (Brisa):
+          // alcatrão texturado, pistas diferenciadas PESADOS (amarelo + pictograma TIR) e LIGEIROS (branco/azul + pictograma),
+          // divisórias alinhadas com as ilhas de bomba, passadeira pedonal, drenagem e bocais subterrâneos.
+          if (flatTex?.patterns.asphalt) {
+            this.fillTexturedFlatRect(
+              flatTex,
+              o,
+              flatTex.patterns.asphalt,
+              'rgba(14, 20, 30, 0.34)',
+              'rgba(71, 85, 105, 0.92)',
+              3,
+            );
+            // Lancil exterior em betão (apenas contorno para não tapar o alcatrão texturado nem as marcações no piso)
+            g.lineStyle(4, 0x0d121a, 0.45);
+            g.strokeRoundedRect(x0 - 3, y0 - 3, o.w + 6, o.h + 6, 9);
+            g.lineStyle(2.5, 0x64748b, 0.9);
+            g.strokeRoundedRect(x0 - 1, y0 - 1, o.w + 2, o.h + 2, 7);
+          } else {
+            g.fillStyle(0x0d121a, 0.55);
+            g.fillRoundedRect(x0 - 4, y0 - 4, o.w + 8, o.h + 8, 10);
+            g.fillStyle(0x475569, 1);
+            g.fillRoundedRect(x0 - 2, y0 - 2, o.w + 4, o.h + 4, 8);
+            g.fillStyle(0x1e2634, 1);
+            g.fillRoundedRect(x0, y0, o.w, o.h, 6);
           }
 
-          // Pistas / zonas de abastecimento desenhadas no alcatrão
-          const lanes = Math.max(2, Math.min(4, Math.round(o.w / 140)));
-          const laneW = o.w / lanes;
-          const bayY0 = y0 + 38;
-          const bayH = Math.max(80, o.h - 76);
+          // Configuração das pistas (largas para manobras de pesados):
+          // >= 480px: 3 pistas (37% PESADOS, 33% PESADOS, 30% LIGEIROS) -> divisórias em 0.37*w e 0.70*w
+          // < 480px:  2 pistas (50% PESADOS, 50% LIGEIROS) -> divisória central em 0.50*w
+          const customHeavy = typeof o.params?.heavyLanes === 'number' ? o.params.heavyLanes : null;
+          const laneSpecs: Array<{ startF: number; endF: number; heavy: boolean }> =
+            o.w >= 480
+              ? [
+                  { startF: 0.0, endF: 0.37, heavy: customHeavy !== null ? customHeavy >= 1 : true },
+                  { startF: 0.37, endF: 0.7, heavy: customHeavy !== null ? customHeavy >= 2 : true },
+                  { startF: 0.7, endF: 1.0, heavy: customHeavy !== null ? customHeavy >= 3 : false },
+                ]
+              : [
+                  { startF: 0.0, endF: 0.5, heavy: customHeavy !== null ? customHeavy >= 1 : true },
+                  { startF: 0.5, endF: 1.0, heavy: customHeavy !== null ? customHeavy >= 2 : false },
+                ];
 
-          for (let i = 0; i < lanes; i++) {
-            const lx0 = x0 + i * laneW;
-            const lcx = lx0 + laneW / 2;
+          const bayY0 = y0 + 56;
+          const bayH = Math.max(76, o.h - 112);
 
-            // Marcas subtis de rodado nas pistas de entrada/saída
-            g.fillStyle(0x141a24, 0.52);
-            g.fillRect(lcx - 16, y0 + 14, 7, o.h - 28);
-            g.fillRect(lcx + 9, y0 + 14, 7, o.h - 28);
+          for (let i = 0; i < laneSpecs.length; i++) {
+            const spec = laneSpecs[i];
+            const lx0 = x0 + spec.startF * o.w;
+            const lw = (spec.endF - spec.startF) * o.w;
+            const lcx = lx0 + lw * 0.5;
+            const isHeavy = spec.heavy;
+            const accentCol = isHeavy ? 0xfacc15 : 0x38bdf8;
+            const lineCol = isHeavy ? 0xfacc15 : 0xe2e8f0;
 
-            // Caixa de paragem / zona de abastecimento centrada na pista
-            const boxW = Math.max(46, laneW - 34);
-            const bx0 = lcx - boxW / 2;
-            const by0 = bayY0 + 14;
-            const bh = Math.max(46, bayH - 28);
-            g.fillStyle(0x242e3f, 0.55);
+            // Marcas subtis de rodado dentro da baia (mantendo as inscrições PESADOS/LIGEIROS 100% limpas)
+            const trackSpan = isHeavy ? 20 : 14;
+            const trackW = isHeavy ? 9 : 6;
+            g.fillStyle(0x0b0f17, 0.42);
+            g.fillRect(lcx - trackSpan - trackW * 0.5, bayY0 + 6, trackW, bayH - 12);
+            g.fillRect(lcx + trackSpan - trackW * 0.5, bayY0 + 6, trackW, bayH - 12);
+
+            // Zona de paragem / abastecimento centrada na pista
+            const sidePad = i === 0 ? 28 : 26;
+            const boxW = Math.max(54, lw - sidePad * 2);
+            const bx0 = lcx - boxW * 0.5;
+            const by0 = bayY0;
+            const bh = bayH;
+            g.fillStyle(isHeavy ? 0x26241b : 0x1e2c3a, 0.35);
             g.fillRect(bx0, by0, boxW, bh);
 
-            // Contorno branco tracejado lateral + cantoneiras amarelas de baia
-            g.lineStyle(2, 0xe2e8f0, 0.45);
+            // Linhas laterais tracejadas + cantoneiras reforçadas da baia
+            g.lineStyle(2, lineCol, isHeavy ? 0.62 : 0.48);
             for (let sy = by0 + 4; sy < by0 + bh - 8; sy += 16) {
-              g.lineBetween(bx0, sy, bx0, Math.min(sy + 9, by0 + bh - 2));
-              g.lineBetween(bx0 + boxW, sy, bx0 + boxW, Math.min(sy + 9, by0 + bh - 2));
+              g.lineBetween(bx0, sy, bx0, Math.min(sy + 10, by0 + bh - 2));
+              g.lineBetween(bx0 + boxW, sy, bx0 + boxW, Math.min(sy + 10, by0 + bh - 2));
             }
-            const cLen = 12;
-            g.lineStyle(2.5, 0xfacc15, 0.82);
+            const cLen = 14;
+            g.lineStyle(2.8, accentCol, 0.88);
             for (const [cx, cy, dx, dy] of [
               [bx0, by0, 1, 1], [bx0 + boxW, by0, -1, 1],
               [bx0, by0 + bh, 1, -1], [bx0 + boxW, by0 + bh, -1, -1],
@@ -2714,79 +2765,136 @@ export class WorldObjects {
               g.lineBetween(cx, cy, cx, cy + dy * cLen);
             }
 
-            // Pictograma estilizado de combustível + barras de paragem no piso da baia
-            g.fillStyle(0x10b981, 0.22);
-            g.fillRoundedRect(lcx - 12, o.y - 14, 24, 28, 4);
-            g.lineStyle(1.5, 0x10b981, 0.65);
-            g.strokeRoundedRect(lcx - 12, o.y - 14, 24, 28, 4);
-            g.fillStyle(0xfacc15, 0.7);
-            g.fillRect(lcx - 7, o.y - 9, 14, 7);
-            // Barra de paragem dianteira/traseira na baia
-            g.fillStyle(0xe2e8f0, 0.55);
-            g.fillRect(bx0 + 6, by0 + 6, boxW - 12, 3);
-            g.fillRect(bx0 + 6, by0 + bh - 9, boxW - 12, 3);
+            // Barras de paragem dianteira/traseira na baia
+            g.fillStyle(lineCol, 0.62);
+            g.fillRect(bx0 + 6, by0 + 5, boxW - 12, 3.5);
+            g.fillRect(bx0 + 6, by0 + bh - 8.5, boxW - 12, 3.5);
 
-            // Setas de entrada (sul -> centro) e saída (centro -> norte) no alcatrão
+            // Setas de fluxo na entrada (sul) e saída (norte)
             const drawFloorArrow = (ax: number, ay: number, col: number) => {
-              g.lineStyle(2.5, col, 0.7);
+              g.lineStyle(2.6, col, 0.82);
               g.lineBetween(ax, ay + 9, ax, ay - 7);
               g.beginPath();
-              g.moveTo(ax - 7, ay);
+              g.moveTo(ax - 7, ay - 1);
               g.lineTo(ax, ay - 9);
-              g.lineTo(ax + 7, ay);
+              g.lineTo(ax + 7, ay - 1);
               g.strokePath();
             };
-            drawFloorArrow(lcx, y0 + o.h - 22, 0xfacc15);
-            drawFloorArrow(lcx, y0 + 22, 0xe2e8f0);
+            drawFloorArrow(lcx, y0 + o.h - 16, accentCol);
+            drawFloorArrow(lcx, y0 + 16, lineCol);
           }
 
-          // Separadores de zona entre pistas (onde assentam as ilhas de bomba)
-          for (let i = 1; i < lanes; i++) {
-            const divX = x0 + i * laneW;
-            const padW = 30;
-            const padH = Math.min(132, o.h - 84);
+          // Pintura rodoviária nítida em Canvas2D: etiquetas "PESADOS" / "LIGEIROS" + pictogramas camião/carro
+          // posicionados fora do telhado central (nas zonas de aproximação norte e sul) para leitura imediata!
+          if (flatTex?.ctx) {
+            const ctx = flatTex.ctx;
+            ctx.save();
+            ctx.translate(o.x, o.y);
+            if (o.angle !== 0) ctx.rotate(o.angle);
+
+            const drawLaneStencil = (localX: number, localY: number, isHeavy: boolean) => {
+              ctx.save();
+              ctx.translate(localX, localY);
+
+              // Faixa de destaque subtil sob a inscrição
+              const badgeW = isHeavy ? 84 : 78;
+              const badgeH = 22;
+              ctx.fillStyle = isHeavy ? 'rgba(250, 204, 21, 0.16)' : 'rgba(56, 189, 248, 0.14)';
+              ctx.strokeStyle = isHeavy ? 'rgba(250, 204, 21, 0.72)' : 'rgba(226, 232, 240, 0.68)';
+              ctx.lineWidth = 1.6;
+              ctx.beginPath();
+              ctx.roundRect(-badgeW * 0.5, -badgeH * 0.5, badgeW, badgeH, 4);
+              ctx.fill();
+              ctx.stroke();
+
+              // Pictograma à esquerda (camião articulado para PESADOS, automóvel para LIGEIROS)
+              ctx.fillStyle = isHeavy ? 'rgba(250, 204, 21, 0.92)' : 'rgba(248, 250, 252, 0.92)';
+              const ix = -badgeW * 0.5 + 11;
+              if (isHeavy) {
+                // Silhueta topo/lateral estilizada de pesado (cabina + semi-reboque)
+                ctx.fillRect(ix - 5, -5, 11, 7); // reboque
+                ctx.fillRect(ix + 7, -3.5, 5, 5.5); // cabina
+                ctx.beginPath();
+                ctx.arc(ix - 2.5, 3.5, 2, 0, Math.PI * 2);
+                ctx.arc(ix + 3.5, 3.5, 2, 0, Math.PI * 2);
+                ctx.arc(ix + 9.5, 3.5, 2, 0, Math.PI * 2);
+                ctx.fill();
+              } else {
+                // Silhueta estilizada de ligeiro
+                ctx.fillRect(ix - 4, -2.5, 13, 4.5);
+                ctx.fillRect(ix - 1.5, -5.5, 7.5, 3.5);
+                ctx.beginPath();
+                ctx.arc(ix - 1, 3.2, 1.9, 0, Math.PI * 2);
+                ctx.arc(ix + 6.5, 3.2, 1.9, 0, Math.PI * 2);
+                ctx.fill();
+              }
+
+              // Texto rodoviário nítido ("PESADOS" / "LIGEIROS")
+              ctx.font = '800 10.5px "Inter", "Segoe UI", Arial, sans-serif';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(isHeavy ? 'PESADOS' : 'LIGEIROS', 9, 0.5);
+              ctx.restore();
+            };
+
+            const southLabelY = o.h * 0.5 - 40;
+            const northLabelY = -o.h * 0.5 + 42;
+            for (const spec of laneSpecs) {
+              const localX = -o.w * 0.5 + (spec.startF + spec.endF) * 0.5 * o.w;
+              drawLaneStencil(localX, southLabelY, spec.heavy);
+              drawLaneStencil(localX, northLabelY, spec.heavy);
+            }
+            ctx.restore();
+            flatTex.markUsed();
+          }
+
+          // Plataformas de guia entre pistas (alinhadas com os eixos das ilhas de bomba)
+          for (let i = 1; i < laneSpecs.length; i++) {
+            const divX = x0 + laneSpecs[i].startF * o.w;
+            const padW = 34;
+            const padH = Math.min(132, o.h - 96);
             g.fillStyle(0x2a3444, 0.85);
-            g.fillRoundedRect(divX - padW / 2, o.y - padH / 2, padW, padH, 6);
+            g.fillRoundedRect(divX - padW / 2, o.y - padH / 2, padW, padH, 8);
             g.lineStyle(2, 0xfacc15, 0.72);
-            g.strokeRoundedRect(divX - padW / 2, o.y - padH / 2, padW, padH, 6);
+            g.strokeRoundedRect(divX - padW / 2, o.y - padH / 2, padW, padH, 8);
             // Zonas zebradas nas pontas do eixo da ilha
-            g.lineStyle(2, 0xfacc15, 0.45);
+            g.lineStyle(2, 0xfacc15, 0.48);
             for (const zy of [o.y - padH / 2 - 14, o.y + padH / 2 + 8]) {
               g.lineBetween(divX - 10, zy, divX + 10, zy + 6);
               g.lineBetween(divX + 10, zy, divX - 10, zy + 6);
             }
           }
 
-          // Passadeira pedonal discreta ao longo da borda oeste (acesso à loja)
-          g.fillStyle(0xe2e8f0, 0.58);
-          for (let py = y0 + 28; py < y0 + o.h - 28; py += 18) {
-            g.fillRect(x0 + 6, py, 14, 9);
+          // Passadeira pedonal ao longo da borda oeste (acesso seguro à loja e restauração)
+          g.fillStyle(0xf8fafc, 0.68);
+          for (let py = y0 + 26; py < y0 + o.h - 26; py += 18) {
+            g.fillRect(x0 + 5, py, 14, 9);
           }
-          g.lineStyle(2, 0xfacc15, 0.55);
-          g.lineBetween(x0 + 24, y0 + 18, x0 + 24, y0 + o.h - 18);
+          g.lineStyle(2, 0xfacc15, 0.65);
+          g.lineBetween(x0 + 22, y0 + 16, x0 + 22, y0 + o.h - 16);
 
           // Grelha de drenagem / separador de hidrocarbonetos junto à borda sul
           g.fillStyle(0x0f172a, 0.9);
-          g.fillRect(o.x - 42, y0 + o.h - 10, 84, 5);
+          g.fillRect(o.x - 48, y0 + o.h - 9, 96, 5);
           g.lineStyle(1, 0x475569, 0.85);
-          for (let gx = o.x - 38; gx <= o.x + 38; gx += 6) {
-            g.lineBetween(gx, y0 + o.h - 10, gx, y0 + o.h - 5);
+          for (let gx = o.x - 44; gx <= o.x + 44; gx += 6) {
+            g.lineBetween(gx, y0 + o.h - 9, gx, y0 + o.h - 4);
           }
 
-          // Tampas de visita / bocais de enchimento dos tanques subterrâneos (canto NO)
-          const tankX = x0 + 36, tankY = y0 + 14;
+          // Tampas de visita / bocais de enchimento dos tanques subterrâneos (canto NO, livre da inscrição PESADOS)
+          const tankX = x0 + 28, tankY = y0 + 7;
           g.fillStyle(0x283242, 0.95);
-          g.fillRect(tankX, tankY, 54, 20);
+          g.fillRect(tankX, tankY, 46, 15);
           g.lineStyle(1.5, 0xfacc15, 0.8);
-          g.strokeRect(tankX, tankY, 54, 20);
+          g.strokeRect(tankX, tankY, 46, 15);
           const capCols = [0x0f172a, 0x16a34a, 0x2563eb]; // Gasóleo, 95, AdBlue
           for (let k = 0; k < 3; k++) {
-            const cx = tankX + 11 + k * 16;
-            const cy = tankY + 10;
+            const cx = tankX + 9 + k * 14;
+            const cy = tankY + 7.5;
             g.fillStyle(0x11151d, 1);
-            g.fillCircle(cx, cy, 5.5);
+            g.fillCircle(cx, cy, 4.5);
             g.fillStyle(capCols[k], 0.95);
-            g.fillCircle(cx, cy, 3.2);
+            g.fillCircle(cx, cy, 2.7);
           }
           break;
         }
@@ -3091,6 +3199,7 @@ export class WorldObjects {
               o.variant === 'garage' ||
               o.variant === 'warehouse_docks' ||
               o.variant === 'convenience_store' ||
+              o.variant === 'restaurant' ||
               o.variant === 'church';
             this.drawTexturedBuilding(solidTex, o, buildingImg, !directional);
             break;
@@ -3851,7 +3960,24 @@ export class WorldObjects {
           break;
         }
         case 'gas_pump': {
-          // Ilha realista com bombas duplas, lancil chanfrado amarelo/preto, pilaretes duplos,
+          const pumpImg = solidTex?.images.prop_gas_pump;
+          if (solidTex && pumpImg) {
+            const ctx = solidTex.ctx;
+            ctx.save();
+            ctx.translate(o.x, o.y);
+            if (o.angle !== 0) ctx.rotate(o.angle);
+            const drawW = o.w + 10;
+            const drawH = o.h + 10;
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.42)';
+            ctx.shadowBlur = 7;
+            ctx.shadowOffsetX = 4;
+            ctx.shadowOffsetY = 5;
+            ctx.drawImage(pumpImg, -drawW * 0.5, -drawH * 0.5, drawW, drawH);
+            ctx.restore();
+            solidTex.markUsed();
+            break;
+          }
+          // Fallback vetorial: ilha realista com bombas duplas, lancil chanfrado amarelo/preto, pilaretes duplos,
           // terminal de pagamento central, mangueiras flexíveis e ponto de extintor/limpeza
           const islandW = o.w + 18;
           g.fillStyle(0x000000, 0.28);
@@ -3941,7 +4067,12 @@ export class WorldObjects {
           break;
         }
         case 'air_water': {
-          // Ilha de Ar comprimido / Água / Aspirador de estação de serviço
+          const airImg = solidTex?.images.prop_air_water;
+          if (solidTex && airImg) {
+            this.drawTexturedBuilding(solidTex, o, airImg, true);
+            break;
+          }
+          // Fallback vetorial: ilha de Ar comprimido / Água / Aspirador de estação de serviço
           g.fillStyle(0x000000, 0.24);
           g.fillRoundedRect(x0 + 2, y0 + 3, o.w, o.h, 6);
           g.fillStyle(0x334155, 1);
@@ -3976,7 +4107,22 @@ export class WorldObjects {
           break;
         }
         case 'price_sign': {
-          // Totem luminoso de preços do posto: soco em betão, moldura em alumínio escuro, cabeçalho esmeralda e dígitos LED
+          const totemImg = solidTex?.images.prop_price_sign;
+          if (solidTex && totemImg) {
+            const ctx = solidTex.ctx;
+            ctx.save();
+            ctx.translate(o.x, o.y);
+            if (o.angle !== 0) ctx.rotate(o.angle);
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.48)';
+            ctx.shadowBlur = 9;
+            ctx.shadowOffsetX = 5;
+            ctx.shadowOffsetY = 7;
+            ctx.drawImage(totemImg, -o.w * 0.5, -o.h * 0.5, o.w, o.h);
+            ctx.restore();
+            solidTex.markUsed();
+            break;
+          }
+          // Fallback vetorial: totem luminoso de preços do posto: soco em betão, moldura em alumínio escuro, cabeçalho esmeralda e dígitos LED
           g.fillStyle(0x000000, 0.25);
           g.fillRoundedRect(x0 + 3, y0 + 3, o.w, o.h, 4);
           // Soco / base de fixação no solo

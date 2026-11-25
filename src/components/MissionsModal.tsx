@@ -15,6 +15,7 @@ import {
 import { TRUCK_CATALOG, type TruckType } from '../systems/TruckCatalog';
 import { LicenseSystem } from '../systems/LicenseSystem';
 import type { TrailerType } from '../entities/Trailer';
+import { SpriteRegistry } from '../systems/SpriteRegistry';
 
 const TRAILER_LABELS: Record<TrailerType, string> = {
   standard: 'Standard 13.6m',
@@ -243,41 +244,96 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
               )}
             </div>
 
-            {/* Hub Context Strip */}
-            {selectedHubObj && (
-              <div className="px-3.5 sm:px-6 py-2 border-b border-slate-800/60 flex items-center justify-between gap-2 sm:gap-4 text-[11px] sm:text-xs text-slate-400 shrink-0">
-                <div className="truncate min-w-0">
-                  <span className="text-slate-200 font-medium">{selectedHubObj.specialization}</span>
-                  <span className="hidden sm:inline">
-                    <span className="mx-2" aria-hidden="true">·</span>
-                    <span>{selectedHubObj.description}</span>
-                  </span>
+            {/* Hub Context Strip (with panoramic postcard banner when available) */}
+            {selectedHubObj && (() => {
+              const bannerUrl = SpriteRegistry.getHubBanner(selectedHubObj.id);
+              return bannerUrl ? (
+                <div className="relative h-24 sm:h-28 border-b border-slate-800/80 overflow-hidden shrink-0">
+                  <img
+                    src={bannerUrl}
+                    alt={selectedHubObj.name}
+                    referrerPolicy="no-referrer"
+                    className="absolute inset-0 w-full h-full object-cover object-center"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-r from-slate-950/92 via-slate-950/70 to-slate-950/55" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-transparent to-slate-950/20" />
+                  <div className="relative h-full px-3.5 sm:px-6 py-2.5 flex items-end justify-between gap-3">
+                    <div className="min-w-0 max-w-xl">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="text-[10px] font-mono uppercase tracking-wider font-bold px-1.5 py-0.5 rounded bg-slate-950/80 border"
+                          style={{ color: selectedHubObj.color, borderColor: `${selectedHubObj.color}66` }}
+                        >
+                          {selectedHubObj.badge}
+                        </span>
+                        <span className="text-xs sm:text-sm font-bold text-white truncate drop-shadow">
+                          {selectedHubObj.specialization}
+                        </span>
+                      </div>
+                      <p className="hidden sm:block text-[11px] text-slate-300 truncate mt-1 drop-shadow">
+                        {selectedHubObj.description}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2.5 shrink-0">
+                      {!isSandbox && lockedCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setShowLocked((v) => !v)}
+                          className="sm:hidden px-2 py-1 rounded bg-slate-950/80 border border-slate-700/80 text-[11px] text-slate-200 hover:text-white transition-colors whitespace-nowrap"
+                        >
+                          {showLocked ? 'Ocultar' : `+${lockedCount} bloq.`}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onClose();
+                          onOpenWorldMap();
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-950/80 hover:bg-slate-900 border border-cyan-500/40 text-cyan-300 hover:text-cyan-200 text-xs font-medium whitespace-nowrap flex items-center gap-1.5 backdrop-blur-sm transition-colors"
+                      >
+                        <Compass className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Ver rotas no mapa</span>
+                        <span className="sm:hidden">Mapa</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  {!isSandbox && lockedCount > 0 && (
+              ) : (
+                <div className="px-3.5 sm:px-6 py-2 border-b border-slate-800/60 flex items-center justify-between gap-2 sm:gap-4 text-[11px] sm:text-xs text-slate-400 shrink-0">
+                  <div className="truncate min-w-0">
+                    <span className="text-slate-200 font-medium">{selectedHubObj.specialization}</span>
+                    <span className="hidden sm:inline">
+                      <span className="mx-2" aria-hidden="true">·</span>
+                      <span>{selectedHubObj.description}</span>
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    {!isSandbox && lockedCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowLocked((v) => !v)}
+                        className="sm:hidden text-[11px] text-slate-400 hover:text-slate-200 transition-colors whitespace-nowrap"
+                      >
+                        {showLocked ? 'Ocultar' : `+${lockedCount} bloq.`}
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={() => setShowLocked((v) => !v)}
-                      className="sm:hidden text-[11px] text-slate-400 hover:text-slate-200 transition-colors whitespace-nowrap"
+                      onClick={() => {
+                        onClose();
+                        onOpenWorldMap();
+                      }}
+                      className="text-cyan-400 hover:text-cyan-300 font-medium whitespace-nowrap flex items-center gap-1"
                     >
-                      {showLocked ? 'Ocultar' : `+${lockedCount} bloq.`}
+                      <Compass className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Ver rotas no mapa</span>
+                      <span className="sm:hidden">Mapa</span>
                     </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      onOpenWorldMap();
-                    }}
-                    className="text-cyan-400 hover:text-cyan-300 font-medium whitespace-nowrap flex items-center gap-1"
-                  >
-                    <Compass className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Ver rotas no mapa</span>
-                    <span className="sm:hidden">Mapa</span>
-                  </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Mission List */}
             <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3.5 sm:px-6 py-3 sm:py-4 divide-y divide-slate-800/80">
@@ -316,6 +372,8 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
                   const lockReasons = isAvailable ? [] : getLockReasons(offer);
                   const distKm = (offer.distancePx / 1000).toFixed(1);
 
+                  const trailerPreviewUrl = SpriteRegistry.getTrailerMenuPreview(offer.trailerType);
+
                   return (
                     <div
                       key={offer.id}
@@ -324,7 +382,17 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
                         !isAvailable ? 'opacity-60' : ''
                       }`}
                     >
-                      <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex items-center gap-3 sm:gap-3.5 min-w-0 flex-1">
+                        <div className="w-24 sm:w-32 h-14 sm:h-16 rounded-lg bg-gradient-to-b from-slate-900/90 to-slate-950 border border-slate-800/90 px-2 py-1.5 flex items-center justify-center shrink-0">
+                          <img
+                            src={trailerPreviewUrl}
+                            alt={TRAILER_LABELS[offer.trailerType] ?? offer.trailerType}
+                            referrerPolicy="no-referrer"
+                            loading="lazy"
+                            className="max-w-full max-h-full object-contain drop-shadow-[0_3px_4px_rgba(0,0,0,0.65)]"
+                          />
+                        </div>
+                        <div className="min-w-0 flex-1 space-y-1">
                         <div className="flex items-baseline gap-x-2 gap-y-0.5 flex-wrap">
                           <h3 className="text-sm font-semibold text-white">
                             {offer.title}
@@ -393,6 +461,7 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
                             Requer: {lockReasons.join(' · ')}
                           </div>
                         )}
+                        </div>
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
@@ -448,6 +517,8 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
                 };
                 const pct = Math.min(100, Math.round((st.current / Math.max(1, st.target)) * 100));
 
+                const badgeUrl = SpriteRegistry.getCertificateBadgeSprite(id);
+
                 return (
                   <div
                     key={id}
@@ -458,28 +529,45 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
                         : 'bg-slate-900/35 border-slate-800'
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-2 mb-1.5">
-                      <div>
-                        <h3 className="text-sm font-semibold text-white">{def.name}</h3>
-                        <div className="text-[11px] text-slate-400">
-                          {def.consecutive ? 'Série consecutiva' : 'Progresso cumulativo'}
-                        </div>
+                    <div className="flex items-start gap-3 mb-2">
+                      <div className="w-12 h-12 sm:w-14 sm:h-14 shrink-0 flex items-center justify-center">
+                        <img
+                          src={badgeUrl}
+                          alt={def.name}
+                          referrerPolicy="no-referrer"
+                          loading="lazy"
+                          className={`w-full h-full object-contain transition-all ${
+                            st.unlocked
+                              ? 'drop-shadow-[0_0_10px_rgba(16,185,129,0.35)]'
+                              : 'opacity-70 grayscale-[35%]'
+                          }`}
+                        />
                       </div>
-                      {st.unlocked ? (
-                        <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1 whitespace-nowrap">
-                          <CheckCircle className="w-3.5 h-3.5" />
-                          Conquistado
-                        </span>
-                      ) : (
-                        <span className="text-xs font-mono tabular-nums text-slate-300 whitespace-nowrap">
-                          {st.current} / {st.target}
-                        </span>
-                      )}
-                    </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <div className="min-w-0">
+                            <h3 className="text-sm font-semibold text-white truncate">{def.name}</h3>
+                            <div className="text-[11px] text-slate-400">
+                              {def.consecutive ? 'Série consecutiva' : 'Progresso cumulativo'}
+                            </div>
+                          </div>
+                          {st.unlocked ? (
+                            <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1 whitespace-nowrap shrink-0">
+                              <CheckCircle className="w-3.5 h-3.5" />
+                              Conquistado
+                            </span>
+                          ) : (
+                            <span className="text-xs font-mono tabular-nums text-slate-300 whitespace-nowrap shrink-0">
+                              {st.current} / {st.target}
+                            </span>
+                          )}
+                        </div>
 
-                    <p className="text-xs text-slate-300 leading-relaxed mb-3">
-                      {def.description}
-                    </p>
+                        <p className="text-xs text-slate-300 leading-relaxed">
+                          {def.description}
+                        </p>
+                      </div>
+                    </div>
 
                     <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mb-2.5">
                       <div

@@ -1,7 +1,7 @@
 import type { WeatherModifier } from './GarageSystem';
 
-export type WeatherCellKind = 'rain' | 'fog' | 'clouds';
-export type WeatherCondition = 'clear' | 'cloudy' | 'rain' | 'fog';
+export type WeatherCellKind = 'rain' | 'fog' | 'storm' | 'clouds';
+export type WeatherCondition = 'clear' | 'cloudy' | 'rain' | 'fog' | 'storm';
 
 export interface WeatherCell {
   id: string;
@@ -21,6 +21,7 @@ export interface WeatherCell {
 
 export interface LocalWeatherSample {
   rainIntensity: number;
+  stormIntensity: number;
   fogDensity: number;
   cloudCover: number;
   roadWetness: number;
@@ -88,6 +89,7 @@ export class WeatherSystem {
   // Cached latest local sample for UI/inspection
   private latestSample: LocalWeatherSample = {
     rainIntensity: 0,
+    stormIntensity: 0,
     fogDensity: 0,
     cloudCover: 0.24,
     roadWetness: 0,
@@ -128,19 +130,34 @@ export class WeatherSystem {
   public seedInitialCells(): void {
     this.cells = [
       {
-        id: 'rain-serra-nw',
-        kind: 'rain',
-        x: -2650,
-        y: -1850,
+        id: 'storm-serra-nw',
+        kind: 'storm',
+        x: -2450,
+        y: -1650,
         radiusX: 2550,
         radiusY: 1950,
         angle: -0.35,
-        vx: 48,
-        vy: 18,
-        intensity: 0.92,
+        vx: 54,
+        vy: 20,
+        intensity: 0.95,
         lifeSec: 60,
         maxLifeSec: 560,
         seed: 11,
+      },
+      {
+        id: 'storm-atlantic-south',
+        kind: 'storm',
+        x: 6850,
+        y: 9250,
+        radiusX: 2150,
+        radiusY: 1600,
+        angle: -0.24,
+        vx: 54,
+        vy: 18,
+        intensity: 0.90,
+        lifeSec: 40,
+        maxLifeSec: 540,
+        seed: 13,
       },
       {
         id: 'rain-central-approach',
@@ -315,7 +332,7 @@ export class WeatherSystem {
     for (let i = 0; i < this.cells.length; i++) {
       const c = this.cells[i];
       // Blend each cell's velocity gently toward the prevailing wind
-      const kindMul = c.kind === 'fog' ? 0.78 : 1.0;
+      const kindMul = c.kind === 'fog' ? 0.78 : c.kind === 'storm' ? 1.12 : 1.0;
       c.vx += (this.windVx * kindMul - c.vx) * Math.min(1, dt * 0.16);
       c.vy += (this.windVy * kindMul - c.vy) * Math.min(1, dt * 0.16);
       c.x += c.vx * dt;
@@ -354,10 +371,15 @@ export class WeatherSystem {
     cell.radiusX = 2050 + h1 * 1150;
     cell.radiusY = 1550 + h2 * 850;
     cell.angle = (h1 - 0.5) * 0.7;
-    cell.intensity = cell.kind === 'clouds' ? 0.64 + h2 * 0.24 : 0.74 + h2 * 0.24;
+    cell.intensity =
+      cell.kind === 'clouds'
+        ? 0.64 + h2 * 0.24
+        : cell.kind === 'storm'
+          ? 0.82 + h2 * 0.18
+          : 0.74 + h2 * 0.24;
     cell.lifeSec = 0;
     cell.maxLifeSec = 480 + h1 * 200;
-    const kindMul = cell.kind === 'fog' ? 0.78 : 1.0;
+    const kindMul = cell.kind === 'fog' ? 0.78 : cell.kind === 'storm' ? 1.12 : 1.0;
     cell.vx = this.windVx * kindMul;
     cell.vy = this.windVy * kindMul;
   }
@@ -387,9 +409,26 @@ export class WeatherSystem {
     const windSpeedKmh = Math.round(Math.hypot(windVx, windVy) * 0.45);
 
     // 1. Forced global overrides from Exam X or Garages / Hubs quick bar
+    if (forcedModifier === 'storm') {
+      return {
+        rainIntensity: 1,
+        stormIntensity: 1,
+        fogDensity: 0.24,
+        cloudCover: 1,
+        roadWetness: 1,
+        windVx: windVx * 1.65,
+        windVy: windVy * 1.65,
+        windSpeedKmh: Math.round(windSpeedKmh * 1.65),
+        surfaceGrip: 0.40,
+        dominantCondition: 'storm',
+        isForcedOverride: true,
+        dynamicEnabled: this.dynamicEnabled,
+      };
+    }
     if (forcedModifier === 'rain') {
       return {
         rainIntensity: 1,
+        stormIntensity: 0,
         fogDensity: 0.18,
         cloudCover: 0.92,
         roadWetness: 1,
@@ -405,6 +444,7 @@ export class WeatherSystem {
     if (forcedModifier === 'fog') {
       return {
         rainIntensity: 0,
+        stormIntensity: 0,
         fogDensity: 1,
         cloudCover: 0.65,
         roadWetness: 0.25,
@@ -422,6 +462,7 @@ export class WeatherSystem {
     if (!this.dynamicEnabled) {
       return {
         rainIntensity: 0,
+        stormIntensity: 0,
         fogDensity: 0,
         cloudCover: 0,
         roadWetness: 0,
@@ -437,6 +478,7 @@ export class WeatherSystem {
 
     // 3. Dynamic regional cell accumulation
     let rainIntensity = 0;
+    let stormIntensity = 0;
     let fogDensity = 0;
     let cloudCover = 0.22; // gentle scattered fair-weather cloud shadows across RigWorld
 
@@ -459,7 +501,12 @@ export class WeatherSystem {
         : 1 - smoothstep(0.18, 1.0, distNorm);
       const contrib = falloff * c.intensity * env;
 
-      if (c.kind === 'rain') {
+      if (c.kind === 'storm') {
+        stormIntensity = Math.max(stormIntensity, contrib);
+        rainIntensity = Math.max(rainIntensity, Math.min(1, contrib * 1.15));
+        cloudCover = Math.max(cloudCover, 0.55 + contrib * 0.45);
+        fogDensity = Math.max(fogDensity, contrib * 0.24);
+      } else if (c.kind === 'rain') {
         rainIntensity = Math.max(rainIntensity, contrib);
         // Rain fronts always carry heavy overhead cloud cover & light spray mist
         cloudCover = Math.max(cloudCover, 0.35 + contrib * 0.65);
@@ -486,37 +533,46 @@ export class WeatherSystem {
     }
 
     rainIntensity = clamp01(rainIntensity);
+    stormIntensity = clamp01(stormIntensity);
     fogDensity = clamp01(fogDensity);
     cloudCover = clamp01(cloudCover);
+
+    const stormWindMul = 1 + stormIntensity * 0.65;
+    const finalWindVx = windVx * stormWindMul;
+    const finalWindVy = windVy * stormWindMul;
+    const finalWindSpeedKmh = Math.round(Math.hypot(finalWindVx, finalWindVy) * 0.45);
 
     const wetness =
       roadWetnessOverride !== undefined ? clamp01(roadWetnessOverride) : Math.max(rainIntensity, this.roadWetness);
 
     let surfaceGrip = 1.0;
-    if (wetness >= 0.01 || fogDensity >= 0.04) {
-      surfaceGrip = Math.max(0.48, Math.min(1.0, 1.0 - wetness * 0.46 - fogDensity * 0.08));
+    if (wetness >= 0.01 || fogDensity >= 0.04 || stormIntensity >= 0.04) {
+      surfaceGrip = Math.max(0.40, Math.min(1.0, 1.0 - wetness * 0.46 - stormIntensity * 0.08 - fogDensity * 0.08));
     }
     if (forcedModifier === 'night') {
       surfaceGrip = Math.min(0.95, surfaceGrip);
     }
 
     const dominantCondition: WeatherCondition =
-      rainIntensity >= 0.16
-        ? 'rain'
-        : fogDensity >= 0.22
-          ? 'fog'
-          : cloudCover >= 0.52
-            ? 'cloudy'
-            : 'clear';
+      stormIntensity >= 0.16
+        ? 'storm'
+        : rainIntensity >= 0.16
+          ? 'rain'
+          : fogDensity >= 0.22
+            ? 'fog'
+            : cloudCover >= 0.52
+              ? 'cloudy'
+              : 'clear';
 
     return {
       rainIntensity,
+      stormIntensity,
       fogDensity,
       cloudCover,
       roadWetness: wetness,
-      windVx,
-      windVy,
-      windSpeedKmh,
+      windVx: finalWindVx,
+      windVy: finalWindVy,
+      windSpeedKmh: finalWindSpeedKmh,
       surfaceGrip: Math.round(surfaceGrip * 1000) / 1000,
       dominantCondition,
       isForcedOverride: forcedModifier === 'night',
@@ -538,7 +594,7 @@ export class WeatherSystem {
     const dt = Math.min(Math.max(dtSec, 0), 0.1);
     const raw = this.sampleAt(wx, wy, altitudeM, timeOfDayHours, forcedModifier, this.roadWetness);
 
-    if (forcedModifier === 'rain') {
+    if (forcedModifier === 'rain' || forcedModifier === 'storm') {
       this.roadWetness = 1;
     } else if (!this.dynamicEnabled && forcedModifier === 'clear') {
       this.roadWetness = Math.max(0, this.roadWetness - 0.5 * dt);

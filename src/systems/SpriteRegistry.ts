@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
-import type { TruckType } from './TruckCatalog';
+import type { CertificateId, TruckType, UpgradeSlot } from './TruckCatalog';
 import type { TrailerType } from '../entities/Trailer';
+import type { LicenseId } from './LicenseSystem';
 
 /**
  * Central manifest & safe preloader for RigMaster 2D sprites & seamless tiles (Phase D).
@@ -35,7 +36,8 @@ export type BuildingAssetKey =
   | 'building_warehouse'
   | 'building_gabled'
   | 'building_church'
-  | 'building_convenience_store';
+  | 'building_convenience_store'
+  | 'building_restaurant';
 
 export const BUILDING_ASSET_KEYS: readonly BuildingAssetKey[] = [
   'building_warehouse_big',
@@ -46,6 +48,7 @@ export const BUILDING_ASSET_KEYS: readonly BuildingAssetKey[] = [
   'building_gabled',
   'building_church',
   'building_convenience_store',
+  'building_restaurant',
 ] as const;
 
 export type PropAssetKey =
@@ -57,7 +60,10 @@ export type PropAssetKey =
   | 'prop_rock_outcrop'
   | 'prop_log_pile'
   | 'prop_wind_turbine_rotor'
-  | 'prop_gas_canopy';
+  | 'prop_gas_canopy'
+  | 'prop_gas_pump'
+  | 'prop_price_sign'
+  | 'prop_air_water';
 
 export const PROP_ASSET_KEYS: readonly PropAssetKey[] = [
   'prop_container_base',
@@ -69,6 +75,9 @@ export const PROP_ASSET_KEYS: readonly PropAssetKey[] = [
   'prop_log_pile',
   'prop_wind_turbine_rotor',
   'prop_gas_canopy',
+  'prop_gas_pump',
+  'prop_price_sign',
+  'prop_air_water',
 ] as const;
 
 export const STATIC_PROP_SOLID_KEYS: readonly PropAssetKey[] = [
@@ -79,6 +88,9 @@ export const STATIC_PROP_SOLID_KEYS: readonly PropAssetKey[] = [
   'prop_pine_alpine_2',
   'prop_rock_outcrop',
   'prop_log_pile',
+  'prop_gas_pump',
+  'prop_price_sign',
+  'prop_air_water',
 ] as const;
 
 export type TrafficAssetKey =
@@ -159,8 +171,9 @@ export const AVAILABLE_SPRITES: readonly SpriteAssetEntry[] = [
   { key: 'building_gabled', url: '/assets/sprites/buildings/gabled.png', category: 'building' },
   { key: 'building_church', url: '/assets/sprites/buildings/church.png', category: 'building' },
   { key: 'building_convenience_store', url: '/assets/sprites/buildings/convenience_store.png', category: 'building' },
+  { key: 'building_restaurant', url: '/assets/sprites/buildings/restaurant.png', category: 'building' },
 
-  // Phase D3.2 — Containers, Vegetation, Rocks & Industrial Props (9/9 — 100% complete! RGBA PNG)
+  // Phase D3.2 — Containers, Vegetation, Rocks & Industrial/Service Station Props (12/12 — RGBA PNG)
   { key: 'prop_container_base', url: '/assets/sprites/props/container_base.png', category: 'prop' },
   { key: 'prop_tree_deciduous_1', url: '/assets/sprites/props/tree_deciduous_1.png', category: 'prop' },
   { key: 'prop_tree_deciduous_2', url: '/assets/sprites/props/tree_deciduous_2.png', category: 'prop' },
@@ -170,6 +183,9 @@ export const AVAILABLE_SPRITES: readonly SpriteAssetEntry[] = [
   { key: 'prop_log_pile', url: '/assets/sprites/props/log_pile.png', category: 'prop' },
   { key: 'prop_wind_turbine_rotor', url: '/assets/sprites/props/wind_turbine_rotor.png', category: 'prop' },
   { key: 'prop_gas_canopy', url: '/assets/sprites/props/gas_canopy.png', category: 'prop' },
+  { key: 'prop_gas_pump', url: '/assets/sprites/props/gas_pump.png', category: 'prop' },
+  { key: 'prop_price_sign', url: '/assets/sprites/props/price_sign.png', category: 'prop' },
+  { key: 'prop_air_water', url: '/assets/sprites/props/air_water.png', category: 'prop' },
 
   // Phase D4 — AI Traffic Vehicles (4/4 — 100% complete! Neutral RGBA PNGs facing UP / North for GPU tinting)
   { key: 'traffic_car_compact', url: '/assets/sprites/vehicles/traffic/car_compact.png', category: 'traffic' },
@@ -189,6 +205,69 @@ export const TRUCK_SIDEVIEW_SPRITES: Record<TruckType, string> = {
   volvo_fh_6x4: '/assets/sprites/vehicles/trucks/menu/volvo_fh_6x4_sideview.png',
   scania_r_8x4: '/assets/sprites/vehicles/trucks/menu/scania_r_8x4_sideview.png',
   volvo_fh16_8x4: '/assets/sprites/vehicles/trucks/menu/volvo_fh16_8x4_sideview.png',
+};
+
+/**
+ * Manifest of processed UI side-view illustrations for all 14 semi-trailers & tankers (Phase D5.2.1).
+ */
+export const TRAILER_SIDEVIEW_SPRITES: Record<TrailerType, string> = {
+  standard: '/assets/sprites/vehicles/trailers/menu/standard_sideview.png',
+  reefer: '/assets/sprites/vehicles/trailers/menu/reefer_sideview.png',
+  container: '/assets/sprites/vehicles/trailers/menu/container_sideview.png',
+  tanker_milk: '/assets/sprites/vehicles/trailers/menu/tanker_milk_sideview.png',
+  long_cargo: '/assets/sprites/vehicles/trailers/menu/long_cargo_sideview.png',
+  flatbed_heavy: '/assets/sprites/vehicles/trailers/menu/flatbed_heavy_sideview.png',
+  timber: '/assets/sprites/vehicles/trailers/menu/timber_sideview.png',
+  tanker_fuel: '/assets/sprites/vehicles/trailers/menu/tanker_fuel_sideview.png',
+  bitrem_lead: '/assets/sprites/vehicles/trailers/menu/bitrem_lead_sideview.png',
+  bitrem_pup: '/assets/sprites/vehicles/trailers/menu/bitrem_pup_sideview.png',
+  bitrem_tanker_lead: '/assets/sprites/vehicles/trailers/menu/bitrem_tanker_lead_sideview.png',
+  bitrem_tanker_pup: '/assets/sprites/vehicles/trailers/menu/bitrem_tanker_pup_sideview.png',
+  fragile_glass: '/assets/sprites/vehicles/trailers/menu/fragile_glass_sideview.png',
+  tanker_hazmat: '/assets/sprites/vehicles/trailers/menu/tanker_hazmat_sideview.png',
+};
+
+/**
+ * Workshop mechanical component technical illustrations (Phase D5.2.2).
+ */
+export const UPGRADE_SLOT_SPRITES: Record<UpgradeSlot, string> = {
+  engine: '/assets/sprites/ui/upgrades/upgrade_engine.png',
+  brakes: '/assets/sprites/ui/upgrades/upgrade_brakes.png',
+  suspension: '/assets/sprites/ui/upgrades/upgrade_suspension.png',
+  tires: '/assets/sprites/ui/upgrades/upgrade_tires.png',
+};
+
+/**
+ * Panoramic 16:9 postcard banners for the 5 official regional hubs (Phase D5.2.3).
+ */
+export const HUB_BANNER_SPRITES: Record<string, string> = {
+  harbor: '/assets/sprites/ui/hubs/hub_harbor.jpg',
+  shipyard: '/assets/sprites/ui/hubs/hub_shipyard.jpg',
+  industrial: '/assets/sprites/ui/hubs/hub_industrial.jpg',
+  historic: '/assets/sprites/ui/hubs/hub_historic.jpg',
+  serra: '/assets/sprites/ui/hubs/hub_serra.jpg',
+};
+
+/**
+ * Metallic enamel crest badges for the 4 commercial driver licenses (Phase D5.2.3).
+ */
+export const LICENSE_BADGE_SPRITES: Record<LicenseId, string> = {
+  C: '/assets/sprites/ui/badges/license_c.png',
+  CE: '/assets/sprites/ui/badges/license_ce.png',
+  H: '/assets/sprites/ui/badges/license_h.png',
+  X: '/assets/sprites/ui/badges/license_x.png',
+};
+
+/**
+ * Metallic enamel emblem badges for the 6 specialization certificates (Phase D5.2.3).
+ */
+export const CERTIFICATE_BADGE_SPRITES: Record<CertificateId, string> = {
+  ADR_Basic: '/assets/sprites/ui/badges/cert_adr.png',
+  Heavy_Combo: '/assets/sprites/ui/badges/cert_heavy_combo.png',
+  Precision_Dock: '/assets/sprites/ui/badges/cert_precision_dock.png',
+  Night_Ops: '/assets/sprites/ui/badges/cert_night_ops.png',
+  Offroad_Master: '/assets/sprites/ui/badges/cert_offroad_master.png',
+  Fragile_Expert: '/assets/sprites/ui/badges/cert_fragile.png',
 };
 
 export interface TruckMenuPreview {
@@ -224,6 +303,8 @@ export class SpriteRegistry {
         return 'building_church';
       case 'convenience_store':
         return 'building_convenience_store';
+      case 'restaurant':
+        return 'building_restaurant';
       default:
         return null;
     }
@@ -242,6 +323,26 @@ export class SpriteRegistry {
       url: `/assets/sprites/vehicles/trucks/${type}.png`,
       kind: 'topdown',
     };
+  }
+
+  public static getTrailerMenuPreview(type: TrailerType): string {
+    return TRAILER_SIDEVIEW_SPRITES[type] ?? `/assets/sprites/vehicles/trailers/${type}.png`;
+  }
+
+  public static getUpgradeSlotSprite(slot: UpgradeSlot): string {
+    return UPGRADE_SLOT_SPRITES[slot];
+  }
+
+  public static getHubBanner(hubId: string): string | null {
+    return HUB_BANNER_SPRITES[hubId] ?? null;
+  }
+
+  public static getLicenseBadgeSprite(id: LicenseId): string {
+    return LICENSE_BADGE_SPRITES[id];
+  }
+
+  public static getCertificateBadgeSprite(id: CertificateId): string {
+    return CERTIFICATE_BADGE_SPRITES[id];
   }
 
   /**

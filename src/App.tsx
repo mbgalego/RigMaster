@@ -30,6 +30,7 @@ import {
   type GameMode,
 } from './systems/ReputationSystem';
 import { MissionSystem } from './systems/MissionSystem';
+import { SpriteRegistry } from './systems/SpriteRegistry';
 import { TouchControls } from './components/TouchControls';
 import { MissionsModal } from './components/MissionsModal';
 import { FleetGarageModal } from './components/FleetGarageModal';
@@ -108,6 +109,7 @@ import {
   TrendingDown,
   Cloud,
   CloudRain,
+  CloudLightning,
   CloudFog,
   Paintbrush,
   Eraser,
@@ -136,6 +138,7 @@ const CREATE_CATALOG: Array<{
       { spec: { type: 'building', w: 220, h: 170, variant: 'church', label: 'Igreja' }, icon: Church },
       { spec: { type: 'building', w: 260, h: 160, variant: 'archway', label: 'Arco' }, icon: Landmark },
       { spec: { type: 'building', w: 240, h: 136, variant: 'convenience_store', label: 'Loja Conveniência' }, icon: Store },
+      { spec: { type: 'building', w: 260, h: 150, variant: 'restaurant', label: 'Restaurante (A1)' }, icon: Store },
       { spec: { type: 'building', w: 900, h: 420, variant: 'warehouse_docks', params: { docks: 5 }, label: 'Armazém c/ Docas' }, icon: Warehouse },
       { spec: { type: 'building', w: 600, h: 300, variant: 'warehouse_docks', params: { docks: 3 }, label: 'Armazém 3 Docas' }, icon: Warehouse },
     ],
@@ -271,11 +274,12 @@ const CREATE_CATALOG: Array<{
     icon: Fuel,
     items: [
       { spec: { type: 'hub_sign', w: 68, h: 68, label: 'Sinal de HUB' }, icon: MapPin },
-      { spec: { type: 'gas_pump', w: 48, h: 110, label: 'Bomba Combustível' }, icon: Fuel },
-      { spec: { type: 'gas_canopy', w: 420, h: 340, label: 'Pista Posto (Alcatrão)' }, icon: Layers },
+      { spec: { type: 'gas_pump', w: 48, h: 116, label: 'Bomba Combustível' }, icon: Fuel },
+      { spec: { type: 'gas_canopy', w: 540, h: 320, label: 'Pista Posto (Alcatrão)' }, icon: Layers },
       { spec: { type: 'building', w: 240, h: 136, variant: 'convenience_store', label: 'Loja Conveniência' }, icon: Store },
-      { spec: { type: 'air_water', w: 64, h: 36, label: 'Ar / Água / Aspirador' }, icon: Wind },
-      { spec: { type: 'price_sign', w: 50, h: 96, label: 'Totem Preços' }, icon: Gauge },
+      { spec: { type: 'building', w: 260, h: 150, variant: 'restaurant', label: 'Restaurante (A1)' }, icon: Store },
+      { spec: { type: 'air_water', w: 84, h: 42, label: 'Ar / Água / Aspirador' }, icon: Wind },
+      { spec: { type: 'price_sign', w: 56, h: 120, label: 'Totem Preços' }, icon: Gauge },
     ],
   },
   {
@@ -458,6 +462,7 @@ export default function App() {
     weatherDynamic: true,
     weatherCondition: 'clear',
     rainIntensity: 0,
+    stormIntensity: 0,
     fogDensity: 0,
     cloudCover: 0.22,
     roadWetness: 0,
@@ -686,7 +691,7 @@ export default function App() {
           `${Math.round(t.truckDamage.rearLights.brakeLeft)},${Math.round(t.truckDamage.rearLights.brakeRight)},${Math.round(t.truckDamage.rearLights.reverseLeft)},${Math.round(t.truckDamage.rearLights.reverseRight)}|` +
           `${Math.round(t.fuelPercent * 10)}|${Math.round(t.fuelLevel * 10)}|${t.isOutOfFuel ? 1 : 0}|` +
           `${t.isRefuelling ? 1 : 0}|${t.isRepairing ? 1 : 0}|${t.isJackknifed ? 1 : 0}|${t.isMechanicalLocked ? 1 : 0}|` +
-          `${t.articulationDeg}|${t.collisions}|${t.weather}|${t.weatherDynamic ? 1 : 0},${t.weatherCondition},${Math.round(t.rainIntensity * 10)},${Math.round(t.fogDensity * 10)}|${t.currentGForce.toFixed(2)}|${t.peakGForce.toFixed(2)}|` +
+          `${t.articulationDeg}|${t.collisions}|${t.weather}|${t.weatherDynamic ? 1 : 0},${t.weatherCondition},${Math.round(t.rainIntensity * 10)},${Math.round(t.stormIntensity * 10)},${Math.round(t.fogDensity * 10)}|${t.currentGForce.toFixed(2)}|${t.peakGForce.toFixed(2)}|` +
           `${t.headlightMode}|${t.autoHeadlights ? 1 : 0}|${t.timePeriod}|${t.timeClock}|${t.autoTimeCycle ? 1 : 0}|${t.timeRealTime ? 1 : 0}|` +
           `${t.nearbyPump ? `${t.nearbyPump.x},${t.nearbyPump.y}` : ''}|` +
           `${t.nearbyRepairBay ? `${t.nearbyRepairBay.x},${t.nearbyRepairBay.y}` : ''}|` +
@@ -1167,19 +1172,27 @@ export default function App() {
               <PeriodIcon className="w-3 h-3 text-amber-300" />
               <span className="font-mono text-xs font-black text-amber-100 tabular-nums">{telemetry.timeClock}</span>
             </span>
-            {(telemetry.rainIntensity >= 0.15 || telemetry.fogDensity >= 0.18) && (
+            {(telemetry.stormIntensity >= 0.15 || telemetry.rainIntensity >= 0.15 || telemetry.fogDensity >= 0.18) && (
               <span
                 data-testid="hud-weather-indicator"
                 className={`flex items-center ${
-                  telemetry.rainIntensity >= 0.15 ? 'text-sky-300' : 'text-slate-300'
+                  telemetry.stormIntensity >= 0.15
+                    ? 'text-indigo-300'
+                    : telemetry.rainIntensity >= 0.15
+                      ? 'text-sky-300'
+                      : 'text-slate-300'
                 }`}
                 title={
-                  telemetry.rainIntensity >= 0.15
-                    ? `Chuva ${telemetry.rainIntensity >= 0.65 ? 'forte' : 'local'} · Piso molhado (${Math.round(telemetry.roadWetness * 100)}%)`
-                    : `Nevoeiro local (${Math.round(telemetry.fogDensity * 100)}%)`
+                  telemetry.stormIntensity >= 0.15
+                    ? `Trovoada ${telemetry.stormIntensity >= 0.65 ? 'intensa' : 'local'} · Piso muito escorregadio (${Math.round(telemetry.roadWetness * 100)}%)`
+                    : telemetry.rainIntensity >= 0.15
+                      ? `Chuva ${telemetry.rainIntensity >= 0.65 ? 'forte' : 'local'} · Piso molhado (${Math.round(telemetry.roadWetness * 100)}%)`
+                      : `Nevoeiro local (${Math.round(telemetry.fogDensity * 100)}%)`
                 }
               >
-                {telemetry.rainIntensity >= 0.15 ? (
+                {telemetry.stormIntensity >= 0.15 ? (
+                  <CloudLightning className="w-3.5 h-3.5 text-amber-300" />
+                ) : telemetry.rainIntensity >= 0.15 ? (
                   <CloudRain className="w-3.5 h-3.5" />
                 ) : (
                   <CloudFog className="w-3.5 h-3.5" />
@@ -1322,6 +1335,16 @@ export default function App() {
                       ] as Array<{ id: VehicleConfigType; name: string; badge: string; req: LicenseId }>).map((v) => {
                         const unlocked = v.req === 'C' || (licenses.find((l) => l.id === v.req)?.unlocked ?? false);
                         const lockedByExam = Boolean(activeExam?.active);
+                        const previewUrl =
+                          v.id === 'solo'
+                            ? SpriteRegistry.getTruckMenuPreview(telemetry.activeTruckType).url
+                            : SpriteRegistry.getTrailerMenuPreview(
+                                v.id === 'bitrem'
+                                  ? 'bitrem_lead'
+                                  : v.id === 'bitrem_tanker'
+                                    ? 'bitrem_tanker_lead'
+                                    : (v.id as TrailerType),
+                              );
                         return (
                           <button
                             key={v.id}
@@ -1330,7 +1353,7 @@ export default function App() {
                               setIsMenuOpen(false);
                             }}
                             title={lockedByExam ? 'Troca de veículo bloqueada durante exame ativo' : undefined}
-                            className={`text-left px-2 py-1.5 rounded flex items-center justify-between transition ${
+                            className={`text-left px-2 py-1 rounded flex items-center justify-between gap-2 transition ${
                               vehicleConfig === v.id
                                 ? 'bg-cyan-500 text-black font-bold'
                                 : lockedByExam
@@ -1340,8 +1363,24 @@ export default function App() {
                                     : 'text-slate-500 hover:bg-slate-900/70'
                             }`}
                           >
-                            <span className="truncate">{v.name}</span>
-                            <span className="flex items-center gap-1 ml-2 shrink-0">
+                            <span className="flex items-center gap-2 min-w-0">
+                              <span
+                                className={`w-12 h-6 rounded px-1 py-0.5 flex items-center justify-center shrink-0 ${
+                                  vehicleConfig === v.id ? 'bg-slate-950/25' : 'bg-slate-900/90 border border-slate-800/80'
+                                }`}
+                              >
+                                <img
+                                  src={previewUrl}
+                                  alt=""
+                                  aria-hidden="true"
+                                  referrerPolicy="no-referrer"
+                                  loading="lazy"
+                                  className="max-w-full max-h-full object-contain"
+                                />
+                              </span>
+                              <span className="truncate">{v.name}</span>
+                            </span>
+                            <span className="flex items-center gap-1 ml-1 shrink-0">
                               {(!unlocked || lockedByExam) && (
                                 <span
                                   className="text-[9px]"
@@ -3029,6 +3068,8 @@ export default function App() {
               {licenses.map((lic) => {
                 const isPassed = lic.unlocked;
 
+                const badgeUrl = SpriteRegistry.getLicenseBadgeSprite(lic.id);
+
                 return (
                   <div
                     key={lic.id}
@@ -3039,26 +3080,42 @@ export default function App() {
                     }`}
                   >
                     <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <span
-                          className="px-2 py-0.5 rounded font-black text-xs font-mono"
-                          style={{ backgroundColor: `${lic.color}22`, color: lic.color, border: `1px solid ${lic.color}66` }}
-                        >
-                          {lic.badge} • {lic.level}
-                        </span>
-                        {isPassed ? (
-                          <span className="text-emerald-400 text-xs font-bold flex items-center gap-1">
-                            <CheckCircle className="w-3.5 h-3.5" /> DESBLOQUEADA
-                          </span>
-                        ) : (
-                          <span className="text-amber-400 text-xs font-bold flex items-center gap-1">
-                            <AlertTriangle className="w-3.5 h-3.5" /> EXAME PENDENTE
-                          </span>
-                        )}
-                      </div>
+                      <div className="flex items-start gap-3 mb-3">
+                        <div className="w-14 h-14 sm:w-16 sm:h-16 shrink-0 flex items-center justify-center">
+                          <img
+                            src={badgeUrl}
+                            alt={`Emblema ${lic.name}`}
+                            referrerPolicy="no-referrer"
+                            className={`w-full h-full object-contain transition-all ${
+                              isPassed
+                                ? 'drop-shadow-[0_0_12px_rgba(34,211,238,0.3)]'
+                                : 'opacity-70 grayscale-[35%]'
+                            }`}
+                          />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
+                            <span
+                              className="px-2 py-0.5 rounded font-black text-xs font-mono"
+                              style={{ backgroundColor: `${lic.color}22`, color: lic.color, border: `1px solid ${lic.color}66` }}
+                            >
+                              {lic.badge} • {lic.level}
+                            </span>
+                            {isPassed ? (
+                              <span className="text-emerald-400 text-xs font-bold flex items-center gap-1">
+                                <CheckCircle className="w-3.5 h-3.5" /> DESBLOQUEADA
+                              </span>
+                            ) : (
+                              <span className="text-amber-400 text-xs font-bold flex items-center gap-1">
+                                <AlertTriangle className="w-3.5 h-3.5" /> EXAME PENDENTE
+                              </span>
+                            )}
+                          </div>
 
-                      <h3 className="font-bold text-sm text-white mb-1">{lic.name} - {lic.title}</h3>
-                      <p className="text-xs text-slate-400 mb-3">{lic.description}</p>
+                          <h3 className="font-bold text-sm text-white mb-0.5">{lic.name} - {lic.title}</h3>
+                          <p className="text-xs text-slate-400">{lic.description}</p>
+                        </div>
+                      </div>
 
                       <div className="bg-slate-950 p-2.5 rounded border border-slate-850 mb-3 text-[11px] space-y-1">
                         <div className="text-slate-300 font-semibold">{lic.exam.title}</div>
@@ -3117,7 +3174,7 @@ export default function App() {
                 <div className="min-w-0">
                   <h2 className="text-base sm:text-xl font-black text-white leading-snug">HUBS & GARAGENS</h2>
                   <p className="text-[11px] sm:text-xs text-slate-400">
-                    Domina os 4 hubs regionais para desbloquear modificadores de clima.
+                    Domina os hubs regionais para desbloquear modificadores de clima.
                   </p>
                 </div>
               </div>
@@ -3152,7 +3209,7 @@ export default function App() {
                   <Cloud className="w-3 h-3" />
                   Dinâmico
                 </button>
-                {(['clear', 'rain', 'fog', 'night'] as const).map((weather) => {
+                {(['clear', 'rain', 'storm', 'fog', 'night'] as const).map((weather) => {
                   const unlocked = GarageSystem.getInstance().getUnlockedModifiers().includes(weather);
                   const isActive =
                     weather === 'clear'
@@ -3161,18 +3218,29 @@ export default function App() {
                   return (
                     <button
                       key={weather}
+                      data-testid={`btn-weather-${weather}`}
                       onClick={() => handleSetWeather(weather)}
                       disabled={!unlocked}
                       title={unlocked ? undefined : 'Bloqueado: domina o Hub correspondente a 100%'}
                       className={`px-2.5 sm:px-3 py-1 rounded text-[11px] sm:text-xs font-semibold capitalize transition whitespace-nowrap ${
                         isActive
-                          ? 'bg-cyan-500 text-black font-bold shadow-md shadow-cyan-500/30'
+                          ? weather === 'storm'
+                            ? 'bg-indigo-400 text-slate-950 font-bold shadow-md shadow-indigo-400/30'
+                            : 'bg-cyan-500 text-black font-bold shadow-md shadow-cyan-500/30'
                           : unlocked
                             ? 'bg-slate-950 text-slate-300 hover:text-white border border-slate-800'
                             : 'bg-slate-950 text-slate-600 border border-slate-900 cursor-not-allowed'
                       }`}
                     >
-                      {weather === 'rain' ? 'Chuva' : weather === 'fog' ? 'Nevoeiro' : weather === 'night' ? 'Noturno' : 'Limpo'}
+                      {weather === 'storm'
+                        ? 'Trovoada'
+                        : weather === 'rain'
+                          ? 'Chuva'
+                          : weather === 'fog'
+                            ? 'Nevoeiro'
+                            : weather === 'night'
+                              ? 'Noturno'
+                              : 'Limpo'}
                       {!unlocked && ' 🔒'}
                     </button>
                   );
@@ -3180,78 +3248,118 @@ export default function App() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 overflow-y-auto overscroll-contain flex-1 min-h-0 pr-0.5 sm:pr-1">
-              {hubs.map((hub) => (
+            <div className="overflow-y-auto overscroll-contain flex-1 min-h-0 pr-0.5 sm:pr-1">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+              {hubs.map((hub) => {
+                const bannerUrl = SpriteRegistry.getHubBanner(hub.id);
+                return (
                 <div
                   key={hub.id}
-                  className={`p-4 rounded-xl border flex flex-col justify-between transition ${
+                  className={`rounded-xl border flex flex-col justify-between transition ${
                     hub.isDominant
                       ? 'bg-slate-900/80 border-amber-500/50 shadow-lg shadow-amber-500/10'
                       : 'bg-slate-950/80 border-slate-800'
                   }`}
                 >
                   <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <span
-                        className="px-2 py-0.5 rounded font-black text-xs font-mono"
-                        style={{ backgroundColor: `${hub.color}22`, color: hub.color, border: `1px solid ${hub.color}66` }}
-                      >
-                        {hub.badge} • HUB REGIONAL
-                      </span>
-                      {hub.isDominant ? (
-                        <span className="text-amber-400 text-xs font-black flex items-center gap-1 animate-pulse">
-                          <Sparkles className="w-3.5 h-3.5" /> SINAL NÉON ATIVO (100%)
-                        </span>
-                      ) : (
-                        <span className="text-slate-400 text-xs font-mono">{hub.progress}% DOMINADO</span>
-                      )}
-                    </div>
-
-                    <h3 className="font-bold text-base text-white mb-1">{hub.name}</h3>
-                    <p className="text-xs text-slate-400 mb-3">{hub.description}</p>
-
-                    {/* Progress Bar */}
-                    <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden mb-3 border border-slate-800">
-                      <div
-                        className="h-full transition-all"
-                        style={{
-                          width: `${hub.progress}%`,
-                          backgroundColor: hub.color,
-                        }}
-                      />
-                    </div>
-
-                    {/* Regional Contracts */}
-                    <div className="space-y-1.5 mb-3">
-                      <div className="text-[11px] font-mono text-slate-300 font-semibold">Contratos Regionais:</div>
-                      {hub.contracts.map((c) => (
-                        <div
-                          key={c.id}
-                          className="flex items-center justify-between text-xs bg-slate-950 p-2 rounded border border-slate-850"
-                        >
-                          <div>
-                            <div className="text-slate-200 font-medium">{c.title}</div>
-                            <div className="text-[10px] text-slate-400">{c.cargoDescription}</div>
-                          </div>
-                          {c.completed ? (
-                            <span className="text-emerald-400 text-[11px] font-bold">Concluído</span>
+                    {bannerUrl ? (
+                      <div className="relative h-28 sm:h-32 w-full rounded-t-xl overflow-hidden border-b border-slate-800/80">
+                        <img
+                          src={bannerUrl}
+                          alt={hub.name}
+                          referrerPolicy="no-referrer"
+                          loading="lazy"
+                          className="w-full h-full object-cover object-center"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/45 to-slate-950/15" />
+                        <div className="absolute top-2.5 left-3 right-3 flex items-center justify-between gap-2">
+                          <span
+                            className="px-2 py-0.5 rounded font-black text-[11px] font-mono bg-slate-950/85 backdrop-blur-sm"
+                            style={{ color: hub.color, border: `1px solid ${hub.color}88` }}
+                          >
+                            {hub.badge} • HUB REGIONAL
+                          </span>
+                          {hub.isDominant ? (
+                            <span className="px-2 py-0.5 rounded bg-slate-950/85 text-amber-400 text-[11px] font-black flex items-center gap-1 animate-pulse">
+                              <Sparkles className="w-3 h-3" /> NÉON 100%
+                            </span>
                           ) : (
-                            <button
-                              onClick={() => {
-                                GarageSystem.getInstance().completeContract(c.id);
-                                handleReset();
-                              }}
-                              className="text-[11px] bg-amber-500/20 text-amber-300 px-2 py-1 rounded border border-amber-500/50 hover:bg-amber-500 hover:text-black font-semibold"
-                            >
-                              Entregar (+{c.rewardProgress}%)
-                            </button>
+                            <span className="px-2 py-0.5 rounded bg-slate-950/80 text-slate-200 text-[11px] font-mono">
+                              {hub.progress}% DOMINADO
+                            </span>
                           )}
                         </div>
-                      ))}
+                        <div className="absolute bottom-2 left-3 right-3">
+                          <h3 className="font-bold text-base text-white drop-shadow leading-tight">{hub.name}</h3>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="px-4 pt-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <span
+                            className="px-2 py-0.5 rounded font-black text-xs font-mono"
+                            style={{ backgroundColor: `${hub.color}22`, color: hub.color, border: `1px solid ${hub.color}66` }}
+                          >
+                            {hub.badge} • HUB REGIONAL
+                          </span>
+                          {hub.isDominant ? (
+                            <span className="text-amber-400 text-xs font-black flex items-center gap-1 animate-pulse">
+                              <Sparkles className="w-3.5 h-3.5" /> SINAL NÉON ATIVO (100%)
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 text-xs font-mono">{hub.progress}% DOMINADO</span>
+                          )}
+                        </div>
+                        <h3 className="font-bold text-base text-white mb-1">{hub.name}</h3>
+                      </div>
+                    )}
+
+                    <div className="p-4 pt-3">
+                      <p className="text-xs text-slate-400 mb-3">{hub.description}</p>
+
+                      {/* Progress Bar */}
+                      <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden mb-3 border border-slate-800">
+                        <div
+                          className="h-full transition-all"
+                          style={{
+                            width: `${hub.progress}%`,
+                            backgroundColor: hub.color,
+                          }}
+                        />
+                      </div>
+
+                      {/* Regional Contracts */}
+                      <div className="space-y-1.5">
+                        <div className="text-[11px] font-mono text-slate-300 font-semibold">Contratos Regionais:</div>
+                        {hub.contracts.map((c) => (
+                          <div
+                            key={c.id}
+                            className="flex items-center justify-between text-xs bg-slate-950 p-2 rounded border border-slate-850"
+                          >
+                            <div>
+                              <div className="text-slate-200 font-medium">{c.title}</div>
+                              <div className="text-[10px] text-slate-400">{c.cargoDescription}</div>
+                            </div>
+                            {c.completed ? (
+                              <span className="text-emerald-400 text-[11px] font-bold">Concluído</span>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  GarageSystem.getInstance().completeContract(c.id);
+                                  handleReset();
+                                }}
+                                className="text-[11px] bg-amber-500/20 text-amber-300 px-2 py-1 rounded border border-amber-500/50 hover:bg-amber-500 hover:text-black font-semibold"
+                              >
+                                Entregar (+{c.rewardProgress}%)
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
 
-                  <div className="pt-2 border-t border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
+                  <div className="px-4 py-2.5 border-t border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
                     <span>Desbloqueia: Peças de bioma + {hub.unlockedModifier}</span>
                     <button
                       onClick={() => GarageSystem.getInstance().addProgress(hub.id, 25)}
@@ -3261,7 +3369,9 @@ export default function App() {
                     </button>
                   </div>
                 </div>
-              ))}
+                );
+              })}
+              </div>
             </div>
 
             <div className="mt-3 sm:mt-4 pt-3 border-t border-slate-800 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 text-[11px] sm:text-xs shrink-0">

@@ -501,7 +501,7 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                 }
                 aria-label="Alternar Radar Meteorológico"
                 className={`p-1.5 rounded transition-colors ${
-                  showWeatherRadar && (weatherSys.isDynamicEnabled() || activeForcedWeather === 'rain' || activeForcedWeather === 'fog')
+                  showWeatherRadar && (weatherSys.isDynamicEnabled() || activeForcedWeather === 'rain' || activeForcedWeather === 'fog' || activeForcedWeather === 'storm')
                     ? 'text-sky-300 bg-sky-500/20 hover:bg-sky-500/30'
                     : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
                 }`}
@@ -512,12 +512,16 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
 
             {/* Live Weather Radar Status Badge (bottom-left of Strategic Map) */}
             <div className="absolute bottom-3.5 left-3.5 sm:bottom-5 sm:left-5 z-10 flex items-center gap-2 bg-slate-950/90 border border-slate-700/80 rounded-lg px-2.5 py-1.5 shadow-lg backdrop-blur-sm text-[10px] sm:text-[11px] font-mono text-slate-300">
-              {activeForcedWeather === 'rain' || activeForcedWeather === 'fog' ? (
-                <span className="text-sky-300 font-bold">
-                  Clima Fixo: {activeForcedWeather === 'rain' ? 'Chuva' : 'Nevoeiro'}
+              {activeForcedWeather === 'storm' || activeForcedWeather === 'rain' || activeForcedWeather === 'fog' ? (
+                <span className={activeForcedWeather === 'storm' ? 'text-indigo-300 font-bold' : 'text-sky-300 font-bold'}>
+                  Clima Fixo: {activeForcedWeather === 'storm' ? 'Trovoada' : activeForcedWeather === 'rain' ? 'Chuva' : 'Nevoeiro'}
                 </span>
               ) : weatherSys.isDynamicEnabled() ? (
                 <>
+                  <span className="inline-flex items-center gap-1 text-indigo-300">
+                    <span className="w-2 h-2 rounded-full bg-indigo-400" />
+                    Trovoada
+                  </span>
                   <span className="inline-flex items-center gap-1 text-sky-300">
                     <span className="w-2 h-2 rounded-full bg-sky-400" />
                     Chuva
@@ -559,6 +563,11 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
               }`}
             >
               <defs>
+                <radialGradient id="wm-storm-grad" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stopColor="#818cf8" stopOpacity="0.68" />
+                  <stop offset="52%" stopColor="#4f46e5" stopOpacity="0.46" />
+                  <stop offset="100%" stopColor="#312e81" stopOpacity="0" />
+                </radialGradient>
                 <radialGradient id="wm-rain-grad" cx="50%" cy="50%" r="50%">
                   <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.60" />
                   <stop offset="55%" stopColor="#0284c7" stopOpacity="0.38" />
@@ -650,40 +659,53 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
               ))}
 
               {/* Live Weather Radar & Cloud Layer (seen from above on the Strategic Map) */}
-              {showWeatherRadar && (weatherRadarActive || activeForcedWeather === 'rain' || activeForcedWeather === 'fog') && (
+              {showWeatherRadar && (weatherRadarActive || activeForcedWeather === 'storm' || activeForcedWeather === 'rain' || activeForcedWeather === 'fog') && (
                 <g data-testid="world-map-weather-layer" pointerEvents="none">
-                  {activeForcedWeather === 'rain' || activeForcedWeather === 'fog' ? (
+                  {activeForcedWeather === 'storm' || activeForcedWeather === 'rain' || activeForcedWeather === 'fog' ? (
                     <rect
                       x={WORLD_MIN_X}
                       y={WORLD_MIN_Y}
                       width={WORLD_SPAN_W}
                       height={WORLD_SPAN_H}
-                      fill={activeForcedWeather === 'rain' ? '#0284c7' : '#cbd5e1'}
-                      opacity={0.18}
+                      fill={
+                        activeForcedWeather === 'storm'
+                          ? '#4f46e5'
+                          : activeForcedWeather === 'rain'
+                            ? '#0284c7'
+                            : '#cbd5e1'
+                      }
+                      opacity={activeForcedWeather === 'storm' ? 0.22 : 0.18}
                     />
                   ) : (
                     weatherCells.map((cell) => {
                       const env = weatherSys.getCellEnvelope(cell);
                       if (env <= 0.02) return null;
                       const deg = (cell.angle * 180) / Math.PI;
+                      const isStorm = cell.kind === 'storm';
                       const fillUrl =
-                        cell.kind === 'rain'
-                          ? 'url(#wm-rain-grad)'
-                          : cell.kind === 'fog'
-                            ? 'url(#wm-fog-grad)'
-                            : 'url(#wm-cloud-grad)';
+                        isStorm
+                          ? 'url(#wm-storm-grad)'
+                          : cell.kind === 'rain'
+                            ? 'url(#wm-rain-grad)'
+                            : cell.kind === 'fog'
+                              ? 'url(#wm-fog-grad)'
+                              : 'url(#wm-cloud-grad)';
                       const strokeColor =
-                        cell.kind === 'rain'
-                          ? '#38bdf8'
-                          : cell.kind === 'fog'
-                            ? '#cbd5e1'
-                            : '#e2e8f0';
+                        isStorm
+                          ? '#a5b4fc'
+                          : cell.kind === 'rain'
+                            ? '#38bdf8'
+                            : cell.kind === 'fog'
+                              ? '#cbd5e1'
+                              : '#e2e8f0';
                       const label =
-                        cell.kind === 'rain'
-                          ? 'Chuva'
-                          : cell.kind === 'fog'
-                            ? 'Nevoeiro'
-                            : null;
+                        isStorm
+                          ? '⚡ Trovoada'
+                          : cell.kind === 'rain'
+                            ? 'Chuva'
+                            : cell.kind === 'fog'
+                              ? 'Nevoeiro'
+                              : null;
                       return (
                         <g
                           key={cell.id}
@@ -697,9 +719,9 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                             ry={cell.radiusY}
                             fill={fillUrl}
                             stroke={strokeColor}
-                            strokeWidth={cell.kind === 'clouds' ? 20 * s : 36 * s}
-                            strokeDasharray={cell.kind === 'rain' ? `${150 * s} ${90 * s}` : undefined}
-                            strokeOpacity={cell.kind === 'clouds' ? 0.28 : 0.68}
+                            strokeWidth={cell.kind === 'clouds' ? 20 * s : isStorm ? 44 * s : 36 * s}
+                            strokeDasharray={cell.kind === 'rain' || isStorm ? `${150 * s} ${90 * s}` : undefined}
+                            strokeOpacity={cell.kind === 'clouds' ? 0.28 : isStorm ? 0.84 : 0.68}
                           />
                           {/* Secondary organic cloud lobe for natural silhouette */}
                           <ellipse
@@ -715,10 +737,10 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                               x={0}
                               y={0}
                               textAnchor="middle"
-                              fill={cell.kind === 'rain' ? '#bae6fd' : '#f8fafc'}
+                              fill={isStorm ? '#fde047' : cell.kind === 'rain' ? '#bae6fd' : '#f8fafc'}
                               fontSize={220 * s}
                               fontWeight="800"
-                              opacity={0.95}
+                              opacity={0.96}
                               style={{ paintOrder: 'stroke' }}
                               stroke="#0b1927"
                               strokeWidth={55 * s}
@@ -995,7 +1017,7 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                   <div>Verde / Âmbar — Oficinas / Bombas</div>
                   <div>Rota âmbar / verde — Recolha / Entrega</div>
                   <div>Hélice branca — Torres Eólicas (Serra NW)</div>
-                  <div>Azul / Névoa / Branco — Frentes de chuva, nevoeiro e nuvens</div>
+                  <div>Índigo / Azul / Névoa — Trovoada, chuva, nevoeiro e nuvens</div>
                 </div>
               </div>
 

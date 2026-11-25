@@ -87,35 +87,58 @@
           box.style.display = 'block';
         }
         window.__showBootError = showBootError;
-        var retried = false;
+        var handlingScriptErr = false;
         window.__handleMainScriptError = function (scriptEl) {
-          if (window.__rigAppMounted) return;
+          if (window.__rigAppMounted || handlingScriptErr) return;
+          handlingScriptErr = true;
           var src = (scriptEl && scriptEl.getAttribute && scriptEl.getAttribute('src')) || '/src/main.tsx';
-          if (!retried) {
-            retried = true;
-            var status = document.getElementById('boot-status');
-            if (status) status.textContent = 'A reconectar ao servidor…';
-            // Chrome caches failed transitive ES module sub-imports for the lifetime of the document,
-            // so retrying `import()` in the same document fails again even when `/src/main.tsx` is HTTP 200.
-            // Perform one clean fresh-document reload (guarded per 15s) to clear the module map.
-            var now = Date.now();
-            var lastAutoReload = 0;
-            try {
-              lastAutoReload = Number(sessionStorage.getItem('rigmaster_boot_retry_ts') || '0');
-            } catch (_) {}
-            if (!lastAutoReload || now - lastAutoReload > 15000) {
-              try { sessionStorage.setItem('rigmaster_boot_retry_ts', String(now)); } catch (_) {}
-              setTimeout(function () {
-                if (!window.__rigAppMounted) {
-                  window.location.replace(window.location.pathname + '?_r=' + Date.now());
-                }
-              }, 1200);
-              return;
+          var status = document.getElementById('boot-status');
+          if (status) status.textContent = 'A reconectar ao servidor…';
+
+          // Track up to 2 automatic fresh-document reloads within a 30s window so a cold Cloud Run
+          // restart or transient proxy hiccup recovers automatically without looping forever.
+          var now = Date.now();
+          var retryCount = 0;
+          try {
+            var raw = sessionStorage.getItem('rigmaster_boot_retry');
+            if (raw) {
+              var parsed = JSON.parse(raw);
+              if (parsed && now - parsed.ts < 30000) retryCount = Number(parsed.count) || 0;
             }
-            showBootError('Falha temporária ao carregar módulos (' + src + '). Clique em Recarregar para tentar novamente.');
+          } catch (_) {}
+
+          if (retryCount >= 2) {
+            showBootError('Falha ao carregar ' + src + '. Clique em Recarregar para tentar novamente.');
             return;
           }
-          showBootError('Falha ao carregar ' + src);
+
+          var attempts = 0;
+          function probeAndReload() {
+            if (window.__rigAppMounted) return;
+            attempts++;
+            fetch(src + '?_ping=' + Date.now(), { cache: 'no-store' })
+              .then(function (r) {
+                var ct = (r.headers.get('content-type') || '').toLowerCase();
+                if (r.ok && ct.indexOf('javascript') !== -1) {
+                  try {
+                    sessionStorage.setItem('rigmaster_boot_retry', JSON.stringify({ ts: Date.now(), count: retryCount + 1 }));
+                  } catch (_) {}
+                  window.location.replace(window.location.pathname + '?_r=' + Date.now());
+                  return;
+                }
+                throw new Error('HTTP ' + r.status + ' (' + (ct || 'sem content-type') + ')');
+              })
+              .catch(function (err) {
+                if (window.__rigAppMounted) return;
+                if (attempts < 4) {
+                  setTimeout(probeAndReload, 1200);
+                } else {
+                  var detail = err && err.message ? ' [' + err.message + ']' : '';
+                  showBootError('Falha ao carregar ' + src + detail + '. Clique em Recarregar.');
+                }
+              });
+          }
+          setTimeout(probeAndReload, 700);
         };
         window.addEventListener('error', function (e) {
           if (window.__rigAppMounted) return;
@@ -133,7 +156,7 @@
           }
         });
         setTimeout(function () {
-          if (!window.__rigAppMounted && document.getElementById('boot-splash')) {
+          if (!window.__rigAppMounted && !handlingScriptErr && document.getElementById('boot-splash')) {
             var info = '';
             try {
               var entries = performance.getEntriesByType('resource') || [];
@@ -144,7 +167,7 @@
         }, 30000);
       })();
     </script>
-    <script type="module" src="/src/main.tsx" onerror="window.__handleMainScriptError && window.__handleMainScriptError(this)"></script>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
 

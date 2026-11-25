@@ -6,7 +6,7 @@ export const OFFICIAL_HUB_IDS = ['harbor', 'shipyard', 'industrial', 'historic',
 export type OfficialHubId = (typeof OFFICIAL_HUB_IDS)[number];
 export type HubId = string;
 export type FutureHubId = HubId;
-export type WeatherModifier = 'clear' | 'rain' | 'fog' | 'night';
+export type WeatherModifier = 'clear' | 'rain' | 'fog' | 'storm' | 'night';
 
 const OFFICIAL_HUB_SET = new Set<string>(OFFICIAL_HUB_IDS);
 
@@ -248,7 +248,7 @@ export class GarageSystem {
         progress: 0,
         isDominant: false,
         unlockedBiomeTiles: ['wind_turbine', 'log_pile', 'rock_outcrop', 'pine_tree'],
-        unlockedModifier: 'fog',
+        unlockedModifier: 'storm',
         description: 'Expansão montanhosa a noroeste com zona de madeireiros (210 m), curvas em serpentina e parque eólico no cume (640 m).',
         contracts: [
           {
@@ -542,7 +542,7 @@ export class GarageSystem {
 
   public getUnlockedModifiers(): WeatherModifier[] {
     if (ReputationSystem.getInstance().isSandbox()) {
-      return ['clear', 'rain', 'fog', 'night'];
+      return ['clear', 'rain', 'fog', 'storm', 'night'];
     }
     const modifiers: WeatherModifier[] = ['clear'];
     const repSys = ReputationSystem.getInstance();
@@ -568,6 +568,8 @@ export class GarageSystem {
 
   public getSurfaceGrip(): number {
     switch (this.activeModifier) {
+      case 'storm':
+        return 0.40; // Heavy storm downpour & standing water!
       case 'rain':
         return 0.45; // Wet slippery surface!
       case 'fog':

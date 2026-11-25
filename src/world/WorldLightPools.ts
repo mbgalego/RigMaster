@@ -1,11 +1,13 @@
 import Phaser from 'phaser';
 import { WorldObjects } from './WorldObjects';
+import { SpriteRegistry } from '../systems/SpriteRegistry';
 
 /**
  * Seamless, zero-pop-in additive radial light pools for world emitters:
  *   - Streetlamps (ground/road illumination at depth 4.2 + subtle cab-roof spill at depth 14.2)
  *   - Gas canopies (warm white forecourt pool + subtle cab-roof spill)
  *   - Gas pumps (emerald indicator pool)
+ *   - Price signs (emerald tarmac halo + warm LED face glow + unlit self-illuminated night totem)
  *   - Traffic lights (red / amber / green road glow)
  *   - Dominated hub neon signs
  *
@@ -36,7 +38,7 @@ export interface LightPoolStats {
 
 interface ActivePoolBinding {
   img: Phaser.GameObjects.Image;
-  kind: 'lamp' | 'gas_canopy' | 'gas_pump' | 'traffic_light' | 'hub';
+  kind: 'lamp' | 'gas_canopy' | 'gas_pump' | 'price_sign' | 'traffic_light' | 'hub';
   baseAlpha: number;
   dayFloor: number;
 }
@@ -45,10 +47,12 @@ export class WorldLightPools {
   private scene: Phaser.Scene;
   private groundPool: Phaser.GameObjects.Image[] = [];
   private overheadPool: Phaser.GameObjects.Image[] = [];
+  private priceSignGlowPool: Phaser.GameObjects.Image[] = [];
   private activeBindings: ActivePoolBinding[] = [];
 
   private activeGroundCount = 0;
   private activeOverheadCount = 0;
+  private activePriceSignGlowCount = 0;
   private activeLampCount = 0;
 
   private lastCamX = Number.NaN;
@@ -113,6 +117,18 @@ export class WorldLightPools {
     return this.overheadPool[index];
   }
 
+  private acquirePriceSignGlowSprite(index: number): Phaser.GameObjects.Image {
+    while (this.priceSignGlowPool.length <= index) {
+      const img = this.scene.add
+        .image(0, 0, 'prop_price_sign')
+        .setDepth(14.05)
+        .setLighting(false)
+        .setVisible(false);
+      this.priceSignGlowPool.push(img);
+    }
+    return this.priceSignGlowPool[index];
+  }
+
   public hideAll() {
     if (this.wasHidden) return;
     this.wasHidden = true;
@@ -122,8 +138,12 @@ export class WorldLightPools {
     for (let i = 0; i < this.activeOverheadCount; i++) {
       this.overheadPool[i].setVisible(false);
     }
+    for (let i = 0; i < this.activePriceSignGlowCount; i++) {
+      this.priceSignGlowPool[i].setVisible(false);
+    }
     this.activeGroundCount = 0;
     this.activeOverheadCount = 0;
+    this.activePriceSignGlowCount = 0;
     this.activeLampCount = 0;
     this.activeBindings = [];
     this.lastLampFactor = 0;
@@ -198,8 +218,10 @@ export class WorldLightPools {
     const emitters = objects.getEmittersInView(view, VIEW_MARGIN);
     let gIdx = 0;
     let oIdx = 0;
+    let psIdx = 0;
     let lampCount = 0;
     const bindings: ActivePoolBinding[] = [];
+    const hasPriceSignTex = SpriteRegistry.hasTexture(this.scene, 'prop_price_sign');
 
     const nightActive = lf > 0.025;
 
@@ -255,14 +277,49 @@ export class WorldLightPools {
       } else if (o.type === 'gas_pump') {
         if (!nightActive) continue;
         const gImg = this.acquireGroundSprite(gIdx++);
-        const radius = 145;
+        const radius = 160;
         gImg
           .setPosition(o.x, o.y)
           .setDisplaySize(radius * 2, radius * 2)
-          .setTint(0x4ade80)
-          .setAlpha(0.36 * lf)
+          .setTint(0x6ee7b7)
+          .setAlpha(0.38 * lf)
           .setVisible(true);
-        bindings.push({ img: gImg, kind: 'gas_pump', baseAlpha: 0.36, dayFloor: 0 });
+        bindings.push({ img: gImg, kind: 'gas_pump', baseAlpha: 0.38, dayFloor: 0 });
+      } else if (o.type === 'price_sign') {
+        if (!nightActive) continue;
+        // 1. Vivid emerald-teal halo illuminating the tarmac & highway edge around the totem
+        const gImg = this.acquireGroundSprite(gIdx++);
+        const radius = 210;
+        gImg
+          .setPosition(o.x, o.y)
+          .setDisplaySize(radius * 2, radius * 2)
+          .setTint(0x34d399)
+          .setAlpha(0.58 * lf)
+          .setVisible(true);
+        bindings.push({ img: gImg, kind: 'price_sign', baseAlpha: 0.58, dayFloor: 0 });
+
+        // 2. Self-illuminated unlit totem face overlay so LED digits stay razor-sharp & bright in pitch dark
+        if (hasPriceSignTex) {
+          const psImg = this.acquirePriceSignGlowSprite(psIdx++);
+          psImg
+            .setPosition(o.x, o.y)
+            .setDisplaySize(o.w, o.h)
+            .setRotation(o.angle)
+            .setAlpha(Math.min(1, lf * 1.15))
+            .setVisible(true);
+          bindings.push({ img: psImg, kind: 'price_sign', baseAlpha: 1.0, dayFloor: 0 });
+        }
+
+        // 3. Soft warm-amber LED bloom directly over the glowing price digits
+        const oImg = this.acquireOverheadSprite(oIdx++);
+        const oRadius = Math.max(o.w, o.h) * 0.85;
+        oImg
+          .setPosition(o.x, o.y)
+          .setDisplaySize(oRadius * 2, oRadius * 2)
+          .setTint(0xfef08a)
+          .setAlpha(0.34 * lf)
+          .setVisible(true);
+        bindings.push({ img: oImg, kind: 'price_sign', baseAlpha: 0.34, dayFloor: 0 });
       } else if (o.type === 'traffic_light') {
         const st = objects.lightState((o.params?.group ?? 0) as 0 | 1);
         const col = st.red ? 0xff3b30 : st.amber ? 0xffb020 : 0x34d058;
@@ -306,9 +363,13 @@ export class WorldLightPools {
     for (let i = oIdx; i < this.activeOverheadCount; i++) {
       this.overheadPool[i].setVisible(false);
     }
+    for (let i = psIdx; i < this.activePriceSignGlowCount; i++) {
+      this.priceSignGlowPool[i].setVisible(false);
+    }
 
     this.activeGroundCount = gIdx;
     this.activeOverheadCount = oIdx;
+    this.activePriceSignGlowCount = psIdx;
     this.activeLampCount = lampCount;
     this.activeBindings = bindings;
   }
@@ -318,7 +379,8 @@ export class WorldLightPools {
       activeGroundPools: this.activeGroundCount,
       activeOverheadSpills: this.activeOverheadCount,
       activeLampPools: this.activeLampCount,
-      totalPooledSprites: this.groundPool.length + this.overheadPool.length,
+      totalPooledSprites:
+        this.groundPool.length + this.overheadPool.length + this.priceSignGlowPool.length,
       lastLampFactor: this.lastLampFactor,
     };
   }
@@ -326,11 +388,14 @@ export class WorldLightPools {
   public destroy() {
     for (const img of this.groundPool) img.destroy();
     for (const img of this.overheadPool) img.destroy();
+    for (const img of this.priceSignGlowPool) img.destroy();
     this.groundPool = [];
     this.overheadPool = [];
+    this.priceSignGlowPool = [];
     this.activeBindings = [];
     this.activeGroundCount = 0;
     this.activeOverheadCount = 0;
+    this.activePriceSignGlowCount = 0;
     this.activeLampCount = 0;
   }
 }

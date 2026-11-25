@@ -17,6 +17,7 @@ import {
 } from '../systems/TruckCatalog';
 import type { GameMode, TruckWearState } from '../systems/ReputationSystem';
 import { TruckPreviewStage } from './TruckPreviewStage';
+import { SpriteRegistry } from '../systems/SpriteRegistry';
 
 interface WorkshopUpgradesModalProps {
   open: boolean;
@@ -202,16 +203,60 @@ export const WorkshopUpgradesModal: React.FC<WorkshopUpgradesModalProps> = ({
                     setActiveSlot(tab.id);
                     setPreviewValue(null);
                   }}
-                  className={`px-1.5 sm:px-3 py-1.5 rounded-md text-[11px] sm:text-xs font-semibold transition-colors whitespace-nowrap text-center ${
+                  className={`px-1.5 sm:px-2.5 py-1.5 rounded-md text-[11px] sm:text-xs font-semibold transition-colors whitespace-nowrap flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 ${
                     activeSlot === tab.id
                       ? 'bg-cyan-500 text-slate-950'
-                      : 'text-slate-300 hover:text-white'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
                   }`}
                 >
-                  {tab.label}
+                  <img
+                    src={SpriteRegistry.getUpgradeSlotSprite(tab.id)}
+                    alt=""
+                    aria-hidden="true"
+                    referrerPolicy="no-referrer"
+                    className="w-5 h-5 sm:w-6 sm:h-6 object-contain shrink-0 drop-shadow-sm"
+                  />
+                  <span>{tab.label}</span>
                 </button>
               ))}
             </div>
+
+            {/* Active Mechanical Component Technical Preview */}
+            {(() => {
+              const activeTab = SLOT_TABS.find((t) => t.id === activeSlot)!;
+              const installedOpt = options.find((o) => o.id === installedForSlot);
+              const slotWearPct =
+                activeSlot === 'engine'
+                  ? Math.round(truckWear.engine)
+                  : activeSlot === 'brakes'
+                    ? Math.round(truckWear.brakes)
+                    : activeSlot === 'tires'
+                      ? Math.round(truckWear.tires)
+                      : truckHealth;
+              return (
+                <div className="px-3.5 py-2.5 rounded-xl bg-gradient-to-r from-slate-900/90 via-slate-900/60 to-slate-950 border border-slate-800/90 flex items-center gap-3.5">
+                  <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-lg bg-slate-950/90 border border-slate-800 p-1.5 flex items-center justify-center shrink-0">
+                    <img
+                      src={SpriteRegistry.getUpgradeSlotSprite(activeSlot)}
+                      alt={activeTab.label}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-contain drop-shadow-[0_4px_10px_rgba(0,0,0,0.6)]"
+                    />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[10px] font-mono uppercase tracking-wider text-cyan-400 font-semibold">
+                      Subsistemas · {activeTab.label}
+                    </div>
+                    <div className="text-sm font-bold text-white truncate mt-0.5">
+                      Atual: {installedOpt?.name ?? installedForSlot}
+                    </div>
+                    <div className="text-[11px] text-slate-400 font-mono tabular-nums mt-0.5">
+                      Condição mecânica: <span className={slotWearPct < 70 ? 'text-amber-300 font-semibold' : 'text-emerald-400 font-semibold'}>{slotWearPct}%</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             <div className="space-y-2.5">
               {options.map((opt) => {

@@ -388,13 +388,25 @@ export class MinimapScene extends Phaser.Scene {
     g.lineStyle(2, 0x22d3ee, 0.9);
     g.strokeRect(img.x - 1, img.y - 1, w + 2, h + 2);
 
-    // Regional rain / fog radar overlay clipped cleanly inside the local 6.4 km window
+    // Regional storm / rain / fog radar overlay clipped cleanly inside the local 6.4 km window
     const weatherSys = WeatherSystem.getInstance();
     const forcedMod = mainScene.garageSystem.getActiveModifier();
-    if (forcedMod === 'rain' || forcedMod === 'fog') {
-      const washColor = forcedMod === 'rain' ? 0x38bdf8 : 0xe2e8f0;
-      g.fillStyle(washColor, forcedMod === 'rain' ? 0.22 : 0.18);
+    if (forcedMod === 'storm' || forcedMod === 'rain' || forcedMod === 'fog') {
+      const washColor =
+        forcedMod === 'storm' ? 0x6366f1 : forcedMod === 'rain' ? 0x38bdf8 : 0xe2e8f0;
+      g.fillStyle(washColor, forcedMod === 'storm' ? 0.26 : forcedMod === 'rain' ? 0.22 : 0.18);
       g.fillRect(img.x + 1, img.y + 1, w - 2, h - 2);
+      if (forcedMod === 'storm') {
+        const bx = img.x + w - 11;
+        const by = img.y + 11;
+        g.lineStyle(1.8, 0xfacc15, 0.95);
+        g.beginPath();
+        g.moveTo(bx + 2, by - 5);
+        g.lineTo(bx - 2, by);
+        g.lineTo(bx + 1, by);
+        g.lineTo(bx - 2, by + 5);
+        g.strokePath();
+      }
     } else if (weatherSys.isDynamicEnabled()) {
       const cells = weatherSys.getCells();
       for (const cell of cells) {
@@ -410,14 +422,15 @@ export class MinimapScene extends Phaser.Scene {
           continue;
         }
         // Sample clipped ellipse points clamped to the minimap frame
-        const color = cell.kind === 'rain' ? 0x38bdf8 : 0xe2e8f0;
-        const fillAlpha = (cell.kind === 'rain' ? 0.36 : 0.30) * env * cell.intensity;
-        const strokeAlpha = (cell.kind === 'rain' ? 0.78 : 0.66) * env * cell.intensity;
+        const isStorm = cell.kind === 'storm';
+        const color = isStorm ? 0x818cf8 : cell.kind === 'rain' ? 0x38bdf8 : 0xe2e8f0;
+        const fillAlpha = (isStorm ? 0.42 : cell.kind === 'rain' ? 0.36 : 0.30) * env * cell.intensity;
+        const strokeAlpha = (isStorm ? 0.88 : cell.kind === 'rain' ? 0.78 : 0.66) * env * cell.intensity;
         const steps = 22;
         const cosA = Math.cos(cell.angle);
         const sinA = Math.sin(cell.angle);
         g.fillStyle(color, fillAlpha);
-        g.lineStyle(1.4, color, strokeAlpha);
+        g.lineStyle(isStorm ? 1.7 : 1.4, isStorm ? 0xa5b4fc : color, strokeAlpha);
         g.beginPath();
         for (let i = 0; i <= steps; i++) {
           const theta = (i / steps) * Math.PI * 2;
@@ -439,6 +452,17 @@ export class MinimapScene extends Phaser.Scene {
         g.closePath();
         g.fillPath();
         g.strokePath();
+
+        // Crisp yellow lightning bolt glyph inside storm cells on radar
+        if (isStorm && isInside(cx, cy, 7)) {
+          g.lineStyle(1.8, 0xfacc15, Math.min(1, env * 1.1));
+          g.beginPath();
+          g.moveTo(cx + 2, cy - 5);
+          g.lineTo(cx - 2, cy);
+          g.lineTo(cx + 1.5, cy);
+          g.lineTo(cx - 2, cy + 5.5);
+          g.strokePath();
+        }
       }
     }
 

@@ -226,6 +226,16 @@ export class MainScene extends Phaser.Scene {
   private localWeather: LocalWeatherSample = WeatherSystem.getInstance().getLatestSample();
   private lastAppliedSurfaceGrip: number = 1.0;
 
+  // Dynamic thunderstorm state (lightning double-flashes, forked bolts & speed-of-sound thunder delays)
+  private lightningCooldownSec: number = 1.6;
+  private lightningFlashAlpha: number = 0;
+  private lightningRestrikeDelay: number = 0;
+  private lightningRestrikeAmp: number = 0;
+  private lightningBoltTimer: number = 0;
+  private lightningBoltSegments: Array<{ x1: number; y1: number; x2: number; y2: number; width: number }> = [];
+  private pendingThunders: Array<{ delaySec: number; distanceNorm: number }> = [];
+  private wasInStorm: boolean = false;
+
   // Exam target dock handling (marker + guaranteed physical dock at the exam's coordinates)
   private examTargetMarker: Phaser.GameObjects.Graphics | null = null;
   private examTargetLabel: Phaser.GameObjects.Text | null = null;
@@ -243,6 +253,10 @@ export class MainScene extends Phaser.Scene {
 
   // Minimap (rendered in dedicated MinimapScene with locked zoom = 1)
   private minimapVisible: boolean = true;
+
+  // Smooth velocity-driven driving camera look-ahead (world px ahead of truck)
+  private camLookAheadX: number = 0;
+  private camLookAheadY: number = 0;
 
   // Audio Context (Procedural synthesized audio)
   private audioCtx: AudioContext | null = null;
@@ -275,6 +289,7 @@ export class MainScene extends Phaser.Scene {
     weatherDynamic: boolean;
     weatherCondition: WeatherCondition;
     rainIntensity: number;
+    stormIntensity: number;
     fogDensity: number;
     cloudCover: number;
     roadWetness: number;
@@ -340,6 +355,7 @@ export class MainScene extends Phaser.Scene {
     weatherDynamic: true,
     weatherCondition: 'clear',
     rainIntensity: 0,
+    stormIntensity: 0,
     fogDensity: 0,
     cloudCover: 0.22,
     roadWetness: 0,
@@ -555,7 +571,7 @@ export class MainScene extends Phaser.Scene {
       World.WORLD_SPAN_H,
     );
     this.cameras.main.setBackgroundColor(0x0a2338); // ocean blue behind the island
-    this.cameras.main.startFollow(this.truck.container, true, 0.1, 0.1);
+    this.cameras.main.startFollow(this.truck.container, true, 0.16, 0.16);
     // Responsive default zoom: small screens (phones) start more zoomed out
     this.cameras.main.setZoom(Phaser.Math.Clamp(
       Math.min(this.scale.width / 900, this.scale.height / 620), 0.5, 1.0,
@@ -611,14 +627,18 @@ export class MainScene extends Phaser.Scene {
       const ty = this.truck.body.position.y;
       for (const o of this.world.objects.objects) {
         if (o.type !== 'gas_pump') continue;
-        // Hit-test the pump footprint (not a tiny radius) with screen-space padding
+        // Hit-test the pump footprint in local rotated space with screen-space padding
         // that stays comfortable at any zoom — phones start zoomed out (~0.5).
         const pad = 20 / cam.zoom;
         const halfW = o.w / 2 + pad;
         const halfH = o.h / 2 + pad;
-        const inside =
-          Math.abs(worldPt.x - o.x) <= halfW &&
-          Math.abs(worldPt.y - o.y) <= halfH;
+        const pdx = worldPt.x - o.x;
+        const pdy = worldPt.y - o.y;
+        const pCos = Math.cos(-o.angle);
+        const pSin = Math.sin(-o.angle);
+        const plx = pdx * pCos - pdy * pSin;
+        const ply = pdx * pSin + pdy * pCos;
+        const inside = Math.abs(plx) <= halfW && Math.abs(ply) <= halfH;
         if (!inside) continue;
         const distToTruck = Phaser.Math.Distance.Between(tx, ty, o.x, o.y);
         if (distToTruck < 120) {
@@ -917,6 +937,7 @@ export class MainScene extends Phaser.Scene {
     this.jackknifeWearTimer = 0;
     this.currentGForce = 0;
     this.peakGForce = 0;
+    this.resetCameraLookAhead();
 
     if (configType === 'solo') {
       this.missionCollisionTracker = this.getTotalRigCollisions();
@@ -1228,6 +1249,7 @@ export class MainScene extends Phaser.Scene {
     this.jackknifeWearTimer = 0;
     this.currentGForce = 0;
     this.peakGForce = 0;
+    this.resetCameraLookAhead();
 
     const truckElev = this.roadNetwork.initialLayerAt(targetX, targetY);
     let leadElev: { layer: 0 | 1; z: number } | null = null;
@@ -2470,6 +2492,7 @@ export class MainScene extends Phaser.Scene {
       // the map-sized bounds made Phaser re-center the camera whenever the fitted view
       // exceeded them, which drifted the tiles away from the editor grid overlay.
       this.preEditorZoom = this.cameras.main.zoom;
+      this.resetCameraLookAhead();
       this.cameras.main.stopFollow();
       this.cameras.main.removeBounds();
       this.scene.launch('EditorScene');
@@ -2487,9 +2510,101 @@ export class MainScene extends Phaser.Scene {
         World.WORLD_SPAN_H,
       );
       this.cameras.main.setZoom(this.preEditorZoom);
-      this.cameras.main.startFollow(this.truck.container, true, 0.1, 0.1);
+      this.cameras.main.startFollow(this.truck.container, true, 0.16, 0.16);
+      this.resetCameraLookAhead();
       this.scene.bringToTop('MinimapScene');
     }
+  }
+
+  /** Resets the driving camera look-ahead offset cleanly back to centered on the truck. */
+  private resetCameraLookAhead(): void {
+    this.camLookAheadX = 0;
+    this.camLookAheadY = 0;
+    this.cameras?.main?.setFollowOffset(0, 0);
+  }
+
+  /**
+   * Smoothly leads the camera ahead of the truck along its direction of motion so the
+   * truck shifts slightly opposite the movement vector and exposes more road ahead.
+   * Smoothly glides back to exact center when the truck slows down and stops.
+   */
+  private updateCameraLookAhead(dt: number): void {
+    const cam = this.cameras?.main;
+    if (!cam || !this.truck) return;
+
+    const zoom = Math.max(0.25, cam.zoom || 1);
+    const viewW = cam.width / zoom;
+    const viewH = cam.height / zoom;
+
+    // Directional viewport budget: gives a natural ~25-26% rule-of-thirds shift on both
+    // 16:9 desktop and portrait mobile screens while keeping the rig clear of HUD/pedals.
+    const maxAxisX = Math.min(300, viewW * 0.26);
+    const maxAxisY = Math.min(240, viewH * 0.26);
+
+    const speedKmh = this.truck.speedKmh;
+    const vLong = this.truck.vLong;
+
+    let targetX = 0;
+    let targetY = 0;
+
+    // Below 1.5 km/h deadzone, target returns to (0, 0) to re-center smoothly on the truck
+    if (speedKmh >= 1.5) {
+      const isReversing = vLong < -0.25;
+      const sign = isReversing ? -1 : 1;
+      const angle = this.truck.body.angle;
+      let dirX = Math.sin(angle) * sign;
+      let dirY = -Math.cos(angle) * sign;
+
+      // Blend actual travel vector (65%) with truck heading (35%) so turns anticipate the arc smoothly
+      const velMag = Math.hypot(this.truck.vx, this.truck.vy);
+      if (velMag > 8) {
+        const vxN = this.truck.vx / velMag;
+        const vyN = this.truck.vy / velMag;
+        const bx = vxN * 0.65 + dirX * 0.35;
+        const by = vyN * 0.65 + dirY * 0.35;
+        const bLen = Math.hypot(bx, by);
+        if (bLen > 0.001) {
+          dirX = bx / bLen;
+          dirY = by / bLen;
+        }
+      }
+
+      let leadFactor = 0;
+      if (isReversing) {
+        // Controlled rear look-ahead when backing up (saturates around 18 km/h)
+        const rawRev = Phaser.Math.Clamp((speedKmh - 1.5) / 16.5, 0, 1);
+        leadFactor = Math.pow(rawRev, 0.8) * 0.65;
+      } else {
+        // Progressive forward curve calibrated for truck cruising speeds (1.5 -> 38 km/h)
+        const rawT = Phaser.Math.Clamp((speedKmh - 1.5) / 36.5, 0, 1);
+        leadFactor = Math.pow(rawT, 0.72);
+      }
+
+      // Add mild velocity lag compensation for Phaser's 0.16 follow lerp (~0.085s) so the
+      // actual camera midpoint reaches the intended screen framing while cruising.
+      const lagCompX = Phaser.Math.Clamp(this.truck.vx * 0.085, -45, 45);
+      const lagCompY = Phaser.Math.Clamp(this.truck.vy * 0.085, -45, 45);
+
+      targetX = Phaser.Math.Clamp(dirX * maxAxisX * leadFactor + lagCompX, -maxAxisX * 1.08, maxAxisX * 1.08);
+      targetY = Phaser.Math.Clamp(dirY * maxAxisY * leadFactor + lagCompY, -maxAxisY * 1.08, maxAxisY * 1.08);
+    }
+
+    // Framerate-independent exponential smoothing (slightly gentler when re-centering to rest)
+    const isReturningToCenter = targetX === 0 && targetY === 0;
+    const rate = isReturningToCenter ? 2.4 : 3.2;
+    const alpha = 1 - Math.exp(-rate * dt);
+
+    this.camLookAheadX += (targetX - this.camLookAheadX) * alpha;
+    this.camLookAheadY += (targetY - this.camLookAheadY) * alpha;
+
+    if (isReturningToCenter && Math.hypot(this.camLookAheadX, this.camLookAheadY) < 0.25) {
+      this.camLookAheadX = 0;
+      this.camLookAheadY = 0;
+    }
+
+    // Phaser's Camera.preRender computes `fx = follow.x - followOffset.x`,
+    // so negating (camLookAheadX, camLookAheadY) shifts the camera midpoint AHEAD of the truck.
+    cam.setFollowOffset(-this.camLookAheadX, -this.camLookAheadY);
   }
 
   public reseedWorld() {
@@ -2796,6 +2911,8 @@ export class MainScene extends Phaser.Scene {
         const vl = v.x * fx + v.y * fy;
         if (vl < 0) this.matter.body.setVelocity(this.truck.body, { x: v.x - vl * fx, y: v.y - vl * fy });
       }
+
+      this.updateCameraLookAhead(dt);
 
       let artTelemetry: ArticulationTelemetry = {
         angleDeg: 0,
@@ -3110,6 +3227,7 @@ export class MainScene extends Phaser.Scene {
         weatherDynamic: this.weatherSystem.isDynamicEnabled(),
         weatherCondition: this.localWeather.dominantCondition,
         rainIntensity: Math.round(this.localWeather.rainIntensity * 100) / 100,
+        stormIntensity: Math.round(this.localWeather.stormIntensity * 100) / 100,
         fogDensity: Math.round(this.localWeather.fogDensity * 100) / 100,
         cloudCover: Math.round(this.localWeather.cloudCover * 100) / 100,
         roadWetness: Math.round(this.localWeather.roadWetness * 100) / 100,
@@ -4396,34 +4514,41 @@ export class MainScene extends Phaser.Scene {
       return;
     }
 
-    // Apply smooth weather overcast attenuation over time-of-day ambient
+    // Apply smooth weather overcast / thunderstorm attenuation + lightning flash boost over time-of-day ambient
     const weather = this.garageSystem.getActiveModifier();
     const lw = this.localWeather;
     let { r, g, b } = snap.ambientRgb;
     const rainF = lw.rainIntensity;
+    const stormF = lw.stormIntensity;
     const fogF = lw.fogDensity;
     const overcastF = Math.max(0, lw.cloudCover - 0.35) / 0.65;
-    if (rainF > 0.02 || fogF > 0.02 || overcastF > 0.05) {
-      const rMul = 1 - rainF * 0.22 - fogF * 0.10 - overcastF * 0.06;
-      const gMul = 1 - rainF * 0.16 - fogF * 0.08 - overcastF * 0.05;
-      const bMul = 1 - rainF * 0.05 - fogF * 0.05 - overcastF * 0.02;
-      r = Math.round(r * Math.max(0.68, rMul));
-      g = Math.round(g * Math.max(0.74, gMul));
-      b = Math.round(b * Math.max(0.84, bMul));
+    if (rainF > 0.02 || stormF > 0.02 || fogF > 0.02 || overcastF > 0.05) {
+      const rMul = 1 - rainF * 0.20 - stormF * 0.16 - fogF * 0.10 - overcastF * 0.06;
+      const gMul = 1 - rainF * 0.15 - stormF * 0.13 - fogF * 0.08 - overcastF * 0.05;
+      const bMul = 1 - rainF * 0.05 - stormF * 0.06 - fogF * 0.05 - overcastF * 0.02;
+      r = Math.round(r * Math.max(0.56, rMul));
+      g = Math.round(g * Math.max(0.62, gMul));
+      b = Math.round(b * Math.max(0.74, bMul));
+    }
+    const flashBoost = Phaser.Math.Clamp(this.lightningFlashAlpha * 1.45, 0, 0.92);
+    if (flashBoost > 0.01) {
+      r = Math.round(Phaser.Math.Linear(r, 224, flashBoost));
+      g = Math.round(Phaser.Math.Linear(g, 238, flashBoost));
+      b = Math.round(Phaser.Math.Linear(b, 255, flashBoost));
     }
     const ambientHex = (r << 16) | (g << 8) | b;
 
     // Automatic ambient-light & adverse-weather headlight sensor (with hysteresis to avoid twilight flicker)
     const ambientLum = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
     const wantAutoOn = this.autoLightsActive
-      ? !(ambientLum > 0.84 && snap.lampFactor < 0.14 && rainF < 0.18 && fogF < 0.20 && weather === 'clear')
-      : (ambientLum < 0.76 || snap.lampFactor >= 0.24 || rainF >= 0.30 || fogF >= 0.34 || weather !== 'clear');
+      ? !(ambientLum > 0.84 && snap.lampFactor < 0.14 && rainF < 0.18 && stormF < 0.12 && fogF < 0.20 && weather === 'clear')
+      : (ambientLum < 0.76 || snap.lampFactor >= 0.24 || rainF >= 0.30 || stormF >= 0.18 || fogF >= 0.34 || weather !== 'clear');
     this.autoLightsActive = wantAutoOn;
     if (this.truck.autoHeadlights) {
       this.truck.applyAutoHeadlights(wantAutoOn);
     }
 
-    // Only pay the WebGL lighting shader cost when dusk, night, dawn, or real rain/fog meaningfully dims the scene
+    // Only pay the WebGL lighting shader cost when dusk, night, dawn, or real rain/storm/fog meaningfully dims the scene
     // (fair-weather cloud decks already cast drifting ground shadows via cloudShadowSprite without Light2D overhead)
     const needsWebGLLighting =
       snap.lampFactor >= 0.05 ||
@@ -4431,7 +4556,9 @@ export class MainScene extends Phaser.Scene {
       snap.ambientRgb.g < 240 ||
       snap.ambientRgb.b < 230 ||
       rainF >= 0.22 ||
+      stormF >= 0.14 ||
       fogF >= 0.28 ||
+      flashBoost > 0.01 ||
       weather !== 'clear';
     this.setWebGLLightingActive(needsWebGLLighting);
     if (!needsWebGLLighting) {
@@ -4870,8 +4997,8 @@ export class MainScene extends Phaser.Scene {
           const tAng = this.truck.body.angle;
           const targetWorldX = this.truck.body.position.x + Math.sin(tAng) * beamForward;
           const targetWorldY = this.truck.body.position.y - Math.cos(tAng) * beamForward;
-          const truckOffX = Phaser.Math.Clamp(targetWorldX - cam.midPoint.x, -viewW * 0.22, viewW * 0.22);
-          const truckOffY = Phaser.Math.Clamp(targetWorldY - cam.midPoint.y, -viewH * 0.22, viewH * 0.22);
+          const truckOffX = Phaser.Math.Clamp(targetWorldX - cam.midPoint.x, -viewW * 0.30, viewW * 0.30);
+          const truckOffY = Phaser.Math.Clamp(targetWorldY - cam.midPoint.y, -viewH * 0.30, viewH * 0.30);
           cx = w * 0.5 + truckOffX;
           cy = h * 0.5 + truckOffY;
         }
@@ -4893,8 +5020,13 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
-    // 3. Intensity-scaled wind-slanted rain streaks & subtle wet sheen (zoom-compensated 1:1 to screen pixels)
-    if (lw.rainIntensity < 0.04) {
+    // 3. Dynamic thunderstorm lightning & delayed thunderclap state machine
+    this.updateThunderstorm(dt, w, h, lw.stormIntensity);
+
+    // 4. Intensity-scaled wind-slanted rain streaks & lightning flashes/bolts (zoom-compensated 1:1 to screen pixels)
+    const hasRain = lw.rainIntensity >= 0.04;
+    const hasFlash = this.lightningFlashAlpha > 0.01 || this.lightningBoltTimer > 0;
+    if (!hasRain && !hasFlash) {
       if (this.weatherGraphicsDirty) {
         g.clear();
         this.weatherGraphicsDirty = false;
@@ -4907,38 +5039,178 @@ export class MainScene extends Phaser.Scene {
     g.clear();
     this.weatherGraphicsDirty = true;
 
-    const rInt = lw.rainIntensity;
-    g.fillStyle(0x0284c7, 0.075 * rInt);
-    g.fillRect(-4, -4, w + 8, h + 8);
+    if (hasRain) {
+      const rInt = lw.rainIntensity;
+      const sInt = lw.stormIntensity;
+      const washColor = sInt > 0.25 ? 0x1e293b : 0x0284c7;
+      g.fillStyle(washColor, 0.075 * rInt + 0.075 * sInt);
+      g.fillRect(-4, -4, w + 8, h + 8);
 
-    const maxDrops = 130;
-    while (this.rainParticles.length < maxDrops) {
-      this.rainParticles.push({
-        x: Phaser.Math.Between(0, w),
-        y: Phaser.Math.Between(0, h),
-        speed: Phaser.Math.Between(560, 880),
-        length: Phaser.Math.Between(14, 28),
-      });
+      const maxDrops = sInt > 0.2 ? 175 : 130;
+      while (this.rainParticles.length < maxDrops) {
+        this.rainParticles.push({
+          x: Phaser.Math.Between(0, w),
+          y: Phaser.Math.Between(0, h),
+          speed: Phaser.Math.Between(560, 920),
+          length: Phaser.Math.Between(14, 30),
+        });
+      }
+
+      const activeDrops = Math.min(maxDrops, Math.round(16 + rInt * (maxDrops - 16)));
+      const slantVx = Phaser.Math.Clamp(lw.windVx * (4.8 + sInt * 1.4), -300, 300);
+      const slantDx = (slantVx / 700) * 22;
+
+      g.lineStyle(1.1 + rInt * 0.65 + sInt * 0.2, sInt > 0.25 ? 0xc7d2fe : 0x93c5fd, 0.18 + rInt * 0.34 + sInt * 0.10);
+      for (let i = 0; i < activeDrops; i++) {
+        const drop = this.rainParticles[i];
+        drop.y += drop.speed * (0.85 + rInt * 0.25 + sInt * 0.18) * dt;
+        drop.x += slantVx * dt;
+        if (drop.y > h + 20) {
+          drop.y = -15;
+          drop.x = Phaser.Math.Between(-60, w + 60);
+        } else if (drop.x < -70) {
+          drop.x = w + 35;
+        } else if (drop.x > w + 70) {
+          drop.x = -35;
+        }
+        g.lineBetween(drop.x, drop.y, drop.x + slantDx, drop.y + drop.length);
+      }
     }
 
-    const activeDrops = Math.min(maxDrops, Math.round(16 + rInt * (maxDrops - 16)));
-    const slantVx = Phaser.Math.Clamp(lw.windVx * 4.8, -220, 220);
-    const slantDx = (slantVx / 700) * 20;
-
-    g.lineStyle(1.1 + rInt * 0.6, 0x93c5fd, 0.18 + rInt * 0.34);
-    for (let i = 0; i < activeDrops; i++) {
-      const drop = this.rainParticles[i];
-      drop.y += drop.speed * (0.85 + rInt * 0.25) * dt;
-      drop.x += slantVx * dt;
-      if (drop.y > h + 20) {
-        drop.y = -15;
-        drop.x = Phaser.Math.Between(-40, w + 40);
-      } else if (drop.x < -50) {
-        drop.x = w + 30;
-      } else if (drop.x > w + 50) {
-        drop.x = -30;
+    // 5. Thunderstorm screen illumination flash & crisp forked lightning bolt
+    if (this.lightningFlashAlpha > 0.01) {
+      const sheetAlpha = Phaser.Math.Clamp(this.lightningFlashAlpha * 0.68, 0, 0.44);
+      g.fillStyle(0xdbeafe, sheetAlpha);
+      g.fillRect(-4, -4, w + 8, h + 8);
+    }
+    if (this.lightningBoltTimer > 0 && this.lightningBoltSegments.length > 0) {
+      const boltFade = Phaser.Math.Clamp(this.lightningBoltTimer / 0.19, 0, 1);
+      // Outer electric indigo/cyan bloom
+      for (const seg of this.lightningBoltSegments) {
+        g.lineStyle(seg.width * 3.1, 0x93c5fd, 0.42 * boltFade);
+        g.lineBetween(seg.x1, seg.y1, seg.x2, seg.y2);
       }
-      g.lineBetween(drop.x, drop.y, drop.x + slantDx, drop.y + drop.length);
+      // Hot white-blue core
+      for (const seg of this.lightningBoltSegments) {
+        g.lineStyle(seg.width, 0xf8fafc, 0.96 * boltFade);
+        g.lineBetween(seg.x1, seg.y1, seg.x2, seg.y2);
+      }
+    }
+  }
+
+  /**
+   * Triggers a realistic lightning flash (double-pulse flicker + optional forked sky bolt
+   * + delayed speed-of-sound Web Audio thunderclap).
+   */
+  public triggerLightningFlash(forceCloseBolt: boolean = false): void {
+    const w = Math.max(320, this.scale.width);
+    const h = Math.max(240, this.scale.height);
+    const distanceNorm = forceCloseBolt ? Phaser.Math.FloatBetween(0.08, 0.28) : Math.random();
+    const peakAlpha = Phaser.Math.Linear(0.62, 0.26, distanceNorm);
+
+    this.lightningFlashAlpha = peakAlpha;
+    // Authentic multi-stroke lightning restrike ~90-160ms after initial flash
+    this.lightningRestrikeDelay = Phaser.Math.FloatBetween(0.085, 0.155);
+    this.lightningRestrikeAmp = peakAlpha * Phaser.Math.FloatBetween(0.65, 0.92);
+
+    if (forceCloseBolt || distanceNorm < 0.68) {
+      this.lightningBoltSegments = this.generateLightningBolt(w, h);
+      this.lightningBoltTimer = 0.21;
+    } else {
+      this.lightningBoltSegments = [];
+      this.lightningBoltTimer = 0;
+    }
+
+    // Queue delayed thunderclap matching visual distance (0.25s for close crack up to 2.1s for distant rumble)
+    this.pendingThunders.push({
+      delaySec: 0.22 + distanceNorm * 1.85,
+      distanceNorm,
+    });
+  }
+
+  private generateLightningBolt(w: number, h: number): Array<{ x1: number; y1: number; x2: number; y2: number; width: number }> {
+    const segs: Array<{ x1: number; y1: number; x2: number; y2: number; width: number }> = [];
+    // Keep bolt near the upper perimeter / horizon edges so the driving lane center stays unobstructed
+    const startX = Phaser.Math.FloatBetween(w * 0.14, w * 0.86);
+    let cx = startX;
+    let cy = -6;
+    const steps = Phaser.Math.Between(7, 10);
+    const targetH = h * Phaser.Math.FloatBetween(0.32, 0.56);
+    const stepY = targetH / steps;
+    const driftX = (startX > w * 0.5 ? -1 : 1) * Phaser.Math.FloatBetween(8, 22);
+
+    for (let i = 0; i < steps; i++) {
+      const nx = cx + driftX + Phaser.Math.FloatBetween(-26, 26);
+      const ny = cy + stepY * Phaser.Math.FloatBetween(0.85, 1.15);
+      const width = Math.max(1.4, 3.2 - i * 0.22);
+      segs.push({ x1: cx, y1: cy, x2: nx, y2: ny, width });
+
+      // Forked secondary branch on 2–3 joints
+      if (i >= 1 && i <= steps - 2 && Math.random() < 0.48) {
+        let bx = nx;
+        let by = ny;
+        const bDir = Math.random() < 0.5 ? -1 : 1;
+        const bSteps = Phaser.Math.Between(2, 4);
+        for (let b = 0; b < bSteps; b++) {
+          const bnx = bx + bDir * Phaser.Math.FloatBetween(14, 34);
+          const bny = by + Phaser.Math.FloatBetween(14, 30);
+          segs.push({ x1: bx, y1: by, x2: bnx, y2: bny, width: Math.max(0.9, width * 0.55) });
+          bx = bnx;
+          by = bny;
+        }
+      }
+      cx = nx;
+      cy = ny;
+    }
+    return segs;
+  }
+
+  private updateThunderstorm(dt: number, _w: number, _h: number, stormIntensity: number): void {
+    // Decay flash & bolt smoothly
+    if (this.lightningFlashAlpha > 0) {
+      this.lightningFlashAlpha = Math.max(0, this.lightningFlashAlpha - dt * 3.1);
+    }
+    if (this.lightningRestrikeDelay > 0) {
+      this.lightningRestrikeDelay -= dt;
+      if (this.lightningRestrikeDelay <= 0) {
+        this.lightningFlashAlpha = Math.max(this.lightningFlashAlpha, this.lightningRestrikeAmp);
+        this.lightningRestrikeAmp = 0;
+      }
+    }
+    if (this.lightningBoltTimer > 0) {
+      this.lightningBoltTimer = Math.max(0, this.lightningBoltTimer - dt);
+    }
+
+    // Tick pending thunder delays even if player just exited the storm edge
+    if (this.pendingThunders.length > 0) {
+      for (let i = this.pendingThunders.length - 1; i >= 0; i--) {
+        this.pendingThunders[i].delaySec -= dt;
+        if (this.pendingThunders[i].delaySec <= 0) {
+          const { distanceNorm } = this.pendingThunders[i];
+          this.pendingThunders.splice(i, 1);
+          this.playThunder(distanceNorm);
+        }
+      }
+    }
+
+    const inStorm = stormIntensity >= 0.16;
+    if (!inStorm) {
+      this.wasInStorm = false;
+      this.lightningCooldownSec = 1.4;
+      return;
+    }
+
+    // Deliver a crisp introductory flash shortly after entering a thunderstorm cell
+    if (!this.wasInStorm) {
+      this.wasInStorm = true;
+      this.lightningCooldownSec = Phaser.Math.FloatBetween(0.75, 1.55);
+    }
+
+    this.lightningCooldownSec -= dt;
+    if (this.lightningCooldownSec <= 0) {
+      this.triggerLightningFlash(false);
+      const baseInterval = Phaser.Math.FloatBetween(3.4, 8.6);
+      this.lightningCooldownSec = baseInterval / Math.max(0.45, stormIntensity);
     }
   }
 
@@ -5051,6 +5323,66 @@ export class MainScene extends Phaser.Scene {
       noise.start();
     } catch (e) {
       // Ignore
+    }
+  }
+
+  private playThunder(distanceNorm: number = 0.35) {
+    if (!this.audioCtx || !this.soundEnabled || this.audioCtx.state !== 'running') return;
+    try {
+      const now = this.audioCtx.currentTime;
+      const prox = Phaser.Math.Clamp(1 - distanceNorm * 0.68, 0.22, 1.0);
+      const duration = 2.4 + distanceNorm * 1.4;
+
+      // 1. Rolling low-pass brown-noise thunder body
+      const sampleRate = this.audioCtx.sampleRate;
+      const bufferSize = Math.floor(sampleRate * duration);
+      const buffer = this.audioCtx.createBuffer(1, bufferSize, sampleRate);
+      const data = buffer.getChannelData(0);
+      let lastOut = 0;
+      for (let i = 0; i < bufferSize; i++) {
+        const white = Math.random() * 2 - 1;
+        lastOut = (lastOut + 0.045 * white) / 1.045;
+        // Rolling rumble modulation (natural multi-echo valleys)
+        const tNorm = i / bufferSize;
+        const rumble = 0.68 + 0.32 * Math.sin(tNorm * 22 + 0.7) * Math.cos(tNorm * 9.5);
+        data[i] = Math.max(-1, Math.min(1, lastOut * 4.8 * rumble));
+      }
+
+      const noise = this.audioCtx.createBufferSource();
+      noise.buffer = buffer;
+
+      const lowpass = this.audioCtx.createBiquadFilter();
+      lowpass.type = 'lowpass';
+      lowpass.frequency.setValueAtTime(220 + prox * 280, now);
+      lowpass.frequency.exponentialRampToValueAtTime(58, now + duration);
+      lowpass.Q.setValueAtTime(1.4, now);
+
+      const gain = this.audioCtx.createGain();
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.32 * prox, now + 0.06 + distanceNorm * 0.14);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+      noise.connect(lowpass);
+      lowpass.connect(gain);
+      gain.connect(this.audioCtx.destination);
+      noise.start(now);
+
+      // 2. Deep sub-bass boom on close/medium strikes
+      if (distanceNorm < 0.7) {
+        const sub = this.audioCtx.createOscillator();
+        const subGain = this.audioCtx.createGain();
+        sub.type = 'sine';
+        sub.frequency.setValueAtTime(62, now);
+        sub.frequency.exponentialRampToValueAtTime(30, now + 0.95);
+        subGain.gain.setValueAtTime(0.20 * prox, now);
+        subGain.gain.exponentialRampToValueAtTime(0.001, now + 1.05);
+        sub.connect(subGain);
+        subGain.connect(this.audioCtx.destination);
+        sub.start(now);
+        sub.stop(now + 1.08);
+      }
+    } catch {
+      // Ignore audio failures
     }
   }
 
