@@ -408,8 +408,9 @@ export class IntersectionSystem {
       let surface: RoadSurface;
       let bestIdx: number;
 
-      // Segment-segment crossing: exitAngle is already the tangent at the hit point
-      if (m.pointIndex === -1 && m.exitAngle !== 0) {
+      // Segment-segment crossing: exitAngle is already the tangent at the hit point.
+      // Use it for ALL interpolated arms (including eastbound with exitAngle=0).
+      if (m.pointIndex === -1) {
         exitAngle = m.exitAngle;
         // Interpolate width/surface at the hit point
         const nearest = pointToSegmentNearestOnRoad(road, m.x, m.y);
