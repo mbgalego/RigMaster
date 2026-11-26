@@ -1656,20 +1656,19 @@ export class WorldObjects {
 
     if (approachAngle !== undefined) {
       // Diagonal/free-form intersection: use actual approach angle
-      // Traffic light is already at the stop-line position (o.x, o.y)
-      // Stop bar is perpendicular to approachAngle, on the right-hand lane
+      // Traffic light is at: node_center - approach_dir * TL_STOP_OFFSET + perp_dir * (halfRoad + margin)
+      // Lane center is at: traffic_light - perp_dir * margin (margin = TL_SHOULDER_MARGIN = 28)
+      // Stop bar is perpendicular to approach, centered on lane, at traffic light position
       cosA = Math.cos(approachAngle);
       sinA = Math.sin(approachAngle);
       // Perpendicular to approach (right-hand side in y-down coordinates)
       const perpX = -sinA;
       const perpY = cosA;
-      // Lane center is halfRoad + TL_SHOULDER_MARGIN to the right of road centerline
-      // The light is at: node_center - approach_dir * TL_STOP_OFFSET + perp_dir * (halfRoad + margin)
-      // So the lane center is approximately at the light position minus half the lane width along perp
-      const laneOffset = halfRoad + 28; // TL_SHOULDER_MARGIN = 28
-      laneCenterX = o.x - perpX * (laneOffset - laneWidth / 2);
-      laneCenterY = o.y - perpY * (laneOffset - laneWidth / 2);
-      // Stop bar is perpendicular to approach, centered on lane
+      const margin = 28; // TL_SHOULDER_MARGIN
+      // Lane center = traffic light - perp_dir * margin
+      laneCenterX = o.x - perpX * margin;
+      laneCenterY = o.y - perpY * margin;
+      // Stop bar is perpendicular to approach, centered on lane, spanning laneWidth
       // Draw as a triangle fan (two triangles making a rotated rectangle)
       const hw = laneWidth / 2, hh = thick / 2;
       const cx = laneCenterX, cy = laneCenterY;
