@@ -86,6 +86,9 @@ const TL_STOP_OFFSET = 132;
  *  For a 128 px road: half-width 64 + 28 margin = 92. Scales with road width. */
 const TL_SHOULDER_MARGIN = 28;
 
+/** Inset from lane edges for painted stop line (px). */
+const STOP_LINE_INSET = 4;
+
 /** Specification for a traffic-light world object to be created by the editor. */
 export interface TrafficLightSpec {
   x: number;
@@ -97,6 +100,11 @@ export interface TrafficLightSpec {
     intersectionNode: string;
     /** Actual approach angle in radians (for diagonal intersections) */
     approachAngle?: number;
+    /** Perpendicular offset from road centerline to stop line center (px).
+     *  For a 128px road with two 64px lanes, approach lane center is at width/4 = 32px. */
+    stopLineOffset?: number;
+    /** Width of the painted stop line (px), spanning the approach lane minus insets. */
+    stopLineWidth?: number;
   };
 }
 
@@ -337,6 +345,11 @@ export class IntersectionSystem {
             intersectionNode: nodeId,
             // Store actual approach angle for diagonal intersections
             approachAngle: arm.entryAngle,
+            // Stop line geometry: centered on approach lane (right-hand lane)
+            // Approach lane center is at arm.width/4 from road centerline
+            // Painted width = arm.width/2 - 2*STOP_LINE_INSET
+            stopLineOffset: arm.width / 4,
+            stopLineWidth: arm.width / 2 - 2 * STOP_LINE_INSET,
           },
         });
       }

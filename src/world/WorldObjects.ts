@@ -1656,22 +1656,26 @@ export class WorldObjects {
 
     if (approachAngle !== undefined) {
       // Diagonal/free-form intersection: use actual approach angle
-      // Traffic light is at: node_center - approach_dir * TL_STOP_OFFSET + perp_dir * (halfRoad + margin)
-      // Lane center is at: traffic_light - perp_dir * margin (margin = TL_SHOULDER_MARGIN = 28)
-      // Stop bar is perpendicular to approach, centered on lane, at traffic light position
+      // Traffic light is at: node - approach_dir * TL_STOP_OFFSET + perp_dir * (halfRoad + margin)
+      // Stop line is at: node - approach_dir * TL_STOP_OFFSET + perp_dir * stopLineOffset
+      // So: stop_line = traffic_light - perp_dir * (halfRoad + TL_SHOULDER_MARGIN - stopLineOffset)
       cosA = Math.cos(approachAngle);
       sinA = Math.sin(approachAngle);
       // Perpendicular to approach (right-hand side in y-down coordinates)
       const perpX = -sinA;
       const perpY = cosA;
-      const margin = 28; // TL_SHOULDER_MARGIN
-      // Lane center = traffic light - perp_dir * margin
-      laneCenterX = o.x - perpX * margin;
-      laneCenterY = o.y - perpY * margin;
-      // Stop bar is perpendicular to approach, centered on lane, spanning laneWidth
-      // Draw as a triangle fan (two triangles making a rotated rectangle)
-      const hw = laneWidth / 2, hh = thick / 2;
-      const cx = laneCenterX, cy = laneCenterY;
+      // Get stop line geometry from params (set by IntersectionSystem)
+      const stopLineOffset = (o.params?.stopLineOffset as number) ?? (halfRoad / 2);
+      const stopLineWidth = (o.params?.stopLineWidth as number) ?? (halfRoad - inset * 2);
+      // Traffic light is at: node - approach_dir * TL_STOP_OFFSET + perp_dir * (halfRoad + TL_SHOULDER_MARGIN)
+      // Stop line is at: node - approach_dir * TL_STOP_OFFSET + perp_dir * stopLineOffset
+      // So: stop_line = traffic_light - perp_dir * (halfRoad + TL_SHOULDER_MARGIN - stopLineOffset)
+      const TL_SHOULDER_MARGIN = 28;
+      const offsetFromLight = halfRoad + TL_SHOULDER_MARGIN - stopLineOffset;
+      const cx = o.x - perpX * offsetFromLight;
+      const cy = o.y - perpY * offsetFromLight;
+      // Stop bar is perpendicular to approach, centered on approach lane
+      const hw = stopLineWidth / 2, hh = thick / 2;
       const c1x = cx + cosA * hw + perpX * hh;
       const c1y = cy + sinA * hw + perpY * hh;
       const c2x = cx - cosA * hw + perpX * hh;
@@ -1679,7 +1683,7 @@ export class WorldObjects {
       const c3x = cx - cosA * hw - perpX * hh;
       const c3y = cy - sinA * hw - perpY * hh;
       const c4x = cx + cosA * hw - perpX * hh;
-      const c4y = cy + sinA * hw - perpY * hh;
+      const c4y = cy + sinA * hw - perpX * hh;
 
       // Soft asphalt shadow (offset by 1px)
       g.fillStyle(0x000000, 0.22);
