@@ -1,1 +1,6263 @@
-{"version":7,"name":"RigWorld","worldW":13824,"worldH":10240,"spawn":{"x":5760,"y":4700,"angle":0},"roads":[{"id":"rd_1","surface":"asphalt","closed":false,"points":[{"x":1152,"y":620,"w":128},{"x":1152,"y":9620,"w":128}]},{"id":"rd_2","surface":"asphalt","closed":false,"points":[{"x":3456,"y":620,"w":128},{"x":3456,"y":9620,"w":128}]},{"id":"rd_3","surface":"asphalt","closed":false,"points":[{"x":5760,"y":620,"w":128},{"x":5760,"y":9620,"w":128}]},{"id":"rd_4","surface":"asphalt","closed":false,"points":[{"x":8061,"y":88,"w":128},{"x":8061,"y":9088,"w":128}]},{"id":"rd_5","surface":"asphalt","closed":false,"points":[{"x":10368,"y":620,"w":128},{"x":10368,"y":9620,"w":128}]},{"id":"rd_6","surface":"asphalt","closed":false,"points":[{"x":12672,"y":620,"w":128},{"x":12672,"y":9620,"w":128}]},{"id":"rd_7","surface":"asphalt","closed":false,"points":[{"x":1370,"y":1028,"w":128},{"x":1472,"y":1027,"w":128},{"x":1685,"y":1027,"w":128},{"x":13204,"y":1024,"w":128}]},{"id":"rd_8","surface":"asphalt","closed":false,"points":[{"x":520,"y":3072,"w":128},{"x":13104,"y":3072,"w":128}]},{"id":"rd_9","surface":"asphalt","closed":false,"points":[{"x":620,"y":5120,"w":128},{"x":13204,"y":5120,"w":128}]},{"id":"rd_10","surface":"asphalt","closed":false,"points":[{"x":620,"y":7168,"w":128},{"x":13204,"y":7168,"w":128}]},{"id":"rd_11","surface":"asphalt","closed":false,"points":[{"x":620,"y":9216,"w":128},{"x":13204,"y":9216,"w":128}]},{"id":"rd_12","surface":"asphalt","closed":false,"points":[{"x":3584,"y":4096,"w":128},{"x":4100,"y":4210,"w":128},{"x":4620,"y":4020,"w":128},{"x":5120,"y":4200,"w":128},{"x":5632,"y":4096,"w":128}]},{"id":"rd_13","surface":"asphalt","closed":false,"points":[{"x":4608,"y":3200,"w":128},{"x":4712,"y":3660,"w":128},{"x":4510,"y":4120,"w":128},{"x":4608,"y":4640,"w":128}]},{"id":"rd_15","surface":"dirt","closed":false,"points":[{"x":4940,"y":7600,"w":92},{"x":5420,"y":8120,"w":84},{"x":5820,"y":8520,"w":72},{"x":6330,"y":8680,"w":64},{"x":6840,"y":9010,"w":56}]},{"id":"rd_16","surface":"asphalt","closed":false,"points":[{"x":10900,"y":9216,"w":140},{"x":10900,"y":9600,"w":140}]},{"id":"rd_17","surface":"asphalt","closed":false,"points":[{"x":12300,"y":9216,"w":140},{"x":12300,"y":9600,"w":140}]},{"id":"rd_18","surface":"asphalt","closed":false,"points":[{"x":10900,"y":9600,"w":140},{"x":12300,"y":9600,"w":140}]},{"id":"rd_19","surface":"asphalt","closed":false,"points":[{"x":10900,"y":9600,"w":120},{"x":10520,"y":9600,"w":120}]},{"id":"rd_20","surface":"asphalt","closed":false,"points":[{"x":6998,"y":3129,"w":193},{"x":6998,"y":3185,"w":128},{"x":6995,"y":3348,"w":128},{"x":6997,"y":3456,"w":261}]},{"id":"rd_22","surface":"asphalt","closed":false,"layer":1,"points":[{"x":7661,"y":1952,"w":192},{"x":8574,"y":1961,"w":192},{"x":8754,"y":1993,"w":192},{"x":8902,"y":2073,"w":192},{"x":8991,"y":2201,"w":192}]},{"id":"rd_24","surface":"asphalt","closed":false,"points":[{"x":8991,"y":2200,"w":189,"twist":-5.6},{"x":9126,"y":2441,"w":189},{"x":9140,"y":2649,"w":189},{"x":9143,"y":2786,"w":189}]},{"id":"rd_25","surface":"asphalt","closed":false,"layer":1,"points":[{"x":9146,"y":3296,"w":192},{"x":9142,"y":2786,"w":192}]},{"id":"rd_26","surface":"asphalt","closed":false,"points":[{"x":9147,"y":3284,"w":192},{"x":9142,"y":3713,"w":192},{"x":8940,"y":3882,"w":192},{"x":8529,"y":3874,"w":192},{"x":8120,"y":3874,"w":192}]},{"id":"rd_27","surface":"asphalt","closed":false,"points":[{"x":7661,"y":1952,"w":192},{"x":7344,"y":1950,"w":192},{"x":7223,"y":1867,"w":192},{"x":7193,"y":1725,"w":192},{"x":7218,"y":1615,"w":192},{"x":7346,"y":1506,"w":192},{"x":7612,"y":1487,"w":192},{"x":8004,"y":1488,"w":192}]},{"id":"rd_28","surface":"asphalt","closed":false,"layer":1,"points":[{"x":7570,"y":4739,"w":128},{"x":7570,"y":5482,"w":128}]},{"id":"rd_29","surface":"asphalt","closed":false,"points":[{"x":7756,"y":6282,"w":128,"twist":-47.6},{"x":7528,"y":6001,"w":128},{"x":7570,"y":5482,"w":128}]},{"id":"rd_30","surface":"asphalt","closed":false,"layer":1,"points":[{"x":8338,"y":6282,"w":128},{"x":7756,"y":6282,"w":128}]},{"id":"rd_31","surface":"asphalt","closed":false,"points":[{"x":8338,"y":6282,"w":128},{"x":8614,"y":6275,"w":128,"twist":7},{"x":8893,"y":6137,"w":128},{"x":8950,"y":5314,"w":128,"twist":-21.8}]},{"id":"rd_32","surface":"asphalt","closed":false,"layer":1,"points":[{"x":8950,"y":5314,"w":128},{"x":8827,"y":4937,"w":128}]},{"id":"rd_33","surface":"asphalt","closed":false,"points":[{"x":8827,"y":4937,"w":128,"twist":-14.5},{"x":8737,"y":3972,"w":128,"twist":6.2}]},{"id":"rd_34","surface":"asphalt","closed":false,"points":[{"x":7570,"y":4739,"w":128},{"x":7560,"y":4392,"w":128},{"x":7828,"y":4281,"w":128},{"x":7863,"y":3952,"w":128},{"x":7997,"y":3878,"w":128,"twist":28}]},{"id":"rd_37","surface":"asphalt","closed":false,"points":[{"x":2825,"y":2063,"w":128},{"x":2763,"y":2063,"w":128},{"x":1198,"y":2063,"w":128}]},{"id":"rd_38","surface":"asphalt","closed":false,"points":[{"x":4508,"y":5173,"w":128},{"x":4508,"y":5403,"w":128},{"x":4508,"y":6181,"w":128},{"x":4508,"y":6675,"w":128},{"x":4475,"y":6806,"w":128},{"x":4323,"y":6826,"w":128},{"x":3799,"y":6826,"w":128},{"x":3508,"y":6826,"w":128}]},{"id":"rd_39","surface":"asphalt","closed":false,"layer":1,"points":[{"x":1370,"y":1028,"w":128},{"x":933,"y":1028,"w":128}]},{"id":"rd_40","surface":"asphalt","closed":false,"points":[{"x":368,"y":1028,"w":128},{"x":933,"y":1028,"w":128}]},{"id":"rd_41","surface":"asphalt","closed":false,"points":[{"x":466,"y":1088,"w":128},{"x":466,"y":1554,"w":128},{"x":526,"y":1642,"w":128},{"x":694,"y":1660,"w":128},{"x":1100,"y":1660,"w":128}]},{"id":"rd_42","surface":"asphalt","closed":false,"points":[{"x":3456,"y":620,"w":128},{"x":3456,"y":-120,"w":128},{"x":3180,"y":-540,"w":128},{"x":2450,"y":-740,"w":128},{"x":1420,"y":-820,"w":128},{"x":380,"y":-760,"w":128},{"x":-340,"y":-620,"w":128},{"x":-900,"y":-400,"w":128}]},{"id":"rd_43","surface":"asphalt","closed":false,"points":[{"x":520,"y":3072,"w":128},{"x":-240,"y":3072,"w":128},{"x":-760,"y":2740,"w":128},{"x":-980,"y":2050,"w":128},{"x":-1040,"y":1120,"w":128},{"x":-1020,"y":220,"w":128},{"x":-900,"y":-400,"w":128}]},{"id":"rd_44","surface":"asphalt","closed":false,"points":[{"x":-900,"y":-400,"w":126},{"x":-1380,"y":-280,"w":126},{"x":-1820,"y":-440,"w":126},{"x":-2220,"y":-480,"w":126},{"x":-2680,"y":-480,"w":126},{"x":-2980,"y":-520,"w":126}]},{"id":"rd_45","surface":"asphalt","closed":false,"points":[{"x":-2220,"y":-480,"w":124},{"x":-1620,"y":-760,"w":124},{"x":-1240,"y":-1040,"w":124},{"x":-1260,"y":-1340,"w":124},{"x":-1780,"y":-1520,"w":124},{"x":-2520,"y":-1620,"w":124},{"x":-3320,"y":-1700,"w":124},{"x":-3720,"y":-1880,"w":124},{"x":-3660,"y":-2140,"w":124},{"x":-3040,"y":-2260,"w":124},{"x":-2320,"y":-2360,"w":124},{"x":-1940,"y":-2560,"w":124},{"x":-2060,"y":-2800,"w":124},{"x":-2580,"y":-2840,"w":124},{"x":-3160,"y":-2840,"w":124},{"x":-3660,"y":-2840,"w":124},{"x":-4060,"y":-2840,"w":124}]},{"id":"rd_46","surface":"asphalt","closed":false,"points":[{"x":-2580,"y":-2840,"w":112},{"x":-2640,"y":-3240,"w":112},{"x":-3120,"y":-3360,"w":112},{"x":-3660,"y":-3360,"w":112},{"x":-4080,"y":-3220,"w":112},{"x":-4060,"y":-2840,"w":112}]},{"id":"rd_47","surface":"dirt","closed":false,"points":[{"x":-2980,"y":-520,"w":98},{"x":-3520,"y":-740,"w":98},{"x":-3980,"y":-1160,"w":98},{"x":-4240,"y":-1720,"w":98},{"x":-4280,"y":-2320,"w":98},{"x":-4060,"y":-2840,"w":98}]},{"id":"rd_48","surface":"asphalt","closed":false,"points":[{"x":380,"y":-760,"w":122},{"x":1120,"y":-1380,"w":122},{"x":2240,"y":-1820,"w":122},{"x":3560,"y":-1840,"w":122},{"x":4920,"y":-1580,"w":122},{"x":6220,"y":-1160,"w":122},{"x":7420,"y":-620,"w":122},{"x":8061,"y":-220,"w":126},{"x":8061,"y":88,"w":128}]},{"id":"rd_49","surface":"asphalt","closed":false,"points":[{"x":-980,"y":2050,"w":120},{"x":-1640,"y":2780,"w":120},{"x":-1960,"y":3880,"w":120},{"x":-1880,"y":5080,"w":120},{"x":-1460,"y":6160,"w":120},{"x":-640,"y":6940,"w":124},{"x":140,"y":7168,"w":126},{"x":620,"y":7168,"w":128}]}],"objects":[{"id":"wo_1","type":"dock","x":509,"y":795,"angle":0,"w":112,"h":300,"variant":"port"},{"id":"wo_2","type":"dock","x":632,"y":797,"angle":0,"w":102,"h":303,"variant":"port"},{"id":"wo_3","type":"dock","x":765,"y":798,"angle":0,"w":112,"h":306,"variant":"port"},{"id":"wo_4","type":"dock","x":897,"y":800,"angle":0,"w":119,"h":309,"variant":"port"},{"id":"wo_5","type":"dock","x":1022,"y":799,"angle":0,"w":113,"h":308,"variant":"port"},{"id":"wo_6","type":"dock","x":1152,"y":704,"angle":0,"w":118,"h":118,"variant":"port"},{"id":"wo_7","type":"crane","x":448,"y":230,"angle":0,"w":110,"h":280},{"id":"wo_8","type":"crane","x":896,"y":230,"angle":0,"w":110,"h":280},{"id":"wo_9","type":"crane","x":1344,"y":230,"angle":0,"w":110,"h":280},{"id":"wo_10","type":"container_stack","x":450,"y":560,"angle":0,"w":110,"h":64,"variant":"blue"},{"id":"wo_11","type":"container_stack","x":585,"y":560,"angle":0,"w":110,"h":64,"variant":"blue"},{"id":"wo_12","type":"container_stack","x":900,"y":560,"angle":0,"w":110,"h":64,"variant":"red"},{"id":"wo_13","type":"container_stack","x":1035,"y":560,"angle":0,"w":110,"h":64,"variant":"red"},{"id":"wo_14","type":"building","x":1555,"y":820,"angle":0,"w":300,"h":190,"variant":"warehouse"},{"id":"wo_15","type":"container_stack","x":11064,"y":340,"angle":0,"w":200,"h":150,"variant":"blue"},{"id":"wo_16","type":"container_stack","x":11330,"y":340,"angle":0,"w":200,"h":150,"variant":"rust"},{"id":"wo_17","type":"dock","x":10752,"y":620,"angle":0,"w":118,"h":118,"variant":"port"},{"id":"wo_18","type":"dock","x":10880,"y":620,"angle":0,"w":118,"h":118,"variant":"port"},{"id":"wo_19","type":"dock","x":11008,"y":620,"angle":0,"w":118,"h":118,"variant":"port"},{"id":"wo_20","type":"building","x":11400,"y":850,"angle":0,"w":320,"h":200,"variant":"garage"},{"id":"wo_21","type":"pad_dirt","x":10900,"y":1250,"angle":0,"w":420,"h":300},{"id":"wo_22","type":"silo","x":11840,"y":8512,"angle":0,"w":128,"h":128},{"id":"wo_23","type":"silo","x":11840,"y":8896,"angle":0,"w":128,"h":128},{"id":"wo_24","type":"dock","x":12160,"y":8560,"angle":0,"w":118,"h":118,"variant":"factory"},{"id":"wo_25","type":"dock","x":12288,"y":8560,"angle":0,"w":118,"h":118,"variant":"factory"},{"id":"wo_26","type":"dock","x":12416,"y":8560,"angle":0,"w":118,"h":118,"variant":"factory"},{"id":"wo_27","type":"building","x":10900,"y":8000,"angle":0,"w":420,"h":180,"variant":"warehouse"},{"id":"wo_28","type":"building","x":11380,"y":8000,"angle":0,"w":300,"h":180,"variant":"warehouse"},{"id":"wo_29","type":"building","x":512,"y":9100,"angle":0,"w":220,"h":170,"variant":"church"},{"id":"wo_30","type":"building","x":900,"y":9250,"angle":0,"w":260,"h":160,"variant":"archway"},{"id":"wo_31","type":"dock","x":576,"y":9450,"angle":0,"w":118,"h":118,"variant":"port"},{"id":"wo_32","type":"dock","x":704,"y":9450,"angle":0,"w":118,"h":118,"variant":"port"},{"id":"wo_33","type":"dock","x":832,"y":9450,"angle":0,"w":118,"h":118,"variant":"port"},{"id":"wo_38","type":"parking_pad","x":11260,"y":1650,"angle":180,"w":170,"h":700,"variant":"concrete"},{"id":"wo_39","type":"parking_pad","x":11450,"y":1650,"angle":180,"w":170,"h":700,"variant":"clean"},{"id":"wo_40","type":"parking_pad","x":12050,"y":7680,"angle":180,"w":140,"h":420,"variant":"concrete"},{"id":"wo_41","type":"parking_pad","x":12210,"y":7680,"angle":180,"w":140,"h":420,"variant":"hazard"},{"id":"wo_42","type":"parking_pad","x":12370,"y":7680,"angle":180,"w":140,"h":420,"variant":"hazard"},{"id":"wo_43","type":"parking_pad","x":1500,"y":8300,"angle":180,"w":140,"h":300,"variant":"clean"},{"id":"wo_44","type":"parking_pad","x":1650,"y":8300,"angle":180,"w":140,"h":300,"variant":"hazard"},{"id":"wo_47","type":"jersey_barrier","x":1488,"y":948,"angle":0,"w":507,"h":20},{"id":"wo_48","type":"jersey_barrier","x":1750,"y":489,"angle":90,"w":932,"h":20},{"id":"wo_60","type":"roundabout","x":10900,"y":9600,"angle":0,"w":420,"h":420},{"id":"wo_61","type":"building","x":11650,"y":9950,"angle":0,"w":900,"h":420,"variant":"warehouse_big"},{"id":"wo_62","type":"building","x":12360,"y":9950,"angle":0,"w":400,"h":360,"variant":"shed"},{"id":"wo_63","type":"parking_lot","x":11370,"y":9400,"angle":0,"w":460,"h":240},{"id":"wo_64","type":"parking_lot","x":12060,"y":9400,"angle":0,"w":300,"h":240},{"id":"wo_65","type":"parking_lot","x":10600,"y":9960,"angle":0,"w":300,"h":240},{"id":"wo_66","type":"crosswalk","x":10900,"y":9280,"angle":0,"w":36,"h":170},{"id":"wo_67","type":"crosswalk","x":12300,"y":9280,"angle":0,"w":36,"h":170},{"id":"wo_68","type":"pad_asphalt","x":10840,"y":10050,"angle":0,"w":460,"h":360},{"id":"wo_69","type":"dock_wall","x":10840,"y":9898,"angle":0,"w":420,"h":56,"params":{"docks":3}},{"id":"wo_70","type":"parking_pad","x":10720,"y":10080,"angle":0,"w":110,"h":300,"variant":"asphalt"},{"id":"wo_71","type":"parking_pad","x":10840,"y":10080,"angle":0,"w":110,"h":300,"variant":"concrete"},{"id":"wo_72","type":"parking_pad","x":10960,"y":10080,"angle":0,"w":110,"h":300,"variant":"asphalt"},{"id":"wo_75","type":"building","x":3760,"y":1408,"angle":-3.7,"w":304,"h":291,"variant":"warehouse"},{"id":"wo_76","type":"building","x":9574,"y":1276,"angle":-4.8,"w":258,"h":308,"variant":"warehouse"},{"id":"wo_77","type":"building","x":11831,"y":1506,"angle":0.2,"w":282,"h":240,"variant":"garage"},{"id":"wo_78","type":"building","x":7080,"y":2426,"angle":-2.1,"w":443,"h":334,"variant":"warehouse"},{"id":"wo_79","type":"building","x":9466,"y":3875,"angle":-5.3,"w":300,"h":293,"variant":"warehouse"},{"id":"wo_80","type":"building","x":10639,"y":3615,"angle":0,"w":400,"h":243,"variant":"warehouse"},{"id":"wo_81","type":"building","x":11671,"y":3599,"angle":0.3,"w":350,"h":326,"variant":"garage"},{"id":"wo_82","type":"building","x":2473,"y":4672,"angle":4.7,"w":385,"h":314,"variant":"garage"},{"id":"wo_84","type":"building","x":9346,"y":4445,"angle":4.3,"w":248,"h":249,"variant":"warehouse"},{"id":"wo_85","type":"building","x":11774,"y":4508,"angle":-3.1,"w":418,"h":243,"variant":"warehouse"},{"id":"wo_86","type":"building","x":2674,"y":5655,"angle":1.4,"w":385,"h":248,"variant":"warehouse"},{"id":"wo_89","type":"building","x":9450,"y":5707,"angle":5.7,"w":425,"h":290,"variant":"garage"},{"id":"wo_90","type":"building","x":11734,"y":5552,"angle":4.3,"w":345,"h":272,"variant":"warehouse"},{"id":"wo_92","type":"building","x":6129,"y":6479,"angle":90,"w":370,"h":321,"variant":"garage"},{"id":"wo_93","type":"building","x":7051,"y":6756,"angle":-1.9,"w":407,"h":274,"variant":"warehouse"},{"id":"wo_94","type":"building","x":9463,"y":6651,"angle":4,"w":388,"h":333,"variant":"garage"},{"id":"wo_95","type":"building","x":3805,"y":7773,"angle":2.7,"w":407,"h":243,"variant":"warehouse"},{"id":"wo_96","type":"building","x":7086,"y":7736,"angle":-2.4,"w":331,"h":294,"variant":"warehouse"},{"id":"wo_97","type":"building","x":10686,"y":7655,"angle":2.4,"w":289,"h":212,"variant":"garage"},{"id":"wo_98","type":"building","x":11660,"y":7640,"angle":-5.5,"w":404,"h":280,"variant":"warehouse"},{"id":"wo_99","type":"building","x":2440,"y":8788,"angle":1,"w":344,"h":322,"variant":"garage"},{"id":"wo_100","type":"building","x":3817,"y":8739,"angle":0,"w":383,"h":251,"variant":"garage"},{"id":"wo_101","type":"building","x":6013,"y":8786,"angle":-2.4,"w":310,"h":334,"variant":"warehouse"},{"id":"wo_102","type":"building","x":7022,"y":8728,"angle":-3.6,"w":343,"h":290,"variant":"warehouse"},{"id":"wo_103","type":"building","x":8431,"y":8702,"angle":-4.5,"w":356,"h":242,"variant":"garage"},{"id":"wo_104","type":"lamp","x":1054,"y":1800,"angle":0,"w":14,"h":14},{"id":"wo_105","type":"lamp","x":1054,"y":2700,"angle":0,"w":14,"h":14},{"id":"wo_106","type":"lamp","x":1054,"y":3600,"angle":0,"w":14,"h":14},{"id":"wo_107","type":"lamp","x":1054,"y":4500,"angle":0,"w":14,"h":14},{"id":"wo_108","type":"lamp","x":1054,"y":5400,"angle":0,"w":14,"h":14},{"id":"wo_109","type":"lamp","x":1054,"y":6300,"angle":0,"w":14,"h":14},{"id":"wo_110","type":"lamp","x":1054,"y":8100,"angle":0,"w":14,"h":14},{"id":"wo_111","type":"lamp","x":3358,"y":1650,"angle":0,"w":14,"h":14},{"id":"wo_112","type":"lamp","x":3358,"y":2855,"angle":0,"w":14,"h":14},{"id":"wo_113","type":"lamp","x":3358,"y":3600,"angle":0,"w":14,"h":14},{"id":"wo_114","type":"lamp","x":3358,"y":4500,"angle":0,"w":14,"h":14},{"id":"wo_115","type":"lamp","x":3358,"y":5400,"angle":0,"w":14,"h":14},{"id":"wo_116","type":"lamp","x":3358,"y":6300,"angle":0,"w":14,"h":14},{"id":"wo_117","type":"lamp","x":3358,"y":8100,"angle":0,"w":14,"h":14},{"id":"wo_118","type":"lamp","x":5662,"y":1800,"angle":0,"w":14,"h":14},{"id":"wo_119","type":"lamp","x":5662,"y":2700,"angle":0,"w":14,"h":14},{"id":"wo_120","type":"lamp","x":5662,"y":3600,"angle":0,"w":14,"h":14},{"id":"wo_121","type":"lamp","x":5662,"y":4500,"angle":0,"w":14,"h":14},{"id":"wo_122","type":"lamp","x":5662,"y":5400,"angle":0,"w":14,"h":14},{"id":"wo_123","type":"lamp","x":5662,"y":6300,"angle":0,"w":14,"h":14},{"id":"wo_124","type":"lamp","x":5662,"y":8100,"angle":0,"w":14,"h":14},{"id":"wo_125","type":"lamp","x":7966,"y":1800,"angle":0,"w":14,"h":14},{"id":"wo_126","type":"lamp","x":7966,"y":2700,"angle":0,"w":14,"h":14},{"id":"wo_127","type":"lamp","x":7966,"y":3600,"angle":0,"w":14,"h":14},{"id":"wo_128","type":"lamp","x":7966,"y":4500,"angle":0,"w":14,"h":14},{"id":"wo_129","type":"lamp","x":7966,"y":5400,"angle":0,"w":14,"h":14},{"id":"wo_130","type":"lamp","x":7966,"y":6300,"angle":0,"w":14,"h":14},{"id":"wo_131","type":"lamp","x":7966,"y":8100,"angle":0,"w":14,"h":14},{"id":"wo_132","type":"lamp","x":10270,"y":1800,"angle":0,"w":14,"h":14},{"id":"wo_133","type":"lamp","x":10270,"y":2700,"angle":0,"w":14,"h":14},{"id":"wo_134","type":"lamp","x":10270,"y":3600,"angle":0,"w":14,"h":14},{"id":"wo_135","type":"lamp","x":10270,"y":4500,"angle":0,"w":14,"h":14},{"id":"wo_136","type":"lamp","x":10270,"y":5400,"angle":0,"w":14,"h":14},{"id":"wo_137","type":"lamp","x":10270,"y":6300,"angle":0,"w":14,"h":14},{"id":"wo_138","type":"lamp","x":10270,"y":8100,"angle":0,"w":14,"h":14},{"id":"wo_139","type":"lamp","x":12574,"y":1800,"angle":0,"w":14,"h":14},{"id":"wo_140","type":"lamp","x":12574,"y":2700,"angle":0,"w":14,"h":14},{"id":"wo_141","type":"lamp","x":12574,"y":3600,"angle":0,"w":14,"h":14},{"id":"wo_142","type":"lamp","x":12574,"y":4500,"angle":0,"w":14,"h":14},{"id":"wo_143","type":"lamp","x":12574,"y":5400,"angle":0,"w":14,"h":14},{"id":"wo_144","type":"lamp","x":12574,"y":6300,"angle":0,"w":14,"h":14},{"id":"wo_145","type":"lamp","x":12574,"y":8100,"angle":0,"w":14,"h":14},{"id":"wo_146","type":"lamp","x":897,"y":1108,"angle":-90,"w":14,"h":14},{"id":"wo_147","type":"lamp","x":1800,"y":926,"angle":90,"w":14,"h":14},{"id":"wo_148","type":"lamp","x":2700,"y":926,"angle":90,"w":14,"h":14},{"id":"wo_149","type":"lamp","x":4500,"y":926,"angle":90,"w":14,"h":14},{"id":"wo_150","type":"lamp","x":5400,"y":926,"angle":90,"w":14,"h":14},{"id":"wo_151","type":"lamp","x":6300,"y":926,"angle":90,"w":14,"h":14},{"id":"wo_152","type":"lamp","x":7200,"y":926,"angle":90,"w":14,"h":14},{"id":"wo_153","type":"lamp","x":9000,"y":926,"angle":90,"w":14,"h":14},{"id":"wo_154","type":"lamp","x":9900,"y":926,"angle":90,"w":14,"h":14},{"id":"wo_155","type":"lamp","x":10800,"y":926,"angle":90,"w":14,"h":14},{"id":"wo_156","type":"lamp","x":11700,"y":926,"angle":90,"w":14,"h":14},{"id":"wo_157","type":"lamp","x":900,"y":2974,"angle":90,"w":14,"h":14},{"id":"wo_158","type":"lamp","x":1800,"y":2974,"angle":90,"w":14,"h":14},{"id":"wo_159","type":"lamp","x":2700,"y":2974,"angle":90,"w":14,"h":14},{"id":"wo_160","type":"lamp","x":4500,"y":2974,"angle":90,"w":14,"h":14},{"id":"wo_161","type":"lamp","x":5400,"y":2974,"angle":90,"w":14,"h":14},{"id":"wo_162","type":"lamp","x":6300,"y":2974,"angle":90,"w":14,"h":14},{"id":"wo_163","type":"lamp","x":7200,"y":2974,"angle":90,"w":14,"h":14},{"id":"wo_164","type":"lamp","x":9000,"y":2974,"angle":90,"w":14,"h":14},{"id":"wo_165","type":"lamp","x":9900,"y":2974,"angle":90,"w":14,"h":14},{"id":"wo_166","type":"lamp","x":10800,"y":2974,"angle":90,"w":14,"h":14},{"id":"wo_167","type":"lamp","x":11700,"y":2974,"angle":90,"w":14,"h":14},{"id":"wo_168","type":"lamp","x":900,"y":5022,"angle":90,"w":14,"h":14},{"id":"wo_169","type":"lamp","x":1800,"y":5022,"angle":90,"w":14,"h":14},{"id":"wo_170","type":"lamp","x":2700,"y":5022,"angle":90,"w":14,"h":14},{"id":"wo_171","type":"lamp","x":4500,"y":5022,"angle":90,"w":14,"h":14},{"id":"wo_172","type":"lamp","x":5400,"y":5022,"angle":90,"w":14,"h":14},{"id":"wo_173","type":"lamp","x":6300,"y":5022,"angle":90,"w":14,"h":14},{"id":"wo_174","type":"lamp","x":7200,"y":5022,"angle":90,"w":14,"h":14},{"id":"wo_175","type":"lamp","x":9000,"y":5022,"angle":90,"w":14,"h":14},{"id":"wo_176","type":"lamp","x":9900,"y":5022,"angle":90,"w":14,"h":14},{"id":"wo_177","type":"lamp","x":10800,"y":5022,"angle":90,"w":14,"h":14},{"id":"wo_178","type":"lamp","x":11700,"y":5022,"angle":90,"w":14,"h":14},{"id":"wo_179","type":"lamp","x":900,"y":7070,"angle":90,"w":14,"h":14},{"id":"wo_180","type":"lamp","x":1800,"y":7070,"angle":90,"w":14,"h":14},{"id":"wo_181","type":"lamp","x":2700,"y":7070,"angle":90,"w":14,"h":14},{"id":"wo_182","type":"lamp","x":4500,"y":7070,"angle":90,"w":14,"h":14},{"id":"wo_183","type":"lamp","x":5400,"y":7070,"angle":90,"w":14,"h":14},{"id":"wo_184","type":"lamp","x":6300,"y":7070,"angle":90,"w":14,"h":14},{"id":"wo_185","type":"lamp","x":7200,"y":7070,"angle":90,"w":14,"h":14},{"id":"wo_186","type":"lamp","x":9000,"y":7070,"angle":90,"w":14,"h":14},{"id":"wo_187","type":"lamp","x":9900,"y":7070,"angle":90,"w":14,"h":14},{"id":"wo_188","type":"lamp","x":10800,"y":7070,"angle":90,"w":14,"h":14},{"id":"wo_189","type":"lamp","x":11700,"y":7070,"angle":90,"w":14,"h":14},{"id":"wo_190","type":"lamp","x":900,"y":9118,"angle":90,"w":14,"h":14},{"id":"wo_191","type":"lamp","x":1800,"y":9118,"angle":90,"w":14,"h":14},{"id":"wo_192","type":"lamp","x":2700,"y":9118,"angle":90,"w":14,"h":14},{"id":"wo_193","type":"lamp","x":4500,"y":9118,"angle":90,"w":14,"h":14},{"id":"wo_194","type":"lamp","x":5400,"y":9118,"angle":90,"w":14,"h":14},{"id":"wo_195","type":"lamp","x":6300,"y":9118,"angle":90,"w":14,"h":14},{"id":"wo_196","type":"lamp","x":7200,"y":9118,"angle":90,"w":14,"h":14},{"id":"wo_197","type":"lamp","x":9000,"y":9118,"angle":90,"w":14,"h":14},{"id":"wo_198","type":"lamp","x":9900,"y":9118,"angle":90,"w":14,"h":14},{"id":"wo_199","type":"lamp","x":10800,"y":9118,"angle":90,"w":14,"h":14},{"id":"wo_200","type":"lamp","x":11700,"y":9118,"angle":90,"w":14,"h":14},{"id":"wo_201","type":"traffic_light","x":3548,"y":3204,"angle":0,"w":22,"h":22,"params":{"dir":"n","group":0}},{"id":"wo_202","type":"traffic_light","x":3364,"y":2940,"angle":180,"w":22,"h":22,"params":{"dir":"s","group":0}},{"id":"wo_203","type":"traffic_light","x":3324,"y":3164,"angle":90,"w":22,"h":22,"params":{"dir":"e","group":1}},{"id":"wo_204","type":"traffic_light","x":3588,"y":2980,"angle":-90,"w":22,"h":22,"params":{"dir":"w","group":1}},{"id":"wo_205","type":"traffic_light","x":5852,"y":3204,"angle":0,"w":22,"h":22,"params":{"dir":"n","group":1}},{"id":"wo_206","type":"traffic_light","x":5668,"y":2940,"angle":180,"w":22,"h":22,"params":{"dir":"s","group":1}},{"id":"wo_207","type":"traffic_light","x":5628,"y":3164,"angle":90,"w":22,"h":22,"params":{"dir":"e","group":0}},{"id":"wo_208","type":"traffic_light","x":5892,"y":2980,"angle":-90,"w":22,"h":22,"params":{"dir":"w","group":0}},{"id":"wo_209","type":"traffic_light","x":5852,"y":5252,"angle":0,"w":22,"h":22,"params":{"dir":"n","group":0}},{"id":"wo_210","type":"traffic_light","x":5668,"y":4988,"angle":180,"w":22,"h":22,"params":{"dir":"s","group":0}},{"id":"wo_211","type":"traffic_light","x":5628,"y":5212,"angle":90,"w":22,"h":22,"params":{"dir":"e","group":1}},{"id":"wo_212","type":"traffic_light","x":5892,"y":5028,"angle":-90,"w":22,"h":22,"params":{"dir":"w","group":1}},{"id":"wo_213","type":"traffic_light","x":8156,"y":5252,"angle":0,"w":22,"h":22,"params":{"dir":"n","group":1}},{"id":"wo_214","type":"traffic_light","x":7972,"y":4988,"angle":180,"w":22,"h":22,"params":{"dir":"s","group":1}},{"id":"wo_215","type":"traffic_light","x":7932,"y":5212,"angle":90,"w":22,"h":22,"params":{"dir":"e","group":0}},{"id":"wo_216","type":"traffic_light","x":8196,"y":5028,"angle":-90,"w":22,"h":22,"params":{"dir":"w","group":0}},{"id":"wo_217","type":"traffic_light","x":10460,"y":5252,"angle":0,"w":22,"h":22,"params":{"dir":"n","group":0}},{"id":"wo_218","type":"traffic_light","x":10276,"y":4988,"angle":180,"w":22,"h":22,"params":{"dir":"s","group":0}},{"id":"wo_219","type":"traffic_light","x":10236,"y":5212,"angle":90,"w":22,"h":22,"params":{"dir":"e","group":1}},{"id":"wo_220","type":"traffic_light","x":10500,"y":5028,"angle":-90,"w":22,"h":22,"params":{"dir":"w","group":1}},{"id":"wo_221","type":"traffic_light","x":3548,"y":7300,"angle":0,"w":22,"h":22,"params":{"dir":"n","group":0}},{"id":"wo_222","type":"traffic_light","x":3364,"y":7036,"angle":180,"w":22,"h":22,"params":{"dir":"s","group":0}},{"id":"wo_223","type":"traffic_light","x":3324,"y":7260,"angle":90,"w":22,"h":22,"params":{"dir":"e","group":1}},{"id":"wo_224","type":"traffic_light","x":3588,"y":7076,"angle":-90,"w":22,"h":22,"params":{"dir":"w","group":1}},{"id":"wo_225","type":"traffic_light","x":8156,"y":7300,"angle":0,"w":22,"h":22,"params":{"dir":"n","group":0}},{"id":"wo_226","type":"traffic_light","x":7972,"y":7036,"angle":180,"w":22,"h":22,"params":{"dir":"s","group":0}},{"id":"wo_227","type":"traffic_light","x":7932,"y":7260,"angle":90,"w":22,"h":22,"params":{"dir":"e","group":1}},{"id":"wo_228","type":"traffic_light","x":8196,"y":7076,"angle":-90,"w":22,"h":22,"params":{"dir":"w","group":1}},{"id":"wo_229","type":"sign","x":1042,"y":3207,"angle":0,"w":18,"h":18,"variant":"stop"},{"id":"wo_230","type":"sign","x":3346,"y":5255,"angle":0,"w":18,"h":18,"variant":"stop"},{"id":"wo_231","type":"sign","x":5650,"y":7303,"angle":0,"w":18,"h":18,"variant":"stop"},{"id":"wo_232","type":"sign","x":7954,"y":9351,"angle":0,"w":18,"h":18,"variant":"stop"},{"id":"wo_233","type":"sign","x":10258,"y":1159,"angle":0,"w":18,"h":18,"variant":"stop"},{"id":"wo_234","type":"sign","x":12562,"y":3207,"angle":0,"w":18,"h":18,"variant":"stop"},{"id":"wo_235","type":"sign","x":1042,"y":5255,"angle":0,"w":18,"h":18,"variant":"stop"},{"id":"wo_237","type":"building","x":7258,"y":3857,"angle":0,"w":217,"h":265,"variant":"warehouse"},{"id":"wo_238","type":"pad_asphalt","x":6890,"y":3778,"angle":0,"w":1085,"h":645},{"id":"wo_239","type":"container_stack","x":6740,"y":3773,"angle":0,"w":103,"h":240},{"id":"wo_240","type":"jersey_barrier","x":6922,"y":3267,"angle":-89.7,"w":164,"h":20},{"id":"wo_241","type":"wall","x":6891,"y":4094,"angle":0,"w":1109,"h":20},{"id":"wo_242","type":"parking_pad","x":6611,"y":3994,"angle":90,"w":130,"h":420,"variant":"concrete"},{"id":"wo_243","type":"container_stack","x":6605,"y":3771,"angle":0,"w":110,"h":226},{"id":"wo_244","type":"wall","x":6342,"y":3775,"angle":89.8,"w":643,"h":20},{"id":"wo_245","type":"container_stack","x":6466,"y":3776,"angle":0,"w":109,"h":225},{"id":"wo_246","type":"wall","x":6608,"y":3441,"angle":0,"w":532,"h":20},{"id":"wo_247","type":"wall","x":7449,"y":3774,"angle":-90.2,"w":638,"h":20},{"id":"wo_248","type":"wall","x":7289,"y":3442,"angle":0,"w":329,"h":20},{"id":"wo_249","type":"jersey_barrier","x":7070,"y":3264,"angle":89.8,"w":161,"h":20},{"id":"wo_253","type":"trailer","x":7262,"y":3667,"angle":-89.9,"w":46,"h":220,"params":{"trailer":"fragile_glass"}},{"id":"wo_254","type":"trailer","x":6549,"y":3501,"angle":89.6,"w":46,"h":310,"params":{"trailer":"long_cargo"}},{"id":"wo_256","type":"trailer","x":7269,"y":3576,"angle":-90.4,"w":46,"h":220,"params":{"trailer":"standard"}},{"id":"wo_257","type":"dock","x":7252,"y":3580,"angle":-90.1,"w":66,"h":286},{"id":"wo_258","type":"dock","x":7253,"y":3664,"angle":-90.5,"w":70,"h":284},{"id":"wo_280","type":"compound","x":2003,"y":1784,"angle":0,"w":1600,"h":1393,"params":{"parts":[{"type":"parking_pad","x":-97,"y":-147,"angle":3.141592653589793,"w":130,"h":300,"variant":"asphalt"},{"type":"parking_pad","x":49,"y":-147,"angle":3.141592653589793,"w":130,"h":300,"variant":"clean"},{"type":"parking_pad","x":196,"y":-144,"angle":3.141592653589793,"w":130,"h":300,"variant":"asphalt"},{"type":"jersey_barrier","x":-194,"y":-145,"angle":-3.141592653589793,"w":20,"h":301},{"type":"jersey_barrier","x":616,"y":217,"angle":1.5707963267948966,"w":20,"h":329},{"type":"jersey_barrier","x":443,"y":-686,"angle":0,"w":667,"h":20},{"type":"jersey_barrier","x":790,"y":-234,"angle":-3.141592653589793,"w":20,"h":885},{"type":"jersey_barrier","x":-270,"y":215,"angle":1.5707963267948966,"w":20,"h":963},{"type":"building","x":-634,"y":-465,"angle":-1.5707963267948966,"w":332,"h":210,"variant":"garage"},{"type":"building","x":612,"y":-575,"angle":0.008726646259971648,"w":323,"h":174,"variant":"warehouse"},{"type":"jersey_barrier","x":-763,"y":-234,"angle":-3.141592653589793,"w":20,"h":878},{"type":"jersey_barrier","x":-406,"y":-684,"angle":0,"w":692,"h":20},{"type":"parking_pad","x":634,"y":-31,"angle":0,"w":140,"h":460,"variant":"hazard"},{"type":"jersey_barrier","x":300,"y":-140,"angle":1.5707963267948966,"w":292,"h":20},{"type":"pad_asphalt","x":7,"y":-236,"angle":0,"w":1576,"h":917},{"type":"lamp","x":-739,"y":195,"angle":-0.7853981633974492,"w":14,"h":14},{"type":"lamp","x":-527,"y":-648,"angle":0,"w":14,"h":14},{"type":"lamp","x":-76,"y":-662,"angle":1.5707963267948966,"w":14,"h":14},{"type":"lamp","x":124,"y":-664,"angle":1.5707963267948966,"w":14,"h":14},{"type":"lamp","x":-540,"y":-286,"angle":0,"w":14,"h":14},{"type":"lamp","x":185,"y":191,"angle":-1.5707963267948966,"w":14,"h":14},{"type":"lamp","x":475,"y":193,"angle":-1.5707963267948966,"w":14,"h":14},{"type":"lamp","x":768,"y":197,"angle":-2.356194490192345,"w":14,"h":14},{"type":"lamp","x":-458,"y":195,"angle":-1.5707963267948966,"w":14,"h":14},{"type":"lamp","x":-110,"y":190,"angle":-1.5707963267948966,"w":14,"h":14},{"type":"lamp","x":-220,"y":-143,"angle":-3.141592653589793,"w":14,"h":14},{"type":"lamp","x":329,"y":-144,"angle":0,"w":14,"h":14},{"type":"lamp","x":434,"y":-506,"angle":-3.141592653589793,"w":14,"h":14},{"type":"lamp","x":768,"y":-363,"angle":-3.141592653589793,"w":14,"h":14}]}},{"id":"wo_281","type":"compound","x":4219,"y":5994,"angle":-90,"w":1600,"h":1393,"params":{"parts":[{"type":"parking_pad","x":-97,"y":-147,"angle":3.141592653589793,"w":130,"h":300,"variant":"asphalt"},{"type":"parking_pad","x":49,"y":-147,"angle":3.141592653589793,"w":130,"h":300,"variant":"clean"},{"type":"parking_pad","x":196,"y":-144,"angle":3.141592653589793,"w":130,"h":300,"variant":"asphalt"},{"type":"jersey_barrier","x":-194,"y":-145,"angle":-3.141592653589793,"w":20,"h":301},{"type":"jersey_barrier","x":616,"y":217,"angle":1.5707963267948966,"w":20,"h":329},{"type":"jersey_barrier","x":443,"y":-686,"angle":0,"w":667,"h":20},{"type":"jersey_barrier","x":790,"y":-234,"angle":-3.141592653589793,"w":20,"h":885},{"type":"jersey_barrier","x":-270,"y":215,"angle":1.5707963267948966,"w":20,"h":963},{"type":"building","x":-634,"y":-465,"angle":-1.5707963267948966,"w":332,"h":210,"variant":"garage"},{"type":"building","x":612,"y":-575,"angle":0.008726646259971648,"w":323,"h":174,"variant":"warehouse"},{"type":"jersey_barrier","x":-763,"y":-234,"angle":-3.141592653589793,"w":20,"h":878},{"type":"jersey_barrier","x":-406,"y":-684,"angle":0,"w":692,"h":20},{"type":"parking_pad","x":634,"y":-31,"angle":0,"w":140,"h":460,"variant":"hazard"},{"type":"jersey_barrier","x":300,"y":-140,"angle":1.5707963267948966,"w":292,"h":20},{"type":"pad_asphalt","x":7,"y":-236,"angle":0,"w":1576,"h":917},{"type":"lamp","x":-739,"y":195,"angle":-0.7853981633974492,"w":14,"h":14},{"type":"lamp","x":-527,"y":-648,"angle":0,"w":14,"h":14},{"type":"lamp","x":-76,"y":-662,"angle":1.5707963267948966,"w":14,"h":14},{"type":"lamp","x":124,"y":-664,"angle":1.5707963267948966,"w":14,"h":14},{"type":"lamp","x":-540,"y":-286,"angle":0,"w":14,"h":14},{"type":"lamp","x":185,"y":191,"angle":-1.5707963267948966,"w":14,"h":14},{"type":"lamp","x":475,"y":193,"angle":-1.5707963267948966,"w":14,"h":14},{"type":"lamp","x":768,"y":197,"angle":-2.356194490192345,"w":14,"h":14},{"type":"lamp","x":-458,"y":195,"angle":-1.5707963267948966,"w":14,"h":14},{"type":"lamp","x":-110,"y":190,"angle":-1.5707963267948966,"w":14,"h":14},{"type":"lamp","x":-220,"y":-143,"angle":-3.141592653589793,"w":14,"h":14},{"type":"lamp","x":329,"y":-144,"angle":0,"w":14,"h":14},{"type":"lamp","x":434,"y":-506,"angle":-3.141592653589793,"w":14,"h":14},{"type":"lamp","x":768,"y":-363,"angle":-3.141592653589793,"w":14,"h":14}]}},{"id":"wo_282","type":"pad_asphalt","x":903,"y":493,"angle":0,"w":1719,"h":953},{"id":"wo_283","type":"lamp","x":509,"y":617,"angle":90,"w":14,"h":14},{"id":"wo_284","type":"lamp","x":768,"y":615,"angle":90,"w":14,"h":14},{"id":"wo_285","type":"lamp","x":1020,"y":621,"angle":90,"w":14,"h":14},{"id":"wo_286","type":"jersey_barrier","x":361,"y":1030,"angle":90,"w":112,"h":20},{"id":"wo_287","type":"jersey_barrier","x":195,"y":956,"angle":0,"w":299,"h":20},{"id":"wo_288","type":"lamp","x":1222,"y":946,"angle":-180,"w":14,"h":14},{"id":"wo_289","type":"trailer","x":2052,"y":1637,"angle":180,"w":46,"h":220,"params":{"trailer":"container"}},{"id":"wo_290","type":"trailer","x":2199,"y":1640,"angle":180,"w":46,"h":220,"params":{"trailer":"reefer"}},{"id":"wo_291","type":"trailer","x":11450,"y":1650,"angle":180,"w":46,"h":248,"params":{"trailer":"tanker_fuel"}},{"id":"wo_292","type":"trailer","x":10900,"y":1650,"angle":180,"w":46,"h":255,"params":{"trailer":"timber"}},{"id":"wo_293","type":"trailer","x":11080,"y":1650,"angle":180,"w":48,"h":275,"params":{"trailer":"flatbed_heavy"}},{"id":"wo_294","type":"trailer","x":12210,"y":7680,"angle":180,"w":46,"h":155,"params":{"trailer":"bitrem_lead"}},{"id":"wo_295","type":"trailer","x":12210,"y":7513,"angle":180,"w":46,"h":155,"params":{"trailer":"bitrem_pup"}},{"id":"wo_296","type":"trailer","x":12370,"y":7680,"angle":180,"w":46,"h":155,"params":{"trailer":"bitrem_tanker_lead"}},{"id":"wo_297","type":"trailer","x":12370,"y":7513,"angle":180,"w":46,"h":155,"params":{"trailer":"bitrem_tanker_pup"}},{"id":"wo_298","type":"trailer","x":1650,"y":8300,"angle":180,"w":46,"h":225,"params":{"trailer":"tanker_hazmat"}},{"id":"wo_299","type":"trailer","x":1800,"y":8300,"angle":180,"w":46,"h":220,"params":{"trailer":"tanker_milk"}},{"id":"wo_300","type":"pad_dirt","x":-2480,"y":-440,"angle":0,"w":1320,"h":1160},{"id":"wo_304","type":"pad_asphalt","x":-2320,"y":-480,"angle":0,"w":980,"h":520},{"id":"wo_301","type":"dock","x":-2520,"y":-720,"angle":0,"w":96,"h":280,"variant":"industrial"},{"id":"wo_302","type":"dock","x":-3500,"y":-3050,"angle":0,"w":104,"h":320,"variant":"industrial"},{"id":"wo_303","type":"dock","x":-3220,"y":-3050,"angle":0,"w":100,"h":300,"variant":"industrial"},{"id":"wo_310","type":"building","x":-2020,"y":-790,"angle":0,"w":320,"h":220,"variant":"garage"},{"id":"wo_311","type":"building","x":-2860,"y":-840,"angle":0,"w":360,"h":240,"variant":"shed"},{"id":"wo_312","type":"building","x":-2520,"y":-980,"angle":0,"w":280,"h":150,"variant":"warehouse"},{"id":"wo_313","type":"gas_canopy","x":-1682,"y":-133,"angle":20,"w":520,"h":380,"params":{"stationStyle":"secondary","accessSide":"top"}},{"id":"wo_314","type":"gas_pump","x":-1693,"y":-102,"angle":110,"w":48,"h":116},{"id":"wo_315","type":"building","x":-1772,"y":113,"angle":200,"w":128,"h":84,"variant":"fuel_kiosk"},{"id":"wo_316","type":"parking_pad","x":-2680,"y":-110,"angle":0,"w":140,"h":460,"variant":"asphalt"},{"id":"wo_317","type":"parking_pad","x":-2500,"y":-110,"angle":0,"w":140,"h":460,"variant":"asphalt"},{"id":"wo_318","type":"parking_pad","x":-2320,"y":-110,"angle":0,"w":140,"h":460,"variant":"concrete"},{"id":"wo_319","type":"parking_pad","x":-2100,"y":-110,"angle":0,"w":140,"h":460,"variant":"hazard"},{"id":"wo_320","type":"trailer","x":-2680,"y":-110,"angle":0,"w":46,"h":255,"params":{"trailer":"timber"}},{"id":"wo_321","type":"trailer","x":-2500,"y":-110,"angle":0,"w":46,"h":255,"params":{"trailer":"timber"}},{"id":"wo_322","type":"trailer","x":-2100,"y":-110,"angle":0,"w":46,"h":220,"params":{"trailer":"standard"}},{"id":"wo_323","type":"log_pile","x":-3020,"y":-180,"angle":0,"w":180,"h":66},{"id":"wo_324","type":"log_pile","x":-3020,"y":-60,"angle":0,"w":180,"h":66},{"id":"wo_325","type":"log_pile","x":-3020,"y":60,"angle":0,"w":180,"h":66},{"id":"wo_326","type":"log_pile","x":-2820,"y":210,"angle":0,"w":180,"h":66},{"id":"wo_327","type":"log_pile","x":-2580,"y":210,"angle":0,"w":180,"h":66},{"id":"wo_328","type":"log_pile","x":-2340,"y":210,"angle":0,"w":180,"h":66},{"id":"wo_329","type":"log_pile","x":-3260,"y":-790,"angle":1.5708,"w":180,"h":66},{"id":"wo_330","type":"log_pile","x":-3400,"y":-790,"angle":1.5708,"w":180,"h":66},{"id":"wo_331","type":"lamp","x":-2780,"y":-395,"angle":0,"w":14,"h":14},{"id":"wo_332","type":"lamp","x":-2320,"y":-395,"angle":0,"w":14,"h":14},{"id":"wo_333","type":"lamp","x":-1975,"y":-420,"angle":0,"w":14,"h":14},{"id":"wo_334","type":"lamp","x":-1485,"y":-40,"angle":0,"w":14,"h":14},{"id":"wo_335","type":"pad_asphalt","x":-3350,"y":-2920,"angle":0,"w":1220,"h":740},{"id":"wo_336","type":"pad_dirt","x":-3350,"y":-3050,"angle":0,"w":1750,"h":1080},{"id":"wo_337","type":"building","x":-2960,"y":-2600,"angle":0,"w":320,"h":180,"variant":"warehouse"},{"id":"wo_338","type":"building","x":-3350,"y":-2600,"angle":0,"w":240,"h":150,"variant":"shed"},{"id":"wo_339","type":"parking_pad","x":-3740,"y":-2520,"angle":0,"w":150,"h":480,"variant":"clean"},{"id":"wo_340","type":"parking_pad","x":-3550,"y":-2520,"angle":0,"w":140,"h":460,"variant":"hazard"},{"id":"wo_341","type":"trailer","x":-3740,"y":-2520,"angle":0,"w":46,"h":310,"params":{"trailer":"long_cargo"}},{"id":"wo_342","type":"trailer","x":-3550,"y":-2520,"angle":0,"w":48,"h":275,"params":{"trailer":"flatbed_heavy"}},{"id":"wo_343","type":"wind_turbine","x":-4280,"y":-3460,"angle":0,"w":124,"h":124},{"id":"wo_344","type":"wind_turbine","x":-3720,"y":-3620,"angle":0.4,"w":124,"h":124},{"id":"wo_345","type":"wind_turbine","x":-3100,"y":-3620,"angle":0.9,"w":124,"h":124},{"id":"wo_346","type":"wind_turbine","x":-2440,"y":-3440,"angle":1.4,"w":124,"h":124},{"id":"wo_347","type":"wind_turbine","x":-4440,"y":-2720,"angle":2.1,"w":124,"h":124},{"id":"wo_348","type":"wind_turbine","x":-2420,"y":-2540,"angle":2.8,"w":124,"h":124},{"id":"wo_349","type":"lamp","x":-3860,"y":-2930,"angle":0,"w":14,"h":14},{"id":"wo_350","type":"lamp","x":-3360,"y":-2930,"angle":0,"w":14,"h":14},{"id":"wo_351","type":"lamp","x":-2860,"y":-2930,"angle":0,"w":14,"h":14},{"id":"wo_352","type":"jersey_barrier","x":-1090,"y":-1190,"angle":1.5708,"w":220,"h":24},{"id":"wo_353","type":"jersey_barrier","x":-3880,"y":-2010,"angle":1.5708,"w":220,"h":24},{"id":"wo_354","type":"jersey_barrier","x":-1780,"y":-2680,"angle":1.5708,"w":220,"h":24},{"id":"wo_355","type":"rock_outcrop","x":-2820,"y":-1950,"angle":0.3,"w":116,"h":94},{"id":"wo_356","type":"rock_outcrop","x":-2150,"y":-1940,"angle":1.1,"w":108,"h":88},{"id":"wo_357","type":"rock_outcrop","x":-3180,"y":-1350,"angle":0.6,"w":120,"h":96},{"id":"wo_358","type":"rock_outcrop","x":-3950,"y":-2480,"angle":2.2,"w":110,"h":90},{"id":"wo_359","type":"rock_outcrop","x":-2060,"y":-3160,"angle":0.8,"w":124,"h":102},{"id":"wo_360","type":"rock_outcrop","x":-4540,"y":-3120,"angle":1.5,"w":128,"h":104},{"id":"wo_361","type":"rock_outcrop","x":-1620,"y":-1980,"angle":0.4,"w":112,"h":90},{"id":"wo_362","type":"rock_outcrop","x":-3840,"y":-1500,"angle":1.9,"w":114,"h":92},{"id":"wo_363","type":"pine_tree","x":-3320,"y":-220,"angle":0,"w":80,"h":80},{"id":"wo_364","type":"pine_tree","x":-3460,"y":-40,"angle":0.7,"w":84,"h":84},{"id":"wo_365","type":"pine_tree","x":-3280,"y":180,"angle":1.2,"w":76,"h":76},{"id":"wo_366","type":"pine_tree","x":-3060,"y":380,"angle":2.1,"w":88,"h":88},{"id":"wo_367","type":"pine_tree","x":-2720,"y":420,"angle":0.4,"w":82,"h":82},{"id":"wo_368","type":"pine_tree","x":-2320,"y":440,"angle":1.6,"w":78,"h":78},{"id":"wo_369","type":"pine_tree","x":-1920,"y":340,"angle":2.5,"w":84,"h":84},{"id":"wo_370","type":"pine_tree","x":-1580,"y":240,"angle":0.9,"w":80,"h":80},{"id":"wo_371","type":"pine_tree","x":-1320,"y":420,"angle":1.8,"w":86,"h":86},{"id":"wo_372","type":"pine_tree","x":-1960,"y":-1160,"angle":0.5,"w":78,"h":78},{"id":"wo_373","type":"pine_tree","x":-2380,"y":-1240,"angle":1.3,"w":82,"h":82},{"id":"wo_374","type":"pine_tree","x":-2760,"y":-1280,"angle":2.2,"w":76,"h":76},{"id":"wo_375","type":"pine_tree","x":-3460,"y":-1180,"angle":0.8,"w":84,"h":84},{"id":"wo_376","type":"pine_tree","x":-3780,"y":-1320,"angle":1.9,"w":78,"h":78},{"id":"wo_377","type":"pine_tree","x":-4480,"y":-1560,"angle":0.3,"w":80,"h":80},{"id":"wo_378","type":"pine_tree","x":-4540,"y":-2060,"angle":1.4,"w":82,"h":82},{"id":"wo_379","type":"pine_tree","x":-1320,"y":1580,"angle":2,"w":84,"h":84},{"id":"wo_380","type":"pine_tree","x":-720,"y":1520,"angle":0.6,"w":80,"h":80},{"id":"wo_381","type":"pine_tree","x":-560,"y":-960,"angle":1.1,"w":78,"h":78},{"id":"wo_382","type":"pine_tree","x":120,"y":-1080,"angle":2.4,"w":82,"h":82},{"id":"wo_383","type":"pine_tree","x":880,"y":-1120,"angle":0.2,"w":84,"h":84},{"id":"wo_384","type":"pine_tree","x":1860,"y":-1080,"angle":1.5,"w":80,"h":80},{"id":"wo_385","type":"pad_asphalt","x":-1766,"y":98,"angle":20,"w":175,"h":155},{"id":"wo_386","type":"sign","x":-1212,"y":-401,"angle":0,"w":36,"h":36,"variant":"steep_uphill"},{"id":"wo_387","type":"sign","x":-1402,"y":-184,"angle":0,"w":36,"h":36,"variant":"steep_downhill"},{"id":"wo_388","type":"sign","x":-1415,"y":-764,"angle":0,"w":36,"h":36,"variant":"steep_downhill"},{"id":"wo_389","type":"sign","x":-1387,"y":-1015,"angle":0,"w":36,"h":36,"variant":"steep_uphill"},{"id":"wo_390","type":"sign","x":-1334,"y":-1501,"angle":0,"w":36,"h":36,"variant":"steep_uphill"},{"id":"wo_391","type":"sign","x":-1635,"y":-1393,"angle":0,"w":36,"h":36,"variant":"steep_downhill"},{"id":"wo_392","type":"sign","x":-3649,"y":-1948,"angle":0,"w":36,"h":36,"variant":"steep_uphill"},{"id":"wo_393","type":"sign","x":-3811,"y":-2105,"angle":0,"w":36,"h":36,"variant":"steep_downhill"},{"id":"wo_394","type":"sign","x":-2249,"y":-2280,"angle":0,"w":36,"h":36,"variant":"steep_downhill"},{"id":"wo_395","type":"sign","x":-2002,"y":-2878,"angle":0,"w":36,"h":36,"variant":"steep_uphill"},{"id":"wo_396","type":"sign","x":-2375,"y":-2747,"angle":0,"w":36,"h":36,"variant":"steep_downhill"},{"id":"wo_397","type":"sign","x":-3513,"y":-835,"angle":0,"w":36,"h":36,"variant":"steep_downhill"},{"id":"wo_398","type":"sign","x":-4077,"y":-1498,"angle":0,"w":36,"h":36,"variant":"steep_uphill"},{"id":"wo_399","type":"sign","x":-4377,"y":-2168,"angle":0,"w":36,"h":36,"variant":"steep_downhill"},{"id":"wo_400","type":"sign","x":953,"y":-1149,"angle":0,"w":36,"h":36,"variant":"steep_uphill"},{"id":"wo_401","type":"sign","x":979,"y":-1405,"angle":0,"w":36,"h":36,"variant":"steep_downhill"},{"id":"wo_402","type":"sign","x":5267,"y":-1385,"angle":0,"w":36,"h":36,"variant":"steep_downhill"},{"id":"wo_403","type":"sign","x":5488,"y":-1517,"angle":0,"w":36,"h":36,"variant":"steep_uphill"},{"id":"wo_404","type":"pad_asphalt","x":3446,"y":-2019,"angle":0.081,"w":340,"h":170},{"id":"wo_405","type":"parking_pad","x":3446,"y":-2019,"angle":0.081,"w":280,"h":74,"variant":"asphalt"},{"id":"wo_406","type":"lamp","x":3302,"y":-2105,"angle":0,"w":14,"h":14},{"id":"wo_407","type":"lamp","x":3601,"y":-2081,"angle":0,"w":14,"h":14},{"id":"wo_408","type":"pad_asphalt","x":-2099,"y":4821,"angle":1.422,"w":340,"h":170},{"id":"wo_409","type":"parking_pad","x":-2099,"y":4821,"angle":1.422,"w":280,"h":74,"variant":"asphalt"},{"id":"wo_410","type":"lamp","x":-2194,"y":4684,"angle":0,"w":14,"h":14},{"id":"wo_411","type":"lamp","x":-2150,"y":4980,"angle":0,"w":14,"h":14},{"id":"wo_412","type":"rock_outcrop","x":-3850,"y":-3960,"w":155,"h":110,"angle":0.3},{"id":"wo_413","type":"rock_outcrop","x":-2920,"y":-4080,"w":170,"h":120,"angle":-0.4},{"id":"wo_414","type":"rock_outcrop","x":-2120,"y":-3780,"w":145,"h":105,"angle":0.6},{"id":"wo_415","type":"pine_tree","x":-4250,"y":-4120,"w":66,"h":66,"angle":0},{"id":"wo_416","type":"pine_tree","x":-3320,"y":-4260,"w":72,"h":72,"angle":0},{"id":"wo_417","type":"pine_tree","x":-2450,"y":-4180,"w":68,"h":68,"angle":0},{"id":"wo_418","type":"pine_tree","x":-1620,"y":-3420,"w":70,"h":70,"angle":0},{"id":"wo_419","type":"rock_outcrop","x":-4920,"y":-3080,"w":165,"h":115,"angle":0.8},{"id":"wo_420","type":"rock_outcrop","x":-4860,"y":-2150,"w":155,"h":110,"angle":-0.5},{"id":"wo_421","type":"pine_tree","x":-5080,"y":-2650,"w":70,"h":70,"angle":0},{"id":"wo_422","type":"pine_tree","x":-4820,"y":-1580,"w":68,"h":68,"angle":0},{"id":"wo_423","type":"pine_tree","x":-4420,"y":-980,"w":66,"h":66,"angle":0},{"id":"wo_424","type":"rock_outcrop","x":1180,"y":-2220,"w":150,"h":105,"angle":0.25},{"id":"wo_425","type":"rock_outcrop","x":2680,"y":-2460,"w":160,"h":110,"angle":-0.35},{"id":"wo_426","type":"rock_outcrop","x":4680,"y":-2180,"w":145,"h":100,"angle":0.45},{"id":"wo_427","type":"pine_tree","x":780,"y":-1780,"w":68,"h":68,"angle":0},{"id":"wo_428","type":"pine_tree","x":1760,"y":-1240,"w":66,"h":66,"angle":0},{"id":"wo_429","type":"pine_tree","x":2150,"y":-2320,"w":70,"h":70,"angle":0},{"id":"wo_430","type":"pine_tree","x":3120,"y":-1360,"w":68,"h":68,"angle":0},{"id":"wo_431","type":"pine_tree","x":4220,"y":-2160,"w":72,"h":72,"angle":0},{"id":"wo_432","type":"pine_tree","x":5450,"y":-1950,"w":66,"h":66,"angle":0},{"id":"wo_433","type":"pine_tree","x":5620,"y":-920,"w":68,"h":68,"angle":0},{"id":"wo_434","type":"pine_tree","x":6780,"y":-1360,"w":64,"h":64,"angle":0},{"id":"wo_435","type":"rock_outcrop","x":-2460,"y":2680,"w":150,"h":105,"angle":0.5},{"id":"wo_436","type":"rock_outcrop","x":-2520,"y":4120,"w":155,"h":110,"angle":-0.6},{"id":"wo_437","type":"rock_outcrop","x":-2120,"y":5820,"w":140,"h":100,"angle":0.35},{"id":"wo_438","type":"pine_tree","x":-2340,"y":1850,"w":70,"h":70,"angle":0},{"id":"wo_439","type":"pine_tree","x":-1240,"y":3420,"w":68,"h":68,"angle":0},{"id":"wo_440","type":"pine_tree","x":-2480,"y":3450,"w":72,"h":72,"angle":0},{"id":"wo_441","type":"pine_tree","x":-1380,"y":4720,"w":66,"h":66,"angle":0},{"id":"wo_442","type":"pine_tree","x":-2380,"y":5250,"w":68,"h":68,"angle":0},{"id":"wo_443","type":"pine_tree","x":-1020,"y":6040,"w":64,"h":64,"angle":0},{"id":"wo_444","type":"pine_tree","x":-1480,"y":6820,"w":66,"h":66,"angle":0},{"id":"wo_445","type":"hub_sign","x":1020,"y":1200,"angle":0,"w":68,"h":68,"params":{"hubId":"harbor","name":"Porto Comercial","badge":"PORT","color":"#06b6d4","regionRadius":2400}},{"id":"wo_446","type":"hub_sign","x":11200,"y":1200,"angle":0,"w":68,"h":68,"params":{"hubId":"shipyard","name":"Estaleiro Logístico","badge":"SHIP","color":"#f97316","regionRadius":2400}},{"id":"wo_447","type":"hub_sign","x":11470,"y":8310,"angle":0,"w":68,"h":68,"params":{"hubId":"industrial","name":"Zona Industrial Sul","badge":"IND","color":"#eab308","regionRadius":2600}},{"id":"wo_448","type":"hub_sign","x":1510,"y":8770,"angle":0,"w":68,"h":68,"params":{"hubId":"historic","name":"Centro Histórico","badge":"HIST","color":"#ec4899","regionRadius":2600}},{"id":"wo_449","type":"hub_sign","x":-2320,"y":-600,"angle":0,"w":68,"h":68,"params":{"hubId":"serra","name":"Serra dos Ventos","badge":"SERRA","color":"#10b981","regionRadius":3400}},{"id":"wo_527","type":"price_sign","x":-1320,"y":-138,"angle":20,"w":52,"h":112},{"id":"wo_528","type":"air_water","x":-1655,"y":156,"angle":20,"w":76,"h":38},{"id":"wo_501","type":"pad_asphalt","x":2480,"y":2480,"angle":0,"w":630,"h":860},{"id":"wo_52","type":"gas_canopy","x":3082,"y":2350,"angle":0,"w":640,"h":880,"params":{"stationStyle":"highway","accessSide":"right"}},{"id":"wo_53","type":"gas_pump","x":2960,"y":2350,"angle":0,"w":48,"h":116},{"id":"wo_54","type":"gas_pump","x":3140,"y":2350,"angle":0,"w":48,"h":116},{"id":"wo_55","type":"price_sign","x":3330,"y":1840,"angle":0,"w":56,"h":120},{"id":"wo_502","type":"building","x":2615,"y":2245,"angle":-90,"w":210,"h":124,"variant":"convenience_store"},{"id":"wo_503","type":"building","x":2610,"y":2500,"angle":-90,"w":250,"h":144,"variant":"restaurant"},{"id":"wo_504","type":"parking_lot","x":2610,"y":2835,"angle":0,"w":320,"h":136},{"id":"wo_506","type":"parking_pad","x":2260,"y":2445,"angle":0,"w":128,"h":340,"variant":"asphalt"},{"id":"wo_507","type":"parking_pad","x":2410,"y":2445,"angle":0,"w":128,"h":340,"variant":"asphalt"},{"id":"wo_508","type":"air_water","x":2730,"y":2680,"angle":0,"w":84,"h":42},{"id":"wo_509","type":"lamp","x":2705,"y":2195,"angle":90,"w":14,"h":14},{"id":"wo_510","type":"lamp","x":2705,"y":2505,"angle":90,"w":14,"h":14},{"id":"wo_511","type":"lamp","x":2495,"y":2240,"angle":0,"w":14,"h":14},{"id":"wo_512","type":"lamp","x":2495,"y":2650,"angle":0,"w":14,"h":14},{"id":"wo_513","type":"pad_asphalt","x":9160,"y":8170,"angle":0,"w":1420,"h":690},{"id":"wo_56","type":"gas_canopy","x":9040,"y":7542,"angle":0,"w":920,"h":640,"params":{"stationStyle":"highway","accessSide":"top"}},{"id":"wo_57","type":"gas_pump","x":9040,"y":7664,"angle":90,"w":48,"h":116},{"id":"wo_58","type":"gas_pump","x":9040,"y":7484,"angle":90,"w":48,"h":116},{"id":"wo_59","type":"price_sign","x":8470,"y":7310,"angle":0,"w":56,"h":120},{"id":"wo_516","type":"building","x":9020,"y":7965,"angle":180,"w":240,"h":136,"variant":"convenience_store"},{"id":"wo_517","type":"building","x":9315,"y":7970,"angle":180,"w":280,"h":154,"variant":"restaurant"},{"id":"wo_518","type":"parking_lot","x":9655,"y":7965,"angle":0,"w":340,"h":136},{"id":"wo_519","type":"parking_lot","x":8695,"y":7965,"angle":0,"w":280,"h":136},{"id":"wo_520","type":"parking_pad","x":8730,"y":8375,"angle":0,"w":128,"h":260,"variant":"asphalt"},{"id":"wo_521","type":"parking_pad","x":8880,"y":8375,"angle":0,"w":128,"h":260,"variant":"asphalt"},{"id":"wo_530","type":"parking_pad","x":9030,"y":8375,"angle":0,"w":128,"h":260,"variant":"asphalt"},{"id":"wo_531","type":"parking_pad","x":9180,"y":8375,"angle":0,"w":128,"h":260,"variant":"asphalt"},{"id":"wo_532","type":"parking_pad","x":9330,"y":8375,"angle":0,"w":128,"h":260,"variant":"asphalt"},{"id":"wo_533","type":"parking_pad","x":9640,"y":8375,"angle":90,"w":136,"h":320,"variant":"asphalt"},{"id":"wo_522","type":"air_water","x":9565,"y":8135,"angle":0,"w":84,"h":42},{"id":"wo_523","type":"lamp","x":8870,"y":7875,"angle":90,"w":14,"h":14},{"id":"wo_524","type":"lamp","x":9200,"y":7875,"angle":90,"w":14,"h":14},{"id":"wo_525","type":"lamp","x":8520,"y":8165,"angle":0,"w":14,"h":14},{"id":"wo_526","type":"lamp","x":9860,"y":8165,"angle":0,"w":14,"h":14},{"id":"wo_535","type":"pad_asphalt","x":1645,"y":6150,"angle":0,"w":175,"h":165},{"id":"wo_534","type":"gas_canopy","x":1396,"y":6150,"angle":0,"w":380,"h":520,"params":{"stationStyle":"secondary","accessSide":"left"}},{"id":"wo_536","type":"gas_pump","x":1429,"y":6150,"angle":0,"w":48,"h":116},{"id":"wo_537","type":"building","x":1665,"y":6150,"angle":90,"w":128,"h":84,"variant":"fuel_kiosk"},{"id":"wo_538","type":"price_sign","x":1272,"y":6455,"angle":0,"w":52,"h":112},{"id":"wo_539","type":"lamp","x":1588,"y":6035,"angle":180,"w":14,"h":14},{"id":"wo_541","type":"pad_asphalt","x":6780,"y":4630,"angle":0,"w":175,"h":155},{"id":"wo_540","type":"gas_canopy","x":6780,"y":4876,"angle":0,"w":520,"h":380,"params":{"stationStyle":"secondary","accessSide":"bottom"}},{"id":"wo_542","type":"gas_pump","x":6780,"y":4843,"angle":90,"w":48,"h":116},{"id":"wo_543","type":"building","x":6780,"y":4612,"angle":0,"w":128,"h":84,"variant":"fuel_kiosk"},{"id":"wo_544","type":"price_sign","x":7085,"y":5000,"angle":0,"w":52,"h":112},{"id":"wo_545","type":"lamp","x":6665,"y":4685,"angle":90,"w":14,"h":14},{"id":"wo_546","type":"building","variant":"hospital","x":1560,"y":6779,"w":360,"h":278,"angle":0,"params":{"exteriorParking":true}},{"id":"wo_547","type":"building","variant":"fire_station","x":2040,"y":6912,"w":330,"h":180,"angle":0},{"id":"wo_548","type":"building","variant":"police_station","x":2430,"y":6909,"w":270,"h":190,"angle":0},{"id":"wo_549","type":"building","variant":"town_hall","x":2860,"y":6965,"w":250,"h":210,"angle":0},{"id":"wo_550","type":"building","variant":"villa_classic","x":3165,"y":6975,"w":210,"h":145,"angle":0},{"id":"wo_551","type":"building","variant":"apartment_block","x":1550,"y":7479,"w":340,"h":166,"angle":180,"params":{"garageAccess":true,"exteriorParking":true}},{"id":"wo_552","type":"building","variant":"apartment_modern","x":1970,"y":7428,"w":320,"h":184,"angle":180,"params":{"garageAccess":true}},{"id":"wo_553","type":"building","variant":"supermarket","x":2400,"y":7477,"w":360,"h":170,"angle":180,"params":{"exteriorParking":true}},{"id":"wo_554","type":"building","variant":"school","x":2850,"y":7484,"w":320,"h":185,"angle":180,"params":{"exteriorParking":true}},{"id":"wo_555","type":"building","variant":"apartment_modern","x":1464,"y":7840,"w":320,"h":184,"angle":90,"params":{"exteriorParking":true}},{"id":"wo_556","type":"building","variant":"villa_classic","x":3226,"y":7720,"w":210,"h":145,"angle":-90,"params":{"garageAccess":true}},{"id":"wo_557","type":"building","variant":"villa_modern","x":3217,"y":7960,"w":200,"h":162,"angle":-90,"params":{"garageAccess":true}},{"id":"wo_558","type":"building","variant":"villa_modern","x":3285,"y":8265,"w":200,"h":162,"angle":-90},{"id":"wo_559","type":"building","variant":"house_townhouse","x":3236,"y":8530,"w":240,"h":124,"angle":-90,"params":{"garageAccess":true}},{"id":"wo_560","type":"building","variant":"house_traditional","x":3243,"y":8775,"w":150,"h":110,"angle":-90,"params":{"garageAccess":true}},{"id":"wo_561","type":"building","variant":"house_traditional","x":3295,"y":8975,"w":150,"h":110,"angle":-90}],"worldMinX":-6144,"worldMinY":-5120}
+{
+  "version": 7,
+  "name": "RigWorld",
+  "worldW": 13824,
+  "worldH": 10240,
+  "spawn": {
+    "x": 5760,
+    "y": 4700,
+    "angle": 0
+  },
+  "roads": [
+    {
+      "id": "rd_1",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 1152,
+          "y": 620,
+          "w": 128
+        },
+        {
+          "x": 1152,
+          "y": 9620,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_2",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 3456,
+          "y": 620,
+          "w": 128
+        },
+        {
+          "x": 3456,
+          "y": 9620,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_3",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 5760,
+          "y": 620,
+          "w": 128
+        },
+        {
+          "x": 5760,
+          "y": 9620,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_4",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 8061,
+          "y": 88,
+          "w": 128
+        },
+        {
+          "x": 8061,
+          "y": 9088,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_5",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 10368,
+          "y": 620,
+          "w": 128
+        },
+        {
+          "x": 10368,
+          "y": 9620,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_6",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 12672,
+          "y": 620,
+          "w": 128
+        },
+        {
+          "x": 12672,
+          "y": 9620,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_7",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 1370,
+          "y": 1028,
+          "w": 128
+        },
+        {
+          "x": 1472,
+          "y": 1027,
+          "w": 128
+        },
+        {
+          "x": 1685,
+          "y": 1027,
+          "w": 128
+        },
+        {
+          "x": 13204,
+          "y": 1024,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_8",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 520,
+          "y": 3072,
+          "w": 128
+        },
+        {
+          "x": 13104,
+          "y": 3072,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_9",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 620,
+          "y": 5120,
+          "w": 128
+        },
+        {
+          "x": 13204,
+          "y": 5120,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_10",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 620,
+          "y": 7168,
+          "w": 128
+        },
+        {
+          "x": 13204,
+          "y": 7168,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_11",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 620,
+          "y": 9216,
+          "w": 128
+        },
+        {
+          "x": 13204,
+          "y": 9216,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_12",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 3584,
+          "y": 4096,
+          "w": 128
+        },
+        {
+          "x": 4100,
+          "y": 4210,
+          "w": 128
+        },
+        {
+          "x": 4620,
+          "y": 4020,
+          "w": 128
+        },
+        {
+          "x": 5120,
+          "y": 4200,
+          "w": 128
+        },
+        {
+          "x": 5632,
+          "y": 4096,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_13",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 4608,
+          "y": 3200,
+          "w": 128
+        },
+        {
+          "x": 4712,
+          "y": 3660,
+          "w": 128
+        },
+        {
+          "x": 4510,
+          "y": 4120,
+          "w": 128
+        },
+        {
+          "x": 4608,
+          "y": 4640,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_15",
+      "surface": "dirt",
+      "closed": false,
+      "points": [
+        {
+          "x": 4940,
+          "y": 7600,
+          "w": 92
+        },
+        {
+          "x": 5420,
+          "y": 8120,
+          "w": 84
+        },
+        {
+          "x": 5820,
+          "y": 8520,
+          "w": 72
+        },
+        {
+          "x": 6330,
+          "y": 8680,
+          "w": 64
+        },
+        {
+          "x": 6840,
+          "y": 9010,
+          "w": 56
+        }
+      ]
+    },
+    {
+      "id": "rd_16",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 10900,
+          "y": 9216,
+          "w": 140
+        },
+        {
+          "x": 10900,
+          "y": 9600,
+          "w": 140
+        }
+      ]
+    },
+    {
+      "id": "rd_17",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 12300,
+          "y": 9216,
+          "w": 140
+        },
+        {
+          "x": 12300,
+          "y": 9600,
+          "w": 140
+        }
+      ]
+    },
+    {
+      "id": "rd_18",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 10900,
+          "y": 9600,
+          "w": 140
+        },
+        {
+          "x": 12300,
+          "y": 9600,
+          "w": 140
+        }
+      ]
+    },
+    {
+      "id": "rd_19",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 10900,
+          "y": 9600,
+          "w": 120
+        },
+        {
+          "x": 10520,
+          "y": 9600,
+          "w": 120
+        }
+      ]
+    },
+    {
+      "id": "rd_20",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 6998,
+          "y": 3129,
+          "w": 193
+        },
+        {
+          "x": 6998,
+          "y": 3185,
+          "w": 128
+        },
+        {
+          "x": 6995,
+          "y": 3348,
+          "w": 128
+        },
+        {
+          "x": 6997,
+          "y": 3456,
+          "w": 261
+        }
+      ]
+    },
+    {
+      "id": "rd_22",
+      "surface": "asphalt",
+      "closed": false,
+      "layer": 1,
+      "points": [
+        {
+          "x": 7661,
+          "y": 1952,
+          "w": 192
+        },
+        {
+          "x": 8574,
+          "y": 1961,
+          "w": 192
+        },
+        {
+          "x": 8754,
+          "y": 1993,
+          "w": 192
+        },
+        {
+          "x": 8902,
+          "y": 2073,
+          "w": 192
+        },
+        {
+          "x": 8991,
+          "y": 2201,
+          "w": 192
+        }
+      ]
+    },
+    {
+      "id": "rd_24",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 8991,
+          "y": 2200,
+          "w": 189,
+          "twist": -5.6
+        },
+        {
+          "x": 9126,
+          "y": 2441,
+          "w": 189
+        },
+        {
+          "x": 9140,
+          "y": 2649,
+          "w": 189
+        },
+        {
+          "x": 9143,
+          "y": 2786,
+          "w": 189
+        }
+      ]
+    },
+    {
+      "id": "rd_25",
+      "surface": "asphalt",
+      "closed": false,
+      "layer": 1,
+      "points": [
+        {
+          "x": 9146,
+          "y": 3296,
+          "w": 192
+        },
+        {
+          "x": 9142,
+          "y": 2786,
+          "w": 192
+        }
+      ]
+    },
+    {
+      "id": "rd_26",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 9147,
+          "y": 3284,
+          "w": 192
+        },
+        {
+          "x": 9142,
+          "y": 3713,
+          "w": 192
+        },
+        {
+          "x": 8940,
+          "y": 3882,
+          "w": 192
+        },
+        {
+          "x": 8529,
+          "y": 3874,
+          "w": 192
+        },
+        {
+          "x": 8120,
+          "y": 3874,
+          "w": 192
+        }
+      ]
+    },
+    {
+      "id": "rd_27",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 7661,
+          "y": 1952,
+          "w": 192
+        },
+        {
+          "x": 7344,
+          "y": 1950,
+          "w": 192
+        },
+        {
+          "x": 7223,
+          "y": 1867,
+          "w": 192
+        },
+        {
+          "x": 7193,
+          "y": 1725,
+          "w": 192
+        },
+        {
+          "x": 7218,
+          "y": 1615,
+          "w": 192
+        },
+        {
+          "x": 7346,
+          "y": 1506,
+          "w": 192
+        },
+        {
+          "x": 7612,
+          "y": 1487,
+          "w": 192
+        },
+        {
+          "x": 8004,
+          "y": 1488,
+          "w": 192
+        }
+      ]
+    },
+    {
+      "id": "rd_28",
+      "surface": "asphalt",
+      "closed": false,
+      "layer": 1,
+      "points": [
+        {
+          "x": 7570,
+          "y": 4739,
+          "w": 128
+        },
+        {
+          "x": 7570,
+          "y": 5482,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_29",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 7756,
+          "y": 6282,
+          "w": 128,
+          "twist": -47.6
+        },
+        {
+          "x": 7528,
+          "y": 6001,
+          "w": 128
+        },
+        {
+          "x": 7570,
+          "y": 5482,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_30",
+      "surface": "asphalt",
+      "closed": false,
+      "layer": 1,
+      "points": [
+        {
+          "x": 8338,
+          "y": 6282,
+          "w": 128
+        },
+        {
+          "x": 7756,
+          "y": 6282,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_31",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 8338,
+          "y": 6282,
+          "w": 128
+        },
+        {
+          "x": 8614,
+          "y": 6275,
+          "w": 128,
+          "twist": 7
+        },
+        {
+          "x": 8893,
+          "y": 6137,
+          "w": 128
+        },
+        {
+          "x": 8950,
+          "y": 5314,
+          "w": 128,
+          "twist": -21.8
+        }
+      ]
+    },
+    {
+      "id": "rd_32",
+      "surface": "asphalt",
+      "closed": false,
+      "layer": 1,
+      "points": [
+        {
+          "x": 8950,
+          "y": 5314,
+          "w": 128
+        },
+        {
+          "x": 8827,
+          "y": 4937,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_33",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 8827,
+          "y": 4937,
+          "w": 128,
+          "twist": -14.5
+        },
+        {
+          "x": 8737,
+          "y": 3972,
+          "w": 128,
+          "twist": 6.2
+        }
+      ]
+    },
+    {
+      "id": "rd_34",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 7570,
+          "y": 4739,
+          "w": 128
+        },
+        {
+          "x": 7560,
+          "y": 4392,
+          "w": 128
+        },
+        {
+          "x": 7828,
+          "y": 4281,
+          "w": 128
+        },
+        {
+          "x": 7863,
+          "y": 3952,
+          "w": 128
+        },
+        {
+          "x": 7997,
+          "y": 3878,
+          "w": 128,
+          "twist": 28
+        }
+      ]
+    },
+    {
+      "id": "rd_37",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 2825,
+          "y": 2063,
+          "w": 128
+        },
+        {
+          "x": 2763,
+          "y": 2063,
+          "w": 128
+        },
+        {
+          "x": 1198,
+          "y": 2063,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_38",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 4508,
+          "y": 5173,
+          "w": 128
+        },
+        {
+          "x": 4508,
+          "y": 5403,
+          "w": 128
+        },
+        {
+          "x": 4508,
+          "y": 6181,
+          "w": 128
+        },
+        {
+          "x": 4508,
+          "y": 6675,
+          "w": 128
+        },
+        {
+          "x": 4475,
+          "y": 6806,
+          "w": 128
+        },
+        {
+          "x": 4323,
+          "y": 6826,
+          "w": 128
+        },
+        {
+          "x": 3799,
+          "y": 6826,
+          "w": 128
+        },
+        {
+          "x": 3508,
+          "y": 6826,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_39",
+      "surface": "asphalt",
+      "closed": false,
+      "layer": 1,
+      "points": [
+        {
+          "x": 1370,
+          "y": 1028,
+          "w": 128
+        },
+        {
+          "x": 933,
+          "y": 1028,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_40",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 368,
+          "y": 1028,
+          "w": 128
+        },
+        {
+          "x": 933,
+          "y": 1028,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_41",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 466,
+          "y": 1088,
+          "w": 128
+        },
+        {
+          "x": 466,
+          "y": 1554,
+          "w": 128
+        },
+        {
+          "x": 526,
+          "y": 1642,
+          "w": 128
+        },
+        {
+          "x": 694,
+          "y": 1660,
+          "w": 128
+        },
+        {
+          "x": 1100,
+          "y": 1660,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_42",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 3456,
+          "y": 620,
+          "w": 128
+        },
+        {
+          "x": 3456,
+          "y": -120,
+          "w": 128
+        },
+        {
+          "x": 3180,
+          "y": -540,
+          "w": 128
+        },
+        {
+          "x": 2450,
+          "y": -740,
+          "w": 128
+        },
+        {
+          "x": 1420,
+          "y": -820,
+          "w": 128
+        },
+        {
+          "x": 380,
+          "y": -760,
+          "w": 128
+        },
+        {
+          "x": -340,
+          "y": -620,
+          "w": 128
+        },
+        {
+          "x": -900,
+          "y": -400,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_43",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 520,
+          "y": 3072,
+          "w": 128
+        },
+        {
+          "x": -240,
+          "y": 3072,
+          "w": 128
+        },
+        {
+          "x": -760,
+          "y": 2740,
+          "w": 128
+        },
+        {
+          "x": -980,
+          "y": 2050,
+          "w": 128
+        },
+        {
+          "x": -1040,
+          "y": 1120,
+          "w": 128
+        },
+        {
+          "x": -1020,
+          "y": 220,
+          "w": 128
+        },
+        {
+          "x": -900,
+          "y": -400,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_44",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": -900,
+          "y": -400,
+          "w": 126
+        },
+        {
+          "x": -1380,
+          "y": -280,
+          "w": 126
+        },
+        {
+          "x": -1820,
+          "y": -440,
+          "w": 126
+        },
+        {
+          "x": -2220,
+          "y": -480,
+          "w": 126
+        },
+        {
+          "x": -2680,
+          "y": -480,
+          "w": 126
+        },
+        {
+          "x": -2980,
+          "y": -520,
+          "w": 126
+        }
+      ]
+    },
+    {
+      "id": "rd_45",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": -2220,
+          "y": -480,
+          "w": 124
+        },
+        {
+          "x": -1620,
+          "y": -760,
+          "w": 124
+        },
+        {
+          "x": -1240,
+          "y": -1040,
+          "w": 124
+        },
+        {
+          "x": -1260,
+          "y": -1340,
+          "w": 124
+        },
+        {
+          "x": -1780,
+          "y": -1520,
+          "w": 124
+        },
+        {
+          "x": -2520,
+          "y": -1620,
+          "w": 124
+        },
+        {
+          "x": -3320,
+          "y": -1700,
+          "w": 124
+        },
+        {
+          "x": -3720,
+          "y": -1880,
+          "w": 124
+        },
+        {
+          "x": -3660,
+          "y": -2140,
+          "w": 124
+        },
+        {
+          "x": -3040,
+          "y": -2260,
+          "w": 124
+        },
+        {
+          "x": -2320,
+          "y": -2360,
+          "w": 124
+        },
+        {
+          "x": -1940,
+          "y": -2560,
+          "w": 124
+        },
+        {
+          "x": -2060,
+          "y": -2800,
+          "w": 124
+        },
+        {
+          "x": -2580,
+          "y": -2840,
+          "w": 124
+        },
+        {
+          "x": -3160,
+          "y": -2840,
+          "w": 124
+        },
+        {
+          "x": -3660,
+          "y": -2840,
+          "w": 124
+        },
+        {
+          "x": -4060,
+          "y": -2840,
+          "w": 124
+        }
+      ]
+    },
+    {
+      "id": "rd_46",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": -2580,
+          "y": -2840,
+          "w": 112
+        },
+        {
+          "x": -2640,
+          "y": -3240,
+          "w": 112
+        },
+        {
+          "x": -3120,
+          "y": -3360,
+          "w": 112
+        },
+        {
+          "x": -3660,
+          "y": -3360,
+          "w": 112
+        },
+        {
+          "x": -4080,
+          "y": -3220,
+          "w": 112
+        },
+        {
+          "x": -4060,
+          "y": -2840,
+          "w": 112
+        }
+      ]
+    },
+    {
+      "id": "rd_47",
+      "surface": "dirt",
+      "closed": false,
+      "points": [
+        {
+          "x": -2980,
+          "y": -520,
+          "w": 98
+        },
+        {
+          "x": -3520,
+          "y": -740,
+          "w": 98
+        },
+        {
+          "x": -3980,
+          "y": -1160,
+          "w": 98
+        },
+        {
+          "x": -4240,
+          "y": -1720,
+          "w": 98
+        },
+        {
+          "x": -4280,
+          "y": -2320,
+          "w": 98
+        },
+        {
+          "x": -4060,
+          "y": -2840,
+          "w": 98
+        }
+      ]
+    },
+    {
+      "id": "rd_48",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": 380,
+          "y": -760,
+          "w": 122
+        },
+        {
+          "x": 1120,
+          "y": -1380,
+          "w": 122
+        },
+        {
+          "x": 2240,
+          "y": -1820,
+          "w": 122
+        },
+        {
+          "x": 3560,
+          "y": -1840,
+          "w": 122
+        },
+        {
+          "x": 4920,
+          "y": -1580,
+          "w": 122
+        },
+        {
+          "x": 6220,
+          "y": -1160,
+          "w": 122
+        },
+        {
+          "x": 7420,
+          "y": -620,
+          "w": 122
+        },
+        {
+          "x": 8061,
+          "y": -220,
+          "w": 126
+        },
+        {
+          "x": 8061,
+          "y": 88,
+          "w": 128
+        }
+      ]
+    },
+    {
+      "id": "rd_49",
+      "surface": "asphalt",
+      "closed": false,
+      "points": [
+        {
+          "x": -980,
+          "y": 2050,
+          "w": 120
+        },
+        {
+          "x": -1640,
+          "y": 2780,
+          "w": 120
+        },
+        {
+          "x": -1960,
+          "y": 3880,
+          "w": 120
+        },
+        {
+          "x": -1880,
+          "y": 5080,
+          "w": 120
+        },
+        {
+          "x": -1460,
+          "y": 6160,
+          "w": 120
+        },
+        {
+          "x": -640,
+          "y": 6940,
+          "w": 124
+        },
+        {
+          "x": 140,
+          "y": 7168,
+          "w": 126
+        },
+        {
+          "x": 620,
+          "y": 7168,
+          "w": 128
+        }
+      ]
+    }
+  ],
+  "objects": [
+    {
+      "id": "wo_1",
+      "type": "dock",
+      "x": 509,
+      "y": 795,
+      "angle": 0,
+      "w": 112,
+      "h": 300,
+      "variant": "port"
+    },
+    {
+      "id": "wo_2",
+      "type": "dock",
+      "x": 632,
+      "y": 797,
+      "angle": 0,
+      "w": 102,
+      "h": 303,
+      "variant": "port"
+    },
+    {
+      "id": "wo_3",
+      "type": "dock",
+      "x": 765,
+      "y": 798,
+      "angle": 0,
+      "w": 112,
+      "h": 306,
+      "variant": "port"
+    },
+    {
+      "id": "wo_4",
+      "type": "dock",
+      "x": 897,
+      "y": 800,
+      "angle": 0,
+      "w": 119,
+      "h": 309,
+      "variant": "port"
+    },
+    {
+      "id": "wo_5",
+      "type": "dock",
+      "x": 1022,
+      "y": 799,
+      "angle": 0,
+      "w": 113,
+      "h": 308,
+      "variant": "port"
+    },
+    {
+      "id": "wo_6",
+      "type": "dock",
+      "x": 1152,
+      "y": 704,
+      "angle": 0,
+      "w": 118,
+      "h": 118,
+      "variant": "port"
+    },
+    {
+      "id": "wo_7",
+      "type": "crane",
+      "x": 448,
+      "y": 230,
+      "angle": 0,
+      "w": 110,
+      "h": 280
+    },
+    {
+      "id": "wo_8",
+      "type": "crane",
+      "x": 896,
+      "y": 230,
+      "angle": 0,
+      "w": 110,
+      "h": 280
+    },
+    {
+      "id": "wo_9",
+      "type": "crane",
+      "x": 1344,
+      "y": 230,
+      "angle": 0,
+      "w": 110,
+      "h": 280
+    },
+    {
+      "id": "wo_10",
+      "type": "container_stack",
+      "x": 450,
+      "y": 560,
+      "angle": 0,
+      "w": 110,
+      "h": 64,
+      "variant": "blue"
+    },
+    {
+      "id": "wo_11",
+      "type": "container_stack",
+      "x": 585,
+      "y": 560,
+      "angle": 0,
+      "w": 110,
+      "h": 64,
+      "variant": "blue"
+    },
+    {
+      "id": "wo_12",
+      "type": "container_stack",
+      "x": 900,
+      "y": 560,
+      "angle": 0,
+      "w": 110,
+      "h": 64,
+      "variant": "red"
+    },
+    {
+      "id": "wo_13",
+      "type": "container_stack",
+      "x": 1035,
+      "y": 560,
+      "angle": 0,
+      "w": 110,
+      "h": 64,
+      "variant": "red"
+    },
+    {
+      "id": "wo_14",
+      "type": "building",
+      "x": 1555,
+      "y": 820,
+      "angle": 0,
+      "w": 300,
+      "h": 190,
+      "variant": "warehouse"
+    },
+    {
+      "id": "wo_15",
+      "type": "container_stack",
+      "x": 11064,
+      "y": 340,
+      "angle": 0,
+      "w": 200,
+      "h": 150,
+      "variant": "blue"
+    },
+    {
+      "id": "wo_16",
+      "type": "container_stack",
+      "x": 11330,
+      "y": 340,
+      "angle": 0,
+      "w": 200,
+      "h": 150,
+      "variant": "rust"
+    },
+    {
+      "id": "wo_17",
+      "type": "dock",
+      "x": 10752,
+      "y": 620,
+      "angle": 0,
+      "w": 118,
+      "h": 118,
+      "variant": "port"
+    },
+    {
+      "id": "wo_18",
+      "type": "dock",
+      "x": 10880,
+      "y": 620,
+      "angle": 0,
+      "w": 118,
+      "h": 118,
+      "variant": "port"
+    },
+    {
+      "id": "wo_19",
+      "type": "dock",
+      "x": 11008,
+      "y": 620,
+      "angle": 0,
+      "w": 118,
+      "h": 118,
+      "variant": "port"
+    },
+    {
+      "id": "wo_20",
+      "type": "building",
+      "x": 11400,
+      "y": 850,
+      "angle": 0,
+      "w": 320,
+      "h": 200,
+      "variant": "garage"
+    },
+    {
+      "id": "wo_21",
+      "type": "pad_dirt",
+      "x": 10900,
+      "y": 1250,
+      "angle": 0,
+      "w": 420,
+      "h": 300
+    },
+    {
+      "id": "wo_22",
+      "type": "silo",
+      "x": 11840,
+      "y": 8512,
+      "angle": 0,
+      "w": 128,
+      "h": 128
+    },
+    {
+      "id": "wo_23",
+      "type": "silo",
+      "x": 11840,
+      "y": 8896,
+      "angle": 0,
+      "w": 128,
+      "h": 128
+    },
+    {
+      "id": "wo_24",
+      "type": "dock",
+      "x": 12160,
+      "y": 8560,
+      "angle": 0,
+      "w": 118,
+      "h": 118,
+      "variant": "factory"
+    },
+    {
+      "id": "wo_25",
+      "type": "dock",
+      "x": 12288,
+      "y": 8560,
+      "angle": 0,
+      "w": 118,
+      "h": 118,
+      "variant": "factory"
+    },
+    {
+      "id": "wo_26",
+      "type": "dock",
+      "x": 12416,
+      "y": 8560,
+      "angle": 0,
+      "w": 118,
+      "h": 118,
+      "variant": "factory"
+    },
+    {
+      "id": "wo_27",
+      "type": "building",
+      "x": 10900,
+      "y": 8000,
+      "angle": 0,
+      "w": 420,
+      "h": 180,
+      "variant": "warehouse"
+    },
+    {
+      "id": "wo_28",
+      "type": "building",
+      "x": 11380,
+      "y": 8000,
+      "angle": 0,
+      "w": 300,
+      "h": 180,
+      "variant": "warehouse"
+    },
+    {
+      "id": "wo_29",
+      "type": "building",
+      "x": 512,
+      "y": 9100,
+      "angle": 0,
+      "w": 220,
+      "h": 170,
+      "variant": "church"
+    },
+    {
+      "id": "wo_30",
+      "type": "building",
+      "x": 900,
+      "y": 9250,
+      "angle": 0,
+      "w": 260,
+      "h": 160,
+      "variant": "archway"
+    },
+    {
+      "id": "wo_31",
+      "type": "dock",
+      "x": 576,
+      "y": 9450,
+      "angle": 0,
+      "w": 118,
+      "h": 118,
+      "variant": "port"
+    },
+    {
+      "id": "wo_32",
+      "type": "dock",
+      "x": 704,
+      "y": 9450,
+      "angle": 0,
+      "w": 118,
+      "h": 118,
+      "variant": "port"
+    },
+    {
+      "id": "wo_33",
+      "type": "dock",
+      "x": 832,
+      "y": 9450,
+      "angle": 0,
+      "w": 118,
+      "h": 118,
+      "variant": "port"
+    },
+    {
+      "id": "wo_38",
+      "type": "parking_pad",
+      "x": 11260,
+      "y": 1650,
+      "angle": 180,
+      "w": 170,
+      "h": 700,
+      "variant": "concrete"
+    },
+    {
+      "id": "wo_39",
+      "type": "parking_pad",
+      "x": 11450,
+      "y": 1650,
+      "angle": 180,
+      "w": 170,
+      "h": 700,
+      "variant": "clean"
+    },
+    {
+      "id": "wo_40",
+      "type": "parking_pad",
+      "x": 12050,
+      "y": 7680,
+      "angle": 180,
+      "w": 140,
+      "h": 420,
+      "variant": "concrete"
+    },
+    {
+      "id": "wo_41",
+      "type": "parking_pad",
+      "x": 12210,
+      "y": 7680,
+      "angle": 180,
+      "w": 140,
+      "h": 420,
+      "variant": "hazard"
+    },
+    {
+      "id": "wo_42",
+      "type": "parking_pad",
+      "x": 12370,
+      "y": 7680,
+      "angle": 180,
+      "w": 140,
+      "h": 420,
+      "variant": "hazard"
+    },
+    {
+      "id": "wo_43",
+      "type": "parking_pad",
+      "x": 1500,
+      "y": 8300,
+      "angle": 180,
+      "w": 140,
+      "h": 300,
+      "variant": "clean"
+    },
+    {
+      "id": "wo_44",
+      "type": "parking_pad",
+      "x": 1650,
+      "y": 8300,
+      "angle": 180,
+      "w": 140,
+      "h": 300,
+      "variant": "hazard"
+    },
+    {
+      "id": "wo_47",
+      "type": "jersey_barrier",
+      "x": 1488,
+      "y": 948,
+      "angle": 0,
+      "w": 507,
+      "h": 20
+    },
+    {
+      "id": "wo_48",
+      "type": "jersey_barrier",
+      "x": 1750,
+      "y": 489,
+      "angle": 90,
+      "w": 932,
+      "h": 20
+    },
+    {
+      "id": "wo_60",
+      "type": "roundabout",
+      "x": 10900,
+      "y": 9600,
+      "angle": 0,
+      "w": 420,
+      "h": 420
+    },
+    {
+      "id": "wo_61",
+      "type": "building",
+      "x": 11650,
+      "y": 9950,
+      "angle": 0,
+      "w": 900,
+      "h": 420,
+      "variant": "warehouse_big"
+    },
+    {
+      "id": "wo_62",
+      "type": "building",
+      "x": 12360,
+      "y": 9950,
+      "angle": 0,
+      "w": 400,
+      "h": 360,
+      "variant": "shed"
+    },
+    {
+      "id": "wo_63",
+      "type": "parking_lot",
+      "x": 11370,
+      "y": 9400,
+      "angle": 0,
+      "w": 460,
+      "h": 240
+    },
+    {
+      "id": "wo_64",
+      "type": "parking_lot",
+      "x": 12060,
+      "y": 9400,
+      "angle": 0,
+      "w": 300,
+      "h": 240
+    },
+    {
+      "id": "wo_65",
+      "type": "parking_lot",
+      "x": 10600,
+      "y": 9960,
+      "angle": 0,
+      "w": 300,
+      "h": 240
+    },
+    {
+      "id": "wo_66",
+      "type": "crosswalk",
+      "x": 10900,
+      "y": 9280,
+      "angle": 0,
+      "w": 36,
+      "h": 170
+    },
+    {
+      "id": "wo_67",
+      "type": "crosswalk",
+      "x": 12300,
+      "y": 9280,
+      "angle": 0,
+      "w": 36,
+      "h": 170
+    },
+    {
+      "id": "wo_68",
+      "type": "pad_asphalt",
+      "x": 10840,
+      "y": 10050,
+      "angle": 0,
+      "w": 460,
+      "h": 360
+    },
+    {
+      "id": "wo_69",
+      "type": "dock_wall",
+      "x": 10840,
+      "y": 9898,
+      "angle": 0,
+      "w": 420,
+      "h": 56,
+      "params": {
+        "docks": 3
+      }
+    },
+    {
+      "id": "wo_70",
+      "type": "parking_pad",
+      "x": 10720,
+      "y": 10080,
+      "angle": 0,
+      "w": 110,
+      "h": 300,
+      "variant": "asphalt"
+    },
+    {
+      "id": "wo_71",
+      "type": "parking_pad",
+      "x": 10840,
+      "y": 10080,
+      "angle": 0,
+      "w": 110,
+      "h": 300,
+      "variant": "concrete"
+    },
+    {
+      "id": "wo_72",
+      "type": "parking_pad",
+      "x": 10960,
+      "y": 10080,
+      "angle": 0,
+      "w": 110,
+      "h": 300,
+      "variant": "asphalt"
+    },
+    {
+      "id": "wo_75",
+      "type": "building",
+      "x": 3760,
+      "y": 1408,
+      "angle": -3.7,
+      "w": 304,
+      "h": 291,
+      "variant": "warehouse"
+    },
+    {
+      "id": "wo_76",
+      "type": "building",
+      "x": 9574,
+      "y": 1276,
+      "angle": -4.8,
+      "w": 258,
+      "h": 308,
+      "variant": "warehouse"
+    },
+    {
+      "id": "wo_77",
+      "type": "building",
+      "x": 11831,
+      "y": 1506,
+      "angle": 0.2,
+      "w": 282,
+      "h": 240,
+      "variant": "garage"
+    },
+    {
+      "id": "wo_78",
+      "type": "building",
+      "x": 7080,
+      "y": 2426,
+      "angle": -2.1,
+      "w": 443,
+      "h": 334,
+      "variant": "warehouse"
+    },
+    {
+      "id": "wo_79",
+      "type": "building",
+      "x": 9466,
+      "y": 3875,
+      "angle": -5.3,
+      "w": 300,
+      "h": 293,
+      "variant": "warehouse"
+    },
+    {
+      "id": "wo_80",
+      "type": "building",
+      "x": 10639,
+      "y": 3615,
+      "angle": 0,
+      "w": 400,
+      "h": 243,
+      "variant": "warehouse"
+    },
+    {
+      "id": "wo_81",
+      "type": "building",
+      "x": 11671,
+      "y": 3599,
+      "angle": 0.3,
+      "w": 350,
+      "h": 326,
+      "variant": "garage"
+    },
+    {
+      "id": "wo_82",
+      "type": "building",
+      "x": 2473,
+      "y": 4672,
+      "angle": 4.7,
+      "w": 385,
+      "h": 314,
+      "variant": "garage"
+    },
+    {
+      "id": "wo_84",
+      "type": "building",
+      "x": 9346,
+      "y": 4445,
+      "angle": 4.3,
+      "w": 248,
+      "h": 249,
+      "variant": "warehouse"
+    },
+    {
+      "id": "wo_85",
+      "type": "building",
+      "x": 11774,
+      "y": 4508,
+      "angle": -3.1,
+      "w": 418,
+      "h": 243,
+      "variant": "warehouse"
+    },
+    {
+      "id": "wo_86",
+      "type": "building",
+      "x": 2674,
+      "y": 5655,
+      "angle": 1.4,
+      "w": 385,
+      "h": 248,
+      "variant": "warehouse"
+    },
+    {
+      "id": "wo_89",
+      "type": "building",
+      "x": 9450,
+      "y": 5707,
+      "angle": 5.7,
+      "w": 425,
+      "h": 290,
+      "variant": "garage"
+    },
+    {
+      "id": "wo_90",
+      "type": "building",
+      "x": 11734,
+      "y": 5552,
+      "angle": 4.3,
+      "w": 345,
+      "h": 272,
+      "variant": "warehouse"
+    },
+    {
+      "id": "wo_92",
+      "type": "building",
+      "x": 6129,
+      "y": 6479,
+      "angle": 90,
+      "w": 370,
+      "h": 321,
+      "variant": "garage"
+    },
+    {
+      "id": "wo_93",
+      "type": "building",
+      "x": 7051,
+      "y": 6756,
+      "angle": -1.9,
+      "w": 407,
+      "h": 274,
+      "variant": "warehouse"
+    },
+    {
+      "id": "wo_94",
+      "type": "building",
+      "x": 9463,
+      "y": 6651,
+      "angle": 4,
+      "w": 388,
+      "h": 333,
+      "variant": "garage"
+    },
+    {
+      "id": "wo_95",
+      "type": "building",
+      "x": 3805,
+      "y": 7773,
+      "angle": 2.7,
+      "w": 407,
+      "h": 243,
+      "variant": "warehouse"
+    },
+    {
+      "id": "wo_96",
+      "type": "building",
+      "x": 7086,
+      "y": 7736,
+      "angle": -2.4,
+      "w": 331,
+      "h": 294,
+      "variant": "warehouse"
+    },
+    {
+      "id": "wo_97",
+      "type": "building",
+      "x": 10686,
+      "y": 7655,
+      "angle": 2.4,
+      "w": 289,
+      "h": 212,
+      "variant": "garage"
+    },
+    {
+      "id": "wo_98",
+      "type": "building",
+      "x": 11660,
+      "y": 7640,
+      "angle": -5.5,
+      "w": 404,
+      "h": 280,
+      "variant": "warehouse"
+    },
+    {
+      "id": "wo_99",
+      "type": "building",
+      "x": 2440,
+      "y": 8788,
+      "angle": 1,
+      "w": 344,
+      "h": 322,
+      "variant": "garage"
+    },
+    {
+      "id": "wo_100",
+      "type": "building",
+      "x": 3817,
+      "y": 8739,
+      "angle": 0,
+      "w": 383,
+      "h": 251,
+      "variant": "garage"
+    },
+    {
+      "id": "wo_101",
+      "type": "building",
+      "x": 6013,
+      "y": 8786,
+      "angle": -2.4,
+      "w": 310,
+      "h": 334,
+      "variant": "warehouse"
+    },
+    {
+      "id": "wo_102",
+      "type": "building",
+      "x": 7022,
+      "y": 8728,
+      "angle": -3.6,
+      "w": 343,
+      "h": 290,
+      "variant": "warehouse"
+    },
+    {
+      "id": "wo_103",
+      "type": "building",
+      "x": 8431,
+      "y": 8702,
+      "angle": -4.5,
+      "w": 356,
+      "h": 242,
+      "variant": "garage"
+    },
+    {
+      "id": "wo_104",
+      "type": "lamp",
+      "x": 1054,
+      "y": 1800,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_105",
+      "type": "lamp",
+      "x": 1054,
+      "y": 2700,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_106",
+      "type": "lamp",
+      "x": 1054,
+      "y": 3600,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_107",
+      "type": "lamp",
+      "x": 1054,
+      "y": 4500,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_108",
+      "type": "lamp",
+      "x": 1054,
+      "y": 5400,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_109",
+      "type": "lamp",
+      "x": 1054,
+      "y": 6300,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_110",
+      "type": "lamp",
+      "x": 1054,
+      "y": 8100,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_111",
+      "type": "lamp",
+      "x": 3358,
+      "y": 1650,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_112",
+      "type": "lamp",
+      "x": 3358,
+      "y": 2855,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_113",
+      "type": "lamp",
+      "x": 3358,
+      "y": 3600,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_114",
+      "type": "lamp",
+      "x": 3358,
+      "y": 4500,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_115",
+      "type": "lamp",
+      "x": 3358,
+      "y": 5400,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_116",
+      "type": "lamp",
+      "x": 3358,
+      "y": 6300,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_117",
+      "type": "lamp",
+      "x": 3358,
+      "y": 8100,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_118",
+      "type": "lamp",
+      "x": 5662,
+      "y": 1800,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_119",
+      "type": "lamp",
+      "x": 5662,
+      "y": 2700,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_120",
+      "type": "lamp",
+      "x": 5662,
+      "y": 3600,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_121",
+      "type": "lamp",
+      "x": 5662,
+      "y": 4500,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_122",
+      "type": "lamp",
+      "x": 5662,
+      "y": 5400,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_123",
+      "type": "lamp",
+      "x": 5662,
+      "y": 6300,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_124",
+      "type": "lamp",
+      "x": 5662,
+      "y": 8100,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_125",
+      "type": "lamp",
+      "x": 7966,
+      "y": 1800,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_126",
+      "type": "lamp",
+      "x": 7966,
+      "y": 2700,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_127",
+      "type": "lamp",
+      "x": 7966,
+      "y": 3600,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_128",
+      "type": "lamp",
+      "x": 7966,
+      "y": 4500,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_129",
+      "type": "lamp",
+      "x": 7966,
+      "y": 5400,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_130",
+      "type": "lamp",
+      "x": 7966,
+      "y": 6300,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_131",
+      "type": "lamp",
+      "x": 7966,
+      "y": 8100,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_132",
+      "type": "lamp",
+      "x": 10270,
+      "y": 1800,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_133",
+      "type": "lamp",
+      "x": 10270,
+      "y": 2700,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_134",
+      "type": "lamp",
+      "x": 10270,
+      "y": 3600,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_135",
+      "type": "lamp",
+      "x": 10270,
+      "y": 4500,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_136",
+      "type": "lamp",
+      "x": 10270,
+      "y": 5400,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_137",
+      "type": "lamp",
+      "x": 10270,
+      "y": 6300,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_138",
+      "type": "lamp",
+      "x": 10270,
+      "y": 8100,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_139",
+      "type": "lamp",
+      "x": 12574,
+      "y": 1800,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_140",
+      "type": "lamp",
+      "x": 12574,
+      "y": 2700,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_141",
+      "type": "lamp",
+      "x": 12574,
+      "y": 3600,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_142",
+      "type": "lamp",
+      "x": 12574,
+      "y": 4500,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_143",
+      "type": "lamp",
+      "x": 12574,
+      "y": 5400,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_144",
+      "type": "lamp",
+      "x": 12574,
+      "y": 6300,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_145",
+      "type": "lamp",
+      "x": 12574,
+      "y": 8100,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_146",
+      "type": "lamp",
+      "x": 897,
+      "y": 1108,
+      "angle": -90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_147",
+      "type": "lamp",
+      "x": 1800,
+      "y": 926,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_148",
+      "type": "lamp",
+      "x": 2700,
+      "y": 926,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_149",
+      "type": "lamp",
+      "x": 4500,
+      "y": 926,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_150",
+      "type": "lamp",
+      "x": 5400,
+      "y": 926,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_151",
+      "type": "lamp",
+      "x": 6300,
+      "y": 926,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_152",
+      "type": "lamp",
+      "x": 7200,
+      "y": 926,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_153",
+      "type": "lamp",
+      "x": 9000,
+      "y": 926,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_154",
+      "type": "lamp",
+      "x": 9900,
+      "y": 926,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_155",
+      "type": "lamp",
+      "x": 10800,
+      "y": 926,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_156",
+      "type": "lamp",
+      "x": 11700,
+      "y": 926,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_157",
+      "type": "lamp",
+      "x": 900,
+      "y": 2974,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_158",
+      "type": "lamp",
+      "x": 1800,
+      "y": 2974,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_159",
+      "type": "lamp",
+      "x": 2700,
+      "y": 2974,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_160",
+      "type": "lamp",
+      "x": 4500,
+      "y": 2974,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_161",
+      "type": "lamp",
+      "x": 5400,
+      "y": 2974,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_162",
+      "type": "lamp",
+      "x": 6300,
+      "y": 2974,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_163",
+      "type": "lamp",
+      "x": 7200,
+      "y": 2974,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_164",
+      "type": "lamp",
+      "x": 9000,
+      "y": 2974,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_165",
+      "type": "lamp",
+      "x": 9900,
+      "y": 2974,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_166",
+      "type": "lamp",
+      "x": 10800,
+      "y": 2974,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_167",
+      "type": "lamp",
+      "x": 11700,
+      "y": 2974,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_168",
+      "type": "lamp",
+      "x": 900,
+      "y": 5022,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_169",
+      "type": "lamp",
+      "x": 1800,
+      "y": 5022,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_170",
+      "type": "lamp",
+      "x": 2700,
+      "y": 5022,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_171",
+      "type": "lamp",
+      "x": 4500,
+      "y": 5022,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_172",
+      "type": "lamp",
+      "x": 5400,
+      "y": 5022,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_173",
+      "type": "lamp",
+      "x": 6300,
+      "y": 5022,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_174",
+      "type": "lamp",
+      "x": 7200,
+      "y": 5022,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_175",
+      "type": "lamp",
+      "x": 9000,
+      "y": 5022,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_176",
+      "type": "lamp",
+      "x": 9900,
+      "y": 5022,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_177",
+      "type": "lamp",
+      "x": 10800,
+      "y": 5022,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_178",
+      "type": "lamp",
+      "x": 11700,
+      "y": 5022,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_179",
+      "type": "lamp",
+      "x": 900,
+      "y": 7070,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_180",
+      "type": "lamp",
+      "x": 1800,
+      "y": 7070,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_181",
+      "type": "lamp",
+      "x": 2700,
+      "y": 7070,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_182",
+      "type": "lamp",
+      "x": 4500,
+      "y": 7070,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_183",
+      "type": "lamp",
+      "x": 5400,
+      "y": 7070,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_184",
+      "type": "lamp",
+      "x": 6300,
+      "y": 7070,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_185",
+      "type": "lamp",
+      "x": 7200,
+      "y": 7070,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_186",
+      "type": "lamp",
+      "x": 9000,
+      "y": 7070,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_187",
+      "type": "lamp",
+      "x": 9900,
+      "y": 7070,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_188",
+      "type": "lamp",
+      "x": 10800,
+      "y": 7070,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_189",
+      "type": "lamp",
+      "x": 11700,
+      "y": 7070,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_190",
+      "type": "lamp",
+      "x": 900,
+      "y": 9118,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_191",
+      "type": "lamp",
+      "x": 1800,
+      "y": 9118,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_192",
+      "type": "lamp",
+      "x": 2700,
+      "y": 9118,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_193",
+      "type": "lamp",
+      "x": 4500,
+      "y": 9118,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_194",
+      "type": "lamp",
+      "x": 5400,
+      "y": 9118,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_195",
+      "type": "lamp",
+      "x": 6300,
+      "y": 9118,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_196",
+      "type": "lamp",
+      "x": 7200,
+      "y": 9118,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_197",
+      "type": "lamp",
+      "x": 9000,
+      "y": 9118,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_198",
+      "type": "lamp",
+      "x": 9900,
+      "y": 9118,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_199",
+      "type": "lamp",
+      "x": 10800,
+      "y": 9118,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_200",
+      "type": "lamp",
+      "x": 11700,
+      "y": 9118,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_201",
+      "type": "traffic_light",
+      "x": 3548,
+      "y": 3204,
+      "angle": 0,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "n",
+        "group": 0
+      }
+    },
+    {
+      "id": "wo_202",
+      "type": "traffic_light",
+      "x": 3364,
+      "y": 2940,
+      "angle": 180,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "s",
+        "group": 0
+      }
+    },
+    {
+      "id": "wo_203",
+      "type": "traffic_light",
+      "x": 3324,
+      "y": 3164,
+      "angle": 90,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "e",
+        "group": 1
+      }
+    },
+    {
+      "id": "wo_204",
+      "type": "traffic_light",
+      "x": 3588,
+      "y": 2980,
+      "angle": -90,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "w",
+        "group": 1
+      }
+    },
+    {
+      "id": "wo_205",
+      "type": "traffic_light",
+      "x": 5852,
+      "y": 3204,
+      "angle": 0,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "n",
+        "group": 1
+      }
+    },
+    {
+      "id": "wo_206",
+      "type": "traffic_light",
+      "x": 5668,
+      "y": 2940,
+      "angle": 180,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "s",
+        "group": 1
+      }
+    },
+    {
+      "id": "wo_207",
+      "type": "traffic_light",
+      "x": 5628,
+      "y": 3164,
+      "angle": 90,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "e",
+        "group": 0
+      }
+    },
+    {
+      "id": "wo_208",
+      "type": "traffic_light",
+      "x": 5892,
+      "y": 2980,
+      "angle": -90,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "w",
+        "group": 0
+      }
+    },
+    {
+      "id": "wo_209",
+      "type": "traffic_light",
+      "x": 5852,
+      "y": 5252,
+      "angle": 0,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "n",
+        "group": 0
+      }
+    },
+    {
+      "id": "wo_210",
+      "type": "traffic_light",
+      "x": 5668,
+      "y": 4988,
+      "angle": 180,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "s",
+        "group": 0
+      }
+    },
+    {
+      "id": "wo_211",
+      "type": "traffic_light",
+      "x": 5628,
+      "y": 5212,
+      "angle": 90,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "e",
+        "group": 1
+      }
+    },
+    {
+      "id": "wo_212",
+      "type": "traffic_light",
+      "x": 5892,
+      "y": 5028,
+      "angle": -90,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "w",
+        "group": 1
+      }
+    },
+    {
+      "id": "wo_213",
+      "type": "traffic_light",
+      "x": 8156,
+      "y": 5252,
+      "angle": 0,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "n",
+        "group": 1
+      }
+    },
+    {
+      "id": "wo_214",
+      "type": "traffic_light",
+      "x": 7972,
+      "y": 4988,
+      "angle": 180,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "s",
+        "group": 1
+      }
+    },
+    {
+      "id": "wo_215",
+      "type": "traffic_light",
+      "x": 7932,
+      "y": 5212,
+      "angle": 90,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "e",
+        "group": 0
+      }
+    },
+    {
+      "id": "wo_216",
+      "type": "traffic_light",
+      "x": 8196,
+      "y": 5028,
+      "angle": -90,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "w",
+        "group": 0
+      }
+    },
+    {
+      "id": "wo_217",
+      "type": "traffic_light",
+      "x": 10460,
+      "y": 5252,
+      "angle": 0,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "n",
+        "group": 0
+      }
+    },
+    {
+      "id": "wo_218",
+      "type": "traffic_light",
+      "x": 10276,
+      "y": 4988,
+      "angle": 180,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "s",
+        "group": 0
+      }
+    },
+    {
+      "id": "wo_219",
+      "type": "traffic_light",
+      "x": 10236,
+      "y": 5212,
+      "angle": 90,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "e",
+        "group": 1
+      }
+    },
+    {
+      "id": "wo_220",
+      "type": "traffic_light",
+      "x": 10500,
+      "y": 5028,
+      "angle": -90,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "w",
+        "group": 1
+      }
+    },
+    {
+      "id": "wo_221",
+      "type": "traffic_light",
+      "x": 3548,
+      "y": 7300,
+      "angle": 0,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "n",
+        "group": 0
+      }
+    },
+    {
+      "id": "wo_222",
+      "type": "traffic_light",
+      "x": 3364,
+      "y": 7036,
+      "angle": 180,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "s",
+        "group": 0
+      }
+    },
+    {
+      "id": "wo_223",
+      "type": "traffic_light",
+      "x": 3324,
+      "y": 7260,
+      "angle": 90,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "e",
+        "group": 1
+      }
+    },
+    {
+      "id": "wo_224",
+      "type": "traffic_light",
+      "x": 3588,
+      "y": 7076,
+      "angle": -90,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "w",
+        "group": 1
+      }
+    },
+    {
+      "id": "wo_225",
+      "type": "traffic_light",
+      "x": 8156,
+      "y": 7300,
+      "angle": 0,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "n",
+        "group": 0
+      }
+    },
+    {
+      "id": "wo_226",
+      "type": "traffic_light",
+      "x": 7972,
+      "y": 7036,
+      "angle": 180,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "s",
+        "group": 0
+      }
+    },
+    {
+      "id": "wo_227",
+      "type": "traffic_light",
+      "x": 7932,
+      "y": 7260,
+      "angle": 90,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "e",
+        "group": 1
+      }
+    },
+    {
+      "id": "wo_228",
+      "type": "traffic_light",
+      "x": 8196,
+      "y": 7076,
+      "angle": -90,
+      "w": 22,
+      "h": 22,
+      "params": {
+        "dir": "w",
+        "group": 1
+      }
+    },
+    {
+      "id": "wo_229",
+      "type": "sign",
+      "x": 1042,
+      "y": 3207,
+      "angle": 0,
+      "w": 18,
+      "h": 18,
+      "variant": "stop"
+    },
+    {
+      "id": "wo_230",
+      "type": "sign",
+      "x": 3346,
+      "y": 5255,
+      "angle": 0,
+      "w": 18,
+      "h": 18,
+      "variant": "stop"
+    },
+    {
+      "id": "wo_231",
+      "type": "sign",
+      "x": 5650,
+      "y": 7303,
+      "angle": 0,
+      "w": 18,
+      "h": 18,
+      "variant": "stop"
+    },
+    {
+      "id": "wo_232",
+      "type": "sign",
+      "x": 7954,
+      "y": 9351,
+      "angle": 0,
+      "w": 18,
+      "h": 18,
+      "variant": "stop"
+    },
+    {
+      "id": "wo_233",
+      "type": "sign",
+      "x": 10258,
+      "y": 1159,
+      "angle": 0,
+      "w": 18,
+      "h": 18,
+      "variant": "stop"
+    },
+    {
+      "id": "wo_234",
+      "type": "sign",
+      "x": 12562,
+      "y": 3207,
+      "angle": 0,
+      "w": 18,
+      "h": 18,
+      "variant": "stop"
+    },
+    {
+      "id": "wo_235",
+      "type": "sign",
+      "x": 1042,
+      "y": 5255,
+      "angle": 0,
+      "w": 18,
+      "h": 18,
+      "variant": "stop"
+    },
+    {
+      "id": "wo_237",
+      "type": "building",
+      "x": 7258,
+      "y": 3857,
+      "angle": 0,
+      "w": 217,
+      "h": 265,
+      "variant": "warehouse"
+    },
+    {
+      "id": "wo_238",
+      "type": "pad_asphalt",
+      "x": 6890,
+      "y": 3778,
+      "angle": 0,
+      "w": 1085,
+      "h": 645
+    },
+    {
+      "id": "wo_239",
+      "type": "container_stack",
+      "x": 6740,
+      "y": 3773,
+      "angle": 0,
+      "w": 103,
+      "h": 240
+    },
+    {
+      "id": "wo_240",
+      "type": "jersey_barrier",
+      "x": 6922,
+      "y": 3267,
+      "angle": -89.7,
+      "w": 164,
+      "h": 20
+    },
+    {
+      "id": "wo_241",
+      "type": "wall",
+      "x": 6891,
+      "y": 4094,
+      "angle": 0,
+      "w": 1109,
+      "h": 20
+    },
+    {
+      "id": "wo_242",
+      "type": "parking_pad",
+      "x": 6611,
+      "y": 3994,
+      "angle": 90,
+      "w": 130,
+      "h": 420,
+      "variant": "concrete"
+    },
+    {
+      "id": "wo_243",
+      "type": "container_stack",
+      "x": 6605,
+      "y": 3771,
+      "angle": 0,
+      "w": 110,
+      "h": 226
+    },
+    {
+      "id": "wo_244",
+      "type": "wall",
+      "x": 6342,
+      "y": 3775,
+      "angle": 89.8,
+      "w": 643,
+      "h": 20
+    },
+    {
+      "id": "wo_245",
+      "type": "container_stack",
+      "x": 6466,
+      "y": 3776,
+      "angle": 0,
+      "w": 109,
+      "h": 225
+    },
+    {
+      "id": "wo_246",
+      "type": "wall",
+      "x": 6608,
+      "y": 3441,
+      "angle": 0,
+      "w": 532,
+      "h": 20
+    },
+    {
+      "id": "wo_247",
+      "type": "wall",
+      "x": 7449,
+      "y": 3774,
+      "angle": -90.2,
+      "w": 638,
+      "h": 20
+    },
+    {
+      "id": "wo_248",
+      "type": "wall",
+      "x": 7289,
+      "y": 3442,
+      "angle": 0,
+      "w": 329,
+      "h": 20
+    },
+    {
+      "id": "wo_249",
+      "type": "jersey_barrier",
+      "x": 7070,
+      "y": 3264,
+      "angle": 89.8,
+      "w": 161,
+      "h": 20
+    },
+    {
+      "id": "wo_253",
+      "type": "trailer",
+      "x": 7262,
+      "y": 3667,
+      "angle": -89.9,
+      "w": 46,
+      "h": 220,
+      "params": {
+        "trailer": "fragile_glass"
+      }
+    },
+    {
+      "id": "wo_254",
+      "type": "trailer",
+      "x": 6549,
+      "y": 3501,
+      "angle": 89.6,
+      "w": 46,
+      "h": 310,
+      "params": {
+        "trailer": "long_cargo"
+      }
+    },
+    {
+      "id": "wo_256",
+      "type": "trailer",
+      "x": 7269,
+      "y": 3576,
+      "angle": -90.4,
+      "w": 46,
+      "h": 220,
+      "params": {
+        "trailer": "standard"
+      }
+    },
+    {
+      "id": "wo_257",
+      "type": "dock",
+      "x": 7252,
+      "y": 3580,
+      "angle": -90.1,
+      "w": 66,
+      "h": 286
+    },
+    {
+      "id": "wo_258",
+      "type": "dock",
+      "x": 7253,
+      "y": 3664,
+      "angle": -90.5,
+      "w": 70,
+      "h": 284
+    },
+    {
+      "id": "wo_280",
+      "type": "compound",
+      "x": 2003,
+      "y": 1784,
+      "angle": 0,
+      "w": 1600,
+      "h": 1393,
+      "params": {
+        "parts": [
+          {
+            "type": "parking_pad",
+            "x": -97,
+            "y": -147,
+            "angle": 3.141592653589793,
+            "w": 130,
+            "h": 300,
+            "variant": "asphalt"
+          },
+          {
+            "type": "parking_pad",
+            "x": 49,
+            "y": -147,
+            "angle": 3.141592653589793,
+            "w": 130,
+            "h": 300,
+            "variant": "clean"
+          },
+          {
+            "type": "parking_pad",
+            "x": 196,
+            "y": -144,
+            "angle": 3.141592653589793,
+            "w": 130,
+            "h": 300,
+            "variant": "asphalt"
+          },
+          {
+            "type": "jersey_barrier",
+            "x": -194,
+            "y": -145,
+            "angle": -3.141592653589793,
+            "w": 20,
+            "h": 301
+          },
+          {
+            "type": "jersey_barrier",
+            "x": 616,
+            "y": 217,
+            "angle": 1.5707963267948966,
+            "w": 20,
+            "h": 329
+          },
+          {
+            "type": "jersey_barrier",
+            "x": 443,
+            "y": -686,
+            "angle": 0,
+            "w": 667,
+            "h": 20
+          },
+          {
+            "type": "jersey_barrier",
+            "x": 790,
+            "y": -234,
+            "angle": -3.141592653589793,
+            "w": 20,
+            "h": 885
+          },
+          {
+            "type": "jersey_barrier",
+            "x": -270,
+            "y": 215,
+            "angle": 1.5707963267948966,
+            "w": 20,
+            "h": 963
+          },
+          {
+            "type": "building",
+            "x": -634,
+            "y": -465,
+            "angle": -1.5707963267948966,
+            "w": 332,
+            "h": 210,
+            "variant": "garage"
+          },
+          {
+            "type": "building",
+            "x": 612,
+            "y": -575,
+            "angle": 0.008726646259971648,
+            "w": 323,
+            "h": 174,
+            "variant": "warehouse"
+          },
+          {
+            "type": "jersey_barrier",
+            "x": -763,
+            "y": -234,
+            "angle": -3.141592653589793,
+            "w": 20,
+            "h": 878
+          },
+          {
+            "type": "jersey_barrier",
+            "x": -406,
+            "y": -684,
+            "angle": 0,
+            "w": 692,
+            "h": 20
+          },
+          {
+            "type": "parking_pad",
+            "x": 634,
+            "y": -31,
+            "angle": 0,
+            "w": 140,
+            "h": 460,
+            "variant": "hazard"
+          },
+          {
+            "type": "jersey_barrier",
+            "x": 300,
+            "y": -140,
+            "angle": 1.5707963267948966,
+            "w": 292,
+            "h": 20
+          },
+          {
+            "type": "pad_asphalt",
+            "x": 7,
+            "y": -236,
+            "angle": 0,
+            "w": 1576,
+            "h": 917
+          },
+          {
+            "type": "lamp",
+            "x": -739,
+            "y": 195,
+            "angle": -0.7853981633974492,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": -527,
+            "y": -648,
+            "angle": 0,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": -76,
+            "y": -662,
+            "angle": 1.5707963267948966,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": 124,
+            "y": -664,
+            "angle": 1.5707963267948966,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": -540,
+            "y": -286,
+            "angle": 0,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": 185,
+            "y": 191,
+            "angle": -1.5707963267948966,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": 475,
+            "y": 193,
+            "angle": -1.5707963267948966,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": 768,
+            "y": 197,
+            "angle": -2.356194490192345,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": -458,
+            "y": 195,
+            "angle": -1.5707963267948966,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": -110,
+            "y": 190,
+            "angle": -1.5707963267948966,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": -220,
+            "y": -143,
+            "angle": -3.141592653589793,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": 329,
+            "y": -144,
+            "angle": 0,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": 434,
+            "y": -506,
+            "angle": -3.141592653589793,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": 768,
+            "y": -363,
+            "angle": -3.141592653589793,
+            "w": 14,
+            "h": 14
+          }
+        ]
+      }
+    },
+    {
+      "id": "wo_281",
+      "type": "compound",
+      "x": 4219,
+      "y": 5994,
+      "angle": -90,
+      "w": 1600,
+      "h": 1393,
+      "params": {
+        "parts": [
+          {
+            "type": "parking_pad",
+            "x": -97,
+            "y": -147,
+            "angle": 3.141592653589793,
+            "w": 130,
+            "h": 300,
+            "variant": "asphalt"
+          },
+          {
+            "type": "parking_pad",
+            "x": 49,
+            "y": -147,
+            "angle": 3.141592653589793,
+            "w": 130,
+            "h": 300,
+            "variant": "clean"
+          },
+          {
+            "type": "parking_pad",
+            "x": 196,
+            "y": -144,
+            "angle": 3.141592653589793,
+            "w": 130,
+            "h": 300,
+            "variant": "asphalt"
+          },
+          {
+            "type": "jersey_barrier",
+            "x": -194,
+            "y": -145,
+            "angle": -3.141592653589793,
+            "w": 20,
+            "h": 301
+          },
+          {
+            "type": "jersey_barrier",
+            "x": 616,
+            "y": 217,
+            "angle": 1.5707963267948966,
+            "w": 20,
+            "h": 329
+          },
+          {
+            "type": "jersey_barrier",
+            "x": 443,
+            "y": -686,
+            "angle": 0,
+            "w": 667,
+            "h": 20
+          },
+          {
+            "type": "jersey_barrier",
+            "x": 790,
+            "y": -234,
+            "angle": -3.141592653589793,
+            "w": 20,
+            "h": 885
+          },
+          {
+            "type": "jersey_barrier",
+            "x": -270,
+            "y": 215,
+            "angle": 1.5707963267948966,
+            "w": 20,
+            "h": 963
+          },
+          {
+            "type": "building",
+            "x": -634,
+            "y": -465,
+            "angle": -1.5707963267948966,
+            "w": 332,
+            "h": 210,
+            "variant": "garage"
+          },
+          {
+            "type": "building",
+            "x": 612,
+            "y": -575,
+            "angle": 0.008726646259971648,
+            "w": 323,
+            "h": 174,
+            "variant": "warehouse"
+          },
+          {
+            "type": "jersey_barrier",
+            "x": -763,
+            "y": -234,
+            "angle": -3.141592653589793,
+            "w": 20,
+            "h": 878
+          },
+          {
+            "type": "jersey_barrier",
+            "x": -406,
+            "y": -684,
+            "angle": 0,
+            "w": 692,
+            "h": 20
+          },
+          {
+            "type": "parking_pad",
+            "x": 634,
+            "y": -31,
+            "angle": 0,
+            "w": 140,
+            "h": 460,
+            "variant": "hazard"
+          },
+          {
+            "type": "jersey_barrier",
+            "x": 300,
+            "y": -140,
+            "angle": 1.5707963267948966,
+            "w": 292,
+            "h": 20
+          },
+          {
+            "type": "pad_asphalt",
+            "x": 7,
+            "y": -236,
+            "angle": 0,
+            "w": 1576,
+            "h": 917
+          },
+          {
+            "type": "lamp",
+            "x": -739,
+            "y": 195,
+            "angle": -0.7853981633974492,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": -527,
+            "y": -648,
+            "angle": 0,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": -76,
+            "y": -662,
+            "angle": 1.5707963267948966,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": 124,
+            "y": -664,
+            "angle": 1.5707963267948966,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": -540,
+            "y": -286,
+            "angle": 0,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": 185,
+            "y": 191,
+            "angle": -1.5707963267948966,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": 475,
+            "y": 193,
+            "angle": -1.5707963267948966,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": 768,
+            "y": 197,
+            "angle": -2.356194490192345,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": -458,
+            "y": 195,
+            "angle": -1.5707963267948966,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": -110,
+            "y": 190,
+            "angle": -1.5707963267948966,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": -220,
+            "y": -143,
+            "angle": -3.141592653589793,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": 329,
+            "y": -144,
+            "angle": 0,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": 434,
+            "y": -506,
+            "angle": -3.141592653589793,
+            "w": 14,
+            "h": 14
+          },
+          {
+            "type": "lamp",
+            "x": 768,
+            "y": -363,
+            "angle": -3.141592653589793,
+            "w": 14,
+            "h": 14
+          }
+        ]
+      }
+    },
+    {
+      "id": "wo_282",
+      "type": "pad_asphalt",
+      "x": 903,
+      "y": 493,
+      "angle": 0,
+      "w": 1719,
+      "h": 953
+    },
+    {
+      "id": "wo_283",
+      "type": "lamp",
+      "x": 509,
+      "y": 617,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_284",
+      "type": "lamp",
+      "x": 768,
+      "y": 615,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_285",
+      "type": "lamp",
+      "x": 1020,
+      "y": 621,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_286",
+      "type": "jersey_barrier",
+      "x": 361,
+      "y": 1030,
+      "angle": 90,
+      "w": 112,
+      "h": 20
+    },
+    {
+      "id": "wo_287",
+      "type": "jersey_barrier",
+      "x": 195,
+      "y": 956,
+      "angle": 0,
+      "w": 299,
+      "h": 20
+    },
+    {
+      "id": "wo_288",
+      "type": "lamp",
+      "x": 1222,
+      "y": 946,
+      "angle": -180,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_289",
+      "type": "trailer",
+      "x": 2052,
+      "y": 1637,
+      "angle": 180,
+      "w": 46,
+      "h": 220,
+      "params": {
+        "trailer": "container"
+      }
+    },
+    {
+      "id": "wo_290",
+      "type": "trailer",
+      "x": 2199,
+      "y": 1640,
+      "angle": 180,
+      "w": 46,
+      "h": 220,
+      "params": {
+        "trailer": "reefer"
+      }
+    },
+    {
+      "id": "wo_291",
+      "type": "trailer",
+      "x": 11450,
+      "y": 1650,
+      "angle": 180,
+      "w": 46,
+      "h": 248,
+      "params": {
+        "trailer": "tanker_fuel"
+      }
+    },
+    {
+      "id": "wo_292",
+      "type": "trailer",
+      "x": 10900,
+      "y": 1650,
+      "angle": 180,
+      "w": 46,
+      "h": 255,
+      "params": {
+        "trailer": "timber"
+      }
+    },
+    {
+      "id": "wo_293",
+      "type": "trailer",
+      "x": 11080,
+      "y": 1650,
+      "angle": 180,
+      "w": 48,
+      "h": 275,
+      "params": {
+        "trailer": "flatbed_heavy"
+      }
+    },
+    {
+      "id": "wo_294",
+      "type": "trailer",
+      "x": 12210,
+      "y": 7680,
+      "angle": 180,
+      "w": 46,
+      "h": 155,
+      "params": {
+        "trailer": "bitrem_lead"
+      }
+    },
+    {
+      "id": "wo_295",
+      "type": "trailer",
+      "x": 12210,
+      "y": 7513,
+      "angle": 180,
+      "w": 46,
+      "h": 155,
+      "params": {
+        "trailer": "bitrem_pup"
+      }
+    },
+    {
+      "id": "wo_296",
+      "type": "trailer",
+      "x": 12370,
+      "y": 7680,
+      "angle": 180,
+      "w": 46,
+      "h": 155,
+      "params": {
+        "trailer": "bitrem_tanker_lead"
+      }
+    },
+    {
+      "id": "wo_297",
+      "type": "trailer",
+      "x": 12370,
+      "y": 7513,
+      "angle": 180,
+      "w": 46,
+      "h": 155,
+      "params": {
+        "trailer": "bitrem_tanker_pup"
+      }
+    },
+    {
+      "id": "wo_298",
+      "type": "trailer",
+      "x": 1650,
+      "y": 8300,
+      "angle": 180,
+      "w": 46,
+      "h": 225,
+      "params": {
+        "trailer": "tanker_hazmat"
+      }
+    },
+    {
+      "id": "wo_299",
+      "type": "trailer",
+      "x": 1800,
+      "y": 8300,
+      "angle": 180,
+      "w": 46,
+      "h": 220,
+      "params": {
+        "trailer": "tanker_milk"
+      }
+    },
+    {
+      "id": "wo_300",
+      "type": "pad_dirt",
+      "x": -2480,
+      "y": -440,
+      "angle": 0,
+      "w": 1320,
+      "h": 1160
+    },
+    {
+      "id": "wo_304",
+      "type": "pad_asphalt",
+      "x": -2320,
+      "y": -480,
+      "angle": 0,
+      "w": 980,
+      "h": 520
+    },
+    {
+      "id": "wo_301",
+      "type": "dock",
+      "x": -2520,
+      "y": -720,
+      "angle": 0,
+      "w": 96,
+      "h": 280,
+      "variant": "industrial"
+    },
+    {
+      "id": "wo_302",
+      "type": "dock",
+      "x": -3500,
+      "y": -3050,
+      "angle": 0,
+      "w": 104,
+      "h": 320,
+      "variant": "industrial"
+    },
+    {
+      "id": "wo_303",
+      "type": "dock",
+      "x": -3220,
+      "y": -3050,
+      "angle": 0,
+      "w": 100,
+      "h": 300,
+      "variant": "industrial"
+    },
+    {
+      "id": "wo_310",
+      "type": "building",
+      "x": -2020,
+      "y": -790,
+      "angle": 0,
+      "w": 320,
+      "h": 220,
+      "variant": "garage"
+    },
+    {
+      "id": "wo_311",
+      "type": "building",
+      "x": -2860,
+      "y": -840,
+      "angle": 0,
+      "w": 360,
+      "h": 240,
+      "variant": "shed"
+    },
+    {
+      "id": "wo_312",
+      "type": "building",
+      "x": -2520,
+      "y": -980,
+      "angle": 0,
+      "w": 280,
+      "h": 150,
+      "variant": "warehouse"
+    },
+    {
+      "id": "wo_313",
+      "type": "gas_canopy",
+      "x": -1682,
+      "y": -133,
+      "angle": 20,
+      "w": 520,
+      "h": 380,
+      "params": {
+        "stationStyle": "secondary",
+        "accessSide": "top"
+      }
+    },
+    {
+      "id": "wo_314",
+      "type": "gas_pump",
+      "x": -1693,
+      "y": -102,
+      "angle": 110,
+      "w": 48,
+      "h": 116
+    },
+    {
+      "id": "wo_315",
+      "type": "building",
+      "x": -1772,
+      "y": 113,
+      "angle": 200,
+      "w": 128,
+      "h": 84,
+      "variant": "fuel_kiosk"
+    },
+    {
+      "id": "wo_316",
+      "type": "parking_pad",
+      "x": -2680,
+      "y": -110,
+      "angle": 0,
+      "w": 140,
+      "h": 460,
+      "variant": "asphalt"
+    },
+    {
+      "id": "wo_317",
+      "type": "parking_pad",
+      "x": -2500,
+      "y": -110,
+      "angle": 0,
+      "w": 140,
+      "h": 460,
+      "variant": "asphalt"
+    },
+    {
+      "id": "wo_318",
+      "type": "parking_pad",
+      "x": -2320,
+      "y": -110,
+      "angle": 0,
+      "w": 140,
+      "h": 460,
+      "variant": "concrete"
+    },
+    {
+      "id": "wo_319",
+      "type": "parking_pad",
+      "x": -2100,
+      "y": -110,
+      "angle": 0,
+      "w": 140,
+      "h": 460,
+      "variant": "hazard"
+    },
+    {
+      "id": "wo_320",
+      "type": "trailer",
+      "x": -2680,
+      "y": -110,
+      "angle": 0,
+      "w": 46,
+      "h": 255,
+      "params": {
+        "trailer": "timber"
+      }
+    },
+    {
+      "id": "wo_321",
+      "type": "trailer",
+      "x": -2500,
+      "y": -110,
+      "angle": 0,
+      "w": 46,
+      "h": 255,
+      "params": {
+        "trailer": "timber"
+      }
+    },
+    {
+      "id": "wo_322",
+      "type": "trailer",
+      "x": -2100,
+      "y": -110,
+      "angle": 0,
+      "w": 46,
+      "h": 220,
+      "params": {
+        "trailer": "standard"
+      }
+    },
+    {
+      "id": "wo_323",
+      "type": "log_pile",
+      "x": -3020,
+      "y": -180,
+      "angle": 0,
+      "w": 180,
+      "h": 66
+    },
+    {
+      "id": "wo_324",
+      "type": "log_pile",
+      "x": -3020,
+      "y": -60,
+      "angle": 0,
+      "w": 180,
+      "h": 66
+    },
+    {
+      "id": "wo_325",
+      "type": "log_pile",
+      "x": -3020,
+      "y": 60,
+      "angle": 0,
+      "w": 180,
+      "h": 66
+    },
+    {
+      "id": "wo_326",
+      "type": "log_pile",
+      "x": -2820,
+      "y": 210,
+      "angle": 0,
+      "w": 180,
+      "h": 66
+    },
+    {
+      "id": "wo_327",
+      "type": "log_pile",
+      "x": -2580,
+      "y": 210,
+      "angle": 0,
+      "w": 180,
+      "h": 66
+    },
+    {
+      "id": "wo_328",
+      "type": "log_pile",
+      "x": -2340,
+      "y": 210,
+      "angle": 0,
+      "w": 180,
+      "h": 66
+    },
+    {
+      "id": "wo_329",
+      "type": "log_pile",
+      "x": -3260,
+      "y": -790,
+      "angle": 1.5708,
+      "w": 180,
+      "h": 66
+    },
+    {
+      "id": "wo_330",
+      "type": "log_pile",
+      "x": -3400,
+      "y": -790,
+      "angle": 1.5708,
+      "w": 180,
+      "h": 66
+    },
+    {
+      "id": "wo_331",
+      "type": "lamp",
+      "x": -2780,
+      "y": -395,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_332",
+      "type": "lamp",
+      "x": -2320,
+      "y": -395,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_333",
+      "type": "lamp",
+      "x": -1975,
+      "y": -420,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_334",
+      "type": "lamp",
+      "x": -1485,
+      "y": -40,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_335",
+      "type": "pad_asphalt",
+      "x": -3350,
+      "y": -2920,
+      "angle": 0,
+      "w": 1220,
+      "h": 740
+    },
+    {
+      "id": "wo_336",
+      "type": "pad_dirt",
+      "x": -3350,
+      "y": -3050,
+      "angle": 0,
+      "w": 1750,
+      "h": 1080
+    },
+    {
+      "id": "wo_337",
+      "type": "building",
+      "x": -2960,
+      "y": -2600,
+      "angle": 0,
+      "w": 320,
+      "h": 180,
+      "variant": "warehouse"
+    },
+    {
+      "id": "wo_338",
+      "type": "building",
+      "x": -3350,
+      "y": -2600,
+      "angle": 0,
+      "w": 240,
+      "h": 150,
+      "variant": "shed"
+    },
+    {
+      "id": "wo_339",
+      "type": "parking_pad",
+      "x": -3740,
+      "y": -2520,
+      "angle": 0,
+      "w": 150,
+      "h": 480,
+      "variant": "clean"
+    },
+    {
+      "id": "wo_340",
+      "type": "parking_pad",
+      "x": -3550,
+      "y": -2520,
+      "angle": 0,
+      "w": 140,
+      "h": 460,
+      "variant": "hazard"
+    },
+    {
+      "id": "wo_341",
+      "type": "trailer",
+      "x": -3740,
+      "y": -2520,
+      "angle": 0,
+      "w": 46,
+      "h": 310,
+      "params": {
+        "trailer": "long_cargo"
+      }
+    },
+    {
+      "id": "wo_342",
+      "type": "trailer",
+      "x": -3550,
+      "y": -2520,
+      "angle": 0,
+      "w": 48,
+      "h": 275,
+      "params": {
+        "trailer": "flatbed_heavy"
+      }
+    },
+    {
+      "id": "wo_343",
+      "type": "wind_turbine",
+      "x": -4280,
+      "y": -3460,
+      "angle": 0,
+      "w": 124,
+      "h": 124
+    },
+    {
+      "id": "wo_344",
+      "type": "wind_turbine",
+      "x": -3720,
+      "y": -3620,
+      "angle": 0.4,
+      "w": 124,
+      "h": 124
+    },
+    {
+      "id": "wo_345",
+      "type": "wind_turbine",
+      "x": -3100,
+      "y": -3620,
+      "angle": 0.9,
+      "w": 124,
+      "h": 124
+    },
+    {
+      "id": "wo_346",
+      "type": "wind_turbine",
+      "x": -2440,
+      "y": -3440,
+      "angle": 1.4,
+      "w": 124,
+      "h": 124
+    },
+    {
+      "id": "wo_347",
+      "type": "wind_turbine",
+      "x": -4440,
+      "y": -2720,
+      "angle": 2.1,
+      "w": 124,
+      "h": 124
+    },
+    {
+      "id": "wo_348",
+      "type": "wind_turbine",
+      "x": -2420,
+      "y": -2540,
+      "angle": 2.8,
+      "w": 124,
+      "h": 124
+    },
+    {
+      "id": "wo_349",
+      "type": "lamp",
+      "x": -3860,
+      "y": -2930,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_350",
+      "type": "lamp",
+      "x": -3360,
+      "y": -2930,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_351",
+      "type": "lamp",
+      "x": -2860,
+      "y": -2930,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_352",
+      "type": "jersey_barrier",
+      "x": -1090,
+      "y": -1190,
+      "angle": 1.5708,
+      "w": 220,
+      "h": 24
+    },
+    {
+      "id": "wo_353",
+      "type": "jersey_barrier",
+      "x": -3880,
+      "y": -2010,
+      "angle": 1.5708,
+      "w": 220,
+      "h": 24
+    },
+    {
+      "id": "wo_354",
+      "type": "jersey_barrier",
+      "x": -1780,
+      "y": -2680,
+      "angle": 1.5708,
+      "w": 220,
+      "h": 24
+    },
+    {
+      "id": "wo_355",
+      "type": "rock_outcrop",
+      "x": -2820,
+      "y": -1950,
+      "angle": 0.3,
+      "w": 116,
+      "h": 94
+    },
+    {
+      "id": "wo_356",
+      "type": "rock_outcrop",
+      "x": -2150,
+      "y": -1940,
+      "angle": 1.1,
+      "w": 108,
+      "h": 88
+    },
+    {
+      "id": "wo_357",
+      "type": "rock_outcrop",
+      "x": -3180,
+      "y": -1350,
+      "angle": 0.6,
+      "w": 120,
+      "h": 96
+    },
+    {
+      "id": "wo_358",
+      "type": "rock_outcrop",
+      "x": -3950,
+      "y": -2480,
+      "angle": 2.2,
+      "w": 110,
+      "h": 90
+    },
+    {
+      "id": "wo_359",
+      "type": "rock_outcrop",
+      "x": -2060,
+      "y": -3160,
+      "angle": 0.8,
+      "w": 124,
+      "h": 102
+    },
+    {
+      "id": "wo_360",
+      "type": "rock_outcrop",
+      "x": -4540,
+      "y": -3120,
+      "angle": 1.5,
+      "w": 128,
+      "h": 104
+    },
+    {
+      "id": "wo_361",
+      "type": "rock_outcrop",
+      "x": -1620,
+      "y": -1980,
+      "angle": 0.4,
+      "w": 112,
+      "h": 90
+    },
+    {
+      "id": "wo_362",
+      "type": "rock_outcrop",
+      "x": -3840,
+      "y": -1500,
+      "angle": 1.9,
+      "w": 114,
+      "h": 92
+    },
+    {
+      "id": "wo_363",
+      "type": "pine_tree",
+      "x": -3320,
+      "y": -220,
+      "angle": 0,
+      "w": 80,
+      "h": 80
+    },
+    {
+      "id": "wo_364",
+      "type": "pine_tree",
+      "x": -3460,
+      "y": -40,
+      "angle": 0.7,
+      "w": 84,
+      "h": 84
+    },
+    {
+      "id": "wo_365",
+      "type": "pine_tree",
+      "x": -3280,
+      "y": 180,
+      "angle": 1.2,
+      "w": 76,
+      "h": 76
+    },
+    {
+      "id": "wo_366",
+      "type": "pine_tree",
+      "x": -3060,
+      "y": 380,
+      "angle": 2.1,
+      "w": 88,
+      "h": 88
+    },
+    {
+      "id": "wo_367",
+      "type": "pine_tree",
+      "x": -2720,
+      "y": 420,
+      "angle": 0.4,
+      "w": 82,
+      "h": 82
+    },
+    {
+      "id": "wo_368",
+      "type": "pine_tree",
+      "x": -2320,
+      "y": 440,
+      "angle": 1.6,
+      "w": 78,
+      "h": 78
+    },
+    {
+      "id": "wo_369",
+      "type": "pine_tree",
+      "x": -1920,
+      "y": 340,
+      "angle": 2.5,
+      "w": 84,
+      "h": 84
+    },
+    {
+      "id": "wo_370",
+      "type": "pine_tree",
+      "x": -1580,
+      "y": 240,
+      "angle": 0.9,
+      "w": 80,
+      "h": 80
+    },
+    {
+      "id": "wo_371",
+      "type": "pine_tree",
+      "x": -1320,
+      "y": 420,
+      "angle": 1.8,
+      "w": 86,
+      "h": 86
+    },
+    {
+      "id": "wo_372",
+      "type": "pine_tree",
+      "x": -1960,
+      "y": -1160,
+      "angle": 0.5,
+      "w": 78,
+      "h": 78
+    },
+    {
+      "id": "wo_373",
+      "type": "pine_tree",
+      "x": -2380,
+      "y": -1240,
+      "angle": 1.3,
+      "w": 82,
+      "h": 82
+    },
+    {
+      "id": "wo_374",
+      "type": "pine_tree",
+      "x": -2760,
+      "y": -1280,
+      "angle": 2.2,
+      "w": 76,
+      "h": 76
+    },
+    {
+      "id": "wo_375",
+      "type": "pine_tree",
+      "x": -3460,
+      "y": -1180,
+      "angle": 0.8,
+      "w": 84,
+      "h": 84
+    },
+    {
+      "id": "wo_376",
+      "type": "pine_tree",
+      "x": -3780,
+      "y": -1320,
+      "angle": 1.9,
+      "w": 78,
+      "h": 78
+    },
+    {
+      "id": "wo_377",
+      "type": "pine_tree",
+      "x": -4480,
+      "y": -1560,
+      "angle": 0.3,
+      "w": 80,
+      "h": 80
+    },
+    {
+      "id": "wo_378",
+      "type": "pine_tree",
+      "x": -4540,
+      "y": -2060,
+      "angle": 1.4,
+      "w": 82,
+      "h": 82
+    },
+    {
+      "id": "wo_379",
+      "type": "pine_tree",
+      "x": -1320,
+      "y": 1580,
+      "angle": 2,
+      "w": 84,
+      "h": 84
+    },
+    {
+      "id": "wo_380",
+      "type": "pine_tree",
+      "x": -720,
+      "y": 1520,
+      "angle": 0.6,
+      "w": 80,
+      "h": 80
+    },
+    {
+      "id": "wo_381",
+      "type": "pine_tree",
+      "x": -560,
+      "y": -960,
+      "angle": 1.1,
+      "w": 78,
+      "h": 78
+    },
+    {
+      "id": "wo_382",
+      "type": "pine_tree",
+      "x": 120,
+      "y": -1080,
+      "angle": 2.4,
+      "w": 82,
+      "h": 82
+    },
+    {
+      "id": "wo_383",
+      "type": "pine_tree",
+      "x": 880,
+      "y": -1120,
+      "angle": 0.2,
+      "w": 84,
+      "h": 84
+    },
+    {
+      "id": "wo_384",
+      "type": "pine_tree",
+      "x": 1860,
+      "y": -1080,
+      "angle": 1.5,
+      "w": 80,
+      "h": 80
+    },
+    {
+      "id": "wo_385",
+      "type": "pad_asphalt",
+      "x": -1766,
+      "y": 98,
+      "angle": 20,
+      "w": 175,
+      "h": 155
+    },
+    {
+      "id": "wo_386",
+      "type": "sign",
+      "x": -1212,
+      "y": -401,
+      "angle": 0,
+      "w": 36,
+      "h": 36,
+      "variant": "steep_uphill"
+    },
+    {
+      "id": "wo_387",
+      "type": "sign",
+      "x": -1402,
+      "y": -184,
+      "angle": 0,
+      "w": 36,
+      "h": 36,
+      "variant": "steep_downhill"
+    },
+    {
+      "id": "wo_388",
+      "type": "sign",
+      "x": -1415,
+      "y": -764,
+      "angle": 0,
+      "w": 36,
+      "h": 36,
+      "variant": "steep_downhill"
+    },
+    {
+      "id": "wo_389",
+      "type": "sign",
+      "x": -1387,
+      "y": -1015,
+      "angle": 0,
+      "w": 36,
+      "h": 36,
+      "variant": "steep_uphill"
+    },
+    {
+      "id": "wo_390",
+      "type": "sign",
+      "x": -1334,
+      "y": -1501,
+      "angle": 0,
+      "w": 36,
+      "h": 36,
+      "variant": "steep_uphill"
+    },
+    {
+      "id": "wo_391",
+      "type": "sign",
+      "x": -1635,
+      "y": -1393,
+      "angle": 0,
+      "w": 36,
+      "h": 36,
+      "variant": "steep_downhill"
+    },
+    {
+      "id": "wo_392",
+      "type": "sign",
+      "x": -3649,
+      "y": -1948,
+      "angle": 0,
+      "w": 36,
+      "h": 36,
+      "variant": "steep_uphill"
+    },
+    {
+      "id": "wo_393",
+      "type": "sign",
+      "x": -3811,
+      "y": -2105,
+      "angle": 0,
+      "w": 36,
+      "h": 36,
+      "variant": "steep_downhill"
+    },
+    {
+      "id": "wo_394",
+      "type": "sign",
+      "x": -2249,
+      "y": -2280,
+      "angle": 0,
+      "w": 36,
+      "h": 36,
+      "variant": "steep_downhill"
+    },
+    {
+      "id": "wo_395",
+      "type": "sign",
+      "x": -2002,
+      "y": -2878,
+      "angle": 0,
+      "w": 36,
+      "h": 36,
+      "variant": "steep_uphill"
+    },
+    {
+      "id": "wo_396",
+      "type": "sign",
+      "x": -2375,
+      "y": -2747,
+      "angle": 0,
+      "w": 36,
+      "h": 36,
+      "variant": "steep_downhill"
+    },
+    {
+      "id": "wo_397",
+      "type": "sign",
+      "x": -3513,
+      "y": -835,
+      "angle": 0,
+      "w": 36,
+      "h": 36,
+      "variant": "steep_downhill"
+    },
+    {
+      "id": "wo_398",
+      "type": "sign",
+      "x": -4077,
+      "y": -1498,
+      "angle": 0,
+      "w": 36,
+      "h": 36,
+      "variant": "steep_uphill"
+    },
+    {
+      "id": "wo_399",
+      "type": "sign",
+      "x": -4377,
+      "y": -2168,
+      "angle": 0,
+      "w": 36,
+      "h": 36,
+      "variant": "steep_downhill"
+    },
+    {
+      "id": "wo_400",
+      "type": "sign",
+      "x": 953,
+      "y": -1149,
+      "angle": 0,
+      "w": 36,
+      "h": 36,
+      "variant": "steep_uphill"
+    },
+    {
+      "id": "wo_401",
+      "type": "sign",
+      "x": 979,
+      "y": -1405,
+      "angle": 0,
+      "w": 36,
+      "h": 36,
+      "variant": "steep_downhill"
+    },
+    {
+      "id": "wo_402",
+      "type": "sign",
+      "x": 5267,
+      "y": -1385,
+      "angle": 0,
+      "w": 36,
+      "h": 36,
+      "variant": "steep_downhill"
+    },
+    {
+      "id": "wo_403",
+      "type": "sign",
+      "x": 5488,
+      "y": -1517,
+      "angle": 0,
+      "w": 36,
+      "h": 36,
+      "variant": "steep_uphill"
+    },
+    {
+      "id": "wo_404",
+      "type": "pad_asphalt",
+      "x": 3446,
+      "y": -2019,
+      "angle": 0.081,
+      "w": 340,
+      "h": 170
+    },
+    {
+      "id": "wo_405",
+      "type": "parking_pad",
+      "x": 3446,
+      "y": -2019,
+      "angle": 0.081,
+      "w": 280,
+      "h": 74,
+      "variant": "asphalt"
+    },
+    {
+      "id": "wo_406",
+      "type": "lamp",
+      "x": 3302,
+      "y": -2105,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_407",
+      "type": "lamp",
+      "x": 3601,
+      "y": -2081,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_408",
+      "type": "pad_asphalt",
+      "x": -2099,
+      "y": 4821,
+      "angle": 1.422,
+      "w": 340,
+      "h": 170
+    },
+    {
+      "id": "wo_409",
+      "type": "parking_pad",
+      "x": -2099,
+      "y": 4821,
+      "angle": 1.422,
+      "w": 280,
+      "h": 74,
+      "variant": "asphalt"
+    },
+    {
+      "id": "wo_410",
+      "type": "lamp",
+      "x": -2194,
+      "y": 4684,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_411",
+      "type": "lamp",
+      "x": -2150,
+      "y": 4980,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_412",
+      "type": "rock_outcrop",
+      "x": -3850,
+      "y": -3960,
+      "w": 155,
+      "h": 110,
+      "angle": 0.3
+    },
+    {
+      "id": "wo_413",
+      "type": "rock_outcrop",
+      "x": -2920,
+      "y": -4080,
+      "w": 170,
+      "h": 120,
+      "angle": -0.4
+    },
+    {
+      "id": "wo_414",
+      "type": "rock_outcrop",
+      "x": -2120,
+      "y": -3780,
+      "w": 145,
+      "h": 105,
+      "angle": 0.6
+    },
+    {
+      "id": "wo_415",
+      "type": "pine_tree",
+      "x": -4250,
+      "y": -4120,
+      "w": 66,
+      "h": 66,
+      "angle": 0
+    },
+    {
+      "id": "wo_416",
+      "type": "pine_tree",
+      "x": -3320,
+      "y": -4260,
+      "w": 72,
+      "h": 72,
+      "angle": 0
+    },
+    {
+      "id": "wo_417",
+      "type": "pine_tree",
+      "x": -2450,
+      "y": -4180,
+      "w": 68,
+      "h": 68,
+      "angle": 0
+    },
+    {
+      "id": "wo_418",
+      "type": "pine_tree",
+      "x": -1620,
+      "y": -3420,
+      "w": 70,
+      "h": 70,
+      "angle": 0
+    },
+    {
+      "id": "wo_419",
+      "type": "rock_outcrop",
+      "x": -4920,
+      "y": -3080,
+      "w": 165,
+      "h": 115,
+      "angle": 0.8
+    },
+    {
+      "id": "wo_420",
+      "type": "rock_outcrop",
+      "x": -4860,
+      "y": -2150,
+      "w": 155,
+      "h": 110,
+      "angle": -0.5
+    },
+    {
+      "id": "wo_421",
+      "type": "pine_tree",
+      "x": -5080,
+      "y": -2650,
+      "w": 70,
+      "h": 70,
+      "angle": 0
+    },
+    {
+      "id": "wo_422",
+      "type": "pine_tree",
+      "x": -4820,
+      "y": -1580,
+      "w": 68,
+      "h": 68,
+      "angle": 0
+    },
+    {
+      "id": "wo_423",
+      "type": "pine_tree",
+      "x": -4420,
+      "y": -980,
+      "w": 66,
+      "h": 66,
+      "angle": 0
+    },
+    {
+      "id": "wo_424",
+      "type": "rock_outcrop",
+      "x": 1180,
+      "y": -2220,
+      "w": 150,
+      "h": 105,
+      "angle": 0.25
+    },
+    {
+      "id": "wo_425",
+      "type": "rock_outcrop",
+      "x": 2680,
+      "y": -2460,
+      "w": 160,
+      "h": 110,
+      "angle": -0.35
+    },
+    {
+      "id": "wo_426",
+      "type": "rock_outcrop",
+      "x": 4680,
+      "y": -2180,
+      "w": 145,
+      "h": 100,
+      "angle": 0.45
+    },
+    {
+      "id": "wo_427",
+      "type": "pine_tree",
+      "x": 780,
+      "y": -1780,
+      "w": 68,
+      "h": 68,
+      "angle": 0
+    },
+    {
+      "id": "wo_428",
+      "type": "pine_tree",
+      "x": 1760,
+      "y": -1240,
+      "w": 66,
+      "h": 66,
+      "angle": 0
+    },
+    {
+      "id": "wo_429",
+      "type": "pine_tree",
+      "x": 2150,
+      "y": -2320,
+      "w": 70,
+      "h": 70,
+      "angle": 0
+    },
+    {
+      "id": "wo_430",
+      "type": "pine_tree",
+      "x": 3120,
+      "y": -1360,
+      "w": 68,
+      "h": 68,
+      "angle": 0
+    },
+    {
+      "id": "wo_431",
+      "type": "pine_tree",
+      "x": 4220,
+      "y": -2160,
+      "w": 72,
+      "h": 72,
+      "angle": 0
+    },
+    {
+      "id": "wo_432",
+      "type": "pine_tree",
+      "x": 5450,
+      "y": -1950,
+      "w": 66,
+      "h": 66,
+      "angle": 0
+    },
+    {
+      "id": "wo_433",
+      "type": "pine_tree",
+      "x": 5620,
+      "y": -920,
+      "w": 68,
+      "h": 68,
+      "angle": 0
+    },
+    {
+      "id": "wo_434",
+      "type": "pine_tree",
+      "x": 6780,
+      "y": -1360,
+      "w": 64,
+      "h": 64,
+      "angle": 0
+    },
+    {
+      "id": "wo_435",
+      "type": "rock_outcrop",
+      "x": -2460,
+      "y": 2680,
+      "w": 150,
+      "h": 105,
+      "angle": 0.5
+    },
+    {
+      "id": "wo_436",
+      "type": "rock_outcrop",
+      "x": -2520,
+      "y": 4120,
+      "w": 155,
+      "h": 110,
+      "angle": -0.6
+    },
+    {
+      "id": "wo_437",
+      "type": "rock_outcrop",
+      "x": -2120,
+      "y": 5820,
+      "w": 140,
+      "h": 100,
+      "angle": 0.35
+    },
+    {
+      "id": "wo_438",
+      "type": "pine_tree",
+      "x": -2340,
+      "y": 1850,
+      "w": 70,
+      "h": 70,
+      "angle": 0
+    },
+    {
+      "id": "wo_439",
+      "type": "pine_tree",
+      "x": -1240,
+      "y": 3420,
+      "w": 68,
+      "h": 68,
+      "angle": 0
+    },
+    {
+      "id": "wo_440",
+      "type": "pine_tree",
+      "x": -2480,
+      "y": 3450,
+      "w": 72,
+      "h": 72,
+      "angle": 0
+    },
+    {
+      "id": "wo_441",
+      "type": "pine_tree",
+      "x": -1380,
+      "y": 4720,
+      "w": 66,
+      "h": 66,
+      "angle": 0
+    },
+    {
+      "id": "wo_442",
+      "type": "pine_tree",
+      "x": -2380,
+      "y": 5250,
+      "w": 68,
+      "h": 68,
+      "angle": 0
+    },
+    {
+      "id": "wo_443",
+      "type": "pine_tree",
+      "x": -1020,
+      "y": 6040,
+      "w": 64,
+      "h": 64,
+      "angle": 0
+    },
+    {
+      "id": "wo_444",
+      "type": "pine_tree",
+      "x": -1480,
+      "y": 6820,
+      "w": 66,
+      "h": 66,
+      "angle": 0
+    },
+    {
+      "id": "wo_445",
+      "type": "hub_sign",
+      "x": 1020,
+      "y": 1200,
+      "angle": 0,
+      "w": 68,
+      "h": 68,
+      "params": {
+        "hubId": "harbor",
+        "name": "Porto Comercial",
+        "badge": "PORT",
+        "color": "#06b6d4",
+        "regionRadius": 2400
+      }
+    },
+    {
+      "id": "wo_446",
+      "type": "hub_sign",
+      "x": 11200,
+      "y": 1200,
+      "angle": 0,
+      "w": 68,
+      "h": 68,
+      "params": {
+        "hubId": "shipyard",
+        "name": "Estaleiro Logístico",
+        "badge": "SHIP",
+        "color": "#f97316",
+        "regionRadius": 2400
+      }
+    },
+    {
+      "id": "wo_447",
+      "type": "hub_sign",
+      "x": 11470,
+      "y": 8310,
+      "angle": 0,
+      "w": 68,
+      "h": 68,
+      "params": {
+        "hubId": "industrial",
+        "name": "Zona Industrial Sul",
+        "badge": "IND",
+        "color": "#eab308",
+        "regionRadius": 2600
+      }
+    },
+    {
+      "id": "wo_448",
+      "type": "hub_sign",
+      "x": 1510,
+      "y": 8770,
+      "angle": 0,
+      "w": 68,
+      "h": 68,
+      "params": {
+        "hubId": "historic",
+        "name": "Centro Histórico",
+        "badge": "HIST",
+        "color": "#ec4899",
+        "regionRadius": 2600
+      }
+    },
+    {
+      "id": "wo_449",
+      "type": "hub_sign",
+      "x": -2320,
+      "y": -600,
+      "angle": 0,
+      "w": 68,
+      "h": 68,
+      "params": {
+        "hubId": "serra",
+        "name": "Serra dos Ventos",
+        "badge": "SERRA",
+        "color": "#10b981",
+        "regionRadius": 3400
+      }
+    },
+    {
+      "id": "wo_527",
+      "type": "price_sign",
+      "x": -1320,
+      "y": -138,
+      "angle": 20,
+      "w": 52,
+      "h": 112
+    },
+    {
+      "id": "wo_528",
+      "type": "air_water",
+      "x": -1655,
+      "y": 156,
+      "angle": 20,
+      "w": 76,
+      "h": 38
+    },
+    {
+      "id": "wo_501",
+      "type": "pad_asphalt",
+      "x": 2480,
+      "y": 2480,
+      "angle": 0,
+      "w": 630,
+      "h": 860
+    },
+    {
+      "id": "wo_52",
+      "type": "gas_canopy",
+      "x": 3082,
+      "y": 2350,
+      "angle": 0,
+      "w": 640,
+      "h": 880,
+      "params": {
+        "stationStyle": "highway",
+        "accessSide": "right"
+      }
+    },
+    {
+      "id": "wo_53",
+      "type": "gas_pump",
+      "x": 2960,
+      "y": 2350,
+      "angle": 0,
+      "w": 48,
+      "h": 116
+    },
+    {
+      "id": "wo_54",
+      "type": "gas_pump",
+      "x": 3140,
+      "y": 2350,
+      "angle": 0,
+      "w": 48,
+      "h": 116
+    },
+    {
+      "id": "wo_55",
+      "type": "price_sign",
+      "x": 3330,
+      "y": 1840,
+      "angle": 0,
+      "w": 56,
+      "h": 120
+    },
+    {
+      "id": "wo_502",
+      "type": "building",
+      "x": 2615,
+      "y": 2245,
+      "angle": -90,
+      "w": 210,
+      "h": 124,
+      "variant": "convenience_store"
+    },
+    {
+      "id": "wo_503",
+      "type": "building",
+      "x": 2610,
+      "y": 2500,
+      "angle": -90,
+      "w": 250,
+      "h": 144,
+      "variant": "restaurant"
+    },
+    {
+      "id": "wo_504",
+      "type": "parking_lot",
+      "x": 2610,
+      "y": 2835,
+      "angle": 0,
+      "w": 320,
+      "h": 136
+    },
+    {
+      "id": "wo_506",
+      "type": "parking_pad",
+      "x": 2260,
+      "y": 2445,
+      "angle": 0,
+      "w": 128,
+      "h": 340,
+      "variant": "asphalt"
+    },
+    {
+      "id": "wo_507",
+      "type": "parking_pad",
+      "x": 2410,
+      "y": 2445,
+      "angle": 0,
+      "w": 128,
+      "h": 340,
+      "variant": "asphalt"
+    },
+    {
+      "id": "wo_508",
+      "type": "air_water",
+      "x": 2730,
+      "y": 2680,
+      "angle": 0,
+      "w": 84,
+      "h": 42
+    },
+    {
+      "id": "wo_509",
+      "type": "lamp",
+      "x": 2705,
+      "y": 2195,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_510",
+      "type": "lamp",
+      "x": 2705,
+      "y": 2505,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_511",
+      "type": "lamp",
+      "x": 2495,
+      "y": 2240,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_512",
+      "type": "lamp",
+      "x": 2495,
+      "y": 2650,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_513",
+      "type": "pad_asphalt",
+      "x": 9160,
+      "y": 8170,
+      "angle": 0,
+      "w": 1420,
+      "h": 690
+    },
+    {
+      "id": "wo_56",
+      "type": "gas_canopy",
+      "x": 9040,
+      "y": 7542,
+      "angle": 0,
+      "w": 920,
+      "h": 640,
+      "params": {
+        "stationStyle": "highway",
+        "accessSide": "top"
+      }
+    },
+    {
+      "id": "wo_57",
+      "type": "gas_pump",
+      "x": 9040,
+      "y": 7664,
+      "angle": 90,
+      "w": 48,
+      "h": 116
+    },
+    {
+      "id": "wo_58",
+      "type": "gas_pump",
+      "x": 9040,
+      "y": 7484,
+      "angle": 90,
+      "w": 48,
+      "h": 116
+    },
+    {
+      "id": "wo_59",
+      "type": "price_sign",
+      "x": 8470,
+      "y": 7310,
+      "angle": 0,
+      "w": 56,
+      "h": 120
+    },
+    {
+      "id": "wo_516",
+      "type": "building",
+      "x": 9020,
+      "y": 7965,
+      "angle": 180,
+      "w": 240,
+      "h": 136,
+      "variant": "convenience_store"
+    },
+    {
+      "id": "wo_517",
+      "type": "building",
+      "x": 9315,
+      "y": 7970,
+      "angle": 180,
+      "w": 280,
+      "h": 154,
+      "variant": "restaurant"
+    },
+    {
+      "id": "wo_518",
+      "type": "parking_lot",
+      "x": 9655,
+      "y": 7965,
+      "angle": 0,
+      "w": 340,
+      "h": 136
+    },
+    {
+      "id": "wo_519",
+      "type": "parking_lot",
+      "x": 8695,
+      "y": 7965,
+      "angle": 0,
+      "w": 280,
+      "h": 136
+    },
+    {
+      "id": "wo_520",
+      "type": "parking_pad",
+      "x": 8730,
+      "y": 8375,
+      "angle": 0,
+      "w": 128,
+      "h": 260,
+      "variant": "asphalt"
+    },
+    {
+      "id": "wo_521",
+      "type": "parking_pad",
+      "x": 8880,
+      "y": 8375,
+      "angle": 0,
+      "w": 128,
+      "h": 260,
+      "variant": "asphalt"
+    },
+    {
+      "id": "wo_530",
+      "type": "parking_pad",
+      "x": 9030,
+      "y": 8375,
+      "angle": 0,
+      "w": 128,
+      "h": 260,
+      "variant": "asphalt"
+    },
+    {
+      "id": "wo_531",
+      "type": "parking_pad",
+      "x": 9180,
+      "y": 8375,
+      "angle": 0,
+      "w": 128,
+      "h": 260,
+      "variant": "asphalt"
+    },
+    {
+      "id": "wo_532",
+      "type": "parking_pad",
+      "x": 9330,
+      "y": 8375,
+      "angle": 0,
+      "w": 128,
+      "h": 260,
+      "variant": "asphalt"
+    },
+    {
+      "id": "wo_533",
+      "type": "parking_pad",
+      "x": 9640,
+      "y": 8375,
+      "angle": 90,
+      "w": 136,
+      "h": 320,
+      "variant": "asphalt"
+    },
+    {
+      "id": "wo_522",
+      "type": "air_water",
+      "x": 9565,
+      "y": 8135,
+      "angle": 0,
+      "w": 84,
+      "h": 42
+    },
+    {
+      "id": "wo_523",
+      "type": "lamp",
+      "x": 8870,
+      "y": 7875,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_524",
+      "type": "lamp",
+      "x": 9200,
+      "y": 7875,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_525",
+      "type": "lamp",
+      "x": 8520,
+      "y": 8165,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_526",
+      "type": "lamp",
+      "x": 9860,
+      "y": 8165,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_535",
+      "type": "pad_asphalt",
+      "x": 1645,
+      "y": 6150,
+      "angle": 0,
+      "w": 175,
+      "h": 165
+    },
+    {
+      "id": "wo_534",
+      "type": "gas_canopy",
+      "x": 1396,
+      "y": 6150,
+      "angle": 0,
+      "w": 380,
+      "h": 520,
+      "params": {
+        "stationStyle": "secondary",
+        "accessSide": "left"
+      }
+    },
+    {
+      "id": "wo_536",
+      "type": "gas_pump",
+      "x": 1429,
+      "y": 6150,
+      "angle": 0,
+      "w": 48,
+      "h": 116
+    },
+    {
+      "id": "wo_537",
+      "type": "building",
+      "x": 1665,
+      "y": 6150,
+      "angle": 90,
+      "w": 128,
+      "h": 84,
+      "variant": "fuel_kiosk"
+    },
+    {
+      "id": "wo_538",
+      "type": "price_sign",
+      "x": 1272,
+      "y": 6455,
+      "angle": 0,
+      "w": 52,
+      "h": 112
+    },
+    {
+      "id": "wo_539",
+      "type": "lamp",
+      "x": 1588,
+      "y": 6035,
+      "angle": 180,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_541",
+      "type": "pad_asphalt",
+      "x": 6780,
+      "y": 4630,
+      "angle": 0,
+      "w": 175,
+      "h": 155
+    },
+    {
+      "id": "wo_540",
+      "type": "gas_canopy",
+      "x": 6780,
+      "y": 4876,
+      "angle": 0,
+      "w": 520,
+      "h": 380,
+      "params": {
+        "stationStyle": "secondary",
+        "accessSide": "bottom"
+      }
+    },
+    {
+      "id": "wo_542",
+      "type": "gas_pump",
+      "x": 6780,
+      "y": 4843,
+      "angle": 90,
+      "w": 48,
+      "h": 116
+    },
+    {
+      "id": "wo_543",
+      "type": "building",
+      "x": 6780,
+      "y": 4612,
+      "angle": 0,
+      "w": 128,
+      "h": 84,
+      "variant": "fuel_kiosk"
+    },
+    {
+      "id": "wo_544",
+      "type": "price_sign",
+      "x": 7085,
+      "y": 5000,
+      "angle": 0,
+      "w": 52,
+      "h": 112
+    },
+    {
+      "id": "wo_545",
+      "type": "lamp",
+      "x": 6665,
+      "y": 4685,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_546",
+      "type": "building",
+      "variant": "hospital",
+      "x": 1560,
+      "y": 6779,
+      "w": 360,
+      "h": 278,
+      "angle": 0,
+      "params": {
+        "exteriorParking": true
+      }
+    },
+    {
+      "id": "wo_547",
+      "type": "building",
+      "variant": "fire_station",
+      "x": 2040,
+      "y": 6912,
+      "w": 330,
+      "h": 180,
+      "angle": 0
+    },
+    {
+      "id": "wo_548",
+      "type": "building",
+      "variant": "police_station",
+      "x": 2430,
+      "y": 6909,
+      "w": 270,
+      "h": 190,
+      "angle": 0
+    },
+    {
+      "id": "wo_549",
+      "type": "building",
+      "variant": "town_hall",
+      "x": 2860,
+      "y": 6965,
+      "w": 250,
+      "h": 210,
+      "angle": 0
+    },
+    {
+      "id": "wo_550",
+      "type": "building",
+      "variant": "villa_classic",
+      "x": 3165,
+      "y": 6975,
+      "w": 210,
+      "h": 145,
+      "angle": 0
+    },
+    {
+      "id": "wo_551",
+      "type": "building",
+      "variant": "apartment_block",
+      "x": 1550,
+      "y": 7479,
+      "w": 340,
+      "h": 166,
+      "angle": 180,
+      "params": {
+        "garageAccess": true,
+        "exteriorParking": true
+      }
+    },
+    {
+      "id": "wo_552",
+      "type": "building",
+      "variant": "apartment_modern",
+      "x": 1970,
+      "y": 7428,
+      "w": 320,
+      "h": 184,
+      "angle": 180,
+      "params": {
+        "garageAccess": true
+      }
+    },
+    {
+      "id": "wo_553",
+      "type": "building",
+      "variant": "supermarket",
+      "x": 2400,
+      "y": 7477,
+      "w": 360,
+      "h": 170,
+      "angle": 180,
+      "params": {
+        "exteriorParking": true
+      }
+    },
+    {
+      "id": "wo_554",
+      "type": "building",
+      "variant": "school",
+      "x": 2850,
+      "y": 7484,
+      "w": 320,
+      "h": 185,
+      "angle": 180,
+      "params": {
+        "exteriorParking": true
+      }
+    },
+    {
+      "id": "wo_555",
+      "type": "building",
+      "variant": "apartment_modern",
+      "x": 1464,
+      "y": 7840,
+      "w": 320,
+      "h": 184,
+      "angle": 90,
+      "params": {
+        "exteriorParking": true
+      }
+    },
+    {
+      "id": "wo_556",
+      "type": "building",
+      "variant": "villa_classic",
+      "x": 3226,
+      "y": 7720,
+      "w": 210,
+      "h": 145,
+      "angle": -90,
+      "params": {
+        "garageAccess": true
+      }
+    },
+    {
+      "id": "wo_557",
+      "type": "building",
+      "variant": "villa_modern",
+      "x": 3217,
+      "y": 7960,
+      "w": 200,
+      "h": 162,
+      "angle": -90,
+      "params": {
+        "garageAccess": true
+      }
+    },
+    {
+      "id": "wo_558",
+      "type": "building",
+      "variant": "villa_modern",
+      "x": 3285,
+      "y": 8265,
+      "w": 200,
+      "h": 162,
+      "angle": -90
+    },
+    {
+      "id": "wo_559",
+      "type": "building",
+      "variant": "house_townhouse",
+      "x": 3236,
+      "y": 8530,
+      "w": 240,
+      "h": 124,
+      "angle": -90,
+      "params": {
+        "garageAccess": true
+      }
+    },
+    {
+      "id": "wo_560",
+      "type": "building",
+      "variant": "house_traditional",
+      "x": 3243,
+      "y": 8775,
+      "w": 150,
+      "h": 110,
+      "angle": -90,
+      "params": {
+        "garageAccess": true
+      }
+    },
+    {
+      "id": "wo_561",
+      "type": "building",
+      "variant": "house_traditional",
+      "x": 3295,
+      "y": 8975,
+      "w": 150,
+      "h": 110,
+      "angle": -90
+    }
+  ],
+  "worldMinX": -6144,
+  "worldMinY": -5120
+}
