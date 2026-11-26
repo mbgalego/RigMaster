@@ -210,9 +210,14 @@ export class IntersectionSystem {
         const samplesB = RoadNetwork.sampleRoad(roadB, 24);
 
         // a) Segment-segment crossings (X, Y, oblique crossings)
-        for (let si = 0; si < samplesA.length - 1; si++) {
+        // For each crossing we need TWO arms per road (both directions), so we add
+        // two raw points per road with opposite exitAngles derived from the local
+        // tangent at the intersection. This ensures free-form mid-segment crossings
+        // get all 4 arms, not just 2.
+        let crossingFound = false;
+        for (let si = 0; si < samplesA.length - 1 && !crossingFound; si++) {
           const a1 = samplesA[si], a2 = samplesA[si + 1];
-          for (let sj = 0; sj < samplesB.length - 1; sj++) {
+          for (let sj = 0; sj < samplesB.length - 1 && !crossingFound; sj++) {
             const b1 = samplesB[sj], b2 = samplesB[sj + 1];
             const hit = segmentIntersection(a1.x, a1.y, a2.x, a2.y, b1.x, b1.y, b2.x, b2.y);
             if (!hit) continue;
@@ -222,8 +227,20 @@ export class IntersectionSystem {
             const dToA = Math.abs((hit.x - a1.x) * (-a1.ty) + (hit.y - a1.y) * a1.tx);
             const dToB = Math.abs((hit.x - b1.x) * (-b1.ty) + (hit.y - b1.y) * b1.tx);
             if (dToA > wa / 2 + 6 || dToB > wb / 2 + 6) continue;
-            rawPoints.push({ x: hit.x, y: hit.y, layer: layerA, roadId: roadA.id, pointIndex: -1, exitAngle: 0 });
-            rawPoints.push({ x: hit.x, y: hit.y, layer: layerB, roadId: roadB.id, pointIndex: -1, exitAngle: 0 });
+
+            // Tangent of road A at the hit point (interpolated from segment)
+            const tanAx = a2.x - a1.x, tanAy = a2.y - a1.y;
+            const tanA = Math.atan2(tanAy, tanAx);
+            // Tangent of road B at the hit point
+            const tanBx = b2.x - b1.x, tanBy = b2.y - b1.y;
+            const tanB = Math.atan2(tanBy, tanBx);
+
+            // Two arms per road: opposite directions along the tangent
+            rawPoints.push({ x: hit.x, y: hit.y, layer: layerA, roadId: roadA.id, pointIndex: -1, exitAngle: tanA });
+            rawPoints.push({ x: hit.x, y: hit.y, layer: layerA, roadId: roadA.id, pointIndex: -1, exitAngle: wrapAngle(tanA + Math.PI) });
+            rawPoints.push({ x: hit.x, y: hit.y, layer: layerB, roadId: roadB.id, pointIndex: -1, exitAngle: tanB });
+            rawPoints.push({ x: hit.x, y: hit.y, layer: layerB, roadId: roadB.id, pointIndex: -1, exitAngle: wrapAngle(tanB + Math.PI) });
+            crossingFound = true;
           }
         }
 
@@ -386,32 +403,48 @@ export class IntersectionSystem {
       const road = roadNetwork.getRoad(m.roadId);
       if (!road) continue;
 
-      // Find the closest control point on this road to the node
-      let bestIdx = 0;
-      let bestD = Infinity;
-      for (let i = 0; i < road.points.length; i++) {
-        const p = road.points[i];
-        const d = dist2(m.x, m.y, p.x, p.y);
-        if (d < bestD) { bestD = d; bestIdx = i; }
+      let exitAngle: number;
+      let width: number;
+      let surface: RoadSurface;
+      let bestIdx: number;
+
+      // Segment-segment crossing: exitAngle is already the tangent at the hit point
+      if (m.pointIndex === -1 && m.exitAngle !== 0) {
+        exitAngle = m.exitAngle;
+        // Interpolate width/surface at the hit point
+        const nearest = pointToSegmentNearestOnRoad(road, m.x, m.y);
+        width = nearest?.width ?? road.points[0].w;
+        surface = road.surface;
+        bestIdx = -1; // mark as interpolated
+      } else {
+        // Standard: closest control point (T-junctions, grid nodes)
+        let bestD = Infinity;
+        bestIdx = 0;
+        for (let i = 0; i < road.points.length; i++) {
+          const p = road.points[i];
+          const d = dist2(m.x, m.y, p.x, p.y);
+          if (d < bestD) { bestD = d; bestIdx = i; }
+        }
+        const cp = road.points[bestIdx];
+        width = cp.w;
+        surface = road.surface;
+
+        // Tangent at the control point (direction away from node along the road)
+        const tan = RoadNetwork.pointTangent(road, bestIdx);
+        exitAngle = Math.atan2(tan.ty, tan.tx);
+        const toNodeX = m.x - cp.x;
+        const toNodeY = m.y - cp.y;
+        const dot = Math.cos(exitAngle) * toNodeX + Math.sin(exitAngle) * toNodeY;
+        if (dot > 0) exitAngle = wrapAngle(exitAngle + Math.PI); // flip so it points away
       }
-
-      const cp = road.points[bestIdx];
-      const width = cp.w;
-      const surface = road.surface;
-
-      // Tangent at the control point (direction away from node along the road)
-      const tan = RoadNetwork.pointTangent(road, bestIdx);
-      // Choose the direction that points AWAY from the node centre
-      let exitAngle = Math.atan2(tan.ty, tan.tx);
-      const toNodeX = m.x - cp.x;
-      const toNodeY = m.y - cp.y;
-      const dot = Math.cos(exitAngle) * toNodeX + Math.sin(exitAngle) * toNodeY;
-      if (dot > 0) exitAngle = wrapAngle(exitAngle + Math.PI); // flip so it points away
 
       const entryAngle = wrapAngle(exitAngle + Math.PI); // direction of travel entering the node
       const axis = normaliseAxis(exitAngle);
 
-      const key = `${m.roadId}_${bestIdx}`;
+      // Dedup key: use rounded exitAngle (milliradians) to avoid FP edge cases at π boundaries.
+      // This cleanly separates opposite directions (0 vs π) without quadrant math.
+      const angleKey = Math.round(exitAngle * 1000);
+      const key = `${m.roadId}_${bestIdx >= 0 ? bestIdx : 'x'}_${angleKey}`;
       if (seen.has(key)) continue;
       seen.add(key);
 
