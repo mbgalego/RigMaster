@@ -846,7 +846,11 @@ export class Truck {
     const surfaceAccelScale =
       (1 - surfaceLoss * 0.32) * Math.max(0.55, 1 - trailerDragLoss * 0.45) * enginePowerScale;
     const coastDecel = 18 * rollingMult * dt;
-    const effectiveBrake = this.getEffectiveBrakeForce();
+    // Wet/low-grip asphalt stretches stopping distances: scale brake force down with
+    // available grip (dry = 1.0, rain ~0.77, storm ~0.75). Applied to service and
+    // handbrake alike so a wet downhill cannot be stopped as quickly as on dry tarmac.
+    const brakeGripFactor = Phaser.Math.Linear(0.62, 1.0, Phaser.Math.Clamp(effectiveGrip, 0, 1));
+    const effectiveBrake = this.getEffectiveBrakeForce() * brakeGripFactor;
 
     // Mountain slope gravity (positive grade = uphill pulling backward; negative grade = downhill pushing forward)
     const slopeMassMult = this.hasCoupledTrailer
@@ -866,10 +870,11 @@ export class Truck {
     if (isHandbrake) {
       this.isBraking = true;
       serviceBrakeLoad = Math.abs(this.vLong) > 8 ? 0.8 : 0;
+      const handbrakeForce = 300 * brakeGripFactor;
       if (this.vLong > 0) {
-        this.vLong = Math.max(0, this.vLong - 300 * dt);
+        this.vLong = Math.max(0, this.vLong - handbrakeForce * dt);
       } else if (this.vLong < 0) {
-        this.vLong = Math.min(0, this.vLong + 300 * dt);
+        this.vLong = Math.min(0, this.vLong + handbrakeForce * dt);
       }
       if (Math.abs(this.vLong) < 4) slopeHandled = true;
     } else if (isThrottleActive) {
@@ -1021,18 +1026,48 @@ export class Truck {
 
     // 3. Realistic Lateral Tire Grip (surface + tires + weather + suspension empty stability)
     const totalGrip = Math.min(1.0, effectiveGrip);
+    const absSpeedPx = Math.abs(this.vLong);
+    const wheelbase = this.wheelbase;
+
+    // Low-speed maneuvering must stay crisp in the rain: while creeping/parking the
+    // wheels still bite, so the full wheel angle reaches the road. Only once the rig is
+    // rolling fast enough to actually slide does surface grip reduce steering authority.
+    const speedSteerBlend = Phaser.Math.SmoothStep(absSpeedPx, 34, 120); // 0 <= ~7 km/h, 1 at ~27 km/h
+    const highSpeedSteerAuthority = Phaser.Math.Clamp(
+      Phaser.Math.Linear(0.58, 1.0, totalGrip),
+      0.58,
+      1.0,
+    );
+    const steerAuthority = Phaser.Math.Linear(1.0, highSpeedSteerAuthority, speedSteerBlend);
+
     const emptyStab = this.hasCoupledTrailer ? 1.0 : this.effectiveStats.emptyStabilityMult;
-    const lateralGripFactor = Phaser.Math.Clamp(0.97 * totalGrip * emptyStab, 0.2, 0.99);
-    this.vLat *= (1.0 - lateralGripFactor);
+    const gripLatDamping = Phaser.Math.Clamp(0.97 * totalGrip * emptyStab, 0.2, 0.99);
+    // Extra scrub only on low-grip surfaces while creeping, so a wet truck cannot
+    // slide sideways during parking. Dry grip (totalGrip = 1) keeps the old value.
+    const lowSpeedScrub = Phaser.Math.SmoothStep(absSpeedPx, 12, 70); // 0 stopped, 1 rolling
+    const lowSpeedGripGuard = (1 - totalGrip) * (1 - lowSpeedScrub);
+    const lateralDamping = Phaser.Math.Clamp(gripLatDamping + lowSpeedGripGuard * 0.8, 0.2, 0.995);
+    // Framerate-independent slip decay (matches the old per-frame value at 60 fps)
+    this.vLat *= Math.pow(1.0 - lateralDamping, dt * 60);
+
+    // At speed on a low-grip surface the tail washes wide instead of following the
+    // wheel: bleed lateral velocity opposite the turn direction. Gated to zero while
+    // maneuvering slowly, so low-speed rain parking is never affected.
+    if (absSpeedPx > 34) {
+      const yawDemand = (this.vLong / wheelbase) * Math.tan(this.currentSteerAngle);
+      const slipDrive = (1 - totalGrip) * speedSteerBlend;
+      this.vLat += -Math.sign(yawDemand) * absSpeedPx * 4.0 * slipDrive * dt;
+      const slipCap = this.maxForwardSpeed * 0.4;
+      this.vLat = Phaser.Math.Clamp(this.vLat, -slipCap, slipCap);
+    }
     if (Math.abs(this.vLat) < 0.1) this.vLat = 0;
 
     // 4. Ackermann Steering & Angular Velocity (rad/s) with model wheelbase & steering wear pull
-    const wheelbase = this.wheelbase;
     const steerWear = Math.max(0, (80 - this.damage.steering) / 80);
-    const speedRollWeight = Phaser.Math.Clamp(Math.abs(this.vLong) / 35, 0, 1);
+    const speedRollWeight = Phaser.Math.Clamp(absSpeedPx / 35, 0, 1);
     const pullBias = this.damage.steerPull * steerWear * 0.065 * speedRollWeight;
     const effectiveSteer = Phaser.Math.Clamp(
-      this.currentSteerAngle * totalGrip + pullBias,
+      this.currentSteerAngle * steerAuthority + pullBias,
       -this.maxSteerAngle,
       this.maxSteerAngle,
     );

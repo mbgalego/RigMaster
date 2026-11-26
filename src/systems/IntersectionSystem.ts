@@ -78,11 +78,13 @@ const DEFAULT_ALL_RED_MS = 1000;
 /** Max angle difference (radians) for two arms to share the same axis. */
 const AXIS_MERGE_RAD = Phaser.Math.DegToRad(15);
 
-/** Distance before the node where a traffic light is placed (px). */
-const TL_STOP_OFFSET = 14;
+/** Distance from node centre to the stop line / signal head along the approach (px).
+ *  Matches the manual grid placement (132 px from centre to near-side signal). */
+const TL_STOP_OFFSET = 132;
 
-/** Extra margin from the carriageway edge to the traffic light (px). */
-const TL_SHOULDER_MARGIN = 12;
+/** Perpendicular offset from road centreline to the signal head (px).
+ *  For a 128 px road: half-width 64 + 28 margin = 92. Scales with road width. */
+const TL_SHOULDER_MARGIN = 28;
 
 /** Specification for a traffic-light world object to be created by the editor. */
 export interface TrafficLightSpec {
@@ -287,32 +289,32 @@ export class IntersectionSystem {
     if (!node || !node.signalized) return [];
 
     const specs: TrafficLightSpec[] = [];
-    let group = 0;
     for (const phase of node.phases) {
       for (const armIdx of phase.armIndices) {
         const arm = node.arms[armIdx];
-        // Perpendicular to the right of the direction of travel
-        const rightAngle = arm.entryAngle - Math.PI / 2;
-        const offset = arm.width / 2 + TL_SHOULDER_MARGIN;
-        const rx = Math.cos(rightAngle) * offset;
-        const ry = Math.sin(rightAngle) * offset;
-        // Place before the node (against the direction of travel)
+        // Right-hand side of the approach lane (y-down coordinates: +PI/2)
+        const rightAngle = arm.entryAngle + Math.PI / 2;
+        const perpOffset = arm.width / 2 + TL_SHOULDER_MARGIN;
+        const rx = Math.cos(rightAngle) * perpOffset;
+        const ry = Math.sin(rightAngle) * perpOffset;
+        // Near-side signal: TL_STOP_OFFSET before the node along the approach
         const x = arm.entryX - Math.cos(arm.entryAngle) * TL_STOP_OFFSET + rx;
         const y = arm.entryY - Math.sin(arm.entryAngle) * TL_STOP_OFFSET + ry;
-        // The signal head faces the approaching driver
-        const angle = arm.entryAngle;
+        // Signal head faces the approaching driver (perpendicular to travel, inward)
+        const angle = arm.entryAngle + Math.PI / 2;
+        // dir parameter matches the approach direction for stop-line rendering
+        const dir = angleToDir(arm.entryAngle);
         specs.push({
           x: Math.round(x),
           y: Math.round(y),
           angle,
           params: {
-            dir: angleToDir(angle),
+            dir,
             group: phase.index,
             intersectionNode: nodeId,
           },
         });
       }
-      group++;
     }
     return specs;
   }

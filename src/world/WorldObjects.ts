@@ -1627,6 +1627,56 @@ export class WorldObjects {
     }
   }
 
+  /**
+   * Paints the stop line of a signal head on its own approach lane.
+   *
+   * Traffic lights are seeded at a fixed ±92/±132 offset from the junction centre, so
+   * the centre is reconstructed from the head position and its `dir` param:
+   *   n → centre (x-92, y-132) · s → (x+92, y+132) · e → (x+132, y-92) · w → (x-132, y+92)
+   *
+   * The bar covers only the right-hand lane (the 64px half of the road on the signal's
+   * side) and sits immediately before the signal post along the travel direction — not
+   * across the whole road and not at the junction box edge.
+   */
+  private drawTrafficStopLine(g: Phaser.GameObjects.Graphics, o: WorldObject) {
+    const dir = o.params?.dir as 'n' | 's' | 'e' | 'w' | undefined;
+    if (!dir) return;
+    const cx = o.x + (dir === 'n' ? -92 : dir === 's' ? 92 : dir === 'e' ? 132 : -132);
+    const cy = o.y + (dir === 'n' ? -132 : dir === 's' ? 132 : dir === 'e' ? -92 : 92);
+    const halfRoad = 64; // 128px arterial → one 64px lane per direction
+    const inset = 4; // keep clear of the kerb and the centre line
+    const gap = 6; // stop just behind the signal post
+    const thick = 6;
+    const horizontal = dir === 'n' || dir === 's';
+
+    let x0: number, y0: number, w: number, h: number;
+    if (horizontal) {
+      // n → east (right) lane, s → west (right) lane
+      const laneLeft = dir === 'n' ? cx : cx - halfRoad;
+      const sy = dir === 'n' ? o.y + gap : o.y - gap; // n approaches from +y, s from -y
+      x0 = laneLeft + inset;
+      y0 = sy - thick / 2;
+      w = halfRoad - inset * 2;
+      h = thick;
+    } else {
+      // e → south (right) lane, w → north (right) lane
+      const laneTop = dir === 'e' ? cy : cy - halfRoad;
+      const sx = dir === 'e' ? o.x - gap : o.x + gap; // e approaches from -x, w from +x
+      x0 = sx - thick / 2;
+      y0 = laneTop + inset;
+      w = thick;
+      h = halfRoad - inset * 2;
+    }
+
+    // Soft asphalt shadow, then the painted bar with slightly worn edges.
+    g.fillStyle(0x000000, 0.22);
+    g.fillRect(x0 + 1, y0 + 1, w, h);
+    g.fillStyle(0xe6ebf1, 0.88);
+    g.fillRect(x0, y0, w, h);
+    g.fillStyle(0xffffff, 0.55);
+    g.fillRect(x0 + 1, y0 + 1, Math.max(1, w - 2), Math.max(1, h - 2));
+  }
+
   /** Renders only animated traffic-light LEDs intersecting `view + margin`. */
   public renderTrafficLights(
     lights: Phaser.GameObjects.Graphics,
@@ -1645,6 +1695,7 @@ export class WorldObjects {
           if (drawn.has(o.id)) continue;
           if (o.type === 'traffic_light') {
             drawn.add(o.id);
+            this.drawTrafficStopLine(lights, o);
             this.drawSolid(lights, o);
           } else if (o.type === 'compound') {
             drawn.add(o.id);
@@ -1655,6 +1706,7 @@ export class WorldObjects {
               if (!p) continue;
               if (p.x + p.w / 2 < view.x - margin || p.x - p.w / 2 > view.x + view.width + margin) continue;
               if (p.y + p.h / 2 < view.y - margin || p.y - p.h / 2 > view.y + view.height + margin) continue;
+              this.drawTrafficStopLine(lights, p);
               this.drawSolid(lights, p);
             }
           }

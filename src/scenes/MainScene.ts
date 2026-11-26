@@ -3081,7 +3081,9 @@ export class MainScene extends Phaser.Scene {
       // Sync live towing/weather flags into Truck physics (suspension empty grip, brake heat, wet tires)
       this.truck.hasCoupledTrailer = this.trailer !== null;
       this.truck.isWeatherWet =
-        this.localWeather.roadWetness >= 0.25 || this.garageSystem.getActiveModifier() === 'rain';
+        this.localWeather.roadWetness >= 0.25 ||
+        this.garageSystem.getActiveModifier() === 'rain' ||
+        this.garageSystem.getActiveModifier() === 'storm';
 
       // Update Active License Exam
       const activeExam = this.licenseSystem.getActiveExam();
