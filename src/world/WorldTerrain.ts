@@ -47,6 +47,8 @@ export type TerrainPaintMaterial =
   | 'dirt'
   | 'sand'
   | 'grass'
+  | 'city_garden'
+  | 'flower_garden'
   | 'forest'
   | 'alpine_rock'
   | 'alpine_summit'
@@ -86,6 +88,8 @@ export const TERRAIN_PAINT_CATALOG: readonly TerrainPaintMaterialInfo[] = [
   { id: 'dirt', label: 'Terra Batida', shortLabel: 'Terra', swatch: '#8f673f', minimapColor: '#825d38', grip: 0.68, clearsTrees: true, defaultSoftness: 'soft' },
   { id: 'sand', label: 'Areia / Praia', shortLabel: 'Areia', swatch: '#c2a76f', minimapColor: '#a68e5c', grip: 0.58, clearsTrees: true, defaultSoftness: 'soft' },
   { id: 'grass', label: 'Relva / Prado', shortLabel: 'Relva', swatch: '#3d662e', minimapColor: '#2a4722', grip: 0.60, clearsTrees: false, defaultSoftness: 'soft' },
+  { id: 'city_garden', label: 'Jardim de Cidade', shortLabel: 'Jardim', swatch: '#4a8f47', minimapColor: '#3f7d3d', grip: 0.72, clearsTrees: false, defaultSoftness: 'soft' },
+  { id: 'flower_garden', label: 'Jardim de Flores', shortLabel: 'Flores', swatch: '#c94c7a', minimapColor: '#5c8f4a', grip: 0.66, clearsTrees: true, defaultSoftness: 'soft' },
   { id: 'forest', label: 'Floresta', shortLabel: 'Floresta', swatch: '#224529', minimapColor: '#1b3b23', grip: 0.58, clearsTrees: false, defaultSoftness: 'soft' },
   { id: 'alpine_rock', label: 'Rocha Alpina', shortLabel: 'Rocha', swatch: '#68737e', minimapColor: '#56626e', grip: 0.64, clearsTrees: true, defaultSoftness: 'soft' },
   { id: 'alpine_summit', label: 'Granito / Cume', shortLabel: 'Cume', swatch: '#9aa8b6', minimapColor: '#8897a6', grip: 0.62, clearsTrees: true, defaultSoftness: 'soft' },
@@ -214,6 +218,8 @@ export class WorldTerrain {
   private tilePatternsReady = false;
   private waterTilePattern: CanvasPattern | null = null;
   private grassTilePattern: CanvasPattern | null = null;
+  private cityGardenTilePattern: CanvasPattern | null = null;
+  private flowerGardenTilePattern: CanvasPattern | null = null;
   private forestTilePattern: CanvasPattern | null = null;
   private sandTilePattern: CanvasPattern | null = null;
   private alpineRockTilePattern: CanvasPattern | null = null;
@@ -226,6 +232,7 @@ export class WorldTerrain {
   private deciduousTreeImgs: Array<HTMLImageElement | HTMLCanvasElement> = [];
   private alpinePineImgs: Array<HTMLImageElement | HTMLCanvasElement> = [];
   private rockOutcropImg: HTMLImageElement | HTMLCanvasElement | null = null;
+  private lastViewBoundsKey = '';
 
   public setLightingEnabled(enabled: boolean) {
     if (this.lightingEnabled === enabled) return;
@@ -275,9 +282,30 @@ export class WorldTerrain {
     zoom: number,
     isEditorMode: boolean,
   ): void {
+    // Check whether ANY canopy chunk actually intersects the live camera view
+    let anyVisible = false;
+    if (this.canopyChunks.size > 0 && view.width > 1 && view.height > 1) {
+      const c0x = Math.floor(view.x / CHUNK);
+      const c1x = Math.floor((view.x + view.width) / CHUNK);
+      const c0y = Math.floor(view.y / CHUNK);
+      const c1y = Math.floor((view.y + view.height) / CHUNK);
+      outer: for (let cy = c0y; cy <= c1y; cy++) {
+        for (let cx = c0x; cx <= c1x; cx++) {
+          if (this.canopyChunks.has(`${cx}_${cy}`)) {
+            anyVisible = true;
+            break outer;
+          }
+        }
+      }
+    }
+
+    if (this.canopyContainer) {
+      this.canopyContainer.setVisible(anyVisible);
+    }
+
     const f = this.canopyWindFilter;
     if (!f) return;
-    if (isEditorMode || zoom < 0.25 || this.canopyChunks.size === 0 || view.width <= 1 || view.height <= 1) {
+    if (isEditorMode || zoom < 0.25 || !anyVisible) {
       f.active = false;
       return;
     }
@@ -1121,37 +1149,71 @@ export class WorldTerrain {
     const count = (c1x - c0x + 1) * (c1y - c0y + 1);
     if (count > 80) {
       this.evictAll();
-      if (this.overviewImg) this.overviewImg.setLighting(this.lightingEnabled);
+      this.lastViewBoundsKey = 'overview';
+      if (this.overviewImg) {
+        this.overviewImg.setVisible(true).setLighting(this.lightingEnabled);
+      }
       return;
     }
-    if (this.overviewImg) {
-      this.overviewImg.setLighting(this.lightingEnabled);
+
+    const boundsKey = `${c0x}_${c1x}_${c0y}_${c1y}`;
+    const boundsChanged = boundsKey !== this.lastViewBoundsKey;
+
+    let allVisibleReady = true;
+    if (boundsChanged || this.queue.size > 0) {
+      for (let cy = c0y; cy <= c1y; cy++) {
+        for (let cx = c0x; cx <= c1x; cx++) {
+          const key = `${cx}_${cy}`;
+          if (!this.chunks.has(key)) {
+            this.queue.add(key);
+            allVisibleReady = false;
+          }
+        }
+      }
     }
 
-    for (let cy = c0y; cy <= c1y; cy++) {
-      for (let cx = c0x; cx <= c1x; cx++) {
-        const key = `${cx}_${cy}`;
-        if (!this.chunks.has(key)) this.queue.add(key);
-      }
-    }
     // Build at most one queued chunk per frame
-    for (const key of this.queue) {
-      this.queue.delete(key);
-      if (!this.chunks.has(key)) {
-        const [cx, cy] = key.split('_').map(Number);
-        this.ensureChunk(cx, cy);
+    if (this.queue.size > 0) {
+      for (const key of this.queue) {
+        this.queue.delete(key);
+        if (!this.chunks.has(key)) {
+          const [cx, cy] = key.split('_').map(Number);
+          this.ensureChunk(cx, cy);
+        }
+        break;
       }
-      break;
-    }
-    // Evict chunks far away (keep 1-chunk margin)
-    const keep = new Set<string>();
-    for (let cy = c0y - 1; cy <= c1y + 1; cy++) {
-      for (let cx = c0x - 1; cx <= c1x + 1; cx++) {
-        keep.add(`${cx}_${cy}`);
+      // Re-check whether all visible chunks are now ready
+      allVisibleReady = true;
+      outerReady: for (let cy = c0y; cy <= c1y; cy++) {
+        for (let cx = c0x; cx <= c1x; cx++) {
+          if (!this.chunks.has(`${cx}_${cy}`)) {
+            allVisibleReady = false;
+            break outerReady;
+          }
+        }
       }
     }
+
+    // Hide overview image once detailed chunks completely cover the viewport (eliminates 100% full-screen overdraw)
+    if (this.overviewImg) {
+      const showOverview = !allVisibleReady;
+      if (this.overviewImg.visible !== showOverview) {
+        this.overviewImg.setVisible(showOverview);
+      }
+      if (showOverview) {
+        this.overviewImg.setLighting(this.lightingEnabled);
+      }
+    }
+
+    if (!boundsChanged) return;
+    this.lastViewBoundsKey = boundsKey;
+
+    // Evict chunks far away (keep 1-chunk margin) — runs only when chunk bounds shift
     for (const key of Array.from(this.chunks.keys())) {
-      if (!keep.has(key)) {
+      const sep = key.indexOf('_');
+      const ecx = Number(key.slice(0, sep));
+      const ecy = Number(key.slice(sep + 1));
+      if (ecx < c0x - 1 || ecx > c1x + 1 || ecy < c0y - 1 || ecy > c1y + 1) {
         this.chunks.get(key)!.destroy();
         this.chunks.delete(key);
         this.scene.textures.remove(`terrain_${key}`);
@@ -1161,7 +1223,6 @@ export class WorldTerrain {
           this.canopyChunks.delete(key);
           this.scene.textures.remove(`terrain_canopy_${key}`);
         }
-        const [ecx, ecy] = key.split('_').map(Number);
         this.clearChunkTrunks(ecx, ecy);
       }
     }
@@ -1171,6 +1232,7 @@ export class WorldTerrain {
 
   private evictAll() {
     this.queue.clear();
+    this.lastViewBoundsKey = '';
     for (const [key, img] of Array.from(this.chunks.entries())) {
       img.destroy();
       this.scene.textures.remove(`terrain_${key}`);
@@ -1300,6 +1362,8 @@ export class WorldTerrain {
       this.tilePatternsReady = true;
       const waterImg = SpriteRegistry.getSourceImage(this.scene, 'tile_terrain_water');
       const grassImg = SpriteRegistry.getSourceImage(this.scene, 'tile_terrain_grass');
+      const cityGardenImg = SpriteRegistry.getSourceImage(this.scene, 'tile_terrain_city_garden');
+      const flowerGardenImg = SpriteRegistry.getSourceImage(this.scene, 'tile_terrain_flower_garden');
       const forestImg = SpriteRegistry.getSourceImage(this.scene, 'tile_terrain_forest');
       const sandImg = SpriteRegistry.getSourceImage(this.scene, 'tile_terrain_sand');
       const alpineRockImg = SpriteRegistry.getSourceImage(this.scene, 'tile_terrain_alpine_rock');
@@ -1326,6 +1390,8 @@ export class WorldTerrain {
 
       this.waterTilePattern = buildScaledPattern(waterImg, 0.5);
       this.grassTilePattern = buildScaledPattern(grassImg, 0.5);
+      this.cityGardenTilePattern = buildScaledPattern(cityGardenImg, 0.25);
+      this.flowerGardenTilePattern = buildScaledPattern(flowerGardenImg, 0.25);
       this.forestTilePattern = buildScaledPattern(forestImg, 0.25);
       this.sandTilePattern = buildScaledPattern(sandImg, 0.5);
       this.alpineRockTilePattern = buildScaledPattern(alpineRockImg, 0.25);
@@ -1341,6 +1407,8 @@ export class WorldTerrain {
       (
         this.waterTilePattern ||
         this.grassTilePattern ||
+        this.cityGardenTilePattern ||
+        this.flowerGardenTilePattern ||
         this.forestTilePattern ||
         this.sandTilePattern ||
         this.alpineRockTilePattern ||
@@ -1361,6 +1429,8 @@ export class WorldTerrain {
       case 'dirt': return this.dirtTilePattern;
       case 'sand': return this.sandTilePattern;
       case 'grass': return this.grassTilePattern;
+      case 'city_garden': return this.cityGardenTilePattern || this.grassTilePattern;
+      case 'flower_garden': return this.flowerGardenTilePattern || this.cityGardenTilePattern || this.grassTilePattern;
       case 'forest': return this.forestTilePattern || this.grassTilePattern;
       case 'alpine_rock': return this.alpineRockTilePattern;
       case 'alpine_summit': return this.alpineSummitTilePattern;
@@ -1896,9 +1966,11 @@ export class WorldTerrain {
 
         const chance = painted === 'forest'
           ? 0.44
-          : painted === 'grass'
-            ? 0.03
-            : (region === 7 ? 0.38 : region === 1 ? 0.5 : 0.03);
+          : painted === 'city_garden'
+            ? 0.06
+            : painted === 'grass'
+              ? 0.03
+              : (region === 7 ? 0.38 : region === 1 ? 0.5 : 0.03);
         if (rand(ix, iy, 11) > chance) continue;
 
         // Avoid cluttering the Timber Yard operational apron (-2650..-2000, -860..-260)
@@ -2018,6 +2090,8 @@ export class WorldTerrain {
     this.tilePatternsReady = false;
     this.waterTilePattern = null;
     this.grassTilePattern = null;
+    this.cityGardenTilePattern = null;
+    this.flowerGardenTilePattern = null;
     this.forestTilePattern = null;
     this.sandTilePattern = null;
     this.alpineRockTilePattern = null;

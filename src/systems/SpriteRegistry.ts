@@ -23,7 +23,9 @@ export type TileAssetKey =
   | 'tile_terrain_sand'
   | 'tile_terrain_alpine_rock'
   | 'tile_terrain_alpine_summit'
-  | 'tile_terrain_water';
+  | 'tile_terrain_water'
+  | 'tile_terrain_city_garden'
+  | 'tile_terrain_flower_garden';
 
 export type TruckAssetKey = `truck_${TruckType}`;
 export type TrailerAssetKey = `trailer_${TrailerType}`;
@@ -41,16 +43,31 @@ export type BuildingAssetKey =
   | 'building_fuel_kiosk'
   | 'building_house_traditional'
   | 'building_house_townhouse'
+  | 'building_house_urban_corner'
+  | 'building_house_duplex'
   | 'building_villa_classic'
   | 'building_villa_modern'
   | 'building_apartment_block'
   | 'building_apartment_modern'
+  | 'building_apartment_2f'
+  | 'building_apartment_4f'
+  | 'building_apartment_10f'
   | 'building_fire_station'
   | 'building_police_station'
   | 'building_hospital'
   | 'building_school'
   | 'building_supermarket'
-  | 'building_town_hall';
+  | 'building_hypermarket'
+  | 'building_town_hall'
+  | 'building_esplanade'
+  | 'building_plaza_statue'
+  | 'building_monument'
+  | 'building_sea_pier'
+  | 'building_farmhouse'
+  | 'building_farm_pasture'
+  | 'building_farm_crops'
+  | 'building_crop_field'
+  | 'building_crop_wheat';
 
 export const BUILDING_ASSET_KEYS: readonly BuildingAssetKey[] = [
   'building_warehouse_big',
@@ -65,16 +82,31 @@ export const BUILDING_ASSET_KEYS: readonly BuildingAssetKey[] = [
   'building_fuel_kiosk',
   'building_house_traditional',
   'building_house_townhouse',
+  'building_house_urban_corner',
+  'building_house_duplex',
   'building_villa_classic',
   'building_villa_modern',
   'building_apartment_block',
   'building_apartment_modern',
+  'building_apartment_2f',
+  'building_apartment_4f',
+  'building_apartment_10f',
   'building_fire_station',
   'building_police_station',
   'building_hospital',
   'building_school',
   'building_supermarket',
+  'building_hypermarket',
   'building_town_hall',
+  'building_esplanade',
+  'building_plaza_statue',
+  'building_monument',
+  'building_sea_pier',
+  'building_farmhouse',
+  'building_farm_pasture',
+  'building_farm_crops',
+  'building_crop_field',
+  'building_crop_wheat',
 ] as const;
 
 export type PropAssetKey =
@@ -163,6 +195,8 @@ export const AVAILABLE_SPRITES: readonly SpriteAssetEntry[] = [
   { key: 'tile_terrain_alpine_rock', url: '/assets/sprites/tiles/terrain_alpine_rock.png', category: 'tile' },
   { key: 'tile_terrain_alpine_summit', url: '/assets/sprites/tiles/terrain_alpine_summit.png', category: 'tile' },
   { key: 'tile_terrain_water', url: '/assets/sprites/tiles/terrain_water.png', category: 'tile' },
+  { key: 'tile_terrain_city_garden', url: '/assets/sprites/tiles/terrain_city_garden.png', category: 'tile' },
+  { key: 'tile_terrain_flower_garden', url: '/assets/sprites/tiles/terrain_flower_garden.png', category: 'tile' },
 
   // Phase D1 — Tractor Trucks (6/6 — 100% complete! RGBA PNG, facing UP / North)
   { key: 'truck_iveco_daily_4x2', url: '/assets/sprites/vehicles/trucks/iveco_daily_4x2.png', category: 'truck' },
@@ -211,6 +245,22 @@ export const AVAILABLE_SPRITES: readonly SpriteAssetEntry[] = [
   { key: 'building_school', url: '/assets/sprites/buildings/school.png', category: 'building' },
   { key: 'building_supermarket', url: '/assets/sprites/buildings/supermarket.png', category: 'building' },
   { key: 'building_town_hall', url: '/assets/sprites/buildings/town_hall.png', category: 'building' },
+  // Phase D3.3 — Expanded City, Plazas, Monuments, Waterfront Dock & Rural Farms (15/15 — RGBA PNG)
+  { key: 'building_house_urban_corner', url: '/assets/sprites/buildings/house_urban_corner.png', category: 'building' },
+  { key: 'building_house_duplex', url: '/assets/sprites/buildings/house_duplex.png', category: 'building' },
+  { key: 'building_apartment_2f', url: '/assets/sprites/buildings/apartment_2f.png', category: 'building' },
+  { key: 'building_apartment_4f', url: '/assets/sprites/buildings/apartment_4f.png', category: 'building' },
+  { key: 'building_apartment_10f', url: '/assets/sprites/buildings/apartment_10f.png', category: 'building' },
+  { key: 'building_hypermarket', url: '/assets/sprites/buildings/hypermarket.png', category: 'building' },
+  { key: 'building_esplanade', url: '/assets/sprites/buildings/esplanade.png', category: 'building' },
+  { key: 'building_plaza_statue', url: '/assets/sprites/buildings/plaza_statue.png', category: 'building' },
+  { key: 'building_monument', url: '/assets/sprites/buildings/monument.png', category: 'building' },
+  { key: 'building_sea_pier', url: '/assets/sprites/buildings/sea_pier.png', category: 'building' },
+  { key: 'building_farmhouse', url: '/assets/sprites/buildings/farmhouse.png', category: 'building' },
+  { key: 'building_farm_pasture', url: '/assets/sprites/buildings/farm_pasture.png', category: 'building' },
+  { key: 'building_farm_crops', url: '/assets/sprites/buildings/farm_crops.png', category: 'building' },
+  { key: 'building_crop_field', url: '/assets/sprites/buildings/crop_field.png', category: 'building' },
+  { key: 'building_crop_wheat', url: '/assets/sprites/buildings/crop_wheat.png', category: 'building' },
 
   // Phase D3.2 — Containers, Vegetation, Rocks & Industrial/Service Station Props (12/12 — RGBA PNG)
   { key: 'prop_container_base', url: '/assets/sprites/props/container_base.png', category: 'prop' },
@@ -368,8 +418,38 @@ export class SpriteRegistry {
         return 'building_school';
       case 'supermarket':
         return 'building_supermarket';
+      case 'hypermarket':
+        return 'building_hypermarket';
       case 'town_hall':
         return 'building_town_hall';
+      case 'house_urban_corner':
+        return 'building_house_urban_corner';
+      case 'house_duplex':
+        return 'building_house_duplex';
+      case 'apartment_2f':
+        return 'building_apartment_2f';
+      case 'apartment_4f':
+        return 'building_apartment_4f';
+      case 'apartment_10f':
+        return 'building_apartment_10f';
+      case 'esplanade':
+        return 'building_esplanade';
+      case 'plaza_statue':
+        return 'building_plaza_statue';
+      case 'monument':
+        return 'building_monument';
+      case 'sea_pier':
+        return 'building_sea_pier';
+      case 'farmhouse':
+        return 'building_farmhouse';
+      case 'farm_pasture':
+        return 'building_farm_pasture';
+      case 'farm_crops':
+        return 'building_farm_crops';
+      case 'crop_field':
+        return 'building_crop_field';
+      case 'crop_wheat':
+        return 'building_crop_wheat';
       default:
         return null;
     }

@@ -90,6 +90,7 @@ interface ChunkEntry {
   objectsVersion: number;
   roadCmds: number;
   objCmds: number;
+  hasContent: boolean;
   lastUsedFrame: number;
 }
 
@@ -125,6 +126,10 @@ export class StaticWorldChunks {
   private solidImg: Phaser.GameObjects.Image | null = null;
   private solidImages: SolidSpriteImages = {};
   private surfaceInitDone = false;
+  private flatScratchDirty = true;
+  private roadScratchDirty = true;
+  private roadFlatScratchDirty = true;
+  private solidScratchDirty = true;
   private static readonly FLAT_SCRATCH_KEY = '__static_world_flat_scratch';
   private static readonly ROAD_SCRATCH_KEY = '__static_world_road_scratch';
   private static readonly ROAD_FLAT_SCRATCH_KEY = '__static_world_road_flat_scratch';
@@ -323,7 +328,7 @@ export class StaticWorldChunks {
   ): { fallbackActive: boolean } {
     this.frameCounter++;
     const immediate = opts?.immediate ?? false;
-    const maxPrefetchBakes = opts?.maxPrefetchBakes ?? 2;
+    const maxPrefetchBakes = opts?.maxPrefetchBakes ?? 1;
 
     const vc0x = Math.max(this.minChunkX, Math.floor(view.x / CHUNK_SIZE));
     const vc1x = Math.min(this.maxChunkX, Math.floor((view.x + view.width) / CHUNK_SIZE));
@@ -349,7 +354,7 @@ export class StaticWorldChunks {
     if (this.fallbackActive) {
       this.fallbackActive = false;
       for (const entry of this.chunks.values()) {
-        entry.rt.setVisible(true);
+        entry.rt.setVisible(entry.hasContent);
       }
     }
 
@@ -363,10 +368,10 @@ export class StaticWorldChunks {
         const existing = this.chunks.get(key);
         if (existing) {
           existing.lastUsedFrame = this.frameCounter;
-          existing.rt.setVisible(true);
           if (existing.roadVersion !== roadVersion || existing.objectsVersion !== objectsVersion) {
             this.bakeIntoEntry(existing, roadVersion, objectsVersion);
           }
+          existing.rt.setVisible(existing.hasContent);
         } else {
           this.createAndBakeChunk(cx, cy, roadVersion, objectsVersion);
         }
@@ -387,7 +392,6 @@ export class StaticWorldChunks {
         const existing = this.chunks.get(key);
         if (existing) {
           existing.lastUsedFrame = this.frameCounter;
-          existing.rt.setVisible(true);
           if (
             (existing.roadVersion !== roadVersion || existing.objectsVersion !== objectsVersion) &&
             (immediate || prefetchDone < maxPrefetchBakes)
@@ -395,6 +399,7 @@ export class StaticWorldChunks {
             this.bakeIntoEntry(existing, roadVersion, objectsVersion);
             prefetchDone++;
           }
+          existing.rt.setVisible(existing.hasContent);
         } else if (immediate || prefetchDone < maxPrefetchBakes) {
           this.createAndBakeChunk(cx, cy, roadVersion, objectsVersion);
           prefetchDone++;
@@ -448,6 +453,7 @@ export class StaticWorldChunks {
       objectsVersion: -1,
       roadCmds: 0,
       objCmds: 0,
+      hasContent: false,
       lastUsedFrame: this.frameCounter,
     };
     this.chunks.set(entry.key, entry);
@@ -471,7 +477,10 @@ export class StaticWorldChunks {
     if (this.flatTex) {
       fctx = this.flatTex.getContext();
       fctx.setTransform(1, 0, 0, 1, 0, 0);
-      fctx.clearRect(0, 0, CHUNK_SIZE, CHUNK_SIZE);
+      if (this.flatScratchDirty) {
+        fctx.clearRect(0, 0, CHUNK_SIZE, CHUNK_SIZE);
+        this.flatScratchDirty = false;
+      }
       fctx.save();
       fctx.translate(-worldX, -worldY);
       this.scratches.flatCtx = fctx;
@@ -485,7 +494,10 @@ export class StaticWorldChunks {
     if (this.roadTex) {
       rctx = this.roadTex.getContext();
       rctx.setTransform(1, 0, 0, 1, 0, 0);
-      rctx.clearRect(0, 0, CHUNK_SIZE, CHUNK_SIZE);
+      if (this.roadScratchDirty) {
+        rctx.clearRect(0, 0, CHUNK_SIZE, CHUNK_SIZE);
+        this.roadScratchDirty = false;
+      }
       rctx.save();
       // Translate into world-space so all road vertices & seamless patterns align 1:1 across chunk borders
       rctx.translate(-worldX, -worldY);
@@ -500,7 +512,10 @@ export class StaticWorldChunks {
     if (this.roadFlatTex) {
       rfctx = this.roadFlatTex.getContext();
       rfctx.setTransform(1, 0, 0, 1, 0, 0);
-      rfctx.clearRect(0, 0, CHUNK_SIZE, CHUNK_SIZE);
+      if (this.roadFlatScratchDirty) {
+        rfctx.clearRect(0, 0, CHUNK_SIZE, CHUNK_SIZE);
+        this.roadFlatScratchDirty = false;
+      }
       rfctx.save();
       rfctx.translate(-worldX, -worldY);
       this.scratches.roadFlatCtx = rfctx;
@@ -514,7 +529,10 @@ export class StaticWorldChunks {
     if (this.solidTex) {
       sctx = this.solidTex.getContext();
       sctx.setTransform(1, 0, 0, 1, 0, 0);
-      sctx.clearRect(0, 0, CHUNK_SIZE, CHUNK_SIZE);
+      if (this.solidScratchDirty) {
+        sctx.clearRect(0, 0, CHUNK_SIZE, CHUNK_SIZE);
+        this.solidScratchDirty = false;
+      }
       sctx.save();
       sctx.translate(-worldX, -worldY);
       sctx.imageSmoothingEnabled = true;
@@ -534,32 +552,57 @@ export class StaticWorldChunks {
     if (rfctx) rfctx.restore();
     if (sctx) sctx.restore();
 
+    if (res.hasFlatTex) this.flatScratchDirty = true;
+    if (res.hasRoadTex) this.roadScratchDirty = true;
+    if (res.hasRoadFlatTex) this.roadFlatScratchDirty = true;
+    if (res.hasSolidTex) this.solidScratchDirty = true;
+
+    const hasContent = Boolean(
+      res.hasFlatTex ||
+      res.hasRoadTex ||
+      res.hasRoadFlatTex ||
+      res.hasSolidTex ||
+      flats.commandBuffer.length > 0 ||
+      roads.commandBuffer.length > 0 ||
+      roadFlats.commandBuffer.length > 0 ||
+      rampBase.commandBuffer.length > 0 ||
+      solids.commandBuffer.length > 0,
+    );
+
     const rt = entry.rt;
-    rt.clear();
-    // Draw layers in strict painter's order:
-    // textured flat pads -> flat vector markings/details -> textured roads -> road markings -> textured roadFlats -> vector roadFlats -> rampBase -> vector solids -> textured solid roofs/props
-    if (res.hasFlatTex && this.flatTex && this.flatImg) {
-      this.flatTex.refresh();
-      rt.draw(this.flatImg, 0, 0);
+    if (!hasContent) {
+      if (entry.hasContent) rt.clear();
+      entry.hasContent = false;
+      rt.setVisible(false);
+    } else {
+      rt.clear();
+      // Draw layers in strict painter's order:
+      // textured flat pads -> flat vector markings/details -> textured roads -> road markings -> textured roadFlats -> vector roadFlats -> rampBase -> vector solids -> textured solid roofs/props
+      if (res.hasFlatTex && this.flatTex && this.flatImg) {
+        this.flatTex.refresh();
+        rt.draw(this.flatImg, 0, 0);
+      }
+      if (flats.commandBuffer.length > 0) rt.draw(flats, -worldX, -worldY);
+      if (res.hasRoadTex && this.roadTex && this.roadImg) {
+        this.roadTex.refresh();
+        rt.draw(this.roadImg, 0, 0);
+      }
+      if (roads.commandBuffer.length > 0) rt.draw(roads, -worldX, -worldY);
+      if (res.hasRoadFlatTex && this.roadFlatTex && this.roadFlatImg) {
+        this.roadFlatTex.refresh();
+        rt.draw(this.roadFlatImg, 0, 0);
+      }
+      if (roadFlats.commandBuffer.length > 0) rt.draw(roadFlats, -worldX, -worldY);
+      if (rampBase.commandBuffer.length > 0) rt.draw(rampBase, -worldX, -worldY);
+      if (solids.commandBuffer.length > 0) rt.draw(solids, -worldX, -worldY);
+      if (res.hasSolidTex && this.solidTex && this.solidImg) {
+        this.solidTex.refresh();
+        rt.draw(this.solidImg, 0, 0);
+      }
+      rt.render();
+      entry.hasContent = true;
+      rt.setVisible(!this.fallbackActive);
     }
-    if (flats.commandBuffer.length > 0) rt.draw(flats, -worldX, -worldY);
-    if (res.hasRoadTex && this.roadTex && this.roadImg) {
-      this.roadTex.refresh();
-      rt.draw(this.roadImg, 0, 0);
-    }
-    if (roads.commandBuffer.length > 0) rt.draw(roads, -worldX, -worldY);
-    if (res.hasRoadFlatTex && this.roadFlatTex && this.roadFlatImg) {
-      this.roadFlatTex.refresh();
-      rt.draw(this.roadFlatImg, 0, 0);
-    }
-    if (roadFlats.commandBuffer.length > 0) rt.draw(roadFlats, -worldX, -worldY);
-    if (rampBase.commandBuffer.length > 0) rt.draw(rampBase, -worldX, -worldY);
-    if (solids.commandBuffer.length > 0) rt.draw(solids, -worldX, -worldY);
-    if (res.hasSolidTex && this.solidTex && this.solidImg) {
-      this.solidTex.refresh();
-      rt.draw(this.solidImg, 0, 0);
-    }
-    rt.render();
 
     // Free command buffer memory immediately
     flats.clear();

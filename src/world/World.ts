@@ -76,6 +76,7 @@ export class World {
   public seed() {
     this.seedRoads();
     this.objects.seedWorld(this.terrain);
+    this.objects.syncRoadMarkingsFromNetwork(this.roads);
     this.terrain.fromPaintJSON([]);
     GarageSystem.getInstance().syncFromWorld(this.objects);
     MissionSystem.getInstance().setCustomMissions([]);
@@ -320,6 +321,7 @@ export class World {
       if (!Array.isArray(d.roads) && !Array.isArray(d.objects)) return false;
       this.roads.fromJSON(d.roads || []);
       this.objects.fromJSON(d.objects || []);
+      this.objects.syncRoadMarkingsFromNetwork(this.roads);
       this.terrain.fromPaintJSON(Array.isArray(d.terrainPaints) ? d.terrainPaints : []);
       if (d.spawn && Number.isFinite(d.spawn.x) && Number.isFinite(d.spawn.y)) {
         this.spawnPoint = { x: d.spawn.x, y: d.spawn.y, angle: d.spawn.angle || 0 };

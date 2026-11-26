@@ -1,7 +1,7 @@
 {
   "name": "rigmaster",
   "private": true,
-  "version": "2.24.0",
+  "version": "2.25.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
@@ -15,7 +15,8 @@
     "test:smoke:bridge": "node scripts/smoke-bridge.mjs",
     "test:smoke:damage": "node scripts/smoke-damage.mjs",
     "test:smoke:trailers": "node scripts/smoke-trailers.mjs",
-    "test:smoke:progression": "node scripts/smoke-progression.mjs"
+    "test:smoke:progression": "node scripts/smoke-progression.mjs",
+    "test:smoke:signals": "node scripts/smoke-traffic-lights.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

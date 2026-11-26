@@ -16,6 +16,12 @@ import { IntersectionSystem } from './IntersectionSystem';
 
 export type RoadSurface = 'asphalt' | 'dirt' | 'cobble';
 
+/** Protective metallic guardrail configuration for ground roads */
+export type RoadGuardrailMode = 'none' | 'curves' | 'both' | 'left' | 'right';
+
+/** Per-control-point guardrail override ('auto' inherits the road's guardrail mode) */
+export type RoadPointGuardrail = 'auto' | 'none' | 'both' | 'left' | 'right';
+
 export interface RoadPoint {
   x: number;
   y: number;
@@ -23,6 +29,8 @@ export interface RoadPoint {
   w: number;
   /** Tangent rotation offset in radians (asymmetric curve control) */
   twist?: number;
+  /** Optional per-section guardrail override around this control point */
+  guardrail?: Exclude<RoadPointGuardrail, 'auto'>;
 }
 
 export interface RoadData {
@@ -35,6 +43,8 @@ export interface RoadData {
    * Roads on different layers never form an intersection node (future-proof
    * for viadutos/túneis). Defaults to 0. */
   layer?: number;
+  /** Protective metallic roadside guardrails on ground roads ('none' | 'curves' | 'both' | 'left' | 'right') */
+  guardrail?: RoadGuardrailMode;
   points: RoadPoint[];
 }
 
@@ -50,6 +60,8 @@ export interface RoadSample {
   z?: number;
   /** Cumulative arc length in px from start of road */
   s?: number;
+  /** Nearest control-point index along the spline (for per-section guardrail overrides) */
+  pointIndex?: number;
 }
 
 export interface BridgeSample extends RoadSample {
@@ -77,6 +89,22 @@ export interface BridgeBarrierSegment {
   thickness: number;
   angle: number;
   roadId: string;
+}
+
+export interface RoadGuardrailSegment {
+  x: number;
+  y: number;
+  length: number;
+  thickness: number;
+  angle: number;
+  roadId: string;
+  side: -1 | 1;
+}
+
+export interface RoadGuardrailRun {
+  roadId: string;
+  side: -1 | 1;
+  points: Array<{ x: number; y: number; tx: number; ty: number }>;
 }
 
 export interface BridgeRoadCache {
@@ -138,6 +166,8 @@ export class RoadNetwork {
   private grid: Map<string, RoadSegment[]> = new Map();
   private bridgeCaches: BridgeRoadCache[] = [];
   private bridgeBarriers: BridgeBarrierSegment[] = [];
+  private roadGuardrails: RoadGuardrailSegment[] = [];
+  private roadGuardrailRuns: Map<string, RoadGuardrailRun[]> = new Map();
   private sampleCache: Map<string, RoadSample[]> = new Map();
   private roadBoundsCache: Map<string, { minX: number; minY: number; maxX: number; maxY: number }> = new Map();
   private nextId: number = 1;
@@ -149,7 +179,14 @@ export class RoadNetwork {
   // DATA EDITING
   // ======================================================================
 
-  public addRoad(surface: RoadSurface, points: RoadPoint[], closed = false, oneWay = false, layer = 0): RoadData {
+  public addRoad(
+    surface: RoadSurface,
+    points: RoadPoint[],
+    closed = false,
+    oneWay = false,
+    layer = 0,
+    guardrail: RoadGuardrailMode = 'none',
+  ): RoadData {
     const normLayer = layer > 0 ? 1 : 0;
     const road: RoadData = {
       id: `rd_${this.nextId++}`,
@@ -157,6 +194,7 @@ export class RoadNetwork {
       closed,
       ...(oneWay ? { oneWay: true } : {}),
       ...(normLayer > 0 ? { layer: normLayer } : {}),
+      ...(normLayer === 0 && guardrail !== 'none' ? { guardrail } : {}),
       points,
     };
     this.roads.push(road);
@@ -230,6 +268,22 @@ export class RoadNetwork {
     if (!road) return;
     if (layer > 0) road.layer = Math.round(layer);
     else delete road.layer;
+    this.rebuildIndex();
+  }
+
+  public setRoadGuardrail(id: string, mode: RoadGuardrailMode) {
+    const road = this.getRoad(id);
+    if (!road) return;
+    if (mode === 'none') delete road.guardrail;
+    else road.guardrail = mode;
+    this.rebuildIndex();
+  }
+
+  public setPointGuardrail(id: string, index: number, mode: RoadPointGuardrail) {
+    const p = this.getRoad(id)?.points[index];
+    if (!p) return;
+    if (mode === 'auto') delete p.guardrail;
+    else p.guardrail = mode;
     this.rebuildIndex();
   }
 
@@ -818,6 +872,14 @@ export class RoadNetwork {
     return this.bridgeBarriers;
   }
 
+  public getRoadGuardrails(): readonly RoadGuardrailSegment[] {
+    return this.roadGuardrails;
+  }
+
+  public getRoadGuardrailRuns(roadId: string): readonly RoadGuardrailRun[] {
+    return this.roadGuardrailRuns.get(roadId) ?? [];
+  }
+
   private rebuildBridgeCaches() {
     this.bridgeCaches = [];
     for (const road of this.roads) {
@@ -891,6 +953,214 @@ export class RoadNetwork {
             roadId: road.id,
           });
         }
+      }
+    }
+
+    this.rebuildRoadGuardrails();
+  }
+
+  /**
+   * Computes protective metallic guardrail runs (for rendering) and static Matter
+   * segments (for physics) on all ground roads that have road-level or per-point
+   * guardrails enabled. Automatically clears intersections and cross-road carriageways.
+   */
+  private rebuildRoadGuardrails() {
+    this.roadGuardrails = [];
+    this.roadGuardrailRuns.clear();
+
+    const groundNodes = IntersectionSystem.getInstance().nodes.filter((n) => n.layer === 0);
+    const CURVE_KAPPA_MIN = 0.00145; // triggers outer rail on curves with radius <= ~690px
+    const RAIL_OFFSET = 7;
+
+    const hitsOtherGroundRoad = (roadId: string, px: number, py: number): boolean => {
+      for (const key of this.cellsAround(px, py, 220)) {
+        const list = this.grid.get(key);
+        if (!list) continue;
+        for (const seg of list) {
+          if (seg.road.id === roadId || (seg.road.layer ?? 0) > 0) continue;
+          const abx = seg.bx - seg.ax, aby = seg.by - seg.ay;
+          const len2 = abx * abx + aby * aby;
+          const t = len2 > 0 ? Phaser.Math.Clamp(((px - seg.ax) * abx + (py - seg.ay) * aby) / len2, 0, 1) : 0;
+          const qx = seg.ax + abx * t, qy = seg.ay + aby * t;
+          const halfW = (seg.wa + (seg.wb - seg.wa) * t) * 0.5;
+          if (Math.hypot(px - qx, py - qy) < halfW + 6) return true;
+        }
+      }
+      return false;
+    };
+
+    for (const road of this.roads) {
+      if ((road.layer ?? 0) > 0) continue;
+      const roadMode: RoadGuardrailMode = road.guardrail ?? 'none';
+      const hasPointOverride = road.points.some((p) => p.guardrail !== undefined && p.guardrail !== 'none');
+      if (roadMode === 'none' && !hasPointOverride) continue;
+
+      const samples = this.getRoadSamples(road, 26);
+      const n = samples.length;
+      if (n < 2) continue;
+
+      // Smoothed signed curvature (rad/px) over ±2 samples so curve rails stay clean & continuous
+      const kappa = new Float32Array(n);
+      if (roadMode === 'curves') {
+        const win = 2;
+        for (let i = 0; i < n; i++) {
+          const iA = road.closed ? (i - win + n) % n : Math.max(0, i - win);
+          const iB = road.closed ? (i + win) % n : Math.min(n - 1, i + win);
+          const sA = samples[iA], sB = samples[iB];
+          const dot = sA.tx * sB.tx + sA.ty * sB.ty;
+          const cross = sA.tx * sB.ty - sA.ty * sB.tx;
+          const dTheta = Math.atan2(cross, dot);
+          let arc = 0;
+          if (road.closed) {
+            let cur = iA;
+            for (let step = 0; step < win * 2; step++) {
+              const nxt = (cur + 1) % n;
+              arc += Math.hypot(samples[nxt].x - samples[cur].x, samples[nxt].y - samples[cur].y);
+              cur = nxt;
+            }
+          } else {
+            for (let k = iA; k < iB; k++) {
+              arc += Math.hypot(samples[k + 1].x - samples[k].x, samples[k + 1].y - samples[k].y);
+            }
+          }
+          kappa[i] = arc > 4 ? dTheta / arc : 0;
+        }
+      }
+
+      const runsForRoad: RoadGuardrailRun[] = [];
+
+      for (const side of [-1, 1] as const) {
+        const active = new Uint8Array(n);
+        const curveMask = new Uint8Array(n);
+
+        for (let i = 0; i < n; i++) {
+          const ptIdx = samples[i].pointIndex ?? 0;
+          const ptMode = road.points[ptIdx]?.guardrail;
+          if (ptMode === 'none') {
+            active[i] = 0;
+          } else if (ptMode === 'both') {
+            active[i] = 1;
+          } else if (ptMode === 'left') {
+            active[i] = side === -1 ? 1 : 0;
+          } else if (ptMode === 'right') {
+            active[i] = side === 1 ? 1 : 0;
+          } else if (roadMode === 'both') {
+            active[i] = 1;
+          } else if (roadMode === 'left') {
+            active[i] = side === -1 ? 1 : 0;
+          } else if (roadMode === 'right') {
+            active[i] = side === 1 ? 1 : 0;
+          } else if (roadMode === 'curves') {
+            // Positive cross = right bend → outer shoulder is left (-1); negative cross = left bend → outer is right (+1)
+            const k = kappa[i];
+            if (Math.abs(k) >= CURVE_KAPPA_MIN && (k > 0 ? -1 : 1) === side) {
+              active[i] = 1;
+              curveMask[i] = 1;
+            }
+          }
+        }
+
+        // Filter tiny 1-2 sample Hermite endpoint inflections, then dilate genuine curve runs by ±2 samples (~52px)
+        if (roadMode === 'curves') {
+          let rStart = -1;
+          for (let i = 0; i <= n; i++) {
+            const on = i < n && curveMask[i] === 1;
+            if (on && rStart < 0) {
+              rStart = i;
+            } else if (!on && rStart >= 0) {
+              if (i - rStart < 3) {
+                for (let k = rStart; k < i; k++) {
+                  curveMask[k] = 0;
+                  const ptMode = road.points[samples[k].pointIndex ?? 0]?.guardrail;
+                  if (ptMode === undefined) active[k] = 0;
+                }
+              }
+              rStart = -1;
+            }
+          }
+          const pad = 2;
+          for (let i = 0; i < n; i++) {
+            if (!curveMask[i]) continue;
+            for (let d = -pad; d <= pad; d++) {
+              const j = road.closed ? (i + d + n) % n : i + d;
+              if (j < 0 || j >= n) continue;
+              const ptMode = road.points[samples[j].pointIndex ?? 0]?.guardrail;
+              if (ptMode === 'none') continue;
+              active[j] = 1;
+            }
+          }
+        }
+
+        // Clear intersection nodes and overlapping ground road carriageways
+        for (let i = 0; i < n; i++) {
+          if (!active[i]) continue;
+          const s = samples[i];
+          const off = s.w * 0.5 + RAIL_OFFSET;
+          const gx = s.x - s.ty * off * side;
+          const gy = s.y + s.tx * off * side;
+
+          let blocked = false;
+          for (const node of groundNodes) {
+            const maxW = node.arms.reduce((m, a) => Math.max(m, a.width), 0);
+            if (Math.hypot(gx - node.x, gy - node.y) < maxW * 0.56 + 24) {
+              blocked = true;
+              break;
+            }
+          }
+          if (!blocked && hitsOtherGroundRoad(road.id, gx, gy)) {
+            blocked = true;
+          }
+          if (blocked) active[i] = 0;
+        }
+
+        // Extract contiguous guardrail runs (min 2 samples; split on sharp cusps)
+        let curPts: Array<{ x: number; y: number; tx: number; ty: number }> = [];
+        const flushRun = () => {
+          if (curPts.length >= 2) {
+            runsForRoad.push({ roadId: road.id, side, points: curPts });
+            for (let k = 0; k < curPts.length - 1; k++) {
+              const a = curPts[k], b = curPts[k + 1];
+              const len = Math.hypot(b.x - a.x, b.y - a.y);
+              if (len < 2) continue;
+              this.roadGuardrails.push({
+                x: (a.x + b.x) * 0.5,
+                y: (a.y + b.y) * 0.5,
+                length: len + 3,
+                thickness: 8,
+                angle: Math.atan2(b.y - a.y, b.x - a.x),
+                roadId: road.id,
+                side,
+              });
+            }
+          }
+          curPts = [];
+        };
+
+        for (let i = 0; i < n; i++) {
+          if (!active[i]) {
+            flushRun();
+            continue;
+          }
+          const s = samples[i];
+          if (curPts.length > 0) {
+            const prev = curPts[curPts.length - 1];
+            if (prev.tx * s.tx + prev.ty * s.ty < 0.25) {
+              flushRun();
+            }
+          }
+          const off = s.w * 0.5 + RAIL_OFFSET;
+          curPts.push({
+            x: s.x - s.ty * off * side,
+            y: s.y + s.tx * off * side,
+            tx: s.tx,
+            ty: s.ty,
+          });
+        }
+        flushRun();
+      }
+
+      if (runsForRoad.length > 0) {
+        this.roadGuardrailRuns.set(road.id, runsForRoad);
       }
     }
   }
@@ -1145,14 +1415,14 @@ export class RoadNetwork {
         dx /= len;
         dy /= len;
 
-        out.push({ x, y, w, tx: dx, ty: dy });
+        out.push({ x, y, w, tx: dx, ty: dy, pointIndex: t < 0.5 ? i : j });
       }
     }
 
     // Final endpoint for open roads (tangent already includes its twist)
     if (!road.closed) {
       const b = pts[n - 1];
-      out.push({ x: b.x, y: b.y, w: b.w, tx: m[n - 1].x, ty: m[n - 1].y });
+      out.push({ x: b.x, y: b.y, w: b.w, tx: m[n - 1].x, ty: m[n - 1].y, pointIndex: n - 1 });
     }
     return out;
   }
@@ -1361,9 +1631,11 @@ export class RoadNetwork {
       closed: r.closed,
       ...(r.oneWay ? { oneWay: true } : {}),
       ...(r.layer !== undefined && r.layer !== 0 ? { layer: r.layer } : {}),
+      ...(r.guardrail && r.guardrail !== 'none' ? { guardrail: r.guardrail } : {}),
       points: r.points.map((p) => ({
         x: Math.round(p.x), y: Math.round(p.y), w: Math.round(p.w),
         ...(p.twist ? { twist: Math.round(Phaser.Math.RadToDeg(p.twist) * 10) / 10 } : {}),
+        ...(p.guardrail ? { guardrail: p.guardrail } : {}),
       })),
     }));
   }
@@ -1371,6 +1643,8 @@ export class RoadNetwork {
   public fromJSON(data: unknown) {
     this.roads = [];
     this.nextId = 1;
+    const validRoadRail = new Set<RoadGuardrailMode>(['none', 'curves', 'both', 'left', 'right']);
+    const validPtRail = new Set<Exclude<RoadPointGuardrail, 'auto'>>(['none', 'both', 'left', 'right']);
     if (Array.isArray(data)) {
       for (const raw of data as any[]) {
         if (!raw || !Array.isArray(raw.points) || raw.points.length < 2) continue;
@@ -1382,15 +1656,23 @@ export class RoadNetwork {
             y: p.y,
             w: Phaser.Math.Clamp(Number(p.w) || 128, MIN_ROAD_WIDTH, MAX_ROAD_WIDTH),
             ...(Number.isFinite(p.twist) ? { twist: Phaser.Math.Clamp(Phaser.Math.DegToRad(Number(p.twist)), -MAX_TWIST, MAX_TWIST) } : {}),
+            ...(typeof p.guardrail === 'string' && validPtRail.has(p.guardrail as any)
+              ? { guardrail: p.guardrail as Exclude<RoadPointGuardrail, 'auto'> }
+              : {}),
           }));
         if (points.length < 2) continue;
         const layer = Number(raw.layer) > 0 ? 1 : 0;
+        const guardrail: RoadGuardrailMode | undefined =
+          typeof raw.guardrail === 'string' && validRoadRail.has(raw.guardrail as any) && raw.guardrail !== 'none'
+            ? (raw.guardrail as RoadGuardrailMode)
+            : undefined;
         const road: RoadData = {
           id: typeof raw.id === 'string' ? raw.id : `rd_${this.nextId++}`,
           surface,
           closed: !!raw.closed,
           ...(raw.oneWay ? { oneWay: true } : {}),
           ...(layer > 0 ? { layer } : {}),
+          ...(layer === 0 && guardrail ? { guardrail } : {}),
           points,
         };
         // Keep nextId ahead of imported ids

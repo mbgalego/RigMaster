@@ -41,6 +41,9 @@ export interface TrafficLightPhase {
   amberMs: number;
 }
 
+/** Type of traffic control automatically generated at an intersection node. */
+export type IntersectionControlType = 'none' | 'signal' | 'stop' | 'yield';
+
 /** Automatically detected intersection node. */
 export interface IntersectionNode {
   id: string;
@@ -53,6 +56,8 @@ export interface IntersectionNode {
   arms: IntersectionArm[];
   /** Whether this node has traffic lights (vs stop/yield/unsignalised) */
   signalized: boolean;
+  /** Active control mode for this intersection node */
+  controlType: IntersectionControlType;
   /** Automatically computed traffic-light phases */
   phases: TrafficLightPhase[];
   /** All-red clearance between phase transitions (ms) */
@@ -94,18 +99,90 @@ export interface TrafficLightSpec {
   x: number;
   y: number;
   angle: number;
-  params: { 
-    dir: 'n' | 's' | 'e' | 'w'; 
-    group: number; 
+  params: {
+    dir: 'n' | 's' | 'e' | 'w';
+    group: number;
     intersectionNode: string;
-    /** Actual approach angle in radians (for diagonal intersections) */
+    /** Actual approach angle in radians (direction of travel INTO the intersection) */
     approachAngle?: number;
+    /** Full carriageway width at the stop-line station (px) */
+    roadWidth?: number;
+    /** Shoulder margin from carriageway edge to traffic-light post (px) */
+    shoulderMargin?: number;
     /** Perpendicular offset from road centerline to stop line center (px).
      *  For a 128px road with two 64px lanes, approach lane center is at width/4 = 32px. */
     stopLineOffset?: number;
     /** Width of the painted stop line (px), spanning the approach lane minus insets. */
     stopLineWidth?: number;
+    /** True when placed along a one-way carriageway (stop line spans full width). */
+    oneWay?: boolean;
   };
+}
+
+/** Specification for a STOP or Yield (Cedência) sign object generated at an intersection arm. */
+export interface ControlSignSpec {
+  x: number;
+  y: number;
+  angle: number;
+  variant: 'stop' | 'yield';
+  params: {
+    intersectionNode: string;
+    approachAngle: number;
+    roadWidth: number;
+    shoulderMargin: number;
+    stopLineOffset: number;
+    stopLineWidth: number;
+    oneWay?: boolean;
+  };
+}
+
+/** Resolved road-marking alignment for any manually or automatically placed signal/sign. */
+export interface RoadMarkingAlignment {
+  dir: 'n' | 's' | 'e' | 'w';
+  approachAngle: number;
+  roadWidth: number;
+  shoulderMargin: number;
+  stopLineOffset: number;
+  stopLineWidth: number;
+  oneWay: boolean;
+}
+
+/** Distance the painted stop bar sits behind the signal post along -approach (px). */
+const STOP_LINE_GAP = 6;
+/** Minimum clearance from any road's asphalt edge to a traffic-light post (px). */
+const TL_MIN_ASPHALT_CLEARANCE = 18;
+/** Minimum clearance from any crossing road's asphalt edge to any point on the stop line (px). */
+const STOP_LINE_CROSS_CLEARANCE = 10;
+
+interface RawIntersectionPoint {
+  x: number;
+  y: number;
+  layer: number;
+  roadId: string;
+  pointIndex: number;
+  exitAngle: number;
+  width: number;
+}
+
+interface PolylineNearest {
+  x: number;
+  y: number;
+  dist: number;
+  width: number;
+  /** Arc length along the sampled polyline (px) */
+  s: number;
+  /** Total arc length of the sampled polyline (px) */
+  totalLen: number;
+  /** Local forward tangent angle along increasing s (radians) */
+  tangentAngle: number;
+}
+
+interface PolylineStation {
+  x: number;
+  y: number;
+  width: number;
+  /** Local tangent pointing AWAY from the intersection along the arm */
+  exitAngle: number;
 }
 
 /** Direction hint from an angle (used for the legacy dir param on traffic_light). */
@@ -124,6 +201,11 @@ function wrapAngle(a: number): number {
   return a;
 }
 
+/** Shortest unsigned angular difference in [0, PI]. */
+function angleDiff(a: number, b: number): number {
+  return Math.abs(wrapAngle(a - b));
+}
+
 /** Normalise an angle to an axis in [0, PI) — opposite directions share an axis. */
 function normaliseAxis(angle: number): number {
   const a = wrapAngle(angle);
@@ -131,7 +213,7 @@ function normaliseAxis(angle: number): number {
   return a;
 }
 
-/** Angular distance between two axes in [0, PI). */
+/** Angular distance between two axes in [0, PI/2]. */
 function axisDistance(a: number, b: number): number {
   let d = Math.abs(a - b);
   while (d > Math.PI / 2) d = Math.PI - d; // axes are undirected: 0 and PI are the same
@@ -176,6 +258,96 @@ function segmentIntersection(
   return { x: ax + abx * t, y: ay + aby * t };
 }
 
+/** Precomputed cumulative arc lengths for a sampled road polyline. */
+function buildArcLengths(samples: Array<{ x: number; y: number }>): number[] {
+  const cum: number[] = new Array(samples.length);
+  cum[0] = 0;
+  for (let i = 1; i < samples.length; i++) {
+    cum[i] = cum[i - 1] + Math.hypot(samples[i].x - samples[i - 1].x, samples[i].y - samples[i - 1].y);
+  }
+  return cum;
+}
+
+/** Closest point on a sampled polyline, returning arc length, total length, width, and local tangent. */
+function nearestOnPolyline(
+  samples: Array<{ x: number; y: number; w: number; tx: number; ty: number }>,
+  cumS: number[],
+  px: number,
+  py: number,
+): PolylineNearest | null {
+  if (samples.length < 2) return null;
+  const totalLen = cumS[cumS.length - 1];
+  let bestDist = Infinity;
+  let best: PolylineNearest | null = null;
+  for (let i = 0; i < samples.length - 1; i++) {
+    const a = samples[i];
+    const b = samples[i + 1];
+    const res = pointToSegment(px, py, a.x, a.y, b.x, b.y);
+    if (res.d < bestDist) {
+      bestDist = res.d;
+      const segLen = cumS[i + 1] - cumS[i];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const tangentAngle = (dx * dx + dy * dy) > 1e-6
+        ? Math.atan2(dy, dx)
+        : Math.atan2(a.ty, a.tx);
+      best = {
+        x: res.px,
+        y: res.py,
+        dist: res.d,
+        width: a.w + (b.w - a.w) * res.t,
+        s: cumS[i] + segLen * res.t,
+        totalLen,
+        tangentAngle,
+      };
+    }
+  }
+  return best;
+}
+
+/** Evaluate position, width, and outward tangent at target arc-length `targetS` along a sampled polyline. */
+function evalPolylineAtS(
+  samples: Array<{ x: number; y: number; w: number; tx: number; ty: number }>,
+  cumS: number[],
+  targetS: number,
+  closed: boolean,
+  dirSign: 1 | -1,
+): PolylineStation | null {
+  if (samples.length < 2) return null;
+  const totalLen = cumS[cumS.length - 1];
+  if (totalLen <= 1e-3) return null;
+
+  let s = targetS;
+  if (closed) {
+    s = ((s % totalLen) + totalLen) % totalLen;
+  } else {
+    s = Phaser.Math.Clamp(s, 0, totalLen);
+  }
+
+  // Binary search for segment containing s
+  let lo = 0;
+  let hi = samples.length - 2;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (cumS[mid] <= s) lo = mid;
+    else hi = mid - 1;
+  }
+  const a = samples[lo];
+  const b = samples[lo + 1];
+  const segLen = cumS[lo + 1] - cumS[lo];
+  const t = segLen > 1e-6 ? Phaser.Math.Clamp((s - cumS[lo]) / segLen, 0, 1) : 0;
+  const x = a.x + (b.x - a.x) * t;
+  const y = a.y + (b.y - a.y) * t;
+  const width = a.w + (b.w - a.w) * t;
+
+  // Smooth local tangent using a small chord window around s to avoid micro-jitter
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const fwdAngle = (dx * dx + dy * dy) > 1e-6 ? Math.atan2(dy, dx) : Math.atan2(a.ty, a.tx);
+  const exitAngle = dirSign > 0 ? fwdAngle : wrapAngle(fwdAngle + Math.PI);
+  return { x, y, width, exitAngle };
+}
+
 export class IntersectionSystem {
   private static instance: IntersectionSystem | null = null;
 
@@ -188,93 +360,134 @@ export class IntersectionSystem {
   public nodes: IntersectionNode[] = [];
   /** Bumped whenever nodes are recomputed. */
   public version: number = 0;
+  /** Most recent RoadNetwork passed into rebuild(), used for polyline clearance checks. */
+  private lastRoadNetwork: RoadNetwork | null = null;
 
   /** Rebuild every intersection node from the current road network. */
   public rebuild(roadNetwork: RoadNetwork): void {
+    this.lastRoadNetwork = roadNetwork;
     const roads = roadNetwork.roads;
-    const rawPoints: Array<{ x: number; y: number; layer: number; roadId: string; pointIndex: number; exitAngle: number }> = [];
+    const rawPoints: RawIntersectionPoint[] = [];
+
+    // Pre-sample every road once for accurate spline crossings, tangents, and T-junctions
+    const sampledById = new Map<string, {
+      road: RoadData;
+      samples: ReturnType<typeof RoadNetwork.sampleRoad>;
+      cumS: number[];
+    }>();
+    for (const road of roads) {
+      const samples = RoadNetwork.sampleRoad(road, 18);
+      sampledById.set(road.id, { road, samples, cumS: buildArcLengths(samples) });
+    }
+
+    /** Push only the real physical arm(s) leaving `(wx, wy)` along `road` (1 for open endpoints, 2 for pass-throughs). */
+    const emitArmsForRoad = (road: RoadData, wx: number, wy: number, layer: number) => {
+      const entry = sampledById.get(road.id);
+      if (!entry || entry.samples.length < 2) return;
+      const nearest = nearestOnPolyline(entry.samples, entry.cumS, wx, wy);
+      if (!nearest) return;
+      // Minimum road stub length (px) to count as a real arm rather than a dead-end tip
+      const minArmStub = 36;
+      const hasForward = road.closed || (nearest.totalLen - nearest.s) >= minArmStub;
+      const hasBackward = road.closed || nearest.s >= minArmStub;
+      if (hasForward) {
+        rawPoints.push({
+          x: nearest.x,
+          y: nearest.y,
+          layer,
+          roadId: road.id,
+          pointIndex: -1,
+          exitAngle: nearest.tangentAngle,
+          width: nearest.width,
+        });
+      }
+      if (hasBackward) {
+        rawPoints.push({
+          x: nearest.x,
+          y: nearest.y,
+          layer,
+          roadId: road.id,
+          pointIndex: -1,
+          exitAngle: wrapAngle(nearest.tangentAngle + Math.PI),
+          width: nearest.width,
+        });
+      }
+    };
 
     // --- 1. Collect candidate intersection points -----------------------
     for (let i = 0; i < roads.length; i++) {
       const roadA = roads[i];
       const layerA = roadA.layer ?? 0;
-      const samplesA = RoadNetwork.sampleRoad(roadA, 24);
+      const entryA = sampledById.get(roadA.id);
+      if (!entryA || entryA.samples.length < 2) continue;
+      const samplesA = entryA.samples;
 
       for (let j = i + 1; j < roads.length; j++) {
         const roadB = roads[j];
         const layerB = roadB.layer ?? 0;
+        const entryB = sampledById.get(roadB.id);
+        if (!entryB || entryB.samples.length < 2) continue;
+
         if (layerA !== layerB) {
           // Different levels never intersect mid-span, EXCEPT ground ramp portals
           // (first and last control points of an open bridge road, which sit at z = 0).
           const groundRoad = layerA === 0 ? roadA : layerB === 0 ? roadB : null;
           const bridgeRoad = layerA > 0 ? roadA : layerB > 0 ? roadB : null;
           if (groundRoad && bridgeRoad && !bridgeRoad.closed && bridgeRoad.points.length >= 2) {
+            const groundEntry = sampledById.get(groundRoad.id)!;
             const portals = [bridgeRoad.points[0], bridgeRoad.points[bridgeRoad.points.length - 1]];
             for (const p of portals) {
-              const nearest = pointToSegmentNearestOnRoad(groundRoad, p.x, p.y);
+              const nearest = nearestOnPolyline(groundEntry.samples, groundEntry.cumS, p.x, p.y);
               if (nearest && nearest.dist <= nearest.width / 2 + 8) {
-                rawPoints.push({ x: p.x, y: p.y, layer: 0, roadId: bridgeRoad.id, pointIndex: -1, exitAngle: 0 });
-                rawPoints.push({ x: nearest.x, y: nearest.y, layer: 0, roadId: groundRoad.id, pointIndex: -1, exitAngle: 0 });
+                emitArmsForRoad(bridgeRoad, p.x, p.y, 0);
+                emitArmsForRoad(groundRoad, nearest.x, nearest.y, 0);
               }
             }
           }
           continue;
         }
 
-        const samplesB = RoadNetwork.sampleRoad(roadB, 24);
+        const samplesB = entryB.samples;
 
-        // a) Segment-segment crossings (X, Y, oblique crossings)
-        // For each crossing we need TWO arms per road (both directions), so we add
-        // two raw points per road with opposite exitAngles derived from the local
-        // tangent at the intersection. This ensures free-form mid-segment crossings
-        // get all 4 arms, not just 2.
-        let crossingFound = false;
-        for (let si = 0; si < samplesA.length - 1 && !crossingFound; si++) {
+        // a) Segment-segment crossings (X, Y, oblique, and multi-crossing loops)
+        const foundHits: Array<{ x: number; y: number }> = [];
+        for (let si = 0; si < samplesA.length - 1; si++) {
           const a1 = samplesA[si], a2 = samplesA[si + 1];
-          for (let sj = 0; sj < samplesB.length - 1 && !crossingFound; sj++) {
+          for (let sj = 0; sj < samplesB.length - 1; sj++) {
             const b1 = samplesB[sj], b2 = samplesB[sj + 1];
             const hit = segmentIntersection(a1.x, a1.y, a2.x, a2.y, b1.x, b1.y, b2.x, b2.y);
             if (!hit) continue;
-            // Only count if it's within both carriageways (half-width slack)
-            const wa = a1.w + (a2.w - a1.w) * 0.5;
-            const wb = b1.w + (b2.w - b1.w) * 0.5;
+            // Skip duplicate hits within the same crossing cluster
+            if (foundHits.some((h) => dist2(h.x, h.y, hit.x, hit.y) < NODE_MERGE_DIST * NODE_MERGE_DIST)) {
+              continue;
+            }
+            const wa = (a1.w + a2.w) * 0.5;
+            const wb = (b1.w + b2.w) * 0.5;
             const dToA = Math.abs((hit.x - a1.x) * (-a1.ty) + (hit.y - a1.y) * a1.tx);
             const dToB = Math.abs((hit.x - b1.x) * (-b1.ty) + (hit.y - b1.y) * b1.tx);
             if (dToA > wa / 2 + 6 || dToB > wb / 2 + 6) continue;
 
-            // Tangent of road A at the hit point (interpolated from segment)
-            const tanAx = a2.x - a1.x, tanAy = a2.y - a1.y;
-            const tanA = Math.atan2(tanAy, tanAx);
-            // Tangent of road B at the hit point
-            const tanBx = b2.x - b1.x, tanBy = b2.y - b1.y;
-            const tanB = Math.atan2(tanBy, tanBx);
-
-            // Two arms per road: opposite directions along the tangent
-            rawPoints.push({ x: hit.x, y: hit.y, layer: layerA, roadId: roadA.id, pointIndex: -1, exitAngle: tanA });
-            rawPoints.push({ x: hit.x, y: hit.y, layer: layerA, roadId: roadA.id, pointIndex: -1, exitAngle: wrapAngle(tanA + Math.PI) });
-            rawPoints.push({ x: hit.x, y: hit.y, layer: layerB, roadId: roadB.id, pointIndex: -1, exitAngle: tanB });
-            rawPoints.push({ x: hit.x, y: hit.y, layer: layerB, roadId: roadB.id, pointIndex: -1, exitAngle: wrapAngle(tanB + Math.PI) });
-            crossingFound = true;
+            foundHits.push(hit);
+            emitArmsForRoad(roadA, hit.x, hit.y, layerA);
+            emitArmsForRoad(roadB, hit.x, hit.y, layerB);
           }
         }
 
-        // b) T-junctions: an endpoint (or any control point) of A lies within B's carriageway
+        // b) T-junctions & snapped joins: a control point of A lies within B's carriageway (or vice versa)
         for (const p of roadA.points) {
-          const nearest = pointToSegmentNearestOnRoad(roadB, p.x, p.y);
+          const nearest = nearestOnPolyline(samplesB, entryB.cumS, p.x, p.y);
           if (!nearest) continue;
-          const wb = nearest.width;
-          if (nearest.dist <= wb / 2 + 8) {
-            rawPoints.push({ x: p.x, y: p.y, layer: layerA, roadId: roadA.id, pointIndex: -1, exitAngle: 0 });
-            rawPoints.push({ x: nearest.x, y: nearest.y, layer: layerB, roadId: roadB.id, pointIndex: -1, exitAngle: 0 });
+          if (nearest.dist <= nearest.width / 2 + 8) {
+            emitArmsForRoad(roadA, p.x, p.y, layerA);
+            emitArmsForRoad(roadB, nearest.x, nearest.y, layerB);
           }
         }
         for (const p of roadB.points) {
-          const nearest = pointToSegmentNearestOnRoad(roadA, p.x, p.y);
+          const nearest = nearestOnPolyline(samplesA, entryA.cumS, p.x, p.y);
           if (!nearest) continue;
-          const wa = nearest.width;
-          if (nearest.dist <= wa / 2 + 8) {
-            rawPoints.push({ x: p.x, y: p.y, layer: layerB, roadId: roadB.id, pointIndex: -1, exitAngle: 0 });
-            rawPoints.push({ x: nearest.x, y: nearest.y, layer: layerA, roadId: roadA.id, pointIndex: -1, exitAngle: 0 });
+          if (nearest.dist <= nearest.width / 2 + 8) {
+            emitArmsForRoad(roadB, p.x, p.y, layerB);
+            emitArmsForRoad(roadA, nearest.x, nearest.y, layerA);
           }
         }
       }
@@ -302,59 +515,423 @@ export class IntersectionSystem {
     return this.nodes.filter((n) => n.arms.some((a) => a.roadId === roadId));
   }
 
+  /** Set the active control type (`none` | `signal` | `stop` | `yield`) on a node. */
+  public setControlType(nodeId: string, controlType: IntersectionControlType): IntersectionControlType {
+    const node = this.nodes.find((n) => n.id === nodeId);
+    if (!node) return 'none';
+    node.controlType = controlType;
+    node.signalized = controlType === 'signal';
+    return controlType;
+  }
+
   /** Toggle whether a node has traffic lights. Returns the new state. */
   public setSignalized(nodeId: string, signalized: boolean): boolean {
     const node = this.nodes.find((n) => n.id === nodeId);
     if (!node) return false;
     node.signalized = signalized;
+    node.controlType = signalized ? 'signal' : 'none';
     return signalized;
   }
 
   /**
-   * Generate traffic-light world-object specs for every arm of a signalized
-   * node. Each light is placed on the right-hand side of its lane, before the
-   * node (where approaching drivers see it), rotated to face them.
+   * Resolves road-marking alignment parameters (`approachAngle`, `roadWidth`,
+   * `shoulderMargin`, `stopLineOffset`, `stopLineWidth`) for an arbitrary post
+   * coordinate `(x, y)` placed next to any road in `roadNetwork`.
+   * Returns `null` when the object is too far from any road carriageway.
    */
-  public getTrafficLightSpecs(nodeId: string): TrafficLightSpec[] {
-    const node = this.nodes.find((n) => n.id === nodeId);
-    if (!node || !node.signalized) return [];
+  public static resolveRoadMarkingParams(
+    x: number,
+    y: number,
+    roadNetwork: RoadNetwork,
+    maxMarginFromEdge = 96,
+  ): RoadMarkingAlignment | null {
+    let best: {
+      road: RoadData;
+      near: PolylineNearest;
+      edgeDist: number;
+      score: number;
+    } | null = null;
 
-    const specs: TrafficLightSpec[] = [];
+    for (const road of roadNetwork.roads) {
+      const samples = RoadNetwork.sampleRoad(road, 12);
+      if (samples.length < 2) continue;
+      const cumS = buildArcLengths(samples);
+      const near = nearestOnPolyline(samples, cumS, x, y);
+      if (!near) continue;
+      const edgeDist = near.dist - near.width / 2;
+      if (edgeDist > maxMarginFromEdge) continue;
+      // Prefer paved roads slightly when equidistant to a dirt spur
+      const surfaceBias = road.surface === 'dirt' ? 14 : 0;
+      const score = Math.abs(edgeDist) + surfaceBias;
+      if (!best || score < best.score) {
+        best = { road, near, edgeDist, score };
+      }
+    }
+
+    if (!best) return null;
+    const { road, near } = best;
+    const tA = wrapAngle(near.tangentAngle);
+    const rightTX = -Math.sin(tA);
+    const rightTY = Math.cos(tA);
+    const lat = (x - near.x) * rightTX + (y - near.y) * rightTY;
+
+    let approachAngle: number;
+    let latAlongRight: number;
+    if (road.oneWay) {
+      approachAngle = tA;
+      latAlongRight = lat;
+    } else if (lat >= 0) {
+      approachAngle = tA;
+      latAlongRight = lat;
+    } else {
+      approachAngle = wrapAngle(tA + Math.PI);
+      latAlongRight = -lat;
+    }
+
+    const roadHalf = near.width / 2;
+    const shoulderMargin = latAlongRight - roadHalf;
+    const stopLineOffset = road.oneWay ? 0 : near.width / 4;
+    const stopLineWidth = road.oneWay
+      ? Math.max(16, near.width - 2 * STOP_LINE_INSET)
+      : Math.max(16, roadHalf - 2 * STOP_LINE_INSET);
+
+    return {
+      dir: angleToDir(approachAngle),
+      approachAngle,
+      roadWidth: Math.round(near.width),
+      shoulderMargin,
+      stopLineOffset,
+      stopLineWidth,
+      oneWay: !!road.oneWay,
+    };
+  }
+
+  /**
+   * Computes collision-free right-shoulder post positions and perpendicular stop-line
+   * stations for every approaching arm of `node`. Shared by traffic lights, STOP signs,
+   * and Yield (Cedência) signs across orthogonal, diagonal (45°), oblique (35°),
+   * T-junction, variable-width, one-way, and curved spline intersections.
+   */
+  private computeArmControlPlacements(
+    node: IntersectionNode,
+    roadNetwork?: RoadNetwork,
+  ): Array<{
+    phaseIndex: number;
+    armIndex: number;
+    arm: IntersectionArm;
+    x: number;
+    y: number;
+    angle: number;
+    dir: 'n' | 's' | 'e' | 'w';
+    approachAngle: number;
+    roadWidth: number;
+    shoulderMargin: number;
+    stopLineOffset: number;
+    stopLineWidth: number;
+    oneWay: boolean;
+  }> {
+    const net = roadNetwork ?? this.lastRoadNetwork;
+    // Pre-sample every road on this node's vertical layer for fast, exact clearance tests
+    const layerPolylines = new Map<string, {
+      road: RoadData;
+      samples: ReturnType<typeof RoadNetwork.sampleRoad>;
+      cumS: number[];
+    }>();
+    if (net) {
+      for (const r of net.roads) {
+        if ((r.layer ?? 0) !== node.layer) continue;
+        const samples = RoadNetwork.sampleRoad(r, 12);
+        if (samples.length >= 2) {
+          layerPolylines.set(r.id, { road: r, samples, cumS: buildArcLengths(samples) });
+        }
+      }
+    }
+
+    /** Returns the minimum signed margin from point (px, py) to road asphalt edges (negative = ON asphalt). */
+    const minMarginToRoads = (px: number, py: number, excludeRoadId?: string): number => {
+      let worst = Infinity;
+      for (const [rId, poly] of layerPolylines.entries()) {
+        if (excludeRoadId && rId === excludeRoadId) continue;
+        const near = nearestOnPolyline(poly.samples, poly.cumS, px, py);
+        if (!near) continue;
+        const margin = near.dist - near.width / 2;
+        if (margin < worst) worst = margin;
+      }
+      return worst;
+    };
+
+    const placements: Array<{
+      phaseIndex: number;
+      armIndex: number;
+      arm: IntersectionArm;
+      x: number;
+      y: number;
+      angle: number;
+      dir: 'n' | 's' | 'e' | 'w';
+      approachAngle: number;
+      roadWidth: number;
+      shoulderMargin: number;
+      stopLineOffset: number;
+      stopLineWidth: number;
+      oneWay: boolean;
+    }> = [];
+
     for (const phase of node.phases) {
       for (const armIdx of phase.armIndices) {
         const arm = node.arms[armIdx];
-        // Right-hand side of the approach lane (y-down coordinates: +PI/2)
-        const rightAngle = arm.entryAngle + Math.PI / 2;
-        const perpOffset = arm.width / 2 + TL_SHOULDER_MARGIN;
-        const rx = Math.cos(rightAngle) * perpOffset;
-        const ry = Math.sin(rightAngle) * perpOffset;
-        // Near-side signal: TL_STOP_OFFSET before the node along the approach
-        const x = arm.entryX - Math.cos(arm.entryAngle) * TL_STOP_OFFSET + rx;
-        const y = arm.entryY - Math.sin(arm.entryAngle) * TL_STOP_OFFSET + ry;
-        // Signal head faces the approaching driver (perpendicular to travel, inward)
-        const angle = arm.entryAngle + Math.PI / 2;
-        // dir parameter matches the approach direction for stop-line rendering (legacy)
-        const dir = angleToDir(arm.entryAngle);
-        specs.push({
+        const armPoly = layerPolylines.get(arm.roadId);
+        const isOneWay = !!armPoly?.road.oneWay;
+
+        // One-way road guard: only emit a control post for an arm whose travel enters the node
+        if (armPoly?.road.oneWay) {
+          const nearNode = nearestOnPolyline(armPoly.samples, armPoly.cumS, arm.entryX, arm.entryY);
+          if (nearNode) {
+            const dotForward = Math.cos(arm.entryAngle) * Math.cos(nearNode.tangentAngle)
+              + Math.sin(arm.entryAngle) * Math.sin(nearNode.tangentAngle);
+            if (dotForward < 0) continue; // vehicles only exit along this arm
+          }
+        }
+
+        // Compute an analytical lower bound for oblique crossings so acute wedges start cleanly clear
+        let minStartDist = TL_STOP_OFFSET;
+        for (let otherIdx = 0; otherIdx < node.arms.length; otherIdx++) {
+          if (otherIdx === armIdx) continue;
+          const other = node.arms[otherIdx];
+          if (other.roadId === arm.roadId) continue;
+          const theta = angleDiff(arm.exitAngle, other.exitAngle);
+          // Only relevant for genuinely oblique / crossing arms (12°..168°)
+          if (theta > 0.21 && theta < Math.PI - 0.21) {
+            const sinT = Math.sin(theta);
+            const halfOther = other.width / 2 + 12;
+            const halfSelf = arm.width / 2 + TL_SHOULDER_MARGIN;
+            // Check whether `other` lies on the right-hand side of our approach (where the post sits)
+            const cross = Math.cos(arm.exitAngle) * Math.sin(other.exitAngle)
+              - Math.sin(arm.exitAngle) * Math.cos(other.exitAngle);
+            // In y-down coords, vehicle approach is -exitDir, vehicle right is -perp(exitDir) => cross < 0
+            const cotTerm = cross < 0 && theta < Math.PI / 2 ? halfSelf / Math.tan(theta) : 0;
+            const est = halfOther / sinT + cotTerm;
+            if (Number.isFinite(est) && est > minStartDist) {
+              minStartDist = Math.min(360, est);
+            }
+          }
+        }
+
+        // Determine polyline traversal along this arm away from the node
+        let nearStart: PolylineNearest | null = null;
+        let dirSign: 1 | -1 = 1;
+        let maxAvailDist = 480;
+        if (armPoly) {
+          nearStart = nearestOnPolyline(armPoly.samples, armPoly.cumS, arm.entryX, arm.entryY);
+          if (nearStart) {
+            const dot = Math.cos(arm.exitAngle) * Math.cos(nearStart.tangentAngle)
+              + Math.sin(arm.exitAngle) * Math.sin(nearStart.tangentAngle);
+            dirSign = dot >= 0 ? 1 : -1;
+            if (!armPoly.road.closed) {
+              const avail = dirSign > 0 ? (nearStart.totalLen - nearStart.s) : nearStart.s;
+              maxAvailDist = Math.max(TL_STOP_OFFSET, Math.min(480, avail - 12));
+            }
+          }
+        }
+
+        const evalAtDist = (dist: number): PolylineStation => {
+          if (armPoly && nearStart) {
+            const targetS = nearStart.s + dirSign * dist;
+            const st = evalPolylineAtS(armPoly.samples, armPoly.cumS, targetS, armPoly.road.closed, dirSign);
+            if (st) return st;
+          }
+          return {
+            x: arm.entryX + Math.cos(arm.exitAngle) * dist,
+            y: arm.entryY + Math.sin(arm.exitAngle) * dist,
+            width: arm.width,
+            exitAngle: arm.exitAngle,
+          };
+        };
+
+        // March outward along the arm's actual polyline until post, stop line, and pavement marking are strictly clear
+        let chosenStation: PolylineStation | null = null;
+        let chosenMargin = TL_SHOULDER_MARGIN;
+        let bestFallback: { station: PolylineStation; margin: number; score: number } | null = null;
+
+        const startD = Math.min(minStartDist, maxAvailDist);
+        const stepD = 8;
+        for (let d = startD; d <= maxAvailDist + 0.5; d += stepD) {
+          const clampedD = Math.min(d, maxAvailDist);
+          const st = evalAtDist(clampedD);
+          const approachAngle = wrapAngle(st.exitAngle + Math.PI);
+          const cosA = Math.cos(approachAngle);
+          const sinA = Math.sin(approachAngle);
+          const rightX = -sinA;
+          const rightY = cosA;
+
+          const roadHalf = st.width / 2;
+          const slOffset = isOneWay ? 0 : st.width / 4;
+          const slWidth = isOneWay
+            ? Math.max(16, st.width - 2 * STOP_LINE_INSET)
+            : Math.max(16, roadHalf - 2 * STOP_LINE_INSET);
+          const slCx = st.x + rightX * slOffset - cosA * STOP_LINE_GAP;
+          const slCy = st.y + rightY * slOffset - sinA * STOP_LINE_GAP;
+
+          // Verify stop line (inner edge, center, outer edge) & upstream stencil center clear EVERY OTHER road
+          const slClearInner = minMarginToRoads(slCx - rightX * (slWidth * 0.5), slCy - rightY * (slWidth * 0.5), arm.roadId);
+          const slClearMid = minMarginToRoads(slCx, slCy, arm.roadId);
+          const slClearOuter = minMarginToRoads(slCx + rightX * (slWidth * 0.5), slCy + rightY * (slWidth * 0.5), arm.roadId);
+          const stencilClear = minMarginToRoads(slCx - cosA * 22, slCy - sinA * 22, arm.roadId);
+          const slWorst = Math.min(slClearInner, slClearMid, slClearOuter, stencilClear);
+
+          // Check default shoulder margin first, then slightly wider shoulder if a neighbor grazes the post
+          let accepted = false;
+          for (const marginTry of [TL_SHOULDER_MARGIN, TL_SHOULDER_MARGIN + 8, TL_SHOULDER_MARGIN + 16]) {
+            const tlX = st.x + rightX * (roadHalf + marginTry);
+            const tlY = st.y + rightY * (roadHalf + marginTry);
+            const postClearAll = minMarginToRoads(tlX, tlY);
+            const score = Math.min(postClearAll - TL_MIN_ASPHALT_CLEARANCE, slWorst - STOP_LINE_CROSS_CLEARANCE);
+            if (!bestFallback || score > bestFallback.score) {
+              bestFallback = { station: st, margin: marginTry, score };
+            }
+            if (postClearAll >= TL_MIN_ASPHALT_CLEARANCE && slWorst >= STOP_LINE_CROSS_CLEARANCE) {
+              chosenStation = st;
+              chosenMargin = marginTry;
+              accepted = true;
+              break;
+            }
+          }
+          if (accepted) break;
+        }
+
+        const finalSt = chosenStation ?? bestFallback?.station ?? evalAtDist(TL_STOP_OFFSET);
+        const finalMargin = chosenStation ? chosenMargin : (bestFallback?.margin ?? TL_SHOULDER_MARGIN);
+
+        const approachAngle = wrapAngle(finalSt.exitAngle + Math.PI);
+        const cosA = Math.cos(approachAngle);
+        const sinA = Math.sin(approachAngle);
+        const rightX = -sinA;
+        const rightY = cosA;
+        const perpOffset = finalSt.width / 2 + finalMargin;
+        const x = finalSt.x + rightX * perpOffset;
+        const y = finalSt.y + rightY * perpOffset;
+        const angle = wrapAngle(approachAngle + Math.PI / 2);
+        const dir = angleToDir(approachAngle);
+        const stopLineOffset = isOneWay ? 0 : finalSt.width / 4;
+        const stopLineWidth = isOneWay
+          ? Math.max(16, finalSt.width - 2 * STOP_LINE_INSET)
+          : Math.max(16, finalSt.width / 2 - 2 * STOP_LINE_INSET);
+
+        placements.push({
+          phaseIndex: phase.index,
+          armIndex: armIdx,
+          arm,
           x: Math.round(x),
           y: Math.round(y),
           angle,
-          params: {
-            dir,
-            group: phase.index,
-            intersectionNode: nodeId,
-            // Store actual approach angle for diagonal intersections
-            approachAngle: arm.entryAngle,
-            // Stop line geometry: centered on approach lane (right-hand lane)
-            // Approach lane center is at arm.width/4 from road centerline
-            // Painted width = arm.width/2 - 2*STOP_LINE_INSET
-            stopLineOffset: arm.width / 4,
-            stopLineWidth: arm.width / 2 - 2 * STOP_LINE_INSET,
-          },
+          dir,
+          approachAngle,
+          roadWidth: Math.round(finalSt.width),
+          shoulderMargin: finalMargin,
+          stopLineOffset,
+          stopLineWidth,
+          oneWay: isOneWay,
         });
       }
     }
-    return specs;
+    return placements;
+  }
+
+  /**
+   * Generate traffic-light world-object specs for every approaching arm of a signalized
+   * node. Marches outward along each arm's actual sampled road polyline until:
+   *  1. The traffic-light post clears EVERY road's asphalt on `node.layer` by >= 18 px.
+   *  2. Every point of the painted stop line and 'STOP' marking sits strictly in the arm's
+   *     approach lane and clears EVERY other crossing road's asphalt by >= 10 px.
+   */
+  public getTrafficLightSpecs(nodeId: string, roadNetwork?: RoadNetwork): TrafficLightSpec[] {
+    const node = this.nodes.find((n) => n.id === nodeId);
+    if (!node || !node.signalized) return [];
+
+    const placements = this.computeArmControlPlacements(node, roadNetwork);
+    return placements.map((p) => ({
+      x: p.x,
+      y: p.y,
+      angle: p.angle,
+      params: {
+        dir: p.dir,
+        group: p.phaseIndex,
+        intersectionNode: nodeId,
+        approachAngle: p.approachAngle,
+        roadWidth: p.roadWidth,
+        shoulderMargin: p.shoulderMargin,
+        stopLineOffset: p.stopLineOffset,
+        stopLineWidth: p.stopLineWidth,
+        ...(p.oneWay ? { oneWay: true } : {}),
+      },
+    }));
+  }
+
+  /**
+   * Generate STOP or Yield (Cedência) sign world-object specs for controlled arms of an
+   * intersection node, including exact asphalt stop/yield line & pavement stencil alignment.
+   *
+   * Priority rules:
+   * - Unequal road widths (>= 16 px difference): controls the narrower/secondary road arms.
+   * - T-junction (one through-road phase with >= 2 arms + stem phase with 1 arm): controls the stem.
+   * - Equal multi-way intersection:
+   *   - `stop`: 4-way STOP on all approaching arms.
+   *   - `yield`: controls crossing phase(s) (`phaseIndex > 0`) so the primary axis retains priority.
+   */
+  public getControlSignSpecs(
+    nodeId: string,
+    variant: 'stop' | 'yield',
+    roadNetwork?: RoadNetwork,
+  ): ControlSignSpec[] {
+    const node = this.nodes.find((n) => n.id === nodeId);
+    if (!node) return [];
+
+    const placements = this.computeArmControlPlacements(node, roadNetwork);
+    if (placements.length === 0) return [];
+
+    let selected = placements;
+    const widths = placements.map((p) => p.roadWidth);
+    const minW = Math.min(...widths);
+    const maxW = Math.max(...widths);
+
+    if (maxW - minW >= 16) {
+      // Narrower secondary road yields / stops for wider arterial
+      const minor = placements.filter((p) => p.roadWidth <= minW + 12);
+      if (minor.length > 0 && minor.length < placements.length) {
+        selected = minor;
+      }
+    } else if (node.phases.length >= 2) {
+      const counts = node.phases.map((ph) => ph.armIndices.length);
+      const maxCount = Math.max(...counts);
+      const minCount = Math.min(...counts);
+      if (maxCount >= 2 && minCount === 1) {
+        // T-junction: side stem stops/yields to the through road
+        const minorPhases = new Set(
+          node.phases.filter((ph) => ph.armIndices.length === minCount).map((ph) => ph.index),
+        );
+        const minor = placements.filter((p) => minorPhases.has(p.phaseIndex));
+        if (minor.length > 0) selected = minor;
+      } else if (variant === 'yield') {
+        // Equal-width 4-way yield: crossing axis yields to main axis (phase 0)
+        const crossing = placements.filter((p) => p.phaseIndex > 0);
+        if (crossing.length > 0) selected = crossing;
+      }
+    }
+
+    return selected.map((p) => ({
+      x: p.x,
+      y: p.y,
+      angle: 0, // Road signs stay upright/readable in top-down view; road markings use approachAngle
+      variant,
+      params: {
+        intersectionNode: nodeId,
+        approachAngle: p.approachAngle,
+        roadWidth: p.roadWidth,
+        shoulderMargin: p.shoulderMargin,
+        stopLineOffset: p.stopLineOffset,
+        stopLineWidth: p.stopLineWidth,
+        ...(p.oneWay ? { oneWay: true } : {}),
+      },
+    }));
   }
 
   // ========================================================================
@@ -363,11 +940,11 @@ export class IntersectionSystem {
 
   /** Merge nearby raw points into nodes, then compute arms & phases for each. */
   private mergePointsIntoNodes(
-    raw: Array<{ x: number; y: number; layer: number; roadId: string; pointIndex: number; exitAngle: number }>,
+    raw: RawIntersectionPoint[],
     roadNetwork: RoadNetwork,
   ): IntersectionNode[] {
     // Union-find style clustering by distance
-    const clusters: Array<{ x: number; y: number; layer: number; members: typeof raw }> = [];
+    const clusters: Array<{ x: number; y: number; layer: number; members: RawIntersectionPoint[] }> = [];
 
     for (const p of raw) {
       let placed = false;
@@ -404,6 +981,7 @@ export class IntersectionSystem {
         layer: cl.layer,
         arms,
         signalized: false, // default: stop / yield / unsignalised
+        controlType: 'none',
         phases,
         allRedMs: DEFAULT_ALL_RED_MS,
         version: this.version,
@@ -412,71 +990,35 @@ export class IntersectionSystem {
     return nodes;
   }
 
-  /** Build arm records from the merged cluster members. */
+  /** Build deduplicated arm records from the merged cluster members. */
   private buildArms(
-    members: Array<{ x: number; y: number; layer: number; roadId: string; pointIndex: number; exitAngle: number }>,
+    members: RawIntersectionPoint[],
     roadNetwork: RoadNetwork,
   ): IntersectionArm[] {
     const arms: IntersectionArm[] = [];
-    const seen = new Set<string>();
+    const DEDUP_ANGLE_RAD = Phaser.Math.DegToRad(22);
 
     for (const m of members) {
       const road = roadNetwork.getRoad(m.roadId);
       if (!road) continue;
 
-      let exitAngle: number;
-      let width: number;
-      let surface: RoadSurface;
-      let bestIdx: number;
-
-      // Segment-segment crossing: exitAngle is already the tangent at the hit point.
-      // Use it for ALL interpolated arms (including eastbound with exitAngle=0).
-      if (m.pointIndex === -1) {
-        exitAngle = m.exitAngle;
-        // Interpolate width/surface at the hit point
-        const nearest = pointToSegmentNearestOnRoad(road, m.x, m.y);
-        width = nearest?.width ?? road.points[0].w;
-        surface = road.surface;
-        bestIdx = -1; // mark as interpolated
-      } else {
-        // Standard: closest control point (T-junctions, grid nodes)
-        let bestD = Infinity;
-        bestIdx = 0;
-        for (let i = 0; i < road.points.length; i++) {
-          const p = road.points[i];
-          const d = dist2(m.x, m.y, p.x, p.y);
-          if (d < bestD) { bestD = d; bestIdx = i; }
-        }
-        const cp = road.points[bestIdx];
-        width = cp.w;
-        surface = road.surface;
-
-        // Tangent at the control point (direction away from node along the road)
-        const tan = RoadNetwork.pointTangent(road, bestIdx);
-        exitAngle = Math.atan2(tan.ty, tan.tx);
-        const toNodeX = m.x - cp.x;
-        const toNodeY = m.y - cp.y;
-        const dot = Math.cos(exitAngle) * toNodeX + Math.sin(exitAngle) * toNodeY;
-        if (dot > 0) exitAngle = wrapAngle(exitAngle + Math.PI); // flip so it points away
-      }
-
-      const entryAngle = wrapAngle(exitAngle + Math.PI); // direction of travel entering the node
+      const exitAngle = wrapAngle(m.exitAngle);
+      const entryAngle = wrapAngle(exitAngle + Math.PI);
       const axis = normaliseAxis(exitAngle);
 
-      // Dedup key: use rounded exitAngle (milliradians) to avoid FP edge cases at π boundaries.
-      // This cleanly separates opposite directions (0 vs π) without quadrant math.
-      const angleKey = Math.round(exitAngle * 1000);
-      const key = `${m.roadId}_${bestIdx >= 0 ? bestIdx : 'x'}_${angleKey}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+      // Deduplicate any arm on the same road pointing in nearly the same direction
+      const duplicate = arms.some(
+        (existing) => existing.roadId === m.roadId && angleDiff(existing.exitAngle, exitAngle) <= DEDUP_ANGLE_RAD,
+      );
+      if (duplicate) continue;
 
       arms.push({
         roadId: m.roadId,
-        pointIndex: bestIdx,
+        pointIndex: m.pointIndex,
         entryX: m.x,
         entryY: m.y,
-        width,
-        surface,
+        width: m.width || road.points[0].w,
+        surface: road.surface,
         exitAngle,
         entryAngle,
         axis,
@@ -496,7 +1038,6 @@ export class IntersectionSystem {
       for (const g of groups) {
         if (axisDistance(g.axis, axis) <= AXIS_MERGE_RAD) {
           g.armIndices.push(i);
-          // Recompute group axis as circular mean
           placed = true;
           break;
         }
@@ -522,27 +1063,4 @@ export class IntersectionSystem {
     }
     return phases;
   }
-}
-
-/** Nearest point on a road's centreline to (x,y), with distance & width at that point. */
-function pointToSegmentNearestOnRoad(
-  road: RoadData,
-  px: number, py: number,
-): { x: number; y: number; dist: number; width: number } | null {
-  const pts = road.points;
-  const n = pts.length;
-  if (n < 2) return null;
-
-  let best: { x: number; y: number; dist: number; width: number } | null = null;
-  const last = road.closed ? n : n - 1;
-  for (let i = 0; i < last; i++) {
-    const a = pts[i];
-    const b = pts[(i + 1) % n];
-    const res = pointToSegment(px, py, a.x, a.y, b.x, b.y);
-    const w = a.w + (b.w - a.w) * res.t;
-    if (best === null || res.d < best.dist) {
-      best = { x: res.px, y: res.py, dist: res.d, width: w };
-    }
-  }
-  return best;
 }

@@ -13,7 +13,7 @@ import { TimeOfDaySystem, TimePeriod } from './systems/TimeOfDaySystem';
 import { WeatherSystem } from './systems/WeatherSystem';
 import { TRAILER_TYPE_TO_LICENSE } from './systems/TrailerManager';
 import type { TrailerType } from './entities/Trailer';
-import type { RoadSurface } from './systems/RoadNetwork';
+import type { RoadSurface, RoadGuardrailMode, RoadPointGuardrail } from './systems/RoadNetwork';
 import type { AddObjectSpec } from './scenes/EditorScene';
 import { compoundParts } from './world/WorldObjects';
 import {
@@ -121,6 +121,23 @@ import {
   Cross,
   GraduationCap,
   ShoppingCart,
+  Anchor,
+  Coffee,
+  Sprout,
+  Trees,
+  Wheat,
+  RefreshCw,
+  ArrowUp,
+  CornerUpRight,
+  CornerUpLeft,
+  ArrowDownRight,
+  CircleMinus,
+  CircleOff,
+  Diamond,
+  MoveUp,
+  SquareParking,
+  Spline,
+  Construction,
 } from 'lucide-react';
 
 /** Catálogo do Criar, organizado por categorias — cada categoria tem o seu
@@ -157,10 +174,20 @@ const CREATE_CATALOG: Array<{
       { spec: { type: 'building', w: 150, h: 110, variant: 'house_traditional', label: 'Casa Tradicional' }, icon: Home },
       { spec: { type: 'building', w: 150, h: 110, variant: 'house_traditional', params: { garageAccess: true }, label: 'Casa c/ Garagem' }, icon: Home },
       { spec: { type: 'building', w: 240, h: 124, variant: 'house_townhouse', label: 'Casas Geminadas' }, icon: Home },
+      { spec: { type: 'building', w: 182, h: 135, variant: 'house_urban_corner', label: 'Casa Citadina' }, icon: Home },
+      { spec: { type: 'building', w: 182, h: 135, variant: 'house_urban_corner', params: { garageAccess: true }, label: 'Casa Citadina c/ Garagem' }, icon: Home },
+      { spec: { type: 'building', w: 200, h: 150, variant: 'house_duplex', label: 'Moradia Urbana' }, icon: Home },
+      { spec: { type: 'building', w: 200, h: 150, variant: 'house_duplex', params: { garageAccess: true }, label: 'Moradia Urbana c/ Garagem' }, icon: Home },
       { spec: { type: 'building', w: 210, h: 145, variant: 'villa_classic', label: 'Vivenda Tradicional' }, icon: Home },
       { spec: { type: 'building', w: 210, h: 145, variant: 'villa_classic', params: { garageAccess: true }, label: 'Vivenda Trad. c/ Garagem' }, icon: Home },
       { spec: { type: 'building', w: 200, h: 162, variant: 'villa_modern', label: 'Vivenda Moderna' }, icon: Home },
       { spec: { type: 'building', w: 200, h: 162, variant: 'villa_modern', params: { garageAccess: true }, label: 'Vivenda Mod. c/ Garagem' }, icon: Home },
+      { spec: { type: 'building', w: 240, h: 200, variant: 'apartment_2f', label: 'Prédio 2 Andares' }, icon: Building },
+      { spec: { type: 'building', w: 240, h: 200, variant: 'apartment_2f', params: { garageAccess: true }, label: 'Prédio 2 And. c/ Garagem' }, icon: Building },
+      { spec: { type: 'building', w: 324, h: 220, variant: 'apartment_4f', label: 'Prédio 4 Andares' }, icon: Building },
+      { spec: { type: 'building', w: 324, h: 220, variant: 'apartment_4f', params: { garageAccess: true, exteriorParking: true }, label: 'Prédio 4 And. Completo' }, icon: Building2 },
+      { spec: { type: 'building', w: 246, h: 290, variant: 'apartment_10f', label: 'Torre 10 Andares' }, icon: Building2 },
+      { spec: { type: 'building', w: 246, h: 290, variant: 'apartment_10f', params: { garageAccess: true, exteriorParking: true }, label: 'Torre 10 And. Completa' }, icon: Building2 },
       { spec: { type: 'building', w: 340, h: 166, variant: 'apartment_block', label: 'Prédio Residencial' }, icon: Building },
       { spec: { type: 'building', w: 340, h: 166, variant: 'apartment_block', params: { garageAccess: true }, label: 'Prédio c/ Garagem' }, icon: Building },
       { spec: { type: 'building', w: 340, h: 166, variant: 'apartment_block', params: { exteriorParking: true }, label: 'Prédio c/ Estacionamento' }, icon: CarFront },
@@ -182,9 +209,26 @@ const CREATE_CATALOG: Array<{
       { spec: { type: 'building', w: 360, h: 278, variant: 'hospital', params: { exteriorParking: true }, label: 'Hospital c/ Estacionamento' }, icon: Cross },
       { spec: { type: 'building', w: 320, h: 185, variant: 'school', label: 'Escola' }, icon: GraduationCap },
       { spec: { type: 'building', w: 360, h: 170, variant: 'supermarket', params: { exteriorParking: true }, label: 'Supermercado' }, icon: ShoppingCart },
+      { spec: { type: 'building', w: 540, h: 328, variant: 'hypermarket', params: { exteriorParking: true }, label: 'Hipermercado' }, icon: ShoppingCart },
       { spec: { type: 'building', w: 250, h: 210, variant: 'town_hall', label: 'Câmara Municipal' }, icon: Landmark },
+      { spec: { type: 'building', w: 230, h: 180, variant: 'esplanade', label: 'Esplanada' }, icon: Coffee },
+      { spec: { type: 'building', w: 280, h: 280, variant: 'plaza_statue', label: 'Praça c/ Estátua' }, icon: Landmark },
+      { spec: { type: 'building', w: 250, h: 254, variant: 'monument', label: 'Monumento' }, icon: Landmark },
       { spec: { type: 'building', w: 220, h: 170, variant: 'church', label: 'Igreja' }, icon: Church },
       { spec: { type: 'building', w: 260, h: 160, variant: 'archway', label: 'Arco Histórico' }, icon: Landmark },
+    ],
+  },
+  {
+    id: 'rural',
+    label: 'Rural',
+    icon: Sprout,
+    items: [
+      { spec: { type: 'building', w: 300, h: 218, variant: 'farmhouse', label: 'Quinta Tradicional' }, icon: Home },
+      { spec: { type: 'building', w: 440, h: 220, variant: 'farm_pasture', label: 'Quinta c/ Animais' }, icon: Trees },
+      { spec: { type: 'building', w: 496, h: 210, variant: 'farm_crops', label: 'Quinta c/ Plantações' }, icon: Sprout },
+      { spec: { type: 'building', w: 432, h: 240, variant: 'crop_field', label: 'Campo de Plantações' }, icon: Sprout },
+      { spec: { type: 'building', w: 434, h: 240, variant: 'crop_wheat', label: 'Campo de Cereal' }, icon: Wheat },
+      { spec: { type: 'building', w: 500, h: 220, variant: 'sea_pier', label: 'Doca Marítima' }, icon: Anchor },
     ],
   },
   {
@@ -195,6 +239,7 @@ const CREATE_CATALOG: Array<{
       { spec: { type: 'dock', w: 128, h: 128, label: 'Doca' }, icon: Warehouse },
       { spec: { type: 'dock_wall', w: 420, h: 56, params: { docks: 3 }, label: 'Muro Docas' }, icon: BrickWall },
       { spec: { type: 'dock_wall', w: 700, h: 56, params: { docks: 6 }, label: 'Muro Docas ×6' }, icon: BrickWall },
+      { spec: { type: 'building', w: 500, h: 220, variant: 'sea_pier', label: 'Doca Marítima' }, icon: Anchor },
     ],
   },
   {
@@ -265,8 +310,20 @@ const CREATE_CATALOG: Array<{
     label: 'Barreiras',
     icon: BrickWall,
     items: [
-      { spec: { type: 'wall', w: 220, h: 26, label: 'Muro' }, icon: BrickWall },
-      { spec: { type: 'jersey_barrier', w: 140, h: 26, label: 'Barreira' }, icon: BrickWall },
+      { spec: { type: 'wall', w: 220, h: 26, label: 'Muro Betão' }, icon: BrickWall },
+      { spec: { type: 'wall', w: 220, h: 26, variant: 'brick', label: 'Muro Tijolo' }, icon: BrickWall },
+      { spec: { type: 'wall', w: 220, h: 28, variant: 'stone', label: 'Muro Pedra' }, icon: Mountain },
+      { spec: { type: 'wall', w: 220, h: 26, variant: 'whitewash', label: 'Muro Caiado' }, icon: Landmark },
+      { spec: { type: 'wall', w: 220, h: 24, variant: 'iron_fence', label: 'Muro c/ Grade' }, icon: Equal },
+      { spec: { type: 'wall', w: 240, h: 24, variant: 'sound_barrier', label: 'Barreira Acústica' }, icon: Volume2 },
+      { spec: { type: 'wall', w: 200, h: 28, variant: 'hedge', label: 'Sebe Viva' }, icon: Trees },
+      { spec: { type: 'wall', w: 200, h: 18, variant: 'wood_fence', label: 'Vedação Madeira' }, icon: Equal },
+      { spec: { type: 'wall', w: 220, h: 18, variant: 'chain_fence', label: 'Rede Metálica' }, icon: Shield },
+      { spec: { type: 'jersey_barrier', w: 140, h: 26, label: 'New Jersey' }, icon: BrickWall },
+      { spec: { type: 'jersey_barrier', w: 180, h: 16, variant: 'guardrail', label: 'Guarda Metálica' }, icon: Shield },
+      { spec: { type: 'jersey_barrier', w: 150, h: 24, variant: 'water_red_white', label: 'Barreira Obra' }, icon: Construction },
+      { spec: { type: 'jersey_barrier', w: 150, h: 24, variant: 'hazard_striped', label: 'Barreira Riscas' }, icon: AlertTriangle },
+      { spec: { type: 'jersey_barrier', w: 140, h: 18, variant: 'bollards', label: 'Pilaretes' }, icon: Circle },
       { spec: { type: 'roundabout', w: 420, h: 420, label: 'Rotunda' }, icon: Circle },
     ],
   },
@@ -294,9 +351,25 @@ const CREATE_CATALOG: Array<{
     items: [
       { spec: { type: 'sign', w: 22, h: 22, variant: 'stop', label: 'STOP' }, icon: OctagonAlert },
       { spec: { type: 'sign', w: 22, h: 22, variant: 'yield', label: 'Cedência' }, icon: AlertTriangle },
-      { spec: { type: 'sign', w: 22, h: 22, variant: 'speed', label: 'Limite 50' }, icon: Gauge },
+      { spec: { type: 'sign', w: 22, h: 22, variant: 'priority_road', label: 'Via c/ Prioridade' }, icon: Diamond },
+      { spec: { type: 'sign', w: 22, h: 22, variant: 'roundabout', label: 'Rotunda' }, icon: RefreshCw },
+      { spec: { type: 'sign', w: 22, h: 22, variant: 'mandatory_straight', label: 'Sentido Obrigatório' }, icon: ArrowUp },
+      { spec: { type: 'sign', w: 22, h: 22, variant: 'mandatory_right', label: 'Obrigatório Direita' }, icon: CornerUpRight },
+      { spec: { type: 'sign', w: 22, h: 22, variant: 'mandatory_left', label: 'Obrigatório Esquerda' }, icon: CornerUpLeft },
+      { spec: { type: 'sign', w: 22, h: 22, variant: 'keep_right', label: 'Contornar Direita' }, icon: ArrowDownRight },
+      { spec: { type: 'sign', w: 22, h: 22, variant: 'one_way', label: 'Sentido Único' }, icon: MoveUp },
+      { spec: { type: 'sign', w: 22, h: 22, variant: 'no_entry', label: 'Sentido Proibido' }, icon: CircleMinus },
+      { spec: { type: 'sign', w: 22, h: 22, variant: 'no_trucks', label: 'Proibido Pesados' }, icon: CircleOff },
       { spec: { type: 'sign', w: 22, h: 22, variant: 'no_parking', label: 'Proibido Estacionar' }, icon: Ban },
+      { spec: { type: 'sign', w: 22, h: 22, variant: 'speed_30', label: 'Limite 30' }, icon: Gauge },
+      { spec: { type: 'sign', w: 22, h: 22, variant: 'speed', label: 'Limite 50' }, icon: Gauge },
+      { spec: { type: 'sign', w: 22, h: 22, variant: 'speed_80', label: 'Limite 80' }, icon: Gauge },
+      { spec: { type: 'sign', w: 22, h: 22, variant: 'speed_120', label: 'Limite 120' }, icon: Gauge },
+      { spec: { type: 'sign', w: 22, h: 22, variant: 'parking', label: 'Estacionamento' }, icon: SquareParking },
       { spec: { type: 'sign', w: 22, h: 22, variant: 'pedestrian', label: 'Peões' }, icon: PersonStanding },
+      { spec: { type: 'sign', w: 28, h: 28, variant: 'danger_roundabout', label: 'Aprox. Rotunda' }, icon: RefreshCw },
+      { spec: { type: 'sign', w: 28, h: 28, variant: 'danger_curve', label: 'Curva Perigosa' }, icon: Spline },
+      { spec: { type: 'sign', w: 28, h: 28, variant: 'danger_work', label: 'Obras na Via' }, icon: Construction },
       { spec: { type: 'sign', w: 36, h: 36, variant: 'steep_uphill', label: 'Subida Acentuada' }, icon: TrendingUp },
       { spec: { type: 'sign', w: 36, h: 36, variant: 'steep_downhill', label: 'Descida Acentuada' }, icon: TrendingDown },
       { spec: { type: 'traffic_light', w: 22, h: 22, params: { dir: 'n', group: 0 }, label: 'Semáforo' }, icon: Lamp },
@@ -518,6 +591,8 @@ export default function App() {
     twistDeg: number;
     oneWay: boolean;
     layer: number;
+    guardrail: RoadGuardrailMode;
+    pointGuardrail: RoadPointGuardrail;
     tooShort: boolean;
     snapToRoads: boolean;
     isolateSelectedRoad: boolean;
@@ -534,6 +609,8 @@ export default function App() {
     twistDeg: 0,
     oneWay: false,
     layer: 0,
+    guardrail: 'none',
+    pointGuardrail: 'auto',
     tooShort: false,
     snapToRoads: true,
     isolateSelectedRoad: false,
@@ -829,6 +906,9 @@ export default function App() {
     let lastTelKey = '';
     let lastEditorFlag: boolean | null = null;
     let lastExamKey = '';
+    let lastRoadUIKey = '';
+    let lastObjUIKey = '';
+    let lastTerrainUIKey = '';
     const interval = setInterval(() => {
       const scene = getMainScene();
       const edScene = getEditorScene();
@@ -885,16 +965,31 @@ export default function App() {
         }
       }
       if (edScene && scene?.isEditorMode) {
-        setRoadUI(edScene.getRoadUIState());
-        setObjectUI(edScene.getObjectUIState());
-        setTerrainUI(edScene.getTerrainUIState());
+        const nextRoad = edScene.getRoadUIState();
+        const roadKey = JSON.stringify(nextRoad);
+        if (roadKey !== lastRoadUIKey) {
+          lastRoadUIKey = roadKey;
+          setRoadUI(nextRoad);
+        }
+        const nextObj = edScene.getObjectUIState();
+        const objKey = JSON.stringify(nextObj);
+        if (objKey !== lastObjUIKey) {
+          lastObjUIKey = objKey;
+          setObjectUI(nextObj);
+        }
+        const nextTerrain = edScene.getTerrainUIState();
+        const terrainKey = JSON.stringify(nextTerrain);
+        if (terrainKey !== lastTerrainUIKey) {
+          lastTerrainUIKey = terrainKey;
+          setTerrainUI(nextTerrain);
+        }
         // The scene can switch tools by itself (e.g. Criar → Objectos after placing)
         if (edScene.editorTool !== editorToolRef.current) {
           editorToolRef.current = edScene.editorTool;
           setEditorTool(edScene.editorTool);
         }
       }
-    }, 60);
+    }, 100);
 
     // Keep the Phaser canvas from stealing pointer events while any HTML modal is open,
     // so buttons like "Continuar" on the exam result popup can actually be clicked.
@@ -1263,7 +1358,7 @@ export default function App() {
       )}
 
       {/* TOP COMPACT INDUSTRIAL APP BAR */}
-      <header className="absolute top-0 left-0 right-0 h-12 bg-slate-950/85 backdrop-blur-md border-b border-cyan-500/30 px-2 sm:px-4 flex items-center justify-between z-50 shadow-lg shadow-black/50">
+      <header className="absolute top-0 left-0 right-0 h-12 bg-slate-950/92 border-b border-cyan-500/30 px-2 sm:px-4 flex items-center justify-between z-50 shadow-lg shadow-black/50">
         <div className="flex items-center gap-1.5 sm:gap-2.5">
         {/* Paint & Drive Mode Switcher */}
           <button
@@ -1900,7 +1995,7 @@ export default function App() {
 
       {/* ACTIVE LICENSE EXAM STATUS BANNER */}
       {activeExam && activeExam.active && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 bg-slate-950/95 border border-cyan-400 px-5 py-2.5 rounded-lg shadow-2xl shadow-cyan-500/30 z-30 flex items-center gap-5 backdrop-blur">
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 bg-slate-950/95 border border-cyan-400 px-5 py-2.5 rounded-lg shadow-2xl shadow-cyan-500/30 z-30 flex items-center gap-5">
           <div>
             <div className="text-[10px] uppercase font-mono tracking-widest text-cyan-400">EXAME EM CURSO</div>
             <div className="text-sm font-bold text-white">Classe {activeExam.licenseId}</div>
@@ -2031,7 +2126,7 @@ export default function App() {
             data-testid="active-mission-banner"
             className={`absolute top-[58px] left-2 right-[134px] sm:right-[170px] lg:left-1/2 lg:right-auto lg:-translate-x-1/2 lg:max-w-[calc(100vw-360px)] bg-slate-950/92 border ${
               isPickup ? 'border-amber-500/60' : 'border-emerald-500/60'
-            } px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-lg shadow-xl z-30 backdrop-blur`}
+            } px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-lg shadow-xl z-30`}
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
@@ -2166,7 +2261,7 @@ export default function App() {
       {!isEditorMode && telemetry.nearbySwapTruck && !modalOpen && (
         <div
           data-testid="swap-truck-prompt"
-          className="fixed bottom-24 left-1/2 -translate-x-1/2 z-30 bg-slate-950/92 border border-emerald-500/60 px-4 py-2 rounded-lg shadow-xl flex items-center gap-3 backdrop-blur"
+          className="fixed bottom-24 left-1/2 -translate-x-1/2 z-30 bg-slate-950/95 border border-emerald-500/60 px-4 py-2 rounded-lg shadow-xl flex items-center gap-3"
         >
           <div className="text-xs">
             <div className="font-semibold text-white">{telemetry.nearbySwapTruck.name}</div>
@@ -2195,7 +2290,7 @@ export default function App() {
       {isEditorMode && (
         <>
           {/* 1. SLIM LEFT VERTICAL DOCK / SIDEBAR — scrollable (up & down) */}
-          <aside className="absolute left-0 top-12 bottom-0 w-[74px] md:w-[88px] z-30 bg-slate-950/95 backdrop-blur-md border-r border-amber-500/40 flex flex-col items-center py-2.5 px-1 shadow-2xl select-none">
+          <aside className="absolute left-0 top-12 bottom-0 w-[74px] md:w-[88px] z-30 bg-slate-950/95 border-r border-amber-500/40 flex flex-col items-center py-2.5 px-1 shadow-2xl select-none">
             {/* Scroll container: tools + ALL object categories — rola com a roda
                 do rato / drag / touch, mas nunca mostra barras nem rola na horizontal */}
             <div
@@ -2411,7 +2506,7 @@ export default function App() {
                 a rolar para a direita (posição fixa: não segue o botão quando a barra rola) */}
             {editorTool === 'add' && (
               <div
-                className="absolute top-2 left-[74px] md:left-[90px] z-40 w-48 sm:w-52 md:w-56 max-w-[calc(100vw-4.5rem)] max-h-[calc(100dvh-9rem)] overflow-y-auto overflow-x-hidden no-scrollbar overscroll-contain touch-pan-y bg-slate-950/95 border border-violet-400/60 rounded-xl shadow-2xl backdrop-blur-md py-1.5 px-1.5 flex flex-col gap-1"
+                className="absolute top-2 left-[74px] md:left-[90px] z-40 w-48 sm:w-52 md:w-56 max-w-[calc(100vw-4.5rem)] max-h-[calc(100dvh-9rem)] overflow-y-auto overflow-x-hidden no-scrollbar overscroll-contain touch-pan-y bg-slate-950/95 border border-violet-400/60 rounded-xl shadow-2xl py-1.5 px-1.5 flex flex-col gap-1"
               >
                 <div className="ed-fs-sm font-mono uppercase tracking-wider text-violet-300 px-1 pb-0.5 font-bold shrink-0">
                   {(() => { const c = CREATE_CATALOG.find((x) => x.id === addCat) ?? CREATE_CATALOG[0]; return c.label; })()}
@@ -2438,7 +2533,7 @@ export default function App() {
             {editorTool === 'terrain' && (
               <div
                 data-testid="panel-editor-terrain"
-                className="absolute top-2 left-[74px] md:left-[90px] z-40 w-60 sm:w-64 max-w-[calc(100vw-4.75rem)] max-h-[calc(100dvh-9rem)] overflow-y-auto overflow-x-hidden no-scrollbar overscroll-contain touch-pan-y bg-slate-950/95 border border-teal-400/60 rounded-xl shadow-2xl backdrop-blur-md p-2 flex flex-col gap-2"
+                className="absolute top-2 left-[74px] md:left-[90px] z-40 w-60 sm:w-64 max-w-[calc(100vw-4.75rem)] max-h-[calc(100dvh-9rem)] overflow-y-auto overflow-x-hidden no-scrollbar overscroll-contain touch-pan-y bg-slate-950/95 border border-teal-400/60 rounded-xl shadow-2xl p-2 flex flex-col gap-2"
               >
                 <div className="flex items-center justify-between px-0.5">
                   <span className="ed-fs-sm font-mono uppercase tracking-wider text-teal-300 font-bold">
@@ -2622,7 +2717,7 @@ export default function App() {
             {/* FLYOUT — submenu da ferramenta Estrada (superfície, sentido, largura, tangente) */}
             {editorTool === 'road' && (
               <div
-                className="absolute top-2 left-[74px] md:left-[90px] z-40 w-48 sm:w-52 md:w-56 max-w-[calc(100vw-4.5rem)] max-h-[calc(100dvh-9rem)] overflow-y-auto overflow-x-hidden no-scrollbar overscroll-contain touch-pan-y bg-slate-950/95 border border-sky-400/60 rounded-xl shadow-2xl backdrop-blur-md py-1.5 px-1.5 flex flex-col gap-1"
+                className="absolute top-2 left-[74px] md:left-[90px] z-40 w-48 sm:w-52 md:w-56 max-w-[calc(100vw-4.5rem)] max-h-[calc(100dvh-9rem)] overflow-y-auto overflow-x-hidden no-scrollbar overscroll-contain touch-pan-y bg-slate-950/95 border border-sky-400/60 rounded-xl shadow-2xl py-1.5 px-1.5 flex flex-col gap-1"
               >
                 <div className="ed-fs-sm font-mono uppercase tracking-wider text-sky-300 px-1 pb-0.5 font-bold shrink-0">ESTRADA</div>
                 {([['asphalt', 'Asfalto'], ['dirt', 'Terra'], ['cobble', 'Calçada']] as Array<[RoadSurface, string]>).map(([id, label]) => (
@@ -2665,6 +2760,36 @@ export default function App() {
                     Ponte curta — rampas ajustadas automaticamente
                   </div>
                 )}
+                {roadUI.layer === 0 && (
+                  <div className="shrink-0 flex flex-col gap-1 bg-slate-900/90 border border-slate-700/80 rounded px-1.5 py-1">
+                    <div className="ed-fs-xs font-mono uppercase tracking-wider text-slate-300 font-bold">
+                      Guardas na Estrada
+                    </div>
+                    <div className="grid grid-cols-5 gap-0.5">
+                      {([
+                        ['none', 'Off', 'Sem barreiras protetoras'],
+                        ['curves', 'Curvas', 'Coloca guarda metálica automaticamente no exterior das curvas'],
+                        ['both', 'Ambos', 'Guarda metálica em ambos os lados da estrada'],
+                        ['left', 'Esq.', 'Guarda metálica apenas do lado esquerdo'],
+                        ['right', 'Dir.', 'Guarda metálica apenas do lado direito'],
+                      ] as Array<[RoadGuardrailMode, string, string]>).map(([mode, lbl, tip]) => (
+                        <button
+                          key={mode}
+                          data-testid={`btn-road-guardrail-${mode}`}
+                          onClick={() => { const ed = getEditorScene(); if (ed) ed.setRoadGuardrail(mode); }}
+                          title={tip}
+                          className={`ed-fs-xs font-bold py-1 px-0.5 rounded border text-center transition ${
+                            roadUI.guardrail === mode
+                              ? 'bg-amber-400 text-black border-amber-200'
+                              : 'bg-slate-950 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+                          }`}
+                        >
+                          {lbl}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="shrink-0 flex items-center gap-1 bg-slate-900 border border-sky-800 rounded px-1 py-0.5 shrink-0">
                   <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeRoadWidth(-16); }} className="text-slate-300 hover:text-white px-1 font-black ed-fs-lg" title="Reduzir largura">−</button>
                   <span className="ed-fs font-bold text-slate-200 w-12 text-center">{roadUI.hasPoint ? 'Secção ' : ''}{Math.round(roadUI.width)}px</span>
@@ -2677,6 +2802,36 @@ export default function App() {
                     <span className="ed-fs font-bold text-slate-200 w-8 text-center">{roadUI.twistDeg}°</span>
                     <button onClick={() => { const ed = getEditorScene(); if (ed) ed.nudgeTwist(5); }} className="text-slate-300 hover:text-white px-1 font-black ed-fs-lg">+</button>
                     <button onClick={() => { const ed = getEditorScene(); if (ed) ed.resetTwist(); }} className="ed-fs-sm font-bold text-violet-300 hover:text-white px-1">Reta</button>
+                  </div>
+                )}
+                {roadUI.hasPoint && roadUI.layer === 0 && (
+                  <div className="shrink-0 flex flex-col gap-1 bg-slate-900/90 border border-violet-500/60 rounded px-1.5 py-1">
+                    <div className="ed-fs-xs font-mono uppercase tracking-wider text-violet-300 font-bold">
+                      Guarda nesta Curva
+                    </div>
+                    <div className="grid grid-cols-5 gap-0.5">
+                      {([
+                        ['auto', 'Auto', 'Seguir a definição geral da estrada'],
+                        ['none', 'Off', 'Sem guarda metálica neste ponto/curva'],
+                        ['left', 'Esq.', 'Guarda metálica no lado esquerdo desta curva'],
+                        ['right', 'Dir.', 'Guarda metálica no lado direito desta curva'],
+                        ['both', 'Ambos', 'Guarda metálica em ambos os lados desta curva'],
+                      ] as Array<[RoadPointGuardrail, string, string]>).map(([mode, lbl, tip]) => (
+                        <button
+                          key={mode}
+                          data-testid={`btn-point-guardrail-${mode}`}
+                          onClick={() => { const ed = getEditorScene(); if (ed) ed.setPointGuardrail(mode); }}
+                          title={tip}
+                          className={`ed-fs-xs font-bold py-1 px-0.5 rounded border text-center transition ${
+                            roadUI.pointGuardrail === mode
+                              ? 'bg-violet-400 text-black border-violet-200'
+                              : 'bg-slate-950 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+                          }`}
+                        >
+                          {lbl}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
                 {roadUI.drawing && (
@@ -2780,18 +2935,43 @@ export default function App() {
                           <span className="ed-fs font-bold text-amber-300 shrink-0">
                             CRUZAMENTO {intUI.armCount} braços · {intUI.phaseCount} fase{intUI.phaseCount !== 1 ? 's' : ''} · camada {intUI.layer}
                           </span>
-                          <button
-                            onClick={() => { const ed = getEditorScene(); if (ed) ed.toggleIntersectionSignalized(); }}
-                            className={`shrink-0 ed-fs font-bold px-2 py-1 rounded border transition ${
-                              intUI.signalized
-                                ? 'bg-amber-400 text-slate-900 border-amber-200 shadow-md shadow-amber-500/30'
-                                : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
-                            }`}
-                          >
-                            {intUI.signalized ? 'Semáforos: ON' : 'Semáforos: OFF'}
-                          </button>
+                          <div className="grid grid-cols-2 gap-1 shrink-0">
+                            {([
+                              ['none', 'Livre'],
+                              ['signal', 'Semáforos'],
+                              ['stop', 'STOP'],
+                              ['yield', 'Cedência'],
+                            ] as const).map(([mode, label]) => {
+                              const active = intUI.controlType === mode;
+                              return (
+                                <button
+                                  key={mode}
+                                  onClick={() => { const ed = getEditorScene(); if (ed) ed.setIntersectionControl(mode); }}
+                                  className={`ed-fs font-bold px-2 py-1 rounded border transition ${
+                                    active
+                                      ? mode === 'signal'
+                                        ? 'bg-amber-400 text-slate-900 border-amber-200 shadow-md shadow-amber-500/30'
+                                        : mode === 'stop'
+                                          ? 'bg-red-500 text-white border-red-300 shadow-md shadow-red-500/30'
+                                          : mode === 'yield'
+                                            ? 'bg-orange-400 text-slate-900 border-orange-200 shadow-md shadow-orange-500/30'
+                                            : 'bg-slate-700 text-white border-slate-500'
+                                      : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
+                                  }`}
+                                >
+                                  {label}
+                                </button>
+                              );
+                            })}
+                          </div>
                           <span className="ed-fs text-slate-500 shrink-0">
-                            {intUI.signalized ? 'semáforos automáticos nos braços' : 'stop / cedência / sem sinal'}
+                            {intUI.controlType === 'signal'
+                              ? 'semáforos + linha de paragem e STOP'
+                              : intUI.controlType === 'stop'
+                                ? 'placas STOP + linha de paragem e STOP'
+                                : intUI.controlType === 'yield'
+                                  ? 'cedência + linha descontínua e triângulo'
+                                  : 'sem sinalização automática'}
                           </span>
                         </>
                       );
@@ -2804,7 +2984,7 @@ export default function App() {
             {/* FLYOUT — submenu da ferramenta Objectos (duplicar/copiar/colar/apagar + tipo de atrelado do pad selecionado) */}
             {editorTool === 'object' && (
               <div
-                className="absolute top-2 left-[74px] md:left-[90px] z-40 w-48 sm:w-52 md:w-56 max-w-[calc(100vw-4.5rem)] max-h-[calc(100dvh-9rem)] overflow-y-auto overflow-x-hidden no-scrollbar overscroll-contain touch-pan-y bg-slate-950/95 border border-amber-400/60 rounded-xl shadow-2xl backdrop-blur-md py-1.5 px-1.5 flex flex-col gap-1"
+                className="absolute top-2 left-[74px] md:left-[90px] z-40 w-48 sm:w-52 md:w-56 max-w-[calc(100vw-4.5rem)] max-h-[calc(100dvh-9rem)] overflow-y-auto overflow-x-hidden no-scrollbar overscroll-contain touch-pan-y bg-slate-950/95 border border-amber-400/60 rounded-xl shadow-2xl py-1.5 px-1.5 flex flex-col gap-1"
               >
                 <div className="ed-fs-sm font-mono uppercase tracking-wider text-amber-300 px-1 pb-0.5 font-bold shrink-0">OBJECTOS</div>
                 <button
@@ -3219,7 +3399,7 @@ export default function App() {
             {/* FLYOUT — ferramenta Composto (marquee) */}
             {editorTool === 'compound' && (
               <div
-                className="absolute top-2 left-[74px] md:left-[90px] z-40 w-48 sm:w-52 md:w-56 max-w-[calc(100vw-4.5rem)] max-h-[calc(100dvh-9rem)] overflow-y-auto overflow-x-hidden no-scrollbar overscroll-contain touch-pan-y bg-slate-950/95 border border-violet-400/60 rounded-xl shadow-2xl backdrop-blur-md py-1.5 px-1.5 flex flex-col gap-1"
+                className="absolute top-2 left-[74px] md:left-[90px] z-40 w-48 sm:w-52 md:w-56 max-w-[calc(100vw-4.5rem)] max-h-[calc(100dvh-9rem)] overflow-y-auto overflow-x-hidden no-scrollbar overscroll-contain touch-pan-y bg-slate-950/95 border border-violet-400/60 rounded-xl shadow-2xl py-1.5 px-1.5 flex flex-col gap-1"
               >
                 <div className="ed-fs-sm font-mono uppercase tracking-wider text-violet-300 px-1 pb-0.5 font-bold shrink-0">COMPOSTO</div>
                 {(() => {
@@ -3282,7 +3462,7 @@ export default function App() {
             {/* FLYOUT — submenu da ferramenta Mover (Pan) */}
             {editorTool === 'pan' && (
               <div
-                className="absolute top-2 left-[74px] md:left-[90px] z-40 w-48 sm:w-52 md:w-56 max-w-[calc(100vw-4.5rem)] max-h-[calc(100dvh-9rem)] overflow-y-auto overflow-x-hidden no-scrollbar overscroll-contain touch-pan-y bg-slate-950/95 border border-cyan-400/60 rounded-xl shadow-2xl backdrop-blur-md py-1.5 px-1.5 flex flex-col gap-1"
+                className="absolute top-2 left-[74px] md:left-[90px] z-40 w-48 sm:w-52 md:w-56 max-w-[calc(100vw-4.5rem)] max-h-[calc(100dvh-9rem)] overflow-y-auto overflow-x-hidden no-scrollbar overscroll-contain touch-pan-y bg-slate-950/95 border border-cyan-400/60 rounded-xl shadow-2xl py-1.5 px-1.5 flex flex-col gap-1"
               >
                 <div className="ed-fs-sm font-mono uppercase tracking-wider text-cyan-300 px-1 pb-0.5 font-bold shrink-0">MOVER</div>
                 <Hand className="ed-icon text-cyan-400 shrink-0 animate-bounce" />
@@ -3295,7 +3475,7 @@ export default function App() {
             {/* FLYOUT — submenu da ferramenta Spawn Point */}
             {editorTool === 'spawn' && (
               <div
-                className="absolute top-2 left-[74px] md:left-[90px] z-40 w-48 sm:w-52 md:w-56 max-w-[calc(100vw-4.5rem)] max-h-[calc(100dvh-9rem)] overflow-y-auto overflow-x-hidden no-scrollbar overscroll-contain touch-pan-y bg-slate-950/95 border border-emerald-400/60 rounded-xl shadow-2xl backdrop-blur-md py-1.5 px-1.5 flex flex-col gap-1"
+                className="absolute top-2 left-[74px] md:left-[90px] z-40 w-48 sm:w-52 md:w-56 max-w-[calc(100vw-4.5rem)] max-h-[calc(100dvh-9rem)] overflow-y-auto overflow-x-hidden no-scrollbar overscroll-contain touch-pan-y bg-slate-950/95 border border-emerald-400/60 rounded-xl shadow-2xl py-1.5 px-1.5 flex flex-col gap-1"
               >
                 <div className="ed-fs-sm font-mono uppercase tracking-wider text-emerald-300 px-1 pb-0.5 font-bold shrink-0">SPAWN</div>
                 <Compass className="ed-icon text-emerald-400 shrink-0 animate-spin" />
@@ -3549,7 +3729,7 @@ export default function App() {
                         <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/45 to-slate-950/15" />
                         <div className="absolute top-2.5 left-3 right-3 flex items-center justify-between gap-2">
                           <span
-                            className="px-2 py-0.5 rounded font-black text-[11px] font-mono bg-slate-950/85 backdrop-blur-sm"
+                            className="px-2 py-0.5 rounded font-black text-[11px] font-mono bg-slate-950/92"
                             style={{ color: hub.color, border: `1px solid ${hub.color}88` }}
                           >
                             {hub.badge} • HUB REGIONAL

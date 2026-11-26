@@ -115,6 +115,9 @@ export class MainScene extends Phaser.Scene {
   private bridgeBarrierBodies: MatterJS.BodyType[] = [];
   private bridgeBarrierVersion: number = -1;
   private bridgeRenderVersion: number = -1;
+  private lastBridgeRender = { x: NaN, y: NaN, halfW: 0, halfH: 0 };
+  private lastHubSignStateKey: string = '';
+  private lastHubSignPulseAt: number = -1000;
   private bridgeUnderpassAlpha: number = 1;
   private pumpGraphics: Phaser.GameObjects.Graphics | null = null;
   private roadRenderVersion: number = -1;
@@ -520,8 +523,10 @@ export class MainScene extends Phaser.Scene {
       true,
       true,
     );
+    this.matter.world.drawDebug = this.debugMatter;
     if (this.matter.world.debugGraphic) {
       this.matter.world.debugGraphic.setVisible(this.debugMatter);
+      if (!this.debugMatter) this.matter.world.debugGraphic.clear();
     }
 
     // 2. Spawn parked independent trailers, parked fleet trucks, then active rig
@@ -636,8 +641,7 @@ export class MainScene extends Phaser.Scene {
       const worldPt = cam.getWorldPoint(pointer.x, pointer.y);
       const tx = this.truck.body.position.x;
       const ty = this.truck.body.position.y;
-      for (const o of this.world.objects.objects) {
-        if (o.type !== 'gas_pump') continue;
+      for (const o of this.world.objects.gasPumps) {
         // Hit-test the pump footprint in local rotated space with screen-space padding
         // that stays comfortable at any zoom — phones start zoomed out (~0.5).
         const pad = 20 / cam.zoom;
@@ -787,31 +791,82 @@ export class MainScene extends Phaser.Scene {
    * object in the world. Non-dominant hubs show a crisp, always-visible architectural
    * totem; dominant hubs (100% progress) light up with a pulsing neon halo & glow.
    */
-  private drawHubSigns(time: number) {
+  private drawHubSigns(time: number, view: Phaser.Geom.Rectangle) {
     if (!this.hubSignsGraphics) {
       this.hubSignsGraphics = this.add.graphics().setDepth(13);
     }
 
-    const g = this.hubSignsGraphics;
-    g.clear();
-
     const signs = this.world.objects.hubSigns;
+    const M = 260;
+    const vx0 = view.x - M;
+    const vy0 = view.y - M;
+    const vx1 = view.x + view.width + M;
+    const vy1 = view.y + view.height + M;
+
+    // Collect visible signs & detect whether any visible hub is dominant (needs pulsing animation)
     const activeIds = new Set<string>();
-    const pulse = 0.5 + 0.5 * Math.sin(time / 320);
+    const visibleSigns: Array<{
+      sign: (typeof signs)[number];
+      dominant: boolean;
+      col: number;
+      hexColor: string;
+      displayText: string;
+    }> = [];
+    let anyVisibleDominant = false;
+    let stateKey = `${this.world.objects.version}|`;
 
     for (const sign of signs) {
       activeIds.add(sign.id);
+      const inView = sign.x >= vx0 && sign.x <= vx1 && sign.y >= vy0 && sign.y <= vy1;
+      if (!inView) {
+        const existingText = this.hubSignTexts.get(sign.id);
+        if (existingText && existingText.visible) existingText.setVisible(false);
+        continue;
+      }
       const hubId =
         typeof sign.params?.hubId === 'string' && sign.params.hubId.trim().length > 0
           ? sign.params.hubId.trim()
           : sign.id;
       const hub = this.garageSystem.hasHub(hubId) ? this.garageSystem.getHub(hubId) : null;
       const dominant = !!hub && hub.isDominant;
+      if (dominant) anyVisibleDominant = true;
       const rawColor = hub?.color ?? (typeof sign.params?.color === 'string' ? sign.params.color : '#38bdf8');
       const col = hub?.neonColorHex ?? parseInt(rawColor.replace('#', '') || '38bdf8', 16);
+      const hexColor = '#' + col.toString(16).padStart(6, '0');
       const label = (hub?.name ?? String(sign.params?.name || 'NOVO HUB')).toUpperCase();
       const badge = (hub?.badge ?? String(sign.params?.badge || 'HUB')).toUpperCase().slice(0, 8);
+      const displayText = badge ? `[${badge}] ${label}` : label;
+      stateKey += `${sign.id}:${sign.x},${sign.y}:${dominant ? 1 : 0}:${col}:${displayText}|`;
+      visibleSigns.push({ sign, dominant, col, hexColor, displayText });
+    }
 
+    // Destroy text labels belonging to deleted hub_sign objects
+    for (const [id, txt] of this.hubSignTexts.entries()) {
+      if (!activeIds.has(id)) {
+        txt.destroy();
+        this.hubSignTexts.delete(id);
+      }
+    }
+
+    // Skip expensive Graphics clear/redraw unless visible signs changed or a dominant hub needs a ~15Hz pulse tick
+    const needsPulse = anyVisibleDominant && time - this.lastHubSignPulseAt >= 66;
+    if (stateKey === this.lastHubSignStateKey && !needsPulse) {
+      return;
+    }
+    this.lastHubSignStateKey = stateKey;
+    if (anyVisibleDominant) this.lastHubSignPulseAt = time;
+
+    const g = this.hubSignsGraphics;
+    g.clear();
+    if (visibleSigns.length === 0) {
+      g.setVisible(false);
+      return;
+    }
+    g.setVisible(true);
+
+    const pulse = 0.5 + 0.5 * Math.sin(time / 320);
+    for (const item of visibleSigns) {
+      const { sign, dominant, col, hexColor, displayText } = item;
       const x = sign.x;
       const y = sign.y;
 
@@ -849,33 +904,31 @@ export class MainScene extends Phaser.Scene {
       g.fillStyle(dominant ? 0x4ade80 : col, dominant ? 0.85 + 0.15 * pulse : 0.7);
       g.fillCircle(x + 23, y - 31, dominant ? 3.5 : 2.5);
 
-      // Dynamic text label above signboard
+      // Dynamic text label above signboard — ONLY call setText/setColor when changed (avoids per-frame texImage2D!)
       let text = this.hubSignTexts.get(sign.id);
       if (!text) {
-        text = this.add.text(x, y - 82, '', {
+        text = this.add.text(x, y - 82, displayText, {
           fontFamily: 'monospace',
           fontSize: '12px',
           fontStyle: 'bold',
-          color: '#ffffff',
+          color: hexColor,
           stroke: '#020617',
           strokeThickness: 4,
         }).setOrigin(0.5).setDepth(13);
+        text.setData('lastColor', hexColor);
         this.hubSignTexts.set(sign.id, text);
+      } else {
+        if (text.text !== displayText) text.setText(displayText);
+        if (text.getData('lastColor') !== hexColor) {
+          text.setColor(hexColor);
+          text.setData('lastColor', hexColor);
+        }
+        if (text.x !== x || text.y !== y - 82) {
+          text.setPosition(x, y - 82);
+        }
       }
-      const displayText = badge ? `[${badge}] ${label}` : label;
-      if (text.text !== displayText) text.setText(displayText);
-      text.setPosition(x, y - 82);
-      text.setColor('#' + col.toString(16).padStart(6, '0'));
       text.setAlpha(dominant ? 0.85 + 0.15 * pulse : 0.9);
       text.setVisible(true);
-    }
-
-    // Destroy text labels belonging to deleted hub_sign objects
-    for (const [id, txt] of this.hubSignTexts.entries()) {
-      if (!activeIds.has(id)) {
-        txt.destroy();
-        this.hubSignTexts.delete(id);
-      }
     }
   }
 
@@ -2630,8 +2683,10 @@ export class MainScene extends Phaser.Scene {
 
   public togglePhysicsDebug() {
     this.debugMatter = !this.debugMatter;
+    this.matter.world.drawDebug = this.debugMatter;
     if (this.matter.world.debugGraphic) {
       this.matter.world.debugGraphic.setVisible(this.debugMatter);
+      if (!this.debugMatter) this.matter.world.debugGraphic.clear();
     }
   }
 
@@ -2669,15 +2724,16 @@ export class MainScene extends Phaser.Scene {
     // Keep exam target dock (marker + painted dock tile) in sync with the active exam
     this.syncExamTarget(time);
 
-    // Neon hub signs for dominated regional hubs
-    this.drawHubSigns(time);
-
     // Keep Matter bridge ramp walls / deck guardrails synced with roadNetwork edits
     this.syncBridgeBarriers();
 
     // Static world chunks (flats + ground roads + roadFlats + solids) & elevated bridges
     const cam = this.cameras.main;
     const liveView = this.getCameraView(cam);
+
+    // Neon hub signs for dominated regional hubs (viewport-culled & memoized)
+    this.drawHubSigns(time, liveView);
+
     this.renderStaticWorldAndRoads(cam, liveView);
     // Gas pump highlight (nearby / refuelling)
     this.renderPumps();
@@ -3110,8 +3166,7 @@ export class MainScene extends Phaser.Scene {
       const ty = this.truck.body.position.y;
       const currentHubId = this.garageSystem.findHubForPosition(tx, ty);
       let nearestDist = 110; // highlight distance
-      for (const o of this.world.objects.objects) {
-        if (o.type !== 'gas_pump') continue;
+      for (const o of this.world.objects.gasPumps) {
         const d = Phaser.Math.Distance.Between(tx, ty, o.x, o.y);
         if (d < nearestDist) {
           nearestDist = d;
@@ -3687,16 +3742,37 @@ export class MainScene extends Phaser.Scene {
    * Only falls back to direct roadGraphics drawing on extreme Editor whole-island zoom-outs.
    */
   private renderStaticWorldAndRoads(cam: Phaser.Cameras.Scene2D.Camera, view: Phaser.Geom.Rectangle) {
-    // 1. Elevated viaducts & low ramp aprons: static on the map — rebuild ONLY on roadNetwork.version change
-    if (this.bridgeRenderVersion !== this.roadNetwork.version) {
+    // 1. Elevated viaducts & low ramp aprons: viewport-culled with generous 1200px margin
+    //    so distant bridges don't re-tessellate ~10,600 Graphics commands on the CPU every frame!
+    const bMidX = view.x + view.width * 0.5;
+    const bMidY = view.y + view.height * 0.5;
+    const bHalfW = view.width * 0.5;
+    const bHalfH = view.height * 0.5;
+    const lastB = this.lastBridgeRender;
+    const needsBridgeRebuild =
+      this.bridgeRenderVersion !== this.roadNetwork.version ||
+      Number.isNaN(lastB.x) ||
+      Math.abs(bMidX - lastB.x) > 420 ||
+      Math.abs(bMidY - lastB.y) > 420 ||
+      bHalfW > lastB.halfW + 320 ||
+      bHalfH > lastB.halfH + 320;
+    if (needsBridgeRebuild) {
       this.bridgeRenderVersion = this.roadNetwork.version;
+      this.lastBridgeRender = { x: bMidX, y: bMidY, halfW: bHalfW, halfH: bHalfH };
       this.rampBaseGraphics?.clear();
       this.bridgeShadowGraphics?.clear();
       this.bridgeRoadGraphics?.clear();
-      const INF = 1e6;
+      const bMargin = 1200;
+      const bMinX = view.x - bMargin;
+      const bMinY = view.y - bMargin;
+      const bMaxX = view.x + view.width + bMargin;
+      const bMaxY = view.y + view.height + bMargin;
       for (const cache of this.roadNetwork.getBridgeCaches()) {
-        this.renderBridgeCache(cache, -INF, -INF, INF, INF);
+        this.renderBridgeCache(cache, bMinX, bMinY, bMaxX, bMaxY);
       }
+      this.rampBaseGraphics?.setVisible((this.rampBaseGraphics.commandBuffer.length ?? 0) > 0);
+      this.bridgeShadowGraphics?.setVisible((this.bridgeShadowGraphics.commandBuffer.length ?? 0) > 0);
+      this.bridgeRoadGraphics?.setVisible((this.bridgeRoadGraphics.commandBuffer.length ?? 0) > 0);
     }
 
     // 2. Chunked static world textures (flats + ground roads + roadFlats + solids)
@@ -3874,6 +3950,121 @@ export class MainScene extends Phaser.Scene {
           }
         }
       }
+
+      // 5. Protective metallic road guardrails (curves / shoulders — baked cleanly into static chunks)
+      const guardrailRuns = this.roadNetwork.getRoadGuardrailRuns(road.id);
+      if (guardrailRuns.length > 0) {
+        const strokeRun = (
+          pts: Array<{ x: number; y: number; tx: number; ty: number }>,
+          lineW: number,
+          color: number,
+          alpha: number,
+          ox = 0,
+          oy = 0,
+        ) => {
+          g.lineStyle(lineW, color, alpha);
+          let drawing = false;
+          for (let i = 0; i < pts.length; i++) {
+            const p = pts[i];
+            const vis = p.x >= vx0 - 120 && p.x <= vx1 + 120 && p.y >= vy0 - 120 && p.y <= vy1 + 120;
+            if (!vis) {
+              if (drawing) { g.strokePath(); drawing = false; }
+              continue;
+            }
+            if (!drawing) {
+              g.beginPath();
+              g.moveTo(p.x + ox, p.y + oy);
+              drawing = true;
+            } else {
+              g.lineTo(p.x + ox, p.y + oy);
+            }
+          }
+          if (drawing) g.strokePath();
+        };
+
+        for (const run of guardrailRuns) {
+          const pts = run.points;
+          if (pts.length < 2) continue;
+
+          // Drop shadow beside the road shoulder
+          strokeRun(pts, 9, 0x050810, 0.34, 2.5, 3);
+
+          // Steel support posts every ~32px (drawn slightly outboard of the W-beam)
+          let postAcc = 12;
+          g.fillStyle(0x334155, 0.96);
+          for (let i = 0; i < pts.length - 1; i++) {
+            const a = pts[i], bS = pts[i + 1];
+            const segLen = Math.hypot(bS.x - a.x, bS.y - a.y);
+            if (segLen < 0.001) continue;
+            let d = 0;
+            while (d < segLen) {
+              const step = Math.min(segLen - d, 32 - postAcc);
+              d += step;
+              postAcc += step;
+              if (postAcc >= 31.99) {
+                postAcc = 0;
+                const u = d / segLen;
+                const px = a.x + (bS.x - a.x) * u;
+                const py = a.y + (bS.y - a.y) * u;
+                if (px >= vx0 - 40 && px <= vx1 + 40 && py >= vy0 - 40 && py <= vy1 + 40) {
+                  const nx = -a.ty * run.side;
+                  const ny = a.tx * run.side;
+                  g.fillCircle(px + nx * 2.5, py + ny * 2.5, 3.2);
+                }
+              }
+            }
+          }
+
+          // Galvanized W-beam rail: outer dark steel casing + bright silver beam + ridge highlight
+          strokeRun(pts, 7.5, 0x1e293b, 0.96);
+          strokeRun(pts, 4.4, 0x94a3b8, 0.98);
+          strokeRun(pts, 1.5, 0xe2e8f0, 0.9);
+
+          // Flared terminal end-caps at the start and end of the run
+          const pStart = pts[0];
+          const pEnd = pts[pts.length - 1];
+          for (const [ep, dir] of [[pStart, -1], [pEnd, 1]] as const) {
+            if (ep.x >= vx0 - 40 && ep.x <= vx1 + 40 && ep.y >= vy0 - 40 && ep.y <= vy1 + 40) {
+              const nx = -ep.ty * run.side;
+              const ny = ep.tx * run.side;
+              const ex = ep.x + ep.tx * dir * 8 + nx * 4;
+              const ey = ep.y + ep.ty * dir * 8 + ny * 4;
+              g.lineStyle(5.5, 0x1e293b, 0.96);
+              g.lineBetween(ep.x, ep.y, ex, ey);
+              g.lineStyle(2.8, 0xcbd5e1, 0.95);
+              g.lineBetween(ep.x, ep.y, ex, ey);
+              g.fillStyle(0xf59e0b, 0.95);
+              g.fillCircle(ex, ey, 2.4);
+            }
+          }
+
+          // Cat's-eye road delineator reflectors every ~64px
+          let refAcc = 24;
+          for (let i = 0; i < pts.length - 1; i++) {
+            const a = pts[i], bS = pts[i + 1];
+            const segLen = Math.hypot(bS.x - a.x, bS.y - a.y);
+            if (segLen < 0.001) continue;
+            let d = 0;
+            while (d < segLen) {
+              const step = Math.min(segLen - d, 64 - refAcc);
+              d += step;
+              refAcc += step;
+              if (refAcc >= 63.99) {
+                refAcc = 0;
+                const u = d / segLen;
+                const px = a.x + (bS.x - a.x) * u;
+                const py = a.y + (bS.y - a.y) * u;
+                if (px >= vx0 - 40 && px <= vx1 + 40 && py >= vy0 - 40 && py <= vy1 + 40) {
+                  g.fillStyle(0x0f172a, 0.9);
+                  g.fillCircle(px, py, 2.7);
+                  g.fillStyle(run.side === -1 ? 0xfbbf24 : 0xf8fafc, 0.98);
+                  g.fillCircle(px, py, 1.8);
+                }
+              }
+            }
+          }
+        }
+      }
     }
     return drewRoadTex;
   }
@@ -3998,6 +4189,22 @@ export class MainScene extends Phaser.Scene {
         collisionFilter: {
           category: isRamp ? COLLISION_CAT.RAMP_WALL : COLLISION_CAT.BRIDGE_RAIL,
           mask: isRamp ? COLLISION_MASK.RAMP_WALL : COLLISION_MASK.BRIDGE_RAIL,
+        },
+      });
+      this.bridgeBarrierBodies.push(body);
+    }
+
+    // Ground-level protective road guardrails (collide with ground layer 0 only; low friction so skidding trucks glide safely)
+    for (const seg of this.roadNetwork.getRoadGuardrails()) {
+      const body = this.matter.add.rectangle(seg.x, seg.y, seg.length, seg.thickness, {
+        isStatic: true,
+        angle: seg.angle,
+        label: 'road_guardrail',
+        friction: 0.16,
+        restitution: 0.06,
+        collisionFilter: {
+          category: COLLISION_CAT.GROUND_OBS,
+          mask: COLLISION_MASK.GROUND_OBS,
         },
       });
       this.bridgeBarrierBodies.push(body);
@@ -4289,9 +4496,7 @@ export class MainScene extends Phaser.Scene {
       }
     };
 
-    for (const o of this.world.objects.objects) {
-      if (o.type !== 'gas_pump') continue;
-
+    for (const o of this.world.objects.gasPumps) {
       const dist = Phaser.Math.Distance.Between(tx, ty, o.x, o.y);
 
       if (this.refuellingPump && this.refuellingPump.x === o.x && this.refuellingPump.y === o.y) {

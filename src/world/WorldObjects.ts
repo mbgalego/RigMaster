@@ -4,6 +4,7 @@ import { WorldTerrain } from './WorldTerrain';
 import { COLLISION_CAT, COLLISION_MASK } from '../physics/CollisionLayers';
 import type { FlatSurfacePatterns, SolidSpriteImages } from './StaticWorldChunks';
 import { SpriteRegistry } from '../systems/SpriteRegistry';
+import { IntersectionSystem } from '../systems/IntersectionSystem';
 
 export interface FlatSurfaceTarget {
   ctx: CanvasRenderingContext2D;
@@ -52,8 +53,8 @@ export type WObjType =
   | 'road_turnout'    // road-coloured roadside bay (layby, parallel, perpendicular, diagonal, diagonal_truck)
   | 'roundabout'      // circular island with circulating lane (solid centre island)
   | 'crosswalk'       // flat zebra crossing (stripes along w, spans h)
-  | 'wall'            // solid masonry wall (rotatable, any length)
-  | 'jersey_barrier'  // solid concrete barrier (rotatable)
+  | 'wall'            // solid wall/fence (variant: concrete|brick|stone|whitewash|iron_fence|sound_barrier|hedge|wood_fence|chain_fence)
+  | 'jersey_barrier'  // solid road barrier (variant: concrete|guardrail|water_red_white|hazard_striped|bollards)
   | 'building'        // solid box with roof detail (variant: 'warehouse'|'warehouse_big'|'warehouse_docks'|'shed'|'garage'|'gabled'|'church'|'archway'|'convenience_store'|'restaurant')
   | 'container_stack' // solid stack of shipping containers (variant: colour)
   | 'crane'           // port gantry crane (decor)
@@ -63,7 +64,7 @@ export type WObjType =
   | 'air_water'       // tyre-air, water & vacuum service island (solid)
   | 'price_sign'      // fuel price totem (solid)
   | 'lamp'            // street lamp (solid small)
-  | 'sign'            // traffic sign (variant: 'stop'|'yield'|'speed'|'no_parking'|'pedestrian'|'steep_uphill'|'steep_downhill') (solid small)
+  | 'sign'            // traffic sign (stop|yield|speed|speed_30|speed_80|speed_120|no_parking|no_entry|no_trucks|pedestrian|roundabout|mandatory_straight|mandatory_right|mandatory_left|keep_right|priority_road|one_way|parking|steep_uphill|steep_downhill|danger_curve|danger_roundabout|danger_work)
   | 'traffic_light'   // signal head (params: dir 'n'|'s'|'e'|'w', group 0|1)
   | 'wind_turbine'    // alpine wind turbine (solid mast base + animated spinning 3-blade rotor)
   | 'log_pile'        // stacked timber logs at logging yard (solid)
@@ -208,19 +209,28 @@ function isRoadOverlayType(t: WObjType): boolean { return ROAD_OVERLAY_TYPES.has
 export const RESIDENTIAL_GARAGE_VARIANTS = new Set<string>([
   'house_traditional',
   'house_townhouse',
+  'house_urban_corner',
+  'house_duplex',
   'villa_classic',
   'villa_modern',
   'apartment_block',
   'apartment_modern',
+  'apartment_2f',
+  'apartment_4f',
+  'apartment_10f',
 ]);
 
 /** Variantes urbanas/cívicas que suportam parque de estacionamento exterior integrado. */
 export const EXTERIOR_PARKING_VARIANTS = new Set<string>([
   'apartment_block',
   'apartment_modern',
+  'apartment_2f',
+  'apartment_4f',
+  'apartment_10f',
   'villa_classic',
   'villa_modern',
   'supermarket',
+  'hypermarket',
   'hospital',
   'school',
   'town_hall',
@@ -233,6 +243,13 @@ export const EMERGENCY_FORECOURT_VARIANTS = new Set<string>([
   'fire_station',
   'police_station',
   'hospital',
+]);
+
+/** Variantes de edifício/estrutura transitáveis (sem colisão estática — docas marítimas e campos agrícolas). */
+export const DRIVABLE_BUILDING_VARIANTS = new Set<string>([
+  'sea_pier',
+  'crop_field',
+  'crop_wheat',
 ]);
 
 export interface BuildingApronExtent {
@@ -265,12 +282,28 @@ export function getBuildingApronExtent(o: WorldObject): BuildingApronExtent {
   if (v === 'hospital') {
     return { front: hasParking ? 180 : 98, side: 18, back: 6 };
   }
-  if (v === 'apartment_block' || v === 'apartment_modern') {
+  if (v === 'hypermarket') {
+    return { front: 214, side: 32, back: 10 };
+  }
+  if (
+    v === 'apartment_block' ||
+    v === 'apartment_modern' ||
+    v === 'apartment_2f' ||
+    v === 'apartment_4f' ||
+    v === 'apartment_10f'
+  ) {
     if (hasGarage && hasParking) return { front: 158, side: 20, back: 8 };
     if (hasParking) return { front: 150, side: 18, back: 8 };
     return { front: 98, side: 12, back: 6 };
   }
-  if (v === 'house_traditional' || v === 'house_townhouse' || v === 'villa_classic' || v === 'villa_modern') {
+  if (
+    v === 'house_traditional' ||
+    v === 'house_townhouse' ||
+    v === 'house_urban_corner' ||
+    v === 'house_duplex' ||
+    v === 'villa_classic' ||
+    v === 'villa_modern'
+  ) {
     if (hasParking) return { front: 138, side: 16, back: 8 };
     return { front: 88, side: 12, back: 6 };
   }
@@ -463,6 +496,10 @@ export class WorldObjects {
   private lightClock = 0;
   private cachedRepairBays: RepairBay[] = [];
   private cachedRepairBaysVersion = -1;
+  private cachedHubSigns: WorldObject[] = [];
+  private cachedHubSignsVersion = -1;
+  private cachedGasPumps: WorldObject[] = [];
+  private cachedGasPumpsVersion = -1;
   private lightingEnabled = false;
   private containerTintCache = new Map<string, HTMLCanvasElement>();
   private turbineSprites = new Map<
@@ -765,9 +802,22 @@ export class WorldObjects {
     return pads;
   }
 
-  /** All editable HUB marker signs currently placed in the world. */
+  /** All editable HUB marker signs currently placed in the world (version-cached). */
   public get hubSigns(): WorldObject[] {
-    return this.objects.filter((o) => o.type === 'hub_sign');
+    if (this.cachedHubSignsVersion !== this.version) {
+      this.cachedHubSigns = this.objects.filter((o) => o.type === 'hub_sign');
+      this.cachedHubSignsVersion = this.version;
+    }
+    return this.cachedHubSigns;
+  }
+
+  /** All gas pumps currently placed in the world (version-cached). */
+  public get gasPumps(): WorldObject[] {
+    if (this.cachedGasPumpsVersion !== this.version) {
+      this.cachedGasPumps = this.objects.filter((o) => o.type === 'gas_pump');
+      this.cachedGasPumpsVersion = this.version;
+    }
+    return this.cachedGasPumps;
   }
 
   /** Rotated-rect hit test for the object editor (padded for easy grabbing) */
@@ -805,6 +855,8 @@ export class WorldObjects {
     const gripOf = (o: WorldObject): number => {
       if (PAVED_SURFACE_TYPES.has(o.type) && testRect(o)) return SURFACE_GRIP.asphalt;
       if (o.type === 'building') {
+        if (o.variant === 'sea_pier' && testRect(o)) return SURFACE_GRIP.asphalt;
+        if ((o.variant === 'crop_field' || o.variant === 'crop_wheat') && testRect(o)) return SURFACE_GRIP.dirt;
         const apron = getBuildingApronExtent(o);
         if (apron.front > 0) {
           const dx = x - o.x, dy = y - o.y;
@@ -953,6 +1005,7 @@ export class WorldObjects {
     const y0 = ccy * CHUNK_PX, y1 = y0 + CHUNK_PX;
     for (const o of this.objects) {
       if (!SOLID_TYPES.has(o.type)) continue;
+      if (o.type === 'building' && DRIVABLE_BUILDING_VARIANTS.has(o.variant ?? '')) continue;
       const r = Math.max(o.w, o.h) / 2 + 8;
       if (o.x + r < x0 || o.x - r > x1 || o.y + r < y0 || o.y - r > y1) continue;
       let body: MatterJS.BodyType | undefined;
@@ -967,6 +1020,7 @@ export class WorldObjects {
         };
         for (const part of compoundParts(o)) {
           if (part.type === 'compound' || !SOLID_TYPES.has(part.type)) continue;
+          if (part.type === 'building' && DRIVABLE_BUILDING_VARIANTS.has(part.variant ?? '')) continue;
           const px = o.x + c * part.x - s * part.y;
           const py = o.y + s * part.x + c * part.y;
           const pa = o.angle + part.angle;
@@ -1494,6 +1548,7 @@ export class WorldObjects {
     const flatObjs: WorldObject[] = [];
     const roadFlatObjs: WorldObject[] = [];
     const buildingApronObjs: WorldObject[] = [];
+    const signRoadMarkings: WorldObject[] = [];
     for (let cy = y0; cy <= y1; cy++) {
       for (let cx = x0; cx <= x1; cx++) {
         const list = this.grid.get(`${cx}_${cy}`);
@@ -1501,7 +1556,12 @@ export class WorldObjects {
         for (const o of list) {
           if (drawn.has(o.id)) continue;
           drawn.add(o.id);
-          if (o.type === 'traffic_light') continue; // animated: rendered every frame by renderLights
+          if (o.type === 'traffic_light') {
+            // Static STOP line & pavement lettering bake ONCE into StaticWorldChunks;
+            // only the animated LED housing renders dynamically in renderTrafficLights().
+            signRoadMarkings.push(o);
+            continue;
+          }
 
           // COMPOUND: desenhado por decomposição — cada parte é renderizada
           // como um objecto normal (flats ordenados por z, sólidos por cima).
@@ -1517,12 +1577,23 @@ export class WorldObjects {
               // Culling por parte (compostos podem ser muito extensos)
               if (p.x + p.w / 2 < view.x - padM || p.x - p.w / 2 > view.x + view.width + padM) continue;
               if (p.y + p.h / 2 < view.y - padM || p.y - p.h / 2 > view.y + view.height + padM) continue;
+              if (p.type === 'traffic_light') {
+                signRoadMarkings.push(p);
+                continue;
+              }
               if (isRoadOverlayType(p.type) && roadFlats) {
                 roadFlatObjs.push(p);
               } else if (isFlatType(p.type)) {
                 flatObjs.push(p);
               } else {
                 if (pApron.front > 0) buildingApronObjs.push(p);
+                if (
+                  p.type === 'sign' &&
+                  (p.variant === 'stop' || p.variant === 'yield') &&
+                  p.params?.approachAngle !== undefined
+                ) {
+                  signRoadMarkings.push(p);
+                }
                 this.drawSolid(solids, p, solidTex);
                 if (p.type === 'lamp' && overhead) this.drawOverhead(overhead, p);
               }
@@ -1544,6 +1615,13 @@ export class WorldObjects {
             if (o.type === 'building' && getBuildingApronExtent(o).front > 0) {
               buildingApronObjs.push(o);
             }
+            if (
+              o.type === 'sign' &&
+              (o.variant === 'stop' || o.variant === 'yield') &&
+              o.params?.approachAngle !== undefined
+            ) {
+              signRoadMarkings.push(o);
+            }
             this.drawSolid(solids, o, solidTex);
             if (o.type === 'lamp' && overhead) {
               this.drawOverhead(overhead, o);
@@ -1561,6 +1639,56 @@ export class WorldObjects {
       roadFlatObjs.sort((a, b) => this.flatZ(a) - this.flatZ(b));
       for (const o of roadFlatObjs) this.drawFlat(roadFlats, o, roadFlatTex ?? null);
     }
+    if (signRoadMarkings.length > 0) {
+      const markingTarget = roadFlats ?? solids;
+      for (const o of signRoadMarkings) {
+        const kind: 'traffic_light' | 'stop' | 'yield' =
+          o.type === 'traffic_light' ? 'traffic_light' : (o.variant as 'stop' | 'yield');
+        this.drawApproachRoadMarking(markingTarget, o, kind);
+      }
+    }
+  }
+
+  /**
+   * Auto-aligns pre-existing STOP / Yield signs (and traffic lights missing alignment)
+   * against the nearest road in `roadNetwork` so asphalt stop/yield lines and 'STOP'
+   * pavement markings appear automatically across the entire map.
+   */
+  public syncRoadMarkingsFromNetwork(roadNetwork: RoadNetwork): number {
+    let updated = 0;
+    for (const o of this.objects) {
+      if (o.type === 'sign' && (o.variant === 'stop' || o.variant === 'yield')) {
+        if (o.params?.approachAngle !== undefined) continue;
+        const resolved = IntersectionSystem.resolveRoadMarkingParams(o.x, o.y, roadNetwork);
+        if (!resolved) continue;
+        o.params = {
+          ...(o.params || {}),
+          approachAngle: resolved.approachAngle,
+          roadWidth: resolved.roadWidth,
+          shoulderMargin: resolved.shoulderMargin,
+          stopLineOffset: resolved.stopLineOffset,
+          stopLineWidth: resolved.stopLineWidth,
+          ...(resolved.oneWay ? { oneWay: true } : {}),
+        };
+        updated++;
+      } else if (o.type === 'traffic_light' && o.params?.approachAngle === undefined && !o.params?.dir) {
+        const resolved = IntersectionSystem.resolveRoadMarkingParams(o.x, o.y, roadNetwork);
+        if (!resolved) continue;
+        o.params = {
+          ...(o.params || {}),
+          dir: resolved.dir,
+          approachAngle: resolved.approachAngle,
+          roadWidth: resolved.roadWidth,
+          shoulderMargin: resolved.shoulderMargin,
+          stopLineOffset: resolved.stopLineOffset,
+          stopLineWidth: resolved.stopLineWidth,
+          ...(resolved.oneWay ? { oneWay: true } : {}),
+        };
+        updated++;
+      }
+    }
+    if (updated > 0) this.version++;
+    return updated;
   }
 
   /** Paint order within the FLATS layer — lower = drawn first (underneath). */
@@ -1627,118 +1755,272 @@ export class WorldObjects {
     }
   }
 
+  /** Draws a single oriented rectangle via two triangles (works identically in WebGL & Canvas2D chunk baker). */
+  private fillOrientedRect(
+    g: Phaser.GameObjects.Graphics,
+    cx: number,
+    cy: number,
+    perpX: number,
+    perpY: number,
+    cosA: number,
+    sinA: number,
+    hw: number,
+    hh: number,
+  ) {
+    const c1x = cx + perpX * hw + cosA * hh;
+    const c1y = cy + perpY * hw + sinA * hh;
+    const c2x = cx - perpX * hw + cosA * hh;
+    const c2y = cy - perpY * hw + sinA * hh;
+    const c3x = cx - perpX * hw - cosA * hh;
+    const c3y = cy - perpY * hw - sinA * hh;
+    const c4x = cx + perpX * hw - cosA * hh;
+    const c4y = cy + perpY * hw - sinA * hh;
+    g.fillTriangle(c1x, c1y, c2x, c2y, c3x, c3y);
+    g.fillTriangle(c1x, c1y, c3x, c3y, c4x, c4y);
+  }
+
   /**
-   * Paints the stop line of a signal head on its own approach lane.
-   *
-   * For axis-aligned intersections (legacy): traffic lights are seeded at a fixed
-   * ±92/±132 offset from the junction centre, so the centre is reconstructed from
-   * the head position and its `dir` param.
-   *
-   * For diagonal/free-form intersections: the traffic light already sits at the
-   * stop-line position. The `approachAngle` param (radians) gives the direction of
-   * travel entering the intersection. The stop bar is drawn perpendicular to this
-   * angle, on the right-hand lane, immediately before the signal head.
+   * Paints elongated European asphalt 'STOP' lettering centered at (mcx, mcy),
+   * oriented upright for drivers approaching along (cosA, sinA).
    */
-  private drawTrafficStopLine(g: Phaser.GameObjects.Graphics, o: WorldObject) {
+  private drawPavementStopText(
+    g: Phaser.GameObjects.Graphics,
+    mcx: number,
+    mcy: number,
+    perpX: number,
+    perpY: number,
+    cosA: number,
+    sinA: number,
+    maxLaneWidth: number,
+  ) {
+    const totalW = Math.min(34, Math.max(18, maxLaneWidth - 8));
+    const totalH = Math.round(totalW * 0.48);
+    const gapW = totalW * 0.08;
+    const charW = (totalW - gapW * 3) / 4;
+    const strokeU = Math.max(1.4, charW * 0.27);
+    const strokeV = Math.max(1.6, totalH * 0.21);
+
+    // Helper: emits a rect defined in normalized glyph coordinates u0..u1 (left→right), v0..v1 (bottom→top)
+    const rects: Array<{ u: number; v: number; hw: number; hh: number }> = [];
+    const addGlyphRect = (glyphIdx: number, u0: number, u1: number, v0: number, v1: number) => {
+      const gx0 = -totalW / 2 + glyphIdx * (charW + gapW);
+      const x0 = gx0 + u0 * charW;
+      const x1 = gx0 + u1 * charW;
+      const y0 = -totalH / 2 + v0 * totalH;
+      const y1 = -totalH / 2 + v1 * totalH;
+      rects.push({
+        u: (x0 + x1) * 0.5,
+        v: (y0 + y1) * 0.5,
+        hw: (x1 - x0) * 0.5,
+        hh: (y1 - y0) * 0.5,
+      });
+    };
+
+    const tU = strokeU / charW;
+    const tV = strokeV / totalH;
+
+    // 0: 'S'
+    addGlyphRect(0, 0, 1, 1 - tV, 1);
+    addGlyphRect(0, 0, tU, 0.5 - tV * 0.5, 1);
+    addGlyphRect(0, 0, 1, 0.5 - tV * 0.5, 0.5 + tV * 0.5);
+    addGlyphRect(0, 1 - tU, 1, 0, 0.5 + tV * 0.5);
+    addGlyphRect(0, 0, 1, 0, tV);
+
+    // 1: 'T'
+    addGlyphRect(1, 0, 1, 1 - tV, 1);
+    addGlyphRect(1, 0.5 - tU * 0.5, 0.5 + tU * 0.5, 0, 1);
+
+    // 2: 'O'
+    addGlyphRect(2, 0, 1, 1 - tV, 1);
+    addGlyphRect(2, 0, 1, 0, tV);
+    addGlyphRect(2, 0, tU, 0, 1);
+    addGlyphRect(2, 1 - tU, 1, 0, 1);
+
+    // 3: 'P'
+    addGlyphRect(3, 0, tU, 0, 1);
+    addGlyphRect(3, 0, 1, 1 - tV, 1);
+    addGlyphRect(3, 0, 1, 0.44, 0.44 + tV);
+    addGlyphRect(3, 1 - tU, 1, 0.44, 1);
+
+    // Subtle asphalt shadow pass
+    g.fillStyle(0x000000, 0.20);
+    for (const r of rects) {
+      const rx = mcx + perpX * r.u + cosA * r.v + 0.9;
+      const ry = mcy + perpY * r.u + sinA * r.v + 0.9;
+      this.fillOrientedRect(g, rx, ry, perpX, perpY, cosA, sinA, r.hw, r.hh);
+    }
+    // Crisp road-paint white pass
+    g.fillStyle(0xe6ebf1, 0.86);
+    for (const r of rects) {
+      const rx = mcx + perpX * r.u + cosA * r.v;
+      const ry = mcy + perpY * r.u + sinA * r.v;
+      this.fillOrientedRect(g, rx, ry, perpX, perpY, cosA, sinA, r.hw, r.hh);
+    }
+  }
+
+  /**
+   * Paints the European/Portuguese inverted hollow white yield triangle (M12)
+   * on the asphalt, pointing upstream toward approaching vehicles.
+   */
+  private drawPavementYieldTriangle(
+    g: Phaser.GameObjects.Graphics,
+    mcx: number,
+    mcy: number,
+    perpX: number,
+    perpY: number,
+    cosA: number,
+    sinA: number,
+    maxLaneWidth: number,
+  ) {
+    const triW = Math.min(26, Math.max(15, maxLaneWidth * 0.48));
+    const triH = Math.round(triW * 1.18);
+    const halfW = triW * 0.5;
+    const halfH = triH * 0.5;
+    const inset = Math.max(3.2, triW * 0.21);
+
+    const toWorld = (u: number, v: number, ox = 0, oy = 0) => ({
+      x: mcx + perpX * u + cosA * v + ox,
+      y: mcy + perpY * u + sinA * v + oy,
+    });
+
+    const drawHollowTri = (ox: number, oy: number) => {
+      // Outer triangle: base at +halfH (nearest yield line), apex at -halfH (toward approaching driver)
+      const oL = toWorld(-halfW, halfH, ox, oy);
+      const oR = toWorld(halfW, halfH, ox, oy);
+      const oB = toWorld(0, -halfH, ox, oy);
+      // Inner triangle scaled inward so all 3 legs have balanced visual thickness
+      const iScale = Math.max(0.35, 1 - (inset * 2.1) / triW);
+      const iL = toWorld(-halfW * iScale, halfH - inset * 0.85, ox, oy);
+      const iR = toWorld(halfW * iScale, halfH - inset * 0.85, ox, oy);
+      const iB = toWorld(0, -halfH + inset * 1.45, ox, oy);
+
+      // 3 crisp border quads (top base, left leg, right leg)
+      const fillQuad = (
+        a: { x: number; y: number },
+        b: { x: number; y: number },
+        c: { x: number; y: number },
+        d: { x: number; y: number },
+      ) => {
+        g.fillTriangle(a.x, a.y, b.x, b.y, c.x, c.y);
+        g.fillTriangle(a.x, a.y, c.x, c.y, d.x, d.y);
+      };
+      fillQuad(oL, oR, iR, iL); // top base bar
+      fillQuad(oL, iL, iB, oB); // left diagonal leg
+      fillQuad(oR, oB, iB, iR); // right diagonal leg
+    };
+
+    g.fillStyle(0x000000, 0.20);
+    drawHollowTri(1, 1);
+    g.fillStyle(0xe6ebf1, 0.86);
+    drawHollowTri(0, 0);
+  }
+
+  /**
+   * Paints transverse road markings on the approach lane for traffic lights,
+   * STOP signs, and Yield (Cedência) signs:
+   *  - `traffic_light` & `stop`: solid white transverse stop line + 'STOP' pavement stencil.
+   *  - `yield`: broken/dashed European transverse yield line + inverted hollow yield triangle.
+   */
+  private drawApproachRoadMarking(
+    g: Phaser.GameObjects.Graphics,
+    o: WorldObject,
+    mode: 'traffic_light' | 'stop' | 'yield',
+  ) {
     const dir = o.params?.dir as 'n' | 's' | 'e' | 'w' | undefined;
     const approachAngle = o.params?.approachAngle as number | undefined;
     if (!dir && approachAngle === undefined) return;
 
-    const halfRoad = 64; // 128px arterial → one 64px lane per direction
     const inset = 4; // keep clear of the kerb and the centre line
-    const gap = 6; // stop just behind the signal post
-    const thick = 6;
-    const laneWidth = halfRoad - inset * 2;
-
-    let x0: number, y0: number, w: number, h: number;
-    let cosA: number, sinA: number;
-    let laneCenterX: number, laneCenterY: number;
+    const gap = 6; // stop just behind the post
+    let cosA: number;
+    let sinA: number;
+    let perpX: number;
+    let perpY: number;
+    let cx: number;
+    let cy: number;
+    let stopLineWidth: number;
 
     if (approachAngle !== undefined) {
-      // Diagonal/free-form intersection: use actual approach angle
-      // Traffic light is at: node - approach_dir * TL_STOP_OFFSET + perp_dir * (halfRoad + margin)
-      // Stop line is at: node - approach_dir * TL_STOP_OFFSET + perp_dir * stopLineOffset
-      // So: stop_line = traffic_light - perp_dir * (halfRoad + TL_SHOULDER_MARGIN - stopLineOffset)
+      // Modern diagonal / curved / variable-width / manually road-aligned sign or signal
       cosA = Math.cos(approachAngle);
       sinA = Math.sin(approachAngle);
-      // Perpendicular to approach (right-hand side in y-down coordinates)
-      const perpX = -sinA;
-      const perpY = cosA;
-      // Get stop line geometry from params (set by IntersectionSystem)
-      const stopLineOffset = (o.params?.stopLineOffset as number) ?? (halfRoad / 2);
-      const stopLineWidth = (o.params?.stopLineWidth as number) ?? (halfRoad - inset * 2);
-      // Traffic light is at: node - approach_dir * TL_STOP_OFFSET + perp_dir * (halfRoad + TL_SHOULDER_MARGIN)
-      // Stop line is at: node - approach_dir * TL_STOP_OFFSET + perp_dir * stopLineOffset
-      // So: stop_line = traffic_light - perp_dir * (halfRoad + TL_SHOULDER_MARGIN - stopLineOffset)
-      const TL_SHOULDER_MARGIN = 28;
-      const offsetFromLight = halfRoad + TL_SHOULDER_MARGIN - stopLineOffset;
-      const cx = o.x - perpX * offsetFromLight;
-      const cy = o.y - perpY * offsetFromLight;
-      // Stop bar is perpendicular to approach, centered on approach lane
-      const hw = stopLineWidth / 2, hh = thick / 2;
-      const c1x = cx + cosA * hw + perpX * hh;
-      const c1y = cy + sinA * hw + perpY * hh;
-      const c2x = cx - cosA * hw + perpX * hh;
-      const c2y = cy - sinA * hw + perpY * hh;
-      const c3x = cx - cosA * hw - perpX * hh;
-      const c3y = cy - sinA * hw - perpY * hh;
-      const c4x = cx + cosA * hw - perpX * hh;
-      const c4y = cy + sinA * hw - perpX * hh;
+      perpX = -sinA;
+      perpY = cosA;
 
-      // Soft asphalt shadow (offset by 1px)
-      g.fillStyle(0x000000, 0.22);
-      g.fillTriangle(c1x + 1, c1y + 1, c2x + 1, c2y + 1, c3x + 1, c3y + 1);
-      g.fillTriangle(c1x + 1, c1y + 1, c3x + 1, c3y + 1, c4x + 1, c4y + 1);
-      // Main bar
-      g.fillStyle(0xe6ebf1, 0.88);
-      g.fillTriangle(c1x, c1y, c2x, c2y, c3x, c3y);
-      g.fillTriangle(c1x, c1y, c3x, c3y, c4x, c4y);
-      // Highlight (inner rectangle, slightly smaller)
-      const ihw = hw * 0.85, ihh = hh * 0.85;
-      const ic1x = cx + cosA * ihw + perpX * ihh;
-      const ic1y = cy + sinA * ihw + perpY * ihh;
-      const ic2x = cx - cosA * ihw + perpX * ihh;
-      const ic2y = cy - sinA * ihw + perpY * ihh;
-      const ic3x = cx - cosA * ihw - perpX * ihh;
-      const ic3y = cy - sinA * ihw - perpY * ihh;
-      const ic4x = cx + cosA * ihw - perpX * ihh;
-      const ic4y = cy + sinA * ihw - perpY * ihh;
-      g.fillStyle(0xffffff, 0.55);
-      g.fillTriangle(ic1x, ic1y, ic2x, ic2y, ic3x, ic3y);
-      g.fillTriangle(ic1x, ic1y, ic3x, ic3y, ic4x, ic4y);
+      const roadHalf = ((o.params?.roadWidth as number) ?? 128) / 2;
+      const shoulderMargin = (o.params?.shoulderMargin as number) ?? 28;
+      const stopLineOffset = (o.params?.stopLineOffset as number) ?? (roadHalf / 2);
+      stopLineWidth = (o.params?.stopLineWidth as number) ?? Math.max(12, roadHalf - inset * 2);
+
+      const offsetFromPost = roadHalf + shoulderMargin - stopLineOffset;
+      cx = o.x - perpX * offsetFromPost - cosA * gap;
+      cy = o.y - perpY * offsetFromPost - sinA * gap;
+    } else {
+      // Legacy axis-aligned intersection (rigworld.json traffic lights with ±92/±132 offsets)
+      const halfRoad = 64;
+      stopLineWidth = halfRoad - inset * 2;
+      const jcx = o.x + (dir === 'n' ? -92 : dir === 's' ? 92 : dir === 'e' ? 132 : -132);
+      const jcy = o.y + (dir === 'n' ? -132 : dir === 's' ? 132 : dir === 'e' ? -92 : 92);
+
+      if (dir === 'n') {
+        cosA = 0; sinA = -1; perpX = 1; perpY = 0;
+        cx = jcx + halfRoad / 2;
+        cy = o.y + gap;
+      } else if (dir === 's') {
+        cosA = 0; sinA = 1; perpX = -1; perpY = 0;
+        cx = jcx - halfRoad / 2;
+        cy = o.y - gap;
+      } else if (dir === 'e') {
+        cosA = 1; sinA = 0; perpX = 0; perpY = 1;
+        cx = o.x - gap;
+        cy = jcy + halfRoad / 2;
+      } else {
+        cosA = -1; sinA = 0; perpX = 0; perpY = -1;
+        cx = o.x + gap;
+        cy = jcy - halfRoad / 2;
+      }
+    }
+
+    if (mode === 'yield') {
+      // Broken transverse yield line (European M9 / shark-tooth blocks)
+      const thick = 7;
+      const hh = thick / 2;
+      const dashCount = Math.max(3, Math.min(6, Math.round(stopLineWidth / 12)));
+      const step = stopLineWidth / dashCount;
+      const dashHalfW = Math.max(2.4, step * 0.30);
+      for (let i = 0; i < dashCount; i++) {
+        const u = -stopLineWidth / 2 + step * (i + 0.5);
+        const dx = cx + perpX * u;
+        const dy = cy + perpY * u;
+        g.fillStyle(0x000000, 0.22);
+        this.fillOrientedRect(g, dx + 1, dy + 1, perpX, perpY, cosA, sinA, dashHalfW, hh);
+        g.fillStyle(0xe6ebf1, 0.88);
+        this.fillOrientedRect(g, dx, dy, perpX, perpY, cosA, sinA, dashHalfW, hh);
+        g.fillStyle(0xffffff, 0.55);
+        this.fillOrientedRect(g, dx, dy, perpX, perpY, cosA, sinA, Math.max(1, dashHalfW - 1), Math.max(1, hh - 1));
+      }
+      // Inverted white yield triangle upstream of the dashed line
+      const triCx = cx - cosA * 26;
+      const triCy = cy - sinA * 26;
+      this.drawPavementYieldTriangle(g, triCx, triCy, perpX, perpY, cosA, sinA, stopLineWidth);
       return;
     }
 
-    // Legacy axis-aligned intersection
-    const cx = o.x + (dir === 'n' ? -92 : dir === 's' ? 92 : dir === 'e' ? 132 : -132);
-    const cy = o.y + (dir === 'n' ? -132 : dir === 's' ? 132 : dir === 'e' ? -92 : 92);
-    const horizontal = dir === 'n' || dir === 's';
-
-    if (horizontal) {
-      // n → east (right) lane, s → west (right) lane
-      const laneLeft = dir === 'n' ? cx : cx - halfRoad;
-      const sy = dir === 'n' ? o.y + gap : o.y - gap; // n approaches from +y, s from -y
-      x0 = laneLeft + inset;
-      y0 = sy - thick / 2;
-      w = halfRoad - inset * 2;
-      h = thick;
-    } else {
-      // e → south (right) lane, w → north (right) lane
-      const laneTop = dir === 'e' ? cy : cy - halfRoad;
-      const sx = dir === 'e' ? o.x - gap : o.x + gap; // e approaches from -x, w from +x
-      x0 = sx - thick / 2;
-      y0 = laneTop + inset;
-      w = thick;
-      h = halfRoad - inset * 2;
-    }
-
-    // Soft asphalt shadow, then the painted bar with slightly worn edges.
+    // Solid thick transverse stop bar (`traffic_light` & `stop`)
+    const thick = 6;
+    const hw = stopLineWidth / 2;
+    const hh = thick / 2;
     g.fillStyle(0x000000, 0.22);
-    g.fillRect(x0 + 1, y0 + 1, w, h);
+    this.fillOrientedRect(g, cx + 1, cy + 1, perpX, perpY, cosA, sinA, hw, hh);
     g.fillStyle(0xe6ebf1, 0.88);
-    g.fillRect(x0, y0, w, h);
+    this.fillOrientedRect(g, cx, cy, perpX, perpY, cosA, sinA, hw, hh);
     g.fillStyle(0xffffff, 0.55);
-    g.fillRect(x0 + 1, y0 + 1, Math.max(1, w - 2), Math.max(1, h - 2));
+    this.fillOrientedRect(g, cx, cy, perpX, perpY, cosA, sinA, Math.max(1, hw - 1.5), Math.max(1, hh - 1));
+
+    // Painted 'STOP' pavement lettering centered upstream behind the stop line
+    const textCx = cx - cosA * 21;
+    const textCy = cy - sinA * 21;
+    this.drawPavementStopText(g, textCx, textCy, perpX, perpY, cosA, sinA, stopLineWidth);
   }
 
   /** Renders only animated traffic-light LEDs intersecting `view + margin`. */
@@ -1759,7 +2041,6 @@ export class WorldObjects {
           if (drawn.has(o.id)) continue;
           if (o.type === 'traffic_light') {
             drawn.add(o.id);
-            this.drawTrafficStopLine(lights, o);
             this.drawSolid(lights, o);
           } else if (o.type === 'compound') {
             drawn.add(o.id);
@@ -1770,7 +2051,6 @@ export class WorldObjects {
               if (!p) continue;
               if (p.x + p.w / 2 < view.x - margin || p.x - p.w / 2 > view.x + view.width + margin) continue;
               if (p.y + p.h / 2 < view.y - margin || p.y - p.h / 2 > view.y + view.height + margin) continue;
-              this.drawTrafficStopLine(lights, p);
               this.drawSolid(lights, p);
             }
           }
@@ -3722,11 +4002,28 @@ export class WorldObjects {
       drawH = o.w;
     }
 
-    // Consistent SE silhouette drop shadow (Canvas2D shadowOffset is in chunk/world space, not rotated)
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.42)';
-    ctx.shadowBlur = 10;
-    ctx.shadowOffsetX = 6;
-    ctx.shadowOffsetY = 8;
+    // Consistent SE silhouette drop shadow scaled to architectural height
+    if (o.variant === 'crop_field' || o.variant === 'crop_wheat') {
+      ctx.shadowColor = 'rgba(0, 0, 0, 0)';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
+    } else if (o.variant === 'apartment_10f') {
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.50)';
+      ctx.shadowBlur = 18;
+      ctx.shadowOffsetX = 14;
+      ctx.shadowOffsetY = 16;
+    } else if (o.variant === 'sea_pier') {
+      ctx.shadowColor = 'rgba(0, 14, 30, 0.45)';
+      ctx.shadowBlur = 8;
+      ctx.shadowOffsetX = 4;
+      ctx.shadowOffsetY = 6;
+    } else {
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.42)';
+      ctx.shadowBlur = 10;
+      ctx.shadowOffsetX = 6;
+      ctx.shadowOffsetY = 8;
+    }
     ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
     ctx.restore();
     solidTex.markUsed();
@@ -4017,9 +4314,29 @@ export class WorldObjects {
         if (hasParking) {
           drawParkingRow(fullLeft, frontY + emH, fullW, 66, 16, 67, true);
         }
+      } else if (v === 'hypermarket') {
+        // Large hypermarket customer forecourt: wide pedestrian promenade + 2-row parking lot
+        const sidewalkH = 26;
+        fillConcrete(fullLeft, frontY - 4, fullW, sidewalkH + 4, 'rgba(220, 228, 236, 0.34)');
+        // Pedestrian zebra entrance strip at center doors
+        ctx.fillStyle = 'rgba(248, 250, 252, 0.85)';
+        for (let zx = -36; zx <= 28; zx += 12) {
+          ctx.fillRect(zx, frontY + sidewalkH + 2, 7, 16);
+        }
+        const row1Top = frontY + sidewalkH;
+        const row1Bay = 66;
+        const row1Aisle = 34;
+        drawParkingRow(fullLeft, row1Top, fullW, row1Bay, row1Aisle, 191, true);
+        const row2Top = row1Top + row1Bay + row1Aisle;
+        const row2Rem = frontY + apron.front - row2Top;
+        if (row2Rem >= 68) {
+          drawParkingRow(fullLeft, row2Top, fullW, Math.min(62, row2Rem * 0.68), row2Rem - Math.min(62, row2Rem * 0.68), 229, false);
+        }
       } else if (
         v === 'house_traditional' ||
         v === 'house_townhouse' ||
+        v === 'house_urban_corner' ||
+        v === 'house_duplex' ||
         v === 'villa_classic' ||
         v === 'villa_modern'
       ) {
@@ -4329,73 +4646,494 @@ export class WorldObjects {
           break;
         }
         case 'wall': {
-          g.fillStyle(0x000000, 0.25);
-          g.fillRect(x0 + 4, y0 + 5, o.w, o.h);
-          g.fillStyle(0x3a3d44, 1);
-          g.fillRect(x0, y0, o.w, o.h);
-          g.fillStyle(0x646b78, 1); // capeamento superior iluminado
-          g.fillRect(x0, y0, o.w, Math.min(6, o.h / 3));
-          // Juntas de alvenaria e pilares espaçados
-          g.lineStyle(1, 0x2b2e35, 0.8);
-          const seamStep = 34;
-          if (o.w >= o.h) {
-            for (let sx = x0 + seamStep; sx < x0 + o.w - 4; sx += seamStep) {
-              g.lineBetween(sx, y0, sx, y0 + o.h);
+          const v = o.variant || 'concrete';
+          const horiz = o.w >= o.h;
+          const span = horiz ? o.w : o.h;
+          const thick = horiz ? o.h : o.w;
+
+          if (v === 'brick') {
+            // Muro de tijolo cerâmico português com juntas, pilaretes e capeamento calcário
+            g.fillStyle(0x000000, 0.26);
+            g.fillRect(x0 + 4, y0 + 5, o.w, o.h);
+            g.fillStyle(0x9a3412, 1);
+            g.fillRect(x0, y0, o.w, o.h);
+            // Fiadas alternadas de tijolo
+            const brickLen = 18;
+            const rows = Math.max(2, Math.round(thick / 7));
+            const rowStep = thick / rows;
+            for (let r = 0; r < rows; r++) {
+              const offset = (r % 2) * (brickLen * 0.5);
+              for (let p = -offset; p < span; p += brickLen) {
+                const p0 = Math.max(0, p);
+                const p1 = Math.min(span, p + brickLen - 1.5);
+                if (p1 - p0 < 2) continue;
+                const shade = ((r * 7 + Math.floor((p + offset) / brickLen)) % 3);
+                g.fillStyle(shade === 0 ? 0xb44324 : shade === 1 ? 0x9f3718 : 0x8a2c12, 1);
+                if (horiz) g.fillRect(x0 + p0, y0 + r * rowStep + 0.8, p1 - p0, Math.max(2, rowStep - 1.5));
+                else g.fillRect(x0 + r * rowStep + 0.8, y0 + p0, Math.max(2, rowStep - 1.5), p1 - p0);
+              }
             }
-            for (let px = x0; px <= x0 + o.w; px += 140) {
-              const cx = Math.min(x0 + o.w - 6, Math.max(x0 + 6, px));
-              g.fillStyle(0x4b515c, 1);
-              g.fillRect(cx - 5, y0 - 2, 10, o.h + 4);
-              g.lineStyle(1, 0x1e222a, 0.8);
-              g.strokeRect(cx - 5, y0 - 2, 10, o.h + 4);
+            // Capeamento central em pedra calcária clara
+            g.fillStyle(0xd6cfc2, 0.92);
+            if (horiz) g.fillRect(x0 + 1, o.y - Math.max(2, o.h * 0.14), o.w - 2, Math.max(4, o.h * 0.28));
+            else g.fillRect(o.x - Math.max(2, o.w * 0.14), y0 + 1, Math.max(4, o.w * 0.28), o.h - 2);
+            // Pilaretes de tijolo com capitel de pedra
+            const pillarStep = 120;
+            for (let p = 6; p <= span - 6; p += pillarStep) {
+              const pos = Math.min(span - 7, Math.max(7, p));
+              g.fillStyle(0x7c2d12, 1);
+              if (horiz) {
+                g.fillRect(x0 + pos - 6, y0 - 2.5, 12, o.h + 5);
+                g.fillStyle(0xe7e0d3, 1);
+                g.fillRect(x0 + pos - 4.5, y0 - 1, 9, o.h + 2);
+                g.lineStyle(1, 0x431407, 0.85);
+                g.strokeRect(x0 + pos - 6, y0 - 2.5, 12, o.h + 5);
+              } else {
+                g.fillRect(x0 - 2.5, y0 + pos - 6, o.w + 5, 12);
+                g.fillStyle(0xe7e0d3, 1);
+                g.fillRect(x0 - 1, y0 + pos - 4.5, o.w + 2, 9);
+                g.lineStyle(1, 0x431407, 0.85);
+                g.strokeRect(x0 - 2.5, y0 + pos - 6, o.w + 5, 12);
+              }
+            }
+            g.lineStyle(1.2, 0x431407, 0.85);
+            g.strokeRect(x0, y0, o.w, o.h);
+          } else if (v === 'stone') {
+            // Muro rústico de pedra granítica / xisto (quintas, aldeias, serra)
+            g.fillStyle(0x000000, 0.26);
+            g.fillRect(x0 + 4, y0 + 5, o.w, o.h);
+            g.fillStyle(0x3f3d38, 1); // argamassa escura nas fendas
+            g.fillRect(x0, y0, o.w, o.h);
+            const stoneColors = [0x7c786e, 0x6b675e, 0x8f8a7e, 0x636059, 0x9c9586, 0x57544d];
+            const courses = Math.max(2, Math.round(thick / 11));
+            const courseW = thick / courses;
+            for (let c = 0; c < courses; c++) {
+              let p = (c % 2) * 8;
+              let idx = c * 13;
+              while (p < span - 3) {
+                const sLen = 14 + ((idx * 17 + 5) % 13);
+                const len = Math.min(sLen, span - p - 1.5);
+                if (len < 4) break;
+                const col = stoneColors[(idx * 5 + c * 3) % stoneColors.length];
+                g.fillStyle(col, 1);
+                if (horiz) {
+                  g.fillRoundedRect(x0 + p + 1, y0 + c * courseW + 1, len - 1.5, Math.max(3, courseW - 2), 3);
+                  g.fillStyle(0xb8b2a4, 0.28);
+                  g.fillRect(x0 + p + 2.5, y0 + c * courseW + 2, Math.max(2, len - 5), 2);
+                } else {
+                  g.fillRoundedRect(x0 + c * courseW + 1, y0 + p + 1, Math.max(3, courseW - 2), len - 1.5, 3);
+                  g.fillStyle(0xb8b2a4, 0.28);
+                  g.fillRect(x0 + c * courseW + 2, y0 + p + 2.5, 2, Math.max(2, len - 5));
+                }
+                p += sLen;
+                idx++;
+              }
+            }
+            g.lineStyle(1.2, 0x262420, 0.85);
+            g.strokeRect(x0, y0, o.w, o.h);
+          } else if (v === 'whitewash') {
+            // Muro caiado tradicional português com beirado em telha cerâmica
+            g.fillStyle(0x000000, 0.24);
+            g.fillRect(x0 + 4, y0 + 5, o.w, o.h);
+            g.fillStyle(0xd6d3d1, 1);
+            g.fillRect(x0, y0, o.w, o.h);
+            // Reboco branco iluminado
+            g.fillStyle(0xf5f5f4, 1);
+            g.fillRect(x0 + 1.5, y0 + 1.5, o.w - 3, o.h - 3);
+            // Cumeada em telha portuguesa terracota
+            const cap = Math.max(8, Math.min(14, thick * 0.54));
+            g.fillStyle(0xb45309, 1);
+            if (horiz) {
+              g.fillRect(x0 + 1, o.y - cap / 2, o.w - 2, cap);
+              g.fillStyle(0xd97706, 0.65);
+              g.fillRect(x0 + 1, o.y - cap / 2 + 1, o.w - 2, cap * 0.38);
+              g.lineStyle(1, 0x7c2d12, 0.7);
+              for (let tx = x0 + 8; tx < x0 + o.w - 4; tx += 9) {
+                g.lineBetween(tx, o.y - cap / 2, tx, o.y + cap / 2);
+              }
+            } else {
+              g.fillRect(o.x - cap / 2, y0 + 1, cap, o.h - 2);
+              g.fillStyle(0xd97706, 0.65);
+              g.fillRect(o.x - cap / 2 + 1, y0 + 1, cap * 0.38, o.h - 2);
+              g.lineStyle(1, 0x7c2d12, 0.7);
+              for (let ty = y0 + 8; ty < y0 + o.h - 4; ty += 9) {
+                g.lineBetween(o.x - cap / 2, ty, o.x + cap / 2, ty);
+              }
+            }
+            // Pilares caiados nas pontas e a cada 140px
+            const pCount = Math.max(1, Math.round(span / 140));
+            for (let i = 0; i <= pCount; i++) {
+              const p = (span * i) / pCount;
+              const clamped = Math.min(span - 7, Math.max(7, p));
+              g.fillStyle(0xe7e5e4, 1);
+              if (horiz) {
+                g.fillRect(x0 + clamped - 6, y0 - 2, 12, o.h + 4);
+                g.fillStyle(0xc2410c, 1);
+                g.fillRect(x0 + clamped - 4, y0, 8, o.h);
+                g.lineStyle(1, 0x78716c, 0.85);
+                g.strokeRect(x0 + clamped - 6, y0 - 2, 12, o.h + 4);
+              } else {
+                g.fillRect(x0 - 2, y0 + clamped - 6, o.w + 4, 12);
+                g.fillStyle(0xc2410c, 1);
+                g.fillRect(x0, y0 + clamped - 4, o.w, 8);
+                g.lineStyle(1, 0x78716c, 0.85);
+                g.strokeRect(x0 - 2, y0 + clamped - 6, o.w + 4, 12);
+              }
+            }
+            g.lineStyle(1, 0x78716c, 0.8);
+            g.strokeRect(x0, y0, o.w, o.h);
+          } else if (v === 'iron_fence') {
+            // Murete de pedra com gradeamento em ferro forjado e pilares espaçados
+            g.fillStyle(0x000000, 0.2);
+            g.fillRect(x0 + 3, y0 + 4, o.w, o.h);
+            // Base em granito claro
+            g.fillStyle(0x94a3b8, 1);
+            g.fillRect(x0, y0, o.w, o.h);
+            g.fillStyle(0xcbd5e1, 0.85);
+            g.fillRect(x0 + 2, y0 + 2, o.w - 4, o.h - 4);
+            // Barra longitudinal em ferro forjado escuro
+            g.lineStyle(3.2, 0x0f172a, 0.96);
+            if (horiz) g.lineBetween(x0 + 4, o.y, x0 + o.w - 4, o.y);
+            else g.lineBetween(o.x, y0 + 4, o.x, y0 + o.h - 4);
+            // Lanças / prumos verticais vistos de topo
+            g.fillStyle(0x1e293b, 1);
+            for (let p = 12; p < span - 10; p += 11) {
+              if (horiz) g.fillCircle(x0 + p, o.y, 2.3);
+              else g.fillCircle(o.x, y0 + p, 2.3);
+            }
+            // Pilares de pedra com coroa
+            const pCount = Math.max(1, Math.round(span / 100));
+            for (let i = 0; i <= pCount; i++) {
+              const pos = Math.min(span - 7, Math.max(7, (span * i) / pCount));
+              g.fillStyle(0x64748b, 1);
+              if (horiz) {
+                g.fillRect(x0 + pos - 6.5, y0 - 2.5, 13, o.h + 5);
+                g.fillStyle(0xe2e8f0, 1);
+                g.fillRect(x0 + pos - 4, y0, 8, o.h);
+                g.lineStyle(1, 0x1e293b, 0.85);
+                g.strokeRect(x0 + pos - 6.5, y0 - 2.5, 13, o.h + 5);
+              } else {
+                g.fillRect(x0 - 2.5, y0 + pos - 6.5, o.w + 5, 13);
+                g.fillStyle(0xe2e8f0, 1);
+                g.fillRect(x0, y0 + pos - 4, o.w, 8);
+                g.lineStyle(1, 0x1e293b, 0.85);
+                g.strokeRect(x0 - 2.5, y0 + pos - 6.5, o.w + 5, 13);
+              }
+            }
+          } else if (v === 'sound_barrier') {
+            // Barreira acústica de autoestrada (perfis H em aço + painéis acústicos verde-petróleo + topo translúcido)
+            g.fillStyle(0x000000, 0.28);
+            g.fillRect(x0 + 4, y0 + 5, o.w, o.h);
+            // Sapata de betão
+            g.fillStyle(0x475569, 1);
+            g.fillRect(x0, y0, o.w, o.h);
+            // Painéis acústicos nervurados
+            g.fillStyle(0x2f6865, 1);
+            g.fillRect(x0 + 2, y0 + 2, o.w - 4, o.h - 4);
+            // Faixa superior translúcida azul-gelo
+            g.fillStyle(0x7dd3fc, 0.55);
+            if (horiz) g.fillRect(x0 + 2, o.y - Math.max(2, o.h * 0.16), o.w - 4, Math.max(4, o.h * 0.32));
+            else g.fillRect(o.x - Math.max(2, o.w * 0.16), y0 + 2, Math.max(4, o.w * 0.32), o.h - 4);
+            // Perfis metálicos H espaçados a cada 52px
+            const panels = Math.max(1, Math.round(span / 52));
+            for (let i = 0; i <= panels; i++) {
+              const pos = Math.min(span - 3, Math.max(3, (span * i) / panels));
+              g.fillStyle(0x1e293b, 1);
+              if (horiz) {
+                g.fillRect(x0 + pos - 3.5, y0 - 2, 7, o.h + 4);
+                g.fillStyle(0x94a3b8, 0.9);
+                g.fillRect(x0 + pos - 1.5, y0 - 1, 3, o.h + 2);
+              } else {
+                g.fillRect(x0 - 2, y0 + pos - 3.5, o.w + 4, 7);
+                g.fillStyle(0x94a3b8, 0.9);
+                g.fillRect(x0 - 1, y0 + pos - 1.5, o.w + 2, 3);
+              }
+            }
+            g.lineStyle(1.2, 0x0f172a, 0.9);
+            g.strokeRect(x0, y0, o.w, o.h);
+          } else if (v === 'hedge') {
+            // Sebe viva aparada (folhagem orgânica densa para jardins, vivendas e parques)
+            g.fillStyle(0x000000, 0.25);
+            g.fillRoundedRect(x0 + 4, y0 + 5, o.w, o.h, Math.min(o.w, o.h) * 0.42);
+            g.fillStyle(0x14532d, 1);
+            g.fillRoundedRect(x0, y0, o.w, o.h, Math.min(o.w, o.h) * 0.42);
+            const rBase = Math.max(6, Math.min(13, thick * 0.46));
+            const step = Math.max(9, rBase * 1.1);
+            let idx = 0;
+            for (let p = rBase * 0.8; p <= span - rBase * 0.6; p += step) {
+              const jitter = (((idx * 37) % 7) - 3) * 0.9;
+              const cx = horiz ? x0 + p : o.x + jitter;
+              const cy = horiz ? o.y + jitter : y0 + p;
+              g.fillStyle(idx % 2 === 0 ? 0x166534 : 0x15803d, 1);
+              g.fillCircle(cx, cy, rBase * 0.92);
+              g.fillStyle(idx % 3 === 0 ? 0x4ade80 : 0x22c55e, 0.55);
+              g.fillCircle(cx - rBase * 0.22, cy - rBase * 0.24, rBase * 0.48);
+              idx++;
+            }
+          } else if (v === 'wood_fence') {
+            // Vedação rural em madeira (postes e travessas para quintas e pastagens)
+            g.fillStyle(0x000000, 0.2);
+            g.fillRect(x0 + 3, y0 + 4, o.w, o.h);
+            // Travessa superior de madeira
+            const railThick = Math.max(6, Math.min(11, thick * 0.52));
+            g.fillStyle(0x78350f, 1);
+            if (horiz) {
+              g.fillRect(x0 + 2, o.y - railThick / 2, o.w - 4, railThick);
+              g.fillStyle(0xa16207, 0.65);
+              g.fillRect(x0 + 2, o.y - railThick / 2 + 1, o.w - 4, railThick * 0.35);
+            } else {
+              g.fillRect(o.x - railThick / 2, y0 + 2, railThick, o.h - 4);
+              g.fillStyle(0xa16207, 0.65);
+              g.fillRect(o.x - railThick / 2 + 1, y0 + 2, railThick * 0.35, o.h - 4);
+            }
+            // Postes quadrados de madeira espaçados
+            const posts = Math.max(1, Math.round(span / 46));
+            const pSize = Math.max(9, Math.min(14, thick * 0.72));
+            for (let i = 0; i <= posts; i++) {
+              const pos = Math.min(span - pSize * 0.5, Math.max(pSize * 0.5, (span * i) / posts));
+              const px = horiz ? x0 + pos - pSize / 2 : o.x - pSize / 2;
+              const py = horiz ? o.y - pSize / 2 : y0 + pos - pSize / 2;
+              g.fillStyle(0x451a03, 1);
+              g.fillRect(px, py, pSize, pSize);
+              g.fillStyle(0x92400e, 1);
+              g.fillRect(px + 1.5, py + 1.5, pSize - 3, pSize - 3);
+              g.lineStyle(1, 0x290f02, 0.9);
+              g.strokeRect(px, py, pSize, pSize);
+            }
+          } else if (v === 'chain_fence') {
+            // Rede metálica galvanizada industrial sobre lancil de betão
+            g.fillStyle(0x000000, 0.18);
+            g.fillRect(x0 + 2.5, y0 + 3.5, o.w, o.h);
+            // Lancil estreito em betão
+            const kerb = Math.max(6, Math.min(12, thick * 0.55));
+            g.fillStyle(0x64748b, 0.9);
+            if (horiz) g.fillRect(x0, o.y - kerb / 2, o.w, kerb);
+            else g.fillRect(o.x - kerb / 2, y0, kerb, o.h);
+            // Malha metálica galvanizada (zigue-zague sutil + fio superior)
+            g.lineStyle(1.4, 0xcbd5e1, 0.85);
+            const zig = kerb * 0.42;
+            g.beginPath();
+            for (let p = 0; p <= span; p += 8) {
+              const off = ((Math.floor(p / 8) % 2) === 0 ? -zig : zig);
+              const px = horiz ? x0 + p : o.x + off;
+              const py = horiz ? o.y + off : y0 + p;
+              if (p === 0) g.moveTo(px, py);
+              else g.lineTo(px, py);
+            }
+            g.strokePath();
+            g.lineStyle(2, 0xe2e8f0, 0.95);
+            if (horiz) g.lineBetween(x0 + 2, o.y, x0 + o.w - 2, o.y);
+            else g.lineBetween(o.x, y0 + 2, o.x, y0 + o.h - 2);
+            // Postes tubulares metálicos
+            const posts = Math.max(1, Math.round(span / 54));
+            for (let i = 0; i <= posts; i++) {
+              const pos = Math.min(span - 4, Math.max(4, (span * i) / posts));
+              const cx = horiz ? x0 + pos : o.x;
+              const cy = horiz ? o.y : y0 + pos;
+              g.fillStyle(0x334155, 1);
+              g.fillCircle(cx, cy, 4.2);
+              g.fillStyle(0xe2e8f0, 1);
+              g.fillCircle(cx, cy, 2.2);
             }
           } else {
-            for (let sy = y0 + seamStep; sy < y0 + o.h - 4; sy += seamStep) {
-              g.lineBetween(x0, sy, x0 + o.w, sy);
-            }
-            for (let py = y0; py <= y0 + o.h; py += 140) {
-              const cy = Math.min(y0 + o.h - 6, Math.max(y0 + 6, py));
-              g.fillStyle(0x4b515c, 1);
-              g.fillRect(x0 - 2, cy - 5, o.w + 4, 10);
-              g.lineStyle(1, 0x1e222a, 0.8);
-              g.strokeRect(x0 - 2, cy - 5, o.w + 4, 10);
+            // Default: Muro de betão/alvenaria existente
+            g.fillStyle(0x000000, 0.25);
+            g.fillRect(x0 + 4, y0 + 5, o.w, o.h);
+            g.fillStyle(0x3a3d44, 1);
+            g.fillRect(x0, y0, o.w, o.h);
+            g.fillStyle(0x646b78, 1); // capeamento superior iluminado
+            g.fillRect(x0, y0, o.w, Math.min(6, o.h / 3));
+            // Juntas de alvenaria e pilares espaçados
+            g.lineStyle(1, 0x2b2e35, 0.8);
+            const seamStep = 34;
+            if (horiz) {
+              for (let sx = x0 + seamStep; sx < x0 + o.w - 4; sx += seamStep) {
+                g.lineBetween(sx, y0, sx, y0 + o.h);
+              }
+              for (let px = x0; px <= x0 + o.w; px += 140) {
+                const cx = Math.min(x0 + o.w - 6, Math.max(x0 + 6, px));
+                g.fillStyle(0x4b515c, 1);
+                g.fillRect(cx - 5, y0 - 2, 10, o.h + 4);
+                g.lineStyle(1, 0x1e222a, 0.8);
+                g.strokeRect(cx - 5, y0 - 2, 10, o.h + 4);
+              }
+            } else {
+              for (let sy = y0 + seamStep; sy < y0 + o.h - 4; sy += seamStep) {
+                g.lineBetween(x0, sy, x0 + o.w, sy);
+              }
+              for (let py = y0; py <= y0 + o.h; py += 140) {
+                const cy = Math.min(y0 + o.h - 6, Math.max(y0 + 6, py));
+                g.fillStyle(0x4b515c, 1);
+                g.fillRect(x0 - 2, cy - 5, o.w + 4, 10);
+                g.lineStyle(1, 0x1e222a, 0.8);
+                g.strokeRect(x0 - 2, cy - 5, o.w + 4, 10);
+              }
             }
           }
           break;
         }
         case 'jersey_barrier': {
-          // Perfil New Jersey chanfrado com base larga, crista iluminada, juntas modulares e refletores
+          const v = o.variant || 'concrete';
           const horiz = o.w >= o.h;
-          g.fillStyle(0x000000, 0.22);
-          g.fillRect(x0 + 3, y0 + 4, o.w, o.h);
-          // Sapata da base em betão
-          g.fillStyle(0x64748b, 1);
-          g.fillRect(x0, y0, o.w, o.h);
-          // Face inclinada intermédia
-          g.fillStyle(0x94a3b8, 1);
-          if (horiz) g.fillRect(x0 + 2, y0 + 3, o.w - 4, o.h - 6);
-          else g.fillRect(x0 + 3, y0 + 2, o.w - 6, o.h - 4);
-          // Crista superior estreita
-          g.fillStyle(0xcbd5e1, 1);
-          if (horiz) g.fillRect(x0 + 2, o.y - Math.max(3, o.h * 0.16), o.w - 4, Math.max(6, o.h * 0.32));
-          else g.fillRect(o.x - Math.max(3, o.w * 0.16), y0 + 2, Math.max(6, o.w * 0.32), o.h - 4);
-          // Juntas entre módulos + balizadores refletores âmbar
           const span = horiz ? o.w : o.h;
-          const mods = Math.max(1, Math.round(span / 46));
-          g.lineStyle(1.5, 0x334155, 0.85);
-          for (let i = 1; i < mods; i++) {
-            const p = (horiz ? x0 : y0) + (span * i) / mods;
-            if (horiz) g.lineBetween(p, y0, p, y0 + o.h);
-            else g.lineBetween(x0, p, x0 + o.w, p);
+
+          if (v === 'guardrail') {
+            // Guarda de segurança metálica (rail W galvanizado com prumos e refletores)
+            g.fillStyle(0x000000, 0.26);
+            if (horiz) g.fillRect(x0 + 3, o.y - 4 + 3.5, o.w, 8);
+            else g.fillRect(o.x - 4 + 3, y0 + 3.5, 8, o.h);
+            // Prumos de aço espaçados
+            const posts = Math.max(2, Math.round(span / 34));
+            for (let i = 0; i <= posts; i++) {
+              const pos = (span * i) / posts;
+              const cx = horiz ? x0 + Math.min(o.w - 4, Math.max(4, pos)) : o.x;
+              const cy = horiz ? o.y : y0 + Math.min(o.h - 4, Math.max(4, pos));
+              g.fillStyle(0x334155, 1);
+              g.fillRect(cx - 3.5, cy - 5.5, 7, 11);
+            }
+            // Viga metálica W-beam + brilho superior
+            g.lineStyle(8.5, 0x1e293b, 0.98);
+            if (horiz) g.lineBetween(x0 + 2, o.y, x0 + o.w - 2, o.y);
+            else g.lineBetween(o.x, y0 + 2, o.x, y0 + o.h - 2);
+            g.lineStyle(5, 0x94a3b8, 0.98);
+            if (horiz) g.lineBetween(x0 + 2, o.y, x0 + o.w - 2, o.y);
+            else g.lineBetween(o.x, y0 + 2, o.x, y0 + o.h - 2);
+            g.lineStyle(1.8, 0xe2e8f0, 0.95);
+            if (horiz) g.lineBetween(x0 + 3, o.y - 1, x0 + o.w - 3, o.y - 1);
+            else g.lineBetween(o.x - 1, y0 + 3, o.x - 1, y0 + o.h - 3);
+            // Refletores âmbar/brancos
+            const refs = Math.max(1, Math.round(span / 52));
+            for (let i = 0; i < refs; i++) {
+              const pos = (span * (i + 0.5)) / refs;
+              const cx = horiz ? x0 + pos : o.x;
+              const cy = horiz ? o.y : y0 + pos;
+              g.fillStyle(0x0f172a, 0.95);
+              g.fillCircle(cx, cy, 3);
+              g.fillStyle(i % 2 === 0 ? 0xfbbf24 : 0xf8fafc, 1);
+              g.fillCircle(cx, cy, 2);
+            }
+          } else if (v === 'water_red_white') {
+            // Barreiras plásticas de obra encaixadas (vermelho e branco alternados)
+            g.fillStyle(0x000000, 0.22);
+            g.fillRoundedRect(x0 + 3, y0 + 4, o.w, o.h, 4);
+            const mods = Math.max(2, Math.round(span / 36));
+            const modLen = span / mods;
+            for (let i = 0; i < mods; i++) {
+              const isRed = i % 2 === 0;
+              const baseCol = isRed ? 0xdc2626 : 0xe2e8f0;
+              const topCol = isRed ? 0xef4444 : 0xf8fafc;
+              if (horiz) {
+                const bx = x0 + i * modLen;
+                g.fillStyle(baseCol, 1);
+                g.fillRoundedRect(bx + 0.8, y0, modLen - 1.6, o.h, 3);
+                g.fillStyle(topCol, 1);
+                g.fillRoundedRect(bx + 2.5, y0 + 3, modLen - 5, Math.max(4, o.h - 6), 2);
+                g.fillStyle(isRed ? 0x991b1b : 0x94a3b8, 0.9);
+                g.fillCircle(bx + modLen * 0.5, o.y, 2.2); // tampa de enchimento
+                g.lineStyle(1, 0x334155, 0.75);
+                g.strokeRect(bx + 0.8, y0, modLen - 1.6, o.h);
+              } else {
+                const by = y0 + i * modLen;
+                g.fillStyle(baseCol, 1);
+                g.fillRoundedRect(x0, by + 0.8, o.w, modLen - 1.6, 3);
+                g.fillStyle(topCol, 1);
+                g.fillRoundedRect(x0 + 3, by + 2.5, Math.max(4, o.w - 6), modLen - 5, 2);
+                g.fillStyle(isRed ? 0x991b1b : 0x94a3b8, 0.9);
+                g.fillCircle(o.x, by + modLen * 0.5, 2.2);
+                g.lineStyle(1, 0x334155, 0.75);
+                g.strokeRect(x0, by + 0.8, o.w, modLen - 1.6);
+              }
+            }
+          } else if (v === 'hazard_striped') {
+            // Barreira industrial de perigo com riscas amarelas e pretas
+            g.fillStyle(0x000000, 0.25);
+            g.fillRect(x0 + 3, y0 + 4, o.w, o.h);
+            g.fillStyle(0x18181b, 1);
+            g.fillRect(x0, y0, o.w, o.h);
+            // Riscas amarelas inclinadas / alternadas
+            const step = 16;
+            g.fillStyle(0xfacc15, 1);
+            if (horiz) {
+              for (let sx = 0; sx < o.w; sx += step * 2) {
+                const xA = x0 + sx;
+                const xB = Math.min(x0 + o.w, xA + step);
+                const xC = Math.min(x0 + o.w, xB + 5);
+                const xD = Math.min(x0 + o.w, xA + 5);
+                g.beginPath();
+                g.moveTo(xA, y0 + 2);
+                g.lineTo(xB, y0 + 2);
+                g.lineTo(xC, y0 + o.h - 2);
+                g.lineTo(xD, y0 + o.h - 2);
+                g.closePath();
+                g.fillPath();
+              }
+            } else {
+              for (let sy = 0; sy < o.h; sy += step * 2) {
+                const yA = y0 + sy;
+                const yB = Math.min(y0 + o.h, yA + step);
+                const yC = Math.min(y0 + o.h, yB + 5);
+                const yD = Math.min(y0 + o.h, yA + 5);
+                g.beginPath();
+                g.moveTo(x0 + 2, yA);
+                g.lineTo(x0 + 2, yB);
+                g.lineTo(x0 + o.w - 2, yC);
+                g.lineTo(x0 + o.w - 2, yD);
+                g.closePath();
+                g.fillPath();
+              }
+            }
+            g.lineStyle(1.6, 0x09090b, 1);
+            g.strokeRect(x0, y0, o.w, o.h);
+          } else if (v === 'bollards') {
+            // Fila de pilaretes urbanos em aço com faixa refletora amarela
+            const count = Math.max(2, Math.round(span / 28));
+            const r = Math.max(4.5, Math.min(7, (horiz ? o.h : o.w) * 0.34));
+            for (let i = 0; i < count; i++) {
+              const frac = count === 1 ? 0.5 : i / (count - 1);
+              const pos = r + 3 + frac * Math.max(0, span - (r + 3) * 2);
+              const cx = horiz ? x0 + pos : o.x;
+              const cy = horiz ? o.y : y0 + pos;
+              g.fillStyle(0x000000, 0.28);
+              g.fillCircle(cx + 2.5, cy + 3, r);
+              g.fillStyle(0x1e293b, 1);
+              g.fillCircle(cx, cy, r);
+              g.lineStyle(1.6, 0xfacc15, 0.95);
+              g.strokeCircle(cx, cy, r * 0.68);
+              g.fillStyle(0x94a3b8, 0.95);
+              g.fillCircle(cx - r * 0.18, cy - r * 0.18, r * 0.34);
+            }
+          } else {
+            // Default: Perfil New Jersey chanfrado com base larga, crista iluminada, juntas modulares e refletores
+            g.fillStyle(0x000000, 0.22);
+            g.fillRect(x0 + 3, y0 + 4, o.w, o.h);
+            // Sapata da base em betão
+            g.fillStyle(0x64748b, 1);
+            g.fillRect(x0, y0, o.w, o.h);
+            // Face inclinada intermédia
+            g.fillStyle(0x94a3b8, 1);
+            if (horiz) g.fillRect(x0 + 2, y0 + 3, o.w - 4, o.h - 6);
+            else g.fillRect(x0 + 3, y0 + 2, o.w - 6, o.h - 4);
+            // Crista superior estreita
+            g.fillStyle(0xcbd5e1, 1);
+            if (horiz) g.fillRect(x0 + 2, o.y - Math.max(3, o.h * 0.16), o.w - 4, Math.max(6, o.h * 0.32));
+            else g.fillRect(o.x - Math.max(3, o.w * 0.16), y0 + 2, Math.max(6, o.w * 0.32), o.h - 4);
+            // Juntas entre módulos + balizadores refletores âmbar
+            const mods = Math.max(1, Math.round(span / 46));
+            g.lineStyle(1.5, 0x334155, 0.85);
+            for (let i = 1; i < mods; i++) {
+              const p = (horiz ? x0 : y0) + (span * i) / mods;
+              if (horiz) g.lineBetween(p, y0, p, y0 + o.h);
+              else g.lineBetween(x0, p, x0 + o.w, p);
+            }
+            g.fillStyle(0xf59e0b, 0.95);
+            for (let i = 0; i < mods; i++) {
+              const p = (horiz ? x0 : y0) + (span * (i + 0.5)) / mods;
+              if (horiz) g.fillRect(p - 3, o.y - 2, 6, 4);
+              else g.fillRect(o.x - 2, p - 3, 4, 6);
+            }
+            g.lineStyle(1.5, 0x334155, 1);
+            g.strokeRect(x0, y0, o.w, o.h);
           }
-          g.fillStyle(0xf59e0b, 0.95);
-          for (let i = 0; i < mods; i++) {
-            const p = (horiz ? x0 : y0) + (span * (i + 0.5)) / mods;
-            if (horiz) g.fillRect(p - 3, o.y - 2, 6, 4);
-            else g.fillRect(o.x - 2, p - 3, 4, 6);
-          }
-          g.lineStyle(1.5, 0x334155, 1);
-          g.strokeRect(x0, y0, o.w, o.h);
           break;
         }
         case 'building': {
@@ -4446,16 +5184,31 @@ export class WorldObjects {
               o.variant === 'church' ||
               o.variant === 'house_traditional' ||
               o.variant === 'house_townhouse' ||
+              o.variant === 'house_urban_corner' ||
+              o.variant === 'house_duplex' ||
               o.variant === 'villa_classic' ||
               o.variant === 'villa_modern' ||
               o.variant === 'apartment_block' ||
               o.variant === 'apartment_modern' ||
+              o.variant === 'apartment_2f' ||
+              o.variant === 'apartment_4f' ||
+              o.variant === 'apartment_10f' ||
               o.variant === 'fire_station' ||
               o.variant === 'police_station' ||
               o.variant === 'hospital' ||
               o.variant === 'school' ||
               o.variant === 'supermarket' ||
-              o.variant === 'town_hall';
+              o.variant === 'hypermarket' ||
+              o.variant === 'town_hall' ||
+              o.variant === 'esplanade' ||
+              o.variant === 'plaza_statue' ||
+              o.variant === 'monument' ||
+              o.variant === 'sea_pier' ||
+              o.variant === 'farmhouse' ||
+              o.variant === 'farm_pasture' ||
+              o.variant === 'farm_crops' ||
+              o.variant === 'crop_field' ||
+              o.variant === 'crop_wheat';
             this.drawTexturedBuilding(solidTex, o, buildingImg, !directional);
             break;
           }
@@ -5532,9 +6285,160 @@ export class WorldObjects {
           break;
         }
         case 'sign': {
-          // Sinais de trânsito — chapas nítidas e fiéis à descrição do catálogo
+          // Sinais de trânsito europeus / Código da Estrada — chapas nítidas e proporcionais
           const s = Math.max(12, Math.min(o.w, o.h) * 0.55);
           const u = s / 12;
+
+          const drawBlueDisk = () => {
+            g.fillStyle(0x000000, 0.3);
+            g.fillCircle(o.x + 1.5, o.y + 2, s);
+            g.fillStyle(0x0f172a, 1);
+            g.fillCircle(o.x, o.y, s + 0.7 * u);
+            g.fillStyle(0xffffff, 1);
+            g.fillCircle(o.x, o.y, s);
+            g.fillStyle(0x1d4ed8, 1);
+            g.fillCircle(o.x, o.y, s * 0.90);
+          };
+
+          const drawRedRingDisk = () => {
+            g.fillStyle(0x000000, 0.3);
+            g.fillCircle(o.x + 1.5, o.y + 2, s);
+            g.fillStyle(0x0f172a, 1);
+            g.fillCircle(o.x, o.y, s + 0.8 * u);
+            g.fillStyle(0xffffff, 1);
+            g.fillCircle(o.x, o.y, s);
+            g.lineStyle(2.8 * u, 0xdc2626, 1);
+            g.strokeCircle(o.x, o.y, 10.1 * u);
+          };
+
+          const drawBlueSquare = () => {
+            g.fillStyle(0x000000, 0.3);
+            g.fillRoundedRect(o.x - s + 1.5, o.y - s + 2, s * 2, s * 2, 2.5 * u);
+            g.fillStyle(0x0f172a, 1);
+            g.fillRoundedRect(o.x - s - 0.6 * u, o.y - s - 0.6 * u, s * 2 + 1.2 * u, s * 2 + 1.2 * u, 2.8 * u);
+            g.fillStyle(0xffffff, 1);
+            g.fillRoundedRect(o.x - s, o.y - s, s * 2, s * 2, 2.4 * u);
+            g.fillStyle(0x1d4ed8, 1);
+            g.fillRoundedRect(o.x - 10.6 * u, o.y - 10.6 * u, 21.2 * u, 21.2 * u, 1.8 * u);
+          };
+
+          const drawDangerTri = () => {
+            g.fillStyle(0x000000, 0.34);
+            g.fillTriangle(
+              o.x + 1.8, o.y - 11.4 * u + 2.2,
+              o.x - 11.8 * u + 1.8, o.y + 9.8 * u + 2.2,
+              o.x + 11.8 * u + 1.8, o.y + 9.8 * u + 2.2,
+            );
+            g.fillStyle(0x0f172a, 1);
+            g.fillTriangle(
+              o.x, o.y - 12.2 * u,
+              o.x - 12.5 * u, o.y + 10.3 * u,
+              o.x + 12.5 * u, o.y + 10.3 * u,
+            );
+            g.fillStyle(0xffffff, 1);
+            g.fillTriangle(
+              o.x, o.y - 11.6 * u,
+              o.x - 11.9 * u, o.y + 9.8 * u,
+              o.x + 11.9 * u, o.y + 9.8 * u,
+            );
+            g.fillStyle(0xdc2626, 1);
+            g.fillTriangle(
+              o.x, o.y - 10.5 * u,
+              o.x - 10.8 * u, o.y + 9.0 * u,
+              o.x + 10.8 * u, o.y + 9.0 * u,
+            );
+            g.fillStyle(0xffffff, 1);
+            g.fillTriangle(
+              o.x, o.y - 6.6 * u,
+              o.x - 7.3 * u, o.y + 6.8 * u,
+              o.x + 7.3 * u, o.y + 6.8 * u,
+            );
+          };
+
+          const drawRoundaboutArrows = (cx: number, cy: number, rad: number, color: number, lw: number, head: number) => {
+            g.lineStyle(lw, color, 1);
+            g.fillStyle(color, 1);
+            const span = 1.25; // ~72° arc per arrow (3 arrows around 360°)
+            for (let k = 0; k < 3; k++) {
+              const startA = -Math.PI / 2 + k * ((Math.PI * 2) / 3);
+              const endA = startA - span; // counter-clockwise traffic flow
+              g.beginPath();
+              const segs = 10;
+              for (let i = 0; i <= segs; i++) {
+                const a = startA + (endA - startA) * (i / segs);
+                const px = cx + Math.cos(a) * rad;
+                const py = cy + Math.sin(a) * rad;
+                if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+              }
+              g.strokePath();
+              // Arrowhead at endA pointing tangent CCW: (sin(endA), -cos(endA))
+              const tx = Math.sin(endA);
+              const ty = -Math.cos(endA);
+              const rx = Math.cos(endA);
+              const ry = Math.sin(endA);
+              const tipX = cx + rx * rad + tx * (head * 0.9);
+              const tipY = cy + ry * rad + ty * (head * 0.9);
+              const baseX = cx + rx * rad - tx * (head * 0.55);
+              const baseY = cy + ry * rad - ty * (head * 0.55);
+              g.fillTriangle(
+                tipX, tipY,
+                baseX + rx * (head * 0.72), baseY + ry * (head * 0.72),
+                baseX - rx * (head * 0.72), baseY - ry * (head * 0.72),
+              );
+            }
+          };
+
+          const drawSpeedDigits = (text: string) => {
+            const n = text.length;
+            const digitW = (n >= 3 ? 3.5 : 4.6) * u;
+            const digitH = (n >= 3 ? 6.8 : 8.4) * u;
+            const gap = (n >= 3 ? 0.9 : 1.5) * u;
+            const sw = (n >= 3 ? 1.15 : 1.55) * u;
+            const totalW = n * digitW + (n - 1) * gap;
+            const startX = o.x - totalW / 2;
+            const topY = o.y - digitH / 2;
+            const midY = o.y - sw / 2;
+            const botY = o.y + digitH / 2 - sw;
+            g.fillStyle(0x0f172a, 1);
+
+            for (let i = 0; i < n; i++) {
+              const dx = startX + i * (digitW + gap);
+              const ch = text[i];
+              if (ch === '0') {
+                g.fillRect(dx, topY, digitW, sw);
+                g.fillRect(dx, botY, digitW, sw);
+                g.fillRect(dx, topY, sw, digitH);
+                g.fillRect(dx + digitW - sw, topY, sw, digitH);
+              } else if (ch === '1') {
+                g.fillRect(dx + digitW * 0.45, topY, sw, digitH);
+                g.fillRect(dx + digitW * 0.15, topY + sw * 0.4, digitW * 0.45, sw);
+                g.fillRect(dx + digitW * 0.12, botY, digitW * 0.78, sw);
+              } else if (ch === '2') {
+                g.fillRect(dx, topY, digitW, sw);
+                g.fillRect(dx + digitW - sw, topY, sw, digitH * 0.55);
+                g.fillRect(dx, midY, digitW, sw);
+                g.fillRect(dx, midY, sw, digitH * 0.52);
+                g.fillRect(dx, botY, digitW, sw);
+              } else if (ch === '3') {
+                g.fillRect(dx, topY, digitW, sw);
+                g.fillRect(dx, midY, digitW, sw);
+                g.fillRect(dx, botY, digitW, sw);
+                g.fillRect(dx + digitW - sw, topY, sw, digitH);
+              } else if (ch === '5') {
+                g.fillRect(dx, topY, digitW, sw);
+                g.fillRect(dx, topY, sw, digitH * 0.55);
+                g.fillRect(dx, midY, digitW, sw);
+                g.fillRect(dx + digitW - sw, midY, sw, digitH * 0.52);
+                g.fillRect(dx, botY, digitW, sw);
+              } else if (ch === '8') {
+                g.fillRect(dx, topY, digitW, sw);
+                g.fillRect(dx, midY, digitW, sw);
+                g.fillRect(dx, botY, digitW, sw);
+                g.fillRect(dx, topY, sw, digitH);
+                g.fillRect(dx + digitW - sw, topY, sw, digitH);
+              }
+            }
+          };
 
           if (o.variant === 'yield') {
             // Cedência de passagem (B1): triângulo invertido branco com orla vermelha
@@ -5546,28 +6450,150 @@ export class WorldObjects {
             g.fillTriangle(o.x - 10.2 * u, o.y - 9 * u, o.x + 10.2 * u, o.y - 9 * u, o.x, o.y + 9.6 * u);
             g.fillStyle(0xffffff, 1);
             g.fillTriangle(o.x - 5.6 * u, o.y - 5.8 * u, o.x + 5.6 * u, o.y - 5.8 * u, o.x, o.y + 4.4 * u);
-          } else if (o.variant === 'speed') {
-            // Limite de velocidade 50 (C13): disco branco, anel vermelho e dígitos "50"
+          } else if (o.variant === 'speed' || o.variant === 'speed_30' || o.variant === 'speed_80' || o.variant === 'speed_120') {
+            // Limites de velocidade (C13): 30 / 50 / 80 / 120
+            drawRedRingDisk();
+            const label = o.variant === 'speed_30' ? '30' : o.variant === 'speed_80' ? '80' : o.variant === 'speed_120' ? '120' : '50';
+            drawSpeedDigits(label);
+          } else if (o.variant === 'no_entry') {
+            // Sentido proibido (C1): disco vermelho com barra branca horizontal
             g.fillStyle(0x000000, 0.3);
             g.fillCircle(o.x + 1.5, o.y + 2, s);
             g.fillStyle(0x0f172a, 1);
-            g.fillCircle(o.x, o.y, s + 0.8 * u);
+            g.fillCircle(o.x, o.y, s + 0.7 * u);
             g.fillStyle(0xffffff, 1);
             g.fillCircle(o.x, o.y, s);
-            g.lineStyle(2.8 * u, 0xdc2626, 1);
-            g.strokeCircle(o.x, o.y, 10.1 * u);
-            // Dígito "5"
+            g.fillStyle(0xdc2626, 1);
+            g.fillCircle(o.x, o.y, s * 0.90);
+            g.fillStyle(0xffffff, 1);
+            g.fillRect(o.x - 7.4 * u, o.y - 1.9 * u, 14.8 * u, 3.8 * u);
+          } else if (o.variant === 'no_trucks') {
+            // Proibido a automóveis pesados (C3b): disco branco, anel vermelho, silhueta de camião
+            drawRedRingDisk();
             g.fillStyle(0x0f172a, 1);
-            g.fillRect(o.x - 5.6 * u, o.y - 4.3 * u, 4.5 * u, 1.6 * u);
-            g.fillRect(o.x - 5.6 * u, o.y - 4.3 * u, 1.6 * u, 4.7 * u);
-            g.fillRect(o.x - 5.6 * u, o.y - 0.8 * u, 4.6 * u, 1.6 * u);
-            g.fillRect(o.x - 2.6 * u, o.y - 0.8 * u, 1.6 * u, 4.9 * u);
-            g.fillRect(o.x - 5.6 * u, o.y + 2.7 * u, 4.6 * u, 1.6 * u);
-            // Dígito "0"
-            g.fillRect(o.x + 1.1 * u, o.y - 4.3 * u, 4.2 * u, 1.6 * u);
-            g.fillRect(o.x + 1.1 * u, o.y + 2.7 * u, 4.2 * u, 1.6 * u);
-            g.fillRect(o.x + 0.8 * u, o.y - 3.7 * u, 1.6 * u, 7.4 * u);
-            g.fillRect(o.x + 4.0 * u, o.y - 3.7 * u, 1.6 * u, 7.4 * u);
+            // Caixa de carga
+            g.fillRect(o.x - 6.6 * u, o.y - 3.6 * u, 8.2 * u, 5.2 * u);
+            // Cabina frontal
+            g.fillRect(o.x + 1.8 * u, o.y - 2.2 * u, 4.4 * u, 3.8 * u);
+            g.fillStyle(0xffffff, 1);
+            g.fillRect(o.x + 3.0 * u, o.y - 1.5 * u, 2.3 * u, 1.5 * u);
+            // Chassis + rodas
+            g.fillStyle(0x0f172a, 1);
+            g.fillRect(o.x - 6.6 * u, o.y + 1.5 * u, 12.8 * u, 1.1 * u);
+            g.fillCircle(o.x - 4.1 * u, o.y + 3.1 * u, 1.65 * u);
+            g.fillCircle(o.x + 3.9 * u, o.y + 3.1 * u, 1.65 * u);
+          } else if (o.variant === 'roundabout') {
+            // Rotunda (D4): disco azul com 3 setas brancas circulares
+            drawBlueDisk();
+            drawRoundaboutArrows(o.x, o.y, 5.4 * u, 0xffffff, 1.9 * u, 2.3 * u);
+          } else if (o.variant === 'mandatory_straight') {
+            // Sentido obrigatório em frente (D1c): disco azul com seta branca para cima
+            drawBlueDisk();
+            g.fillStyle(0xffffff, 1);
+            g.fillRect(o.x - 1.7 * u, o.y - 2.4 * u, 3.4 * u, 9.4 * u);
+            g.fillTriangle(o.x, o.y - 7.8 * u, o.x - 5.2 * u, o.y - 1.8 * u, o.x + 5.2 * u, o.y - 1.8 * u);
+          } else if (o.variant === 'mandatory_right' || o.variant === 'mandatory_left') {
+            // Sentido obrigatório à direita (D1a) / à esquerda (D1b)
+            drawBlueDisk();
+            const dirSign = o.variant === 'mandatory_right' ? 1 : -1;
+            g.fillStyle(0xffffff, 1);
+            // Haste vertical inferior + curva em L + seta lateral
+            g.fillRect(o.x - dirSign * 3.8 * u - 1.5 * u, o.y - 2.2 * u, 3.0 * u, 9.2 * u);
+            g.fillRect(
+              dirSign > 0 ? o.x - 5.3 * u : o.x - 1.8 * u,
+              o.y - 3.6 * u,
+              7.1 * u,
+              3.0 * u,
+            );
+            g.fillTriangle(
+              o.x + dirSign * 7.6 * u, o.y - 2.1 * u,
+              o.x + dirSign * 1.4 * u, o.y - 6.6 * u,
+              o.x + dirSign * 1.4 * u, o.y + 2.4 * u,
+            );
+          } else if (o.variant === 'keep_right') {
+            // Passagem obrigatória pela direita (D3a): disco azul com seta diagonal ↘
+            drawBlueDisk();
+            g.lineStyle(2.8 * u, 0xffffff, 1);
+            g.lineBetween(o.x - 5.2 * u, o.y - 5.2 * u, o.x + 2.8 * u, o.y + 2.8 * u);
+            g.fillStyle(0xffffff, 1);
+            g.fillTriangle(
+              o.x + 6.4 * u, o.y + 6.4 * u,
+              o.x + 5.4 * u, o.y - 0.6 * u,
+              o.x - 0.6 * u, o.y + 5.4 * u,
+            );
+          } else if (o.variant === 'priority_road') {
+            // Via com prioridade (B3): losango branco com centro amarelo
+            const drawDiamond = (cx: number, cy: number, rad: number) => {
+              g.beginPath();
+              g.moveTo(cx, cy - rad);
+              g.lineTo(cx + rad, cy);
+              g.lineTo(cx, cy + rad);
+              g.lineTo(cx - rad, cy);
+              g.closePath();
+              g.fillPath();
+            };
+            g.fillStyle(0x000000, 0.3);
+            drawDiamond(o.x + 1.5, o.y + 2, 12.2 * u);
+            g.fillStyle(0x0f172a, 1);
+            drawDiamond(o.x, o.y, 12.5 * u);
+            g.fillStyle(0xffffff, 1);
+            drawDiamond(o.x, o.y, 11.8 * u);
+            g.fillStyle(0x0f172a, 1);
+            drawDiamond(o.x, o.y, 8.2 * u);
+            g.fillStyle(0xfacc15, 1);
+            drawDiamond(o.x, o.y, 7.5 * u);
+          } else if (o.variant === 'one_way') {
+            // Trânsito de sentido único (H3): quadrado azul com seta branca larga
+            drawBlueSquare();
+            g.fillStyle(0xffffff, 1);
+            g.fillRect(o.x - 2.1 * u, o.y - 1.8 * u, 4.2 * u, 9.6 * u);
+            g.fillTriangle(o.x, o.y - 8.2 * u, o.x - 6.0 * u, o.y - 1.2 * u, o.x + 6.0 * u, o.y - 1.2 * u);
+          } else if (o.variant === 'parking') {
+            // Estacionamento autorizado (H1a): quadrado azul com "P" branco
+            drawBlueSquare();
+            g.fillStyle(0xffffff, 1);
+            g.fillRect(o.x - 4.4 * u, o.y - 6.8 * u, 2.5 * u, 13.6 * u);
+            g.fillRect(o.x - 4.4 * u, o.y - 6.8 * u, 7.2 * u, 2.4 * u);
+            g.fillRect(o.x - 4.4 * u, o.y - 0.6 * u, 7.2 * u, 2.4 * u);
+            g.fillRect(o.x + 1.8 * u, o.y - 5.8 * u, 2.5 * u, 6.6 * u);
+          } else if (o.variant === 'danger_roundabout') {
+            // Aproximação de rotunda (A19a): triângulo de perigo com símbolo de rotunda
+            drawDangerTri();
+            drawRoundaboutArrows(o.x, o.y + 2.1 * u, 3.3 * u, 0x0f172a, 1.35 * u, 1.55 * u);
+          } else if (o.variant === 'danger_curve') {
+            // Curva perigosa / sucessão de curvas (A1c)
+            drawDangerTri();
+            g.lineStyle(2.1 * u, 0x0f172a, 1);
+            g.beginPath();
+            g.moveTo(o.x - 2.4 * u, o.y + 5.6 * u);
+            g.lineTo(o.x - 2.4 * u, o.y + 2.4 * u);
+            g.lineTo(o.x + 2.4 * u, o.y - 0.8 * u);
+            g.lineTo(o.x + 2.4 * u, o.y - 3.6 * u);
+            g.strokePath();
+            g.fillStyle(0x0f172a, 1);
+            g.fillTriangle(
+              o.x + 2.4 * u, o.y - 5.4 * u,
+              o.x + 0.4 * u, o.y - 2.6 * u,
+              o.x + 4.4 * u, o.y - 2.6 * u,
+            );
+          } else if (o.variant === 'danger_work') {
+            // Trabalhos na via (A23): triângulo de perigo com silhueta de trabalhador e monte
+            drawDangerTri();
+            g.fillStyle(0x0f172a, 1);
+            // Cabeça + tronco inclinado
+            g.fillCircle(o.x + 1.2 * u, o.y - 1.6 * u, 1.35 * u);
+            g.lineStyle(1.7 * u, 0x0f172a, 1);
+            g.lineBetween(o.x + 1.0 * u, o.y - 0.1 * u, o.x + 2.4 * u, o.y + 3.2 * u);
+            g.lineBetween(o.x + 2.4 * u, o.y + 3.2 * u, o.x + 0.8 * u, o.y + 5.6 * u);
+            g.lineBetween(o.x + 2.4 * u, o.y + 3.2 * u, o.x + 4.2 * u, o.y + 5.6 * u);
+            // Pá + monte de terra
+            g.lineStyle(1.3 * u, 0x0f172a, 1);
+            g.lineBetween(o.x + 1.4 * u, o.y + 1.2 * u, o.x - 2.4 * u, o.y + 4.6 * u);
+            g.fillTriangle(
+              o.x - 5.2 * u, o.y + 5.8 * u,
+              o.x - 2.6 * u, o.y + 2.2 * u,
+              o.x - 0.2 * u, o.y + 5.8 * u,
+            );
           } else if (o.variant === 'no_parking') {
             // Proibido estacionar (C15): disco azul, orla vermelha e faixa diagonal (\)
             g.fillStyle(0x000000, 0.3);
@@ -5603,42 +6629,8 @@ export class WorldObjects {
             g.lineBetween(o.x - 2.3 * u, o.y + 0.5 * u, o.x + 2.2 * u, o.y - 0.5 * u);
           } else if (o.variant === 'steep_uphill' || o.variant === 'steep_downhill') {
             // Sinais de perigo europeus A2b (Subida acentuada) e A2a (Descida perigosa):
-            // triângulo equilátero branco de ponta para cima, orla vermelha larga, cunha de rampa e seta direcional
             const isUp = o.variant === 'steep_uphill';
-            // Sombra projetada
-            g.fillStyle(0x000000, 0.34);
-            g.fillTriangle(
-              o.x + 1.8, o.y - 11.4 * u + 2.2,
-              o.x - 11.8 * u + 1.8, o.y + 9.8 * u + 2.2,
-              o.x + 11.8 * u + 1.8, o.y + 9.8 * u + 2.2,
-            );
-            // Rebordo escuro fino + fundo branco exterior
-            g.fillStyle(0x0f172a, 1);
-            g.fillTriangle(
-              o.x, o.y - 12.2 * u,
-              o.x - 12.5 * u, o.y + 10.3 * u,
-              o.x + 12.5 * u, o.y + 10.3 * u,
-            );
-            g.fillStyle(0xffffff, 1);
-            g.fillTriangle(
-              o.x, o.y - 11.6 * u,
-              o.x - 11.9 * u, o.y + 9.8 * u,
-              o.x + 11.9 * u, o.y + 9.8 * u,
-            );
-            // Orla vermelha de perigo
-            g.fillStyle(0xdc2626, 1);
-            g.fillTriangle(
-              o.x, o.y - 10.5 * u,
-              o.x - 10.8 * u, o.y + 9.0 * u,
-              o.x + 10.8 * u, o.y + 9.0 * u,
-            );
-            // Campo interior branco
-            g.fillStyle(0xffffff, 1);
-            g.fillTriangle(
-              o.x, o.y - 6.6 * u,
-              o.x - 7.3 * u, o.y + 6.8 * u,
-              o.x + 7.3 * u, o.y + 6.8 * u,
-            );
+            drawDangerTri();
             // Cunha inclinada preta (rampa ascendente ↗ ou descendente ↘)
             g.fillStyle(0x0f172a, 1);
             if (isUp) {
@@ -5662,7 +6654,7 @@ export class WorldObjects {
                 o.x + 5.2 * u, o.y + 5.8 * u,
                 o.x - 5.4 * u, o.y + 0.6 * u,
               );
-              // Seta azul-celeste/carmesim destacada a descer (↘)
+              // Seta azul-celeste destacada a descer (↘)
               g.lineStyle(1.8 * u, 0x0284c7, 1);
               g.lineBetween(o.x - 2.8 * u, o.y - 1.2 * u, o.x + 3.6 * u, o.y + 2.4 * u);
               g.fillStyle(0x0284c7, 1);
@@ -5716,10 +6708,7 @@ export class WorldObjects {
             g.fillRect(o.x + 6.3 * u, o.y - 3.2 * u, 1.1 * u, 4.0 * u);
           } else {
             // Placa triangular de perigo (fallback genérico)
-            g.fillStyle(0xffffff, 1);
-            g.fillTriangle(o.x, o.y - 10 * u, o.x - 10.5 * u, o.y + 9 * u, o.x + 10.5 * u, o.y + 9 * u);
-            g.lineStyle(2.4 * u, 0xdc2626, 1);
-            g.strokeTriangle(o.x, o.y - 10 * u, o.x - 10.5 * u, o.y + 9 * u, o.x + 10.5 * u, o.y + 9 * u);
+            drawDangerTri();
           }
           break;
         }

@@ -36,6 +36,8 @@ export class MinimapScene extends Phaser.Scene {
   private lastVersion: number = -1;
   private lastViewCenterX: number = Number.NaN;
   private lastViewCenterY: number = Number.NaN;
+  private lastOverlayDrawAt: number = -1000;
+  private currentDispSize: number = MinimapScene.DISPLAY_SIZE;
 
   constructor() {
     super({ key: 'MinimapScene' });
@@ -78,23 +80,34 @@ export class MinimapScene extends Phaser.Scene {
     this.scale.on('resize', () => this.reposition());
   }
 
+  private getLayoutMetrics(): { disp: number; marginRight: number; top: number } {
+    const sx = this.scale.displayScale?.x > 0 ? this.scale.displayScale.x : 1;
+    const sy = this.scale.displayScale?.y > 0 ? this.scale.displayScale.y : 1;
+    const cssW = this.scale.displaySize?.width > 0 ? this.scale.displaySize.width : this.scale.width;
+    const dispCss = MinimapScene.getDisplaySize(cssW);
+    return {
+      disp: Math.max(72, Math.round(dispCss * sx)),
+      marginRight: Math.max(4, Math.round(MinimapScene.MARGIN_RIGHT * sx)),
+      top: Math.max(24, Math.round(MinimapScene.TOP * sy)),
+    };
+  }
+
   private reposition() {
     if (!this.minimapImage) return;
-    const disp = MinimapScene.getDisplaySize(this.scale.width);
+    const { disp, marginRight, top } = this.getLayoutMetrics();
+    this.currentDispSize = disp;
     this.cameras.main.setZoom(1);
     this.cameras.main.setScroll(0, 0);
     this.minimapImage.setDisplaySize(disp, disp);
-    this.minimapImage.setPosition(
-      this.scale.width - disp - MinimapScene.MARGIN_RIGHT,
-      MinimapScene.TOP,
-    );
+    this.minimapImage.setPosition(this.scale.width - disp - marginRight, top);
+    this.lastOverlayDrawAt = -1000;
   }
 
   public getRect(): { x: number; y: number; width: number; height: number } {
-    const disp = MinimapScene.getDisplaySize(this.scale.width);
+    const { disp, marginRight, top } = this.getLayoutMetrics();
     return {
-      x: this.scale.width - disp - MinimapScene.MARGIN_RIGHT,
-      y: MinimapScene.TOP,
+      x: this.scale.width - disp - marginRight,
+      y: top,
       width: disp,
       height: disp,
     };
@@ -138,17 +151,21 @@ export class MinimapScene extends Phaser.Scene {
       ? mainScene.cameras.main.midPoint.y
       : mainScene.truck.body.position.y;
 
-    if (
+    const viewMoved =
       baseRedrawn ||
       !Number.isFinite(this.lastViewCenterX) ||
-      Math.hypot(centerX - this.lastViewCenterX, centerY - this.lastViewCenterY) >= 4
-    ) {
+      Math.hypot(centerX - this.lastViewCenterX, centerY - this.lastViewCenterY) >= 28;
+    if (viewMoved) {
       this.lastViewCenterX = centerX;
       this.lastViewCenterY = centerY;
       this.updateViewTexture(centerX, centerY);
     }
 
-    this.drawOverlay(mainScene, time, centerX, centerY);
+    // Throttle overlay vector redraws to ~20Hz unless minimap texture or world changed
+    if (viewMoved || time - this.lastOverlayDrawAt >= 50) {
+      this.lastOverlayDrawAt = time;
+      this.drawOverlay(mainScene, time, centerX, centerY);
+    }
   }
 
   private redrawBase(mainScene: MainScene) {
@@ -376,7 +393,7 @@ export class MinimapScene extends Phaser.Scene {
     const span = MinimapScene.VIEW_SPAN_WORLD;
     const viewMinX = centerX - span / 2;
     const viewMinY = centerY - span / 2;
-    const w = MinimapScene.getDisplaySize(this.scale.width);
+    const w = this.currentDispSize;
     const h = w;
 
     const toMapX = (wx: number) => img.x + ((wx - viewMinX) / span) * w;

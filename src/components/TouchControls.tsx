@@ -278,7 +278,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
           style={{ touchAction: 'none' }}
         >
           {/* Outer Translucent Halo */}
-          <div className="absolute inset-0 rounded-full border-2 border-cyan-400/30 bg-black/35 backdrop-blur-sm shadow-[0_0_20px_rgba(0,240,255,0.18)]" />
+          <div className="absolute inset-0 rounded-full border-2 border-cyan-400/30 bg-slate-950/50 shadow-[0_0_20px_rgba(0,240,255,0.18)]" />
 
           {/* Rotating Wheel Ring and Spokes */}
           <div
@@ -332,7 +332,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
                 className={`w-8 h-7 rounded-lg border transition flex items-center justify-center shadow-md select-none touch-none text-[10px] font-black tracking-tight ${
                   autoHeadlights
                     ? 'bg-amber-400/90 text-slate-950 border-amber-200 shadow-amber-400/40'
-                    : 'bg-black/45 backdrop-blur-sm text-slate-300 border-white/20 hover:text-white'
+                    : 'bg-slate-950/70 text-slate-300 border-white/20 hover:text-white'
                 }`}
                 title="Luzes Automáticas — sensor crepuscular & chuva/nevoeiro (Shift+L)"
                 aria-label="Luzes Automáticas"
@@ -354,7 +354,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
                 className={`w-8 h-7 rounded-lg border transition flex items-center justify-center shadow-md select-none touch-none ${
                   headlightMode === 'low'
                     ? 'bg-emerald-500/90 text-slate-950 border-emerald-200 shadow-emerald-500/50'
-                    : 'bg-black/45 backdrop-blur-sm text-slate-300 border-white/20 hover:text-white'
+                    : 'bg-slate-950/70 text-slate-300 border-white/20 hover:text-white'
                 }`}
                 title="Médios (Tecla L)"
                 aria-label="Médios"
@@ -380,7 +380,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
                 className={`w-8 h-7 rounded-lg border transition flex items-center justify-center shadow-md select-none touch-none ${
                   headlightMode === 'high'
                     ? 'bg-blue-500/95 text-white border-blue-200 shadow-blue-500/60'
-                    : 'bg-black/45 backdrop-blur-sm text-slate-300 border-white/20 hover:text-white'
+                    : 'bg-slate-950/70 text-slate-300 border-white/20 hover:text-white'
                 }`}
                 title="Máximos (Tecla L)"
                 aria-label="Máximos"
@@ -449,7 +449,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
                 className={`w-8 h-8 rounded-full text-xs font-mono font-black border transition flex items-center justify-center shadow-md select-none touch-none ${
                   handbrakeActive
                     ? 'bg-red-600/90 text-white border-red-300 shadow-red-500/50 animate-pulse'
-                    : 'bg-black/40 backdrop-blur-sm text-slate-300 border-white/20 hover:text-white'
+                    : 'bg-slate-950/70 text-slate-300 border-white/20 hover:text-white'
                 }`}
                 title="Travão de Estacionamento (P)"
               >
@@ -467,7 +467,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
               >
                 {(truckHealth < 100 || trailerHealth < 100) && (
                   <span
-                    className={`px-1 py-0.5 rounded border backdrop-blur-sm ${
+                    className={`px-1 py-0.5 rounded border ${
                       Math.min(truckHealth, trailerHealth) <= 35
                         ? 'bg-red-950/90 border-red-400/80 text-red-200'
                         : 'bg-amber-950/85 border-amber-400/60 text-amber-200'
@@ -478,7 +478,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
                 )}
                 {cargoHealth < 100 && (
                   <span
-                    className={`px-1 py-0.5 rounded border backdrop-blur-sm ${
+                    className={`px-1 py-0.5 rounded border ${
                       cargoHealth <= 50
                         ? 'bg-red-950/90 border-red-400/80 text-red-200'
                         : 'bg-amber-950/85 border-amber-400/60 text-amber-200'
@@ -508,7 +508,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
 
             {/* Compact Gear Switch Pill (D / R) */}
             <div
-              className="flex items-center bg-black/45 backdrop-blur-md p-1 rounded-full border border-white/20 shadow-lg select-none touch-none"
+              className="flex items-center bg-slate-950/75 p-1 rounded-full border border-white/20 shadow-lg select-none touch-none"
               style={{ touchAction: 'none' }}
             >
               <button
@@ -571,10 +571,10 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
             onPointerCancel={handleBrakeUp}
             onContextMenu={suppressContextMenu}
             onDragStart={suppressContextMenu}
-            className={`relative w-14 sm:w-16 h-20 sm:h-24 rounded-lg border flex flex-col items-center justify-between p-2 select-none touch-none backdrop-blur-sm transition-all ${
+            className={`relative w-14 sm:w-16 h-20 sm:h-24 rounded-lg border flex flex-col items-center justify-between p-2 select-none touch-none transition-all ${
               brakePressed
-                ? 'bg-red-600/80 border-red-200 scale-95 shadow-[0_0_20px_rgba(239,68,68,0.8)] translate-y-1'
-                : 'bg-red-950/30 border-red-500/40 shadow-lg hover:border-red-400'
+                ? 'bg-red-600/85 border-red-200 scale-95 shadow-[0_0_20px_rgba(239,68,68,0.8)] translate-y-1'
+                : 'bg-red-950/60 border-red-500/45 shadow-lg hover:border-red-400'
             }`}
             style={{ touchAction: 'none' }}
           >
@@ -601,10 +601,10 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
             onPointerCancel={handleThrottleUp}
             onContextMenu={suppressContextMenu}
             onDragStart={suppressContextMenu}
-            className={`relative w-14 sm:w-16 h-24 sm:h-28 rounded-lg border flex flex-col items-center justify-between p-2 select-none touch-none backdrop-blur-sm transition-all ${
+            className={`relative w-14 sm:w-16 h-24 sm:h-28 rounded-lg border flex flex-col items-center justify-between p-2 select-none touch-none transition-all ${
               throttlePressed
-                ? 'bg-emerald-500/80 border-emerald-200 scale-95 shadow-[0_0_25px_rgba(16,185,129,0.8)] translate-y-1.5'
-                : 'bg-emerald-950/30 border-emerald-500/40 shadow-lg hover:border-emerald-400'
+                ? 'bg-emerald-500/85 border-emerald-200 scale-95 shadow-[0_0_25px_rgba(16,185,129,0.8)] translate-y-1.5'
+                : 'bg-emerald-950/60 border-emerald-500/45 shadow-lg hover:border-emerald-400'
             }`}
             style={{ touchAction: 'none' }}
           >

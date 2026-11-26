@@ -226,3 +226,28 @@ Este ficheiro contém todos os prompts prontos a copiar para gerar as texturas e
 
 
 
+
+
+---
+
+### 5.3 Cidade Expandida, Praças, Monumentos, Doca Marítima, Quintas, Plantações & Jardim de Cidade (`v2.25.0`)
+
+| Estado | Ficheiro Final | Uso | Proporção | Descrição |
+| :---: | :--- | :--- | :---: | :--- |
+| `[x]` | `tiles/terrain_city_garden.png` | Pincel de terreno **Jardim de Cidade** (`city_garden`) | `1:1` | *(Integrado em v2.25.0 — Relva de parque urbano bem aparada em faixas suaves com canteiros discretos, 512×512 seamless)* |
+| `[x]` | `tiles/terrain_flower_garden.png` | Pincel de terreno **Jardim de Flores** (`flower_garden`) | `1:1` | *(Integrado em v2.25.0 — Relva urbana com canteiros ornamentais de flores coloridas em vermelho, amarelo, lavanda, coral e branco, 512×512 seamless)* |
+| `[x]` | `buildings/house_urban_corner.png` | **Casa Citadina** (`house_urban_corner`) | `4:3` | *(Integrado em v2.25.0 — Casa citadina europeia em L com telhado de telha e pequeno pátio frontal)* |
+| `[x]` | `buildings/house_duplex.png` | **Moradia Urbana** (`house_duplex`) | `4:3` | *(Integrado em v2.25.0 — Moradia urbana contemporânea de dois pisos com terraço e cobertura mista)* |
+| `[x]` | `buildings/apartment_2f.png` | **Prédio 2 Andares** (`apartment_2f`) | `4:3` | *(Integrado em v2.25.0 — Pequeno prédio citadino de 2 andares com telha e clarabóia)* |
+| `[x]` | `buildings/apartment_4f.png` | **Prédio 4 Andares** (`apartment_4f`) | `16:9` | *(Integrado em v2.25.0 — Edifício residencial de 4 andares com terraço plano, varandas e caixas de escada)* |
+| `[x]` | `buildings/apartment_10f.png` | **Torre 10 Andares** (`apartment_10f`) | `1:1` | *(Integrado em v2.25.0 — Torre residencial alta de 10 andares com cobertura técnica, HVAC e guarda-corpos)* |
+| `[x]` | `buildings/hypermarket.png` | **Hipermercado** (`hypermarket`) | `16:9` | *(Integrado em v2.25.0 — Grande hipermercado com cobertura industrial, clarabóias, painéis solares e cais de receção)* |
+| `[x]` | `buildings/esplanade.png` | **Esplanada** (`esplanade`) | `4:3` | *(Integrado em v2.25.0 — Esplanada urbana de calçada com guarda-sóis, mesas e floreiras)* |
+| `[x]` | `buildings/plaza_statue.png` | **Praça c/ Estátua** (`plaza_statue`) | `1:1` | *(Integrado em v2.25.0 — Praça pavimentada simétrica com estátua em pedestal central, canteiros e bancos)* |
+| `[x]` | `buildings/monument.png` | **Monumento** (`monument`) | `1:1` | *(Integrado em v2.25.0 — Monumento histórico em pedra trabalhada sobre escadaria circular com espelho de água)* |
+| `[x]` | `buildings/sea_pier.png` | **Doca Marítima** (`sea_pier`) | `16:9` | *(Integrado em v2.25.0 — Cais / doca marítima transitável em betão e madeira com cabeços de amarração e defensas)* |
+| `[x]` | `buildings/farmhouse.png` | **Quinta Tradicional** (`farmhouse`) | `4:3` | *(Integrado em v2.25.0 — Quinta rústica portuguesa com casa principal, pátio empedrado e muro de pedra)* |
+| `[x]` | `buildings/farm_pasture.png` | **Quinta c/ Animais** (`farm_pasture`) | `16:9` | *(Integrado em v2.25.0 — Quinta agrícola com celeiro, estábulo e cercado de pasto com vacas e ovelhas)* |
+| `[x]` | `buildings/farm_crops.png` | **Quinta c/ Plantações** (`farm_crops`) | `16:9` | *(Integrado em v2.25.0 — Quinta com casa rural, estufa e hortas/vinhas organizadas em fileiras)* |
+| `[x]` | `buildings/crop_field.png` | **Campo de Plantações** (`crop_field`) | `16:9` | *(Integrado em v2.25.0 — Campo agrícola transitável de hortícolas/vinha em sulcos verdes e terra lavrada)* |
+| `[x]` | `buildings/crop_wheat.png` | **Campo de Cereal** (`crop_wheat`) | `16:9` | *(Integrado em v2.25.0 — Campo de cereal dourado ceifado em faixas com fardos e orla rural)* |

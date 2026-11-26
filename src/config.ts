@@ -21,12 +21,15 @@ export function createGameConfig(options: GameConfigOptions): Phaser.Types.Core.
     backgroundColor: '#0c0f17',
     render: {
       maxLights: 4,
+      antialias: true,
+      antialiasGL: false,
+      powerPreference: 'high-performance',
     },
     scale: {
-      mode: Phaser.Scale.RESIZE,
+      mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
-      width: '100%',
-      height: '100%',
+      width: options.width || 1280,
+      height: options.height || 720,
     },
     physics: {
       default: 'matter',

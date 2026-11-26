@@ -1,8 +1,18 @@
 import Phaser from 'phaser';
 import { MainScene } from './MainScene';
 import { GarageSystem, parseHexColor } from '../systems/GarageSystem';
-import { RoadNetwork, RoadData, RoadPoint, RoadSurface, RoadSnapResult, RoadSample, BridgeSample } from '../systems/RoadNetwork';
-import { IntersectionSystem, IntersectionNode, TrafficLightSpec } from '../systems/IntersectionSystem';
+import {
+  RoadNetwork,
+  RoadData,
+  RoadPoint,
+  RoadSurface,
+  RoadGuardrailMode,
+  RoadPointGuardrail,
+  RoadSnapResult,
+  RoadSample,
+  BridgeSample,
+} from '../systems/RoadNetwork';
+import { IntersectionSystem, IntersectionNode, IntersectionControlType, TrafficLightSpec } from '../systems/IntersectionSystem';
 import {
   WorldObject,
   WObjType,
@@ -77,7 +87,7 @@ export class EditorScene extends Phaser.Scene {
     grabY: number;
     pendingUndo?: { json: string; version: number } | null;
   } | null = null;
-  private pendingRoad: { surface: RoadSurface; points: RoadPoint[]; oneWay: boolean; layer: number } | null = null;
+  private pendingRoad: { surface: RoadSurface; points: RoadPoint[]; oneWay: boolean; layer: number; guardrail: RoadGuardrailMode } | null = null;
   private pointerWorld: { x: number; y: number } = { x: 0, y: 0 };
   private lastPointerIsTouch: boolean = false;
   private rightClickPending: { screenX: number; screenY: number } | null = null;
@@ -88,6 +98,7 @@ export class EditorScene extends Phaser.Scene {
   public newRoadWidth: number = 128;
   public newRoadOneWay: boolean = false;
   public newRoadLayer: number = 0;
+  public newRoadGuardrail: RoadGuardrailMode = 'none';
   private roadDirtySinceRelease: boolean = false;
   public snapToRoads: boolean = true;
   public isolateSelectedRoad: boolean = false;
@@ -938,6 +949,7 @@ export class EditorScene extends Phaser.Scene {
       points: [{ x: startSnap.x, y: startSnap.y, w: this.newRoadWidth }],
       oneWay: this.newRoadOneWay,
       layer: this.newRoadLayer,
+      guardrail: this.newRoadGuardrail,
     };
   }
 
@@ -1164,7 +1176,14 @@ export class EditorScene extends Phaser.Scene {
     if (!this.pendingRoad) return;
     if (this.pendingRoad.points.length >= 2) {
       this.pushUndo();
-      const road = this.roadNetwork.addRoad(this.pendingRoad.surface, this.pendingRoad.points, false, this.pendingRoad.oneWay, this.pendingRoad.layer);
+      const road = this.roadNetwork.addRoad(
+        this.pendingRoad.surface,
+        this.pendingRoad.points,
+        false,
+        this.pendingRoad.oneWay,
+        this.pendingRoad.layer,
+        this.pendingRoad.guardrail,
+      );
       this.selectedRoad = road;
       this.overlappingRoads = [road];
     }
@@ -1255,6 +1274,27 @@ export class EditorScene extends Phaser.Scene {
     }
   }
 
+  /** Set protective roadside guardrail mode ('none' | 'curves' | 'both' | 'left' | 'right') for ground roads */
+  public setRoadGuardrail(mode: RoadGuardrailMode) {
+    this.newRoadGuardrail = mode;
+    if (this.pendingRoad) {
+      this.pendingRoad.guardrail = mode;
+    }
+    if (this.selectedRoad) {
+      this.pushUndo();
+      this.roadNetwork.setRoadGuardrail(this.selectedRoad.id, mode);
+      this.mainScene.world.version++;
+    }
+  }
+
+  /** Set per-section guardrail override around the selected control point ('auto' | 'none' | 'left' | 'right' | 'both') */
+  public setPointGuardrail(mode: RoadPointGuardrail) {
+    if (!this.selectedRoad || this.selectedPointIndex === null) return;
+    this.pushUndo();
+    this.roadNetwork.setPointGuardrail(this.selectedRoad.id, this.selectedPointIndex, mode);
+    this.mainScene.world.version++;
+  }
+
   public nudgeTwist(deltaDeg: number) {
     if (!this.selectedRoad || this.selectedPointIndex === null) return;
     const p = this.selectedRoad.points[this.selectedPointIndex];
@@ -1326,6 +1366,8 @@ export class EditorScene extends Phaser.Scene {
     twistDeg: number;
     oneWay: boolean;
     layer: number;
+    guardrail: RoadGuardrailMode;
+    pointGuardrail: RoadPointGuardrail;
     tooShort: boolean;
     snapToRoads: boolean;
     isolateSelectedRoad: boolean;
@@ -1340,6 +1382,12 @@ export class EditorScene extends Phaser.Scene {
       : this.pendingRoad
         ? this.pendingRoad.layer
         : this.newRoadLayer;
+    const guardrail: RoadGuardrailMode = this.selectedRoad
+      ? (this.selectedRoad.guardrail ?? 'none')
+      : this.pendingRoad
+        ? this.pendingRoad.guardrail
+        : this.newRoadGuardrail;
+    const pointGuardrail: RoadPointGuardrail = selPoint?.guardrail ?? 'auto';
     let tooShort = false;
     if (layer > 0) {
       if (this.selectedRoad) {
@@ -1381,6 +1429,8 @@ export class EditorScene extends Phaser.Scene {
       twistDeg: selPoint ? Math.round(Phaser.Math.RadToDeg(selPoint.twist ?? 0)) : 0,
       oneWay: this.selectedRoad ? !!this.selectedRoad.oneWay : this.newRoadOneWay,
       layer,
+      guardrail,
+      pointGuardrail,
       tooShort,
       snapToRoads: this.snapToRoads,
       isolateSelectedRoad: this.isolateSelectedRoad,
@@ -1395,25 +1445,36 @@ export class EditorScene extends Phaser.Scene {
   // INTERSECTION TOOL (select node, toggle signals, visualise phases)
   // ======================================================================
 
+  /** Set the traffic control mode (`none` | `signal` | `stop` | `yield`) on the selected intersection node. */
+  public setIntersectionControl(controlType: IntersectionControlType): IntersectionControlType {
+    const node = this.selectedIntersectionNode;
+    if (!node) return 'none';
+    this.pushUndo();
+    this.removeIntersectionTrafficLights(node.id);
+    this.intersectionSystem.setControlType(node.id, controlType);
+    if (controlType === 'signal') {
+      this.createIntersectionTrafficLights(node.id);
+    } else if (controlType === 'stop' || controlType === 'yield') {
+      this.createIntersectionControlSigns(node.id, controlType);
+    }
+    this.mainScene.world.objects.version++;
+    this.mainScene.world.version++;
+    this.drawIntersectionOverlay();
+    return controlType;
+  }
+
   /** Toggle traffic lights on the currently selected intersection node. */
   public toggleIntersectionSignalized(): boolean {
     const node = this.selectedIntersectionNode;
     if (!node) return false;
-    const next = !node.signalized;
-    this.intersectionSystem.setSignalized(node.id, next);
-    if (next) {
-      this.createIntersectionTrafficLights(node.id);
-    } else {
-      this.removeIntersectionTrafficLights(node.id);
-    }
-    this.mainScene.world.version++;
-    this.drawIntersectionOverlay();
-    return next;
+    const next: IntersectionControlType = node.signalized ? 'none' : 'signal';
+    return this.setIntersectionControl(next) === 'signal';
   }
 
   /** Create traffic-light world objects for a signalized node. */
   private createIntersectionTrafficLights(nodeId: string): void {
-    const specs = this.intersectionSystem.getTrafficLightSpecs(nodeId);
+    this.removeIntersectionTrafficLights(nodeId);
+    const specs = this.intersectionSystem.getTrafficLightSpecs(nodeId, this.mainScene.roadNetwork);
     const ids: string[] = [];
     for (const spec of specs) {
       const o = this.mainScene.world.objects.add('traffic_light', spec.x, spec.y, 22, 22, {
@@ -1425,14 +1486,77 @@ export class EditorScene extends Phaser.Scene {
     this.intersectionTrafficLights.set(nodeId, ids);
   }
 
-  /** Remove all traffic-light world objects for a node. */
+  /** Create STOP or Yield (Cedência) sign world objects (with automatic asphalt markings) for a node. */
+  private createIntersectionControlSigns(nodeId: string, variant: 'stop' | 'yield'): void {
+    this.removeIntersectionTrafficLights(nodeId);
+    const specs = this.intersectionSystem.getControlSignSpecs(nodeId, variant, this.mainScene.roadNetwork);
+    const ids: string[] = [];
+    for (const spec of specs) {
+      const o = this.mainScene.world.objects.add('sign', spec.x, spec.y, 22, 22, {
+        angle: spec.angle,
+        variant: spec.variant,
+        params: spec.params,
+      });
+      ids.push(o.id);
+    }
+    this.intersectionTrafficLights.set(nodeId, ids);
+  }
+
+  /** Remove all intersection-generated traffic lights or control signs for a node. */
   public removeIntersectionTrafficLights(nodeId: string): void {
-    const ids = this.intersectionTrafficLights.get(nodeId);
-    if (ids) {
-      for (const id of ids) {
-        this.mainScene.world.objects.remove(id);
+    const tracked = new Set<string>(this.intersectionTrafficLights.get(nodeId) ?? []);
+    for (const obj of this.mainScene.world.objects.objects) {
+      if (obj.params?.intersectionNode === nodeId) {
+        tracked.add(obj.id);
       }
-      this.intersectionTrafficLights.delete(nodeId);
+    }
+    for (const id of tracked) {
+      this.mainScene.world.objects.remove(id);
+    }
+    this.intersectionTrafficLights.delete(nodeId);
+  }
+
+  /**
+   * Automatically resolves and attaches road-marking alignment parameters
+   * (transverse stop/yield line + 'STOP' / yield triangle stencil) whenever
+   * a traffic light, STOP sign, or Yield sign is placed or moved next to a road.
+   */
+  private attachRoadMarkingForObject(o: WorldObject, autoOrientSignal = false): void {
+    const isControlledSign = o.type === 'sign' && (o.variant === 'stop' || o.variant === 'yield');
+    if (o.type !== 'traffic_light' && !isControlledSign) return;
+
+    const resolved = IntersectionSystem.resolveRoadMarkingParams(o.x, o.y, this.mainScene.roadNetwork);
+    if (resolved) {
+      const nextParams: Record<string, any> = {
+        ...(o.params || {}),
+        approachAngle: resolved.approachAngle,
+        roadWidth: resolved.roadWidth,
+        shoulderMargin: resolved.shoulderMargin,
+        stopLineOffset: resolved.stopLineOffset,
+        stopLineWidth: resolved.stopLineWidth,
+      };
+      if (resolved.oneWay) nextParams.oneWay = true;
+      else delete nextParams.oneWay;
+      if (o.type === 'traffic_light') {
+        nextParams.dir = resolved.dir;
+        if (autoOrientSignal) {
+          const facing = Phaser.Math.Angle.Wrap(resolved.approachAngle + Math.PI / 2);
+          this.mainScene.world.objects.setObjectAngle(o.id, facing);
+          o.angle = facing;
+        }
+      }
+      o.params = nextParams;
+      this.mainScene.world.objects.version++;
+    } else if (o.params && o.params.approachAngle !== undefined) {
+      const nextParams = { ...o.params };
+      delete nextParams.approachAngle;
+      delete nextParams.roadWidth;
+      delete nextParams.shoulderMargin;
+      delete nextParams.stopLineOffset;
+      delete nextParams.stopLineWidth;
+      delete nextParams.oneWay;
+      o.params = nextParams;
+      this.mainScene.world.objects.version++;
     }
   }
 
@@ -1447,6 +1571,7 @@ export class EditorScene extends Phaser.Scene {
     hasNode: boolean;
     nodeId: string;
     signalized: boolean;
+    controlType: IntersectionControlType;
     armCount: number;
     phaseCount: number;
     layer: number;
@@ -1457,6 +1582,7 @@ export class EditorScene extends Phaser.Scene {
       hasNode: true,
       nodeId: n.id,
       signalized: n.signalized,
+      controlType: n.controlType ?? (n.signalized ? 'signal' : 'none'),
       armCount: n.arms.length,
       phaseCount: n.phases.length,
       layer: n.layer,
@@ -1601,6 +1727,7 @@ export class EditorScene extends Phaser.Scene {
       this.mainScene.world.objects.moveObject(o.id, o.x + ddx, o.y + ddy);
       d.grabX += ddx;
       d.grabY += ddy;
+      this.attachRoadMarkingForObject(o, false);
       if (o.type === 'trailer') TrailerManager.getInstance(this.mainScene).syncForObject(o);
       if (o.type === 'hub_sign') this.garageSystem.syncFromWorld(this.mainScene.world.objects);
       this.roadDirtySinceRelease = true; // minimap refresh on release
@@ -1698,6 +1825,7 @@ export class EditorScene extends Phaser.Scene {
       src.w, src.h,
       { angle: src.angle, variant: src.variant, params: this.prepareClonedParams(src.type, src.params) },
     );
+    this.attachRoadMarkingForObject(o, true);
     if (o.type === 'trailer') TrailerManager.getInstance(this.mainScene).spawnObjectTrailer(o);
     if (o.type === 'hub_sign' || o.type === 'dock' || o.type === 'building') {
       this.garageSystem.syncFromWorld(this.mainScene.world.objects);
@@ -1731,6 +1859,7 @@ export class EditorScene extends Phaser.Scene {
       cb.type, Math.round(at.x), Math.round(at.y), cb.w, cb.h,
       { angle: cb.angle, variant: cb.variant, params: this.prepareClonedParams(cb.type, cb.params) },
     );
+    this.attachRoadMarkingForObject(o, true);
     if (o.type === 'trailer') TrailerManager.getInstance(this.mainScene).spawnObjectTrailer(o);
     if (o.type === 'hub_sign' || o.type === 'dock' || o.type === 'building') {
       this.garageSystem.syncFromWorld(this.mainScene.world.objects);
@@ -2247,6 +2376,7 @@ export class EditorScene extends Phaser.Scene {
       variant: spec.variant,
       params,
     });
+    this.attachRoadMarkingForObject(o, true);
     if (o.type === 'hub_sign' || o.type === 'dock' || o.type === 'building') {
       this.garageSystem.syncFromWorld(this.mainScene.world.objects);
     }
