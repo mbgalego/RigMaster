@@ -1630,26 +1630,87 @@ export class WorldObjects {
   /**
    * Paints the stop line of a signal head on its own approach lane.
    *
-   * Traffic lights are seeded at a fixed ±92/±132 offset from the junction centre, so
-   * the centre is reconstructed from the head position and its `dir` param:
-   *   n → centre (x-92, y-132) · s → (x+92, y+132) · e → (x+132, y-92) · w → (x-132, y+92)
+   * For axis-aligned intersections (legacy): traffic lights are seeded at a fixed
+   * ±92/±132 offset from the junction centre, so the centre is reconstructed from
+   * the head position and its `dir` param.
    *
-   * The bar covers only the right-hand lane (the 64px half of the road on the signal's
-   * side) and sits immediately before the signal post along the travel direction — not
-   * across the whole road and not at the junction box edge.
+   * For diagonal/free-form intersections: the traffic light already sits at the
+   * stop-line position. The `approachAngle` param (radians) gives the direction of
+   * travel entering the intersection. The stop bar is drawn perpendicular to this
+   * angle, on the right-hand lane, immediately before the signal head.
    */
   private drawTrafficStopLine(g: Phaser.GameObjects.Graphics, o: WorldObject) {
     const dir = o.params?.dir as 'n' | 's' | 'e' | 'w' | undefined;
-    if (!dir) return;
-    const cx = o.x + (dir === 'n' ? -92 : dir === 's' ? 92 : dir === 'e' ? 132 : -132);
-    const cy = o.y + (dir === 'n' ? -132 : dir === 's' ? 132 : dir === 'e' ? -92 : 92);
+    const approachAngle = o.params?.approachAngle as number | undefined;
+    if (!dir && approachAngle === undefined) return;
+
     const halfRoad = 64; // 128px arterial → one 64px lane per direction
     const inset = 4; // keep clear of the kerb and the centre line
     const gap = 6; // stop just behind the signal post
     const thick = 6;
-    const horizontal = dir === 'n' || dir === 's';
+    const laneWidth = halfRoad - inset * 2;
 
     let x0: number, y0: number, w: number, h: number;
+    let cosA: number, sinA: number;
+    let laneCenterX: number, laneCenterY: number;
+
+    if (approachAngle !== undefined) {
+      // Diagonal/free-form intersection: use actual approach angle
+      // Traffic light is already at the stop-line position (o.x, o.y)
+      // Stop bar is perpendicular to approachAngle, on the right-hand lane
+      cosA = Math.cos(approachAngle);
+      sinA = Math.sin(approachAngle);
+      // Perpendicular to approach (right-hand side in y-down coordinates)
+      const perpX = -sinA;
+      const perpY = cosA;
+      // Lane center is halfRoad + TL_SHOULDER_MARGIN to the right of road centerline
+      // The light is at: node_center - approach_dir * TL_STOP_OFFSET + perp_dir * (halfRoad + margin)
+      // So the lane center is approximately at the light position minus half the lane width along perp
+      const laneOffset = halfRoad + 28; // TL_SHOULDER_MARGIN = 28
+      laneCenterX = o.x - perpX * (laneOffset - laneWidth / 2);
+      laneCenterY = o.y - perpY * (laneOffset - laneWidth / 2);
+      // Stop bar is perpendicular to approach, centered on lane
+      // Draw as a triangle fan (two triangles making a rotated rectangle)
+      const hw = laneWidth / 2, hh = thick / 2;
+      const cx = laneCenterX, cy = laneCenterY;
+      const c1x = cx + cosA * hw + perpX * hh;
+      const c1y = cy + sinA * hw + perpY * hh;
+      const c2x = cx - cosA * hw + perpX * hh;
+      const c2y = cy - sinA * hw + perpY * hh;
+      const c3x = cx - cosA * hw - perpX * hh;
+      const c3y = cy - sinA * hw - perpY * hh;
+      const c4x = cx + cosA * hw - perpX * hh;
+      const c4y = cy + sinA * hw - perpY * hh;
+
+      // Soft asphalt shadow (offset by 1px)
+      g.fillStyle(0x000000, 0.22);
+      g.fillTriangle(c1x + 1, c1y + 1, c2x + 1, c2y + 1, c3x + 1, c3y + 1);
+      g.fillTriangle(c1x + 1, c1y + 1, c3x + 1, c3y + 1, c4x + 1, c4y + 1);
+      // Main bar
+      g.fillStyle(0xe6ebf1, 0.88);
+      g.fillTriangle(c1x, c1y, c2x, c2y, c3x, c3y);
+      g.fillTriangle(c1x, c1y, c3x, c3y, c4x, c4y);
+      // Highlight (inner rectangle, slightly smaller)
+      const ihw = hw * 0.85, ihh = hh * 0.85;
+      const ic1x = cx + cosA * ihw + perpX * ihh;
+      const ic1y = cy + sinA * ihw + perpY * ihh;
+      const ic2x = cx - cosA * ihw + perpX * ihh;
+      const ic2y = cy - sinA * ihw + perpY * ihh;
+      const ic3x = cx - cosA * ihw - perpX * ihh;
+      const ic3y = cy - sinA * ihw - perpY * ihh;
+      const ic4x = cx + cosA * ihw - perpX * ihh;
+      const ic4y = cy + sinA * ihw - perpY * ihh;
+      g.fillStyle(0xffffff, 0.55);
+      g.fillTriangle(ic1x, ic1y, ic2x, ic2y, ic3x, ic3y);
+      g.fillTriangle(ic1x, ic1y, ic3x, ic3y, ic4x, ic4y);
+      return;
+    }
+
+    // Legacy axis-aligned intersection
+    const cx = o.x + (dir === 'n' ? -92 : dir === 's' ? 92 : dir === 'e' ? 132 : -132);
+    const cy = o.y + (dir === 'n' ? -132 : dir === 's' ? 132 : dir === 'e' ? -92 : 92);
+    const horizontal = dir === 'n' || dir === 's';
+
     if (horizontal) {
       // n → east (right) lane, s → west (right) lane
       const laneLeft = dir === 'n' ? cx : cx - halfRoad;

@@ -91,7 +91,13 @@ export interface TrafficLightSpec {
   x: number;
   y: number;
   angle: number;
-  params: { dir: 'n' | 's' | 'e' | 'w'; group: number; intersectionNode: string };
+  params: { 
+    dir: 'n' | 's' | 'e' | 'w'; 
+    group: number; 
+    intersectionNode: string;
+    /** Actual approach angle in radians (for diagonal intersections) */
+    approachAngle?: number;
+  };
 }
 
 /** Direction hint from an angle (used for the legacy dir param on traffic_light). */
@@ -319,7 +325,7 @@ export class IntersectionSystem {
         const y = arm.entryY - Math.sin(arm.entryAngle) * TL_STOP_OFFSET + ry;
         // Signal head faces the approaching driver (perpendicular to travel, inward)
         const angle = arm.entryAngle + Math.PI / 2;
-        // dir parameter matches the approach direction for stop-line rendering
+        // dir parameter matches the approach direction for stop-line rendering (legacy)
         const dir = angleToDir(arm.entryAngle);
         specs.push({
           x: Math.round(x),
@@ -329,6 +335,8 @@ export class IntersectionSystem {
             dir,
             group: phase.index,
             intersectionNode: nodeId,
+            // Store actual approach angle for diagonal intersections
+            approachAngle: arm.entryAngle,
           },
         });
       }
