@@ -192,7 +192,32 @@ public/assets/sprites/
 
 ## 2. Histórico de Versões & Changelog
 
-### **v2.22.0** (Versão Atual — branch main)
+### **v2.24.0** (Versão Atual — branch main)
+- **Pacote Urbano & Cívico — 12 Novas Texturas Top-Down de Edifícios de Cidade (`public/assets/sprites/buildings/`, `SpriteRegistry.ts`, `docs/TEXTURE_PROMPTS.md`)**:
+  - **Residencial (6 sprites PNG RGBA)**: `house_traditional` (Casa Tradicional), `house_townhouse` (Casas Geminadas), `villa_classic` (Vivenda Tradicional), `villa_modern` (Vivenda Moderna c/ deck e piscina), `apartment_block` (Prédio Residencial) e `apartment_modern` (Prédio Moderno).
+  - **Serviços Públicos & Comércio (6 sprites PNG RGBA)**: `fire_station` (Quartel de Bombeiros com torre e 3 baias vermelhas), `police_station` (Esquadra da Polícia PSP), `hospital` (Hospital com heliporto `H` e cruz médica), `school` (Escola), `supermarket` (Supermercado) e `town_hall` (Câmara Municipal com torre de relógio e escadaria).
+- **Acessos a Garagem, Estacionamento Exterior & Placas Cívicas (`WorldObjects.ts`)**:
+  - Novo renderizador de placas frontais transitáveis (`drawBuildingApron` na camada `flats`, aderência de asfalto em `pavedGripAt`, bloqueio de árvores em `hasTreeBlockerAt`, extensão automática de chunks em `rebuildIndex` e colisão física apenas na pegada do edifício):
+    - **Vivendas & Casas c/ Garagem (`params.garageAccess`)**: acesso pavimentado em betão alinhado à ala de garagem, jardim frontal com sebe e caminho de acesso à porta principal.
+    - **Prédios c/ Garagem e/ou Estacionamento Exterior (`params.garageAccess`, `params.exteriorParking`)**: rampa de garagem subterrânea com muros guia e grelha de drenagem, parque de estacionamento exterior asfaltado com lugares pintados, lugar reservado a mobilidade reduzida e carros estacionados — combináveis individualmente ou em conjunto no mesmo edifício.
+    - **Placas de Emergência**: zona amarela zebrada de saída rápida nos Bombeiros, lugares reservados com carro-patrulha na Polícia e baia de Urgência com ambulância no Hospital.
+- **Editor & Bairro Urbano no Mapa (`App.tsx`, `EditorScene.ts`, `rigworld.json`)**:
+  - Duas novas categorias dedicadas no catálogo do Editor — **Cidade** (15 variantes pré-configuradas de casas, vivendas e prédios com/sem garagem e estacionamento) e **Cívico** (Bombeiros, Polícia, Hospital, Escola, Supermercado, Câmara Municipal, Igreja e Arco) — e interruptores de 1 clique no inspetor do objeto selecionado (`Acesso a Garagem` e `Estacionamento Exterior`).
+  - Nova zona urbana completa povoada em `rigworld.json` ao longo das avenidas `rd_10`, `rd_1` e `rd_2` junto ao Centro Histórico com todas as 12 tipologias de edifícios.
+
+### **v2.23.0** (branch main)
+- **Pisos de Estações de Serviço com Acessos em Funil (`WorldObjects.ts`, `StaticWorldChunks.ts`, `WorldLightPools.ts`)**:
+  - `gas_canopy` promovido para `ROAD_OVERLAY_TYPES` com nova camada Canvas2D texturada `roadFlatTex` (acima das estradas e abaixo dos sólidos), garantindo fusão perfeita em alcatrão sem costuras nem rebordos nas ligações à via.
+  - Geometria paramétrica (`getGasCanopyCore`) com **entrada de 1 via que abre suavemente em funil (curvas Bézier)** para as pistas das bombas (`PESADOS` / `LIGEIROS`) e **converge novamente numa única via de saída**, mantendo compacta a zona das bombas, com ilha separadora ajardinada, guias tracejadas curvas, setas de fluxo e legendas auto-endireitadas.
+  - Adaptação nativa para estradas em **todos os 4 lados + passante**: `accessSide: 'right' | 'left' | 'top' | 'bottom' | 'through'`, com cobertura aérea (`prop_gas_canopy`) e iluminação noturna centradas exatamente sobre o núcleo das bombas.
+- **Postos de Estradas Secundárias (1 Bomba + Pequena Casa de Apoio)**:
+  - Novo estilo `stationStyle: 'secondary'` compacto com 1 bomba central ladeada por 2 pistas de acesso em funil e cobertura reduzida.
+  - Nova variante de edifício `fuel_kiosk` com sprite PNG top-down dedicada (`/assets/sprites/buildings/fuel_kiosk.png`, registada em `SpriteRegistry.ts`) representando uma pequena casa de apoio/pagamento de estrada secundária.
+- **Editor & Mapa do Mundo (`src/App.tsx`, `EditorScene.ts`, `rigworld.json`)**:
+  - Catálogo **Serviços** do Editor expandido com os 10 pisos de estações de serviço (5 Autoestrada + 5 Secundário 1B para Direita/Esquerda/Acima/Abaixo/Passante) + `Casa Apoio Posto`, e seletor rápido no inspetor do objeto selecionado para alternar tipo e lado da estrada num clique.
+  - Áreas de Serviço A1 (Estação 1 `right` e Estação 2 `top`) atualizadas com os novos pisos em funil sem lages excessivas, Posto da Serra (`rd_44`) convertido em posto secundário 1B com casa de apoio, e 2 novos postos secundários adicionados no mapa (`rd_1` estrada à esquerda e `rd_9` estrada abaixo).
+
+### **v2.22.0** (branch main)
 - **Fase D5.2 Concluída — 33 Ilustrações Gráficas de Menus & Interface (`public/assets/sprites/`, `SpriteRegistry.ts`, `MissionsModal.tsx`, `WorkshopUpgradesModal.tsx`, `App.tsx`, `docs/TEXTURE_PROMPTS.md`)**:
   - **14 Perfis Laterais (*Sideview*) de Atrelados & Cisternas (`vehicles/trailers/menu/*_sideview.png`)**: criados e recortados em RGBA transparente (`--maxH=240`, orientados à esquerda em estilo estúdio ETS2 coerente com os 6 camiões) para todos os 14 atrelados do jogo (`standard`, `reefer`, `container`, `tanker_milk`, `long_cargo`, `flatbed_heavy`, `timber`, `tanker_fuel`, `bitrem_lead`, `bitrem_pup`, `bitrem_tanker_lead`, `bitrem_tanker_pup`, `fragile_glass`, `tanker_hazmat`). Integrados nos cartões de contratos do `MissionsModal` e no seletor de *Tipologia de Veículo & Carga* em `App.tsx`.
   - **4 Ilustrações Técnicas da Oficina (`ui/upgrades/upgrade_*.png`)**: bloco motor V8 turbo, disco ventilado com pinça vermelha, suspensão pneumática *air-ride* e roda/pneu pesado 10 pernos (`--maxH=256`). Integrados nos separadores de categoria e no painel de destaque técnico do `WorkshopUpgradesModal`.

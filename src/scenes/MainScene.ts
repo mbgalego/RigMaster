@@ -428,6 +428,7 @@ export class MainScene extends Phaser.Scene {
     // Chunked GPU RenderTexture cache for static flats + ground roads + roadFlats + solids (depth 3)
     this.staticWorldChunks = new StaticWorldChunks(this, (chunkRect, scratches) => {
       let hasFlatTex = false;
+      let hasRoadFlatTex = false;
       let hasSolidTex = false;
       this.world.objects.render(
         scratches.flats,
@@ -453,6 +454,15 @@ export class MainScene extends Phaser.Scene {
               },
             }
           : null,
+        scratches.roadFlatCtx
+          ? {
+              ctx: scratches.roadFlatCtx,
+              patterns: scratches.roadFlatPatterns,
+              markUsed: () => {
+                hasRoadFlatTex = true;
+              },
+            }
+          : null,
       );
       const hasRoadTex = this.drawGroundRoadsInto(
         scratches.roads,
@@ -469,6 +479,7 @@ export class MainScene extends Phaser.Scene {
           scratches.solids.commandBuffer.length,
         hasFlatTex,
         hasRoadTex,
+        hasRoadFlatTex,
         hasSolidTex,
       };
     });

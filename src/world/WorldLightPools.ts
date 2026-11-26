@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { WorldObjects } from './WorldObjects';
+import { WorldObjects, getGasCanopyCore } from './WorldObjects';
 import { SpriteRegistry } from '../systems/SpriteRegistry';
 
 /**
@@ -255,10 +255,11 @@ export class WorldLightPools {
         bindings.push({ img: oImg, kind: 'lamp', baseAlpha: 0.15, dayFloor: 0 });
       } else if (o.type === 'gas_canopy') {
         if (!nightActive) continue;
+        const core = getGasCanopyCore(o);
         const gImg = this.acquireGroundSprite(gIdx++);
-        const radius = 315;
+        const radius = core.style === 'secondary' ? 210 : 315;
         gImg
-          .setPosition(o.x, o.y)
+          .setPosition(core.cx, core.cy)
           .setDisplaySize(radius * 2, radius * 2)
           .setTint(0xfff0cc)
           .setAlpha(0.52 * lf)
@@ -266,9 +267,9 @@ export class WorldLightPools {
         bindings.push({ img: gImg, kind: 'gas_canopy', baseAlpha: 0.52, dayFloor: 0 });
 
         const oImg = this.acquireOverheadSprite(oIdx++);
-        const oRadius = 195;
+        const oRadius = core.style === 'secondary' ? 135 : 195;
         oImg
-          .setPosition(o.x, o.y)
+          .setPosition(core.cx, core.cy)
           .setDisplaySize(oRadius * 2, oRadius * 2)
           .setTint(0xfff4d8)
           .setAlpha(0.18 * lf)

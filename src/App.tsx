@@ -115,6 +115,12 @@ import {
   Eraser,
   Waves,
   Trash2,
+  Building,
+  Flame,
+  Shield,
+  Cross,
+  GraduationCap,
+  ShoppingCart,
 } from 'lucide-react';
 
 /** Catálogo do Criar, organizado por categorias — cada categoria tem o seu
@@ -141,6 +147,44 @@ const CREATE_CATALOG: Array<{
       { spec: { type: 'building', w: 260, h: 150, variant: 'restaurant', label: 'Restaurante (A1)' }, icon: Store },
       { spec: { type: 'building', w: 900, h: 420, variant: 'warehouse_docks', params: { docks: 5 }, label: 'Armazém c/ Docas' }, icon: Warehouse },
       { spec: { type: 'building', w: 600, h: 300, variant: 'warehouse_docks', params: { docks: 3 }, label: 'Armazém 3 Docas' }, icon: Warehouse },
+    ],
+  },
+  {
+    id: 'cidade',
+    label: 'Cidade',
+    icon: Home,
+    items: [
+      { spec: { type: 'building', w: 150, h: 110, variant: 'house_traditional', label: 'Casa Tradicional' }, icon: Home },
+      { spec: { type: 'building', w: 150, h: 110, variant: 'house_traditional', params: { garageAccess: true }, label: 'Casa c/ Garagem' }, icon: Home },
+      { spec: { type: 'building', w: 240, h: 124, variant: 'house_townhouse', label: 'Casas Geminadas' }, icon: Home },
+      { spec: { type: 'building', w: 210, h: 145, variant: 'villa_classic', label: 'Vivenda Tradicional' }, icon: Home },
+      { spec: { type: 'building', w: 210, h: 145, variant: 'villa_classic', params: { garageAccess: true }, label: 'Vivenda Trad. c/ Garagem' }, icon: Home },
+      { spec: { type: 'building', w: 200, h: 162, variant: 'villa_modern', label: 'Vivenda Moderna' }, icon: Home },
+      { spec: { type: 'building', w: 200, h: 162, variant: 'villa_modern', params: { garageAccess: true }, label: 'Vivenda Mod. c/ Garagem' }, icon: Home },
+      { spec: { type: 'building', w: 340, h: 166, variant: 'apartment_block', label: 'Prédio Residencial' }, icon: Building },
+      { spec: { type: 'building', w: 340, h: 166, variant: 'apartment_block', params: { garageAccess: true }, label: 'Prédio c/ Garagem' }, icon: Building },
+      { spec: { type: 'building', w: 340, h: 166, variant: 'apartment_block', params: { exteriorParking: true }, label: 'Prédio c/ Estacionamento' }, icon: CarFront },
+      { spec: { type: 'building', w: 340, h: 166, variant: 'apartment_block', params: { garageAccess: true, exteriorParking: true }, label: 'Prédio Garagem + Estac.' }, icon: Building2 },
+      { spec: { type: 'building', w: 320, h: 184, variant: 'apartment_modern', label: 'Prédio Moderno' }, icon: Building2 },
+      { spec: { type: 'building', w: 320, h: 184, variant: 'apartment_modern', params: { garageAccess: true }, label: 'Prédio Mod. c/ Garagem' }, icon: Building2 },
+      { spec: { type: 'building', w: 320, h: 184, variant: 'apartment_modern', params: { exteriorParking: true }, label: 'Prédio Mod. c/ Estac.' }, icon: CarFront },
+      { spec: { type: 'building', w: 320, h: 184, variant: 'apartment_modern', params: { garageAccess: true, exteriorParking: true }, label: 'Prédio Mod. Completo' }, icon: Building2 },
+    ],
+  },
+  {
+    id: 'civico',
+    label: 'Cívico',
+    icon: Landmark,
+    items: [
+      { spec: { type: 'building', w: 330, h: 180, variant: 'fire_station', label: 'Bombeiros' }, icon: Flame },
+      { spec: { type: 'building', w: 270, h: 190, variant: 'police_station', label: 'Polícia (PSP)' }, icon: Shield },
+      { spec: { type: 'building', w: 360, h: 278, variant: 'hospital', label: 'Hospital' }, icon: Cross },
+      { spec: { type: 'building', w: 360, h: 278, variant: 'hospital', params: { exteriorParking: true }, label: 'Hospital c/ Estacionamento' }, icon: Cross },
+      { spec: { type: 'building', w: 320, h: 185, variant: 'school', label: 'Escola' }, icon: GraduationCap },
+      { spec: { type: 'building', w: 360, h: 170, variant: 'supermarket', params: { exteriorParking: true }, label: 'Supermercado' }, icon: ShoppingCart },
+      { spec: { type: 'building', w: 250, h: 210, variant: 'town_hall', label: 'Câmara Municipal' }, icon: Landmark },
+      { spec: { type: 'building', w: 220, h: 170, variant: 'church', label: 'Igreja' }, icon: Church },
+      { spec: { type: 'building', w: 260, h: 160, variant: 'archway', label: 'Arco Histórico' }, icon: Landmark },
     ],
   },
   {
@@ -275,7 +319,107 @@ const CREATE_CATALOG: Array<{
     items: [
       { spec: { type: 'hub_sign', w: 68, h: 68, label: 'Sinal de HUB' }, icon: MapPin },
       { spec: { type: 'gas_pump', w: 48, h: 116, label: 'Bomba Combustível' }, icon: Fuel },
-      { spec: { type: 'gas_canopy', w: 540, h: 320, label: 'Pista Posto (Alcatrão)' }, icon: Layers },
+      {
+        spec: {
+          type: 'gas_canopy',
+          w: 640,
+          h: 860,
+          params: { stationStyle: 'highway', accessSide: 'right' },
+          label: 'Posto AE (Estrada Dir.)',
+        },
+        icon: Layers,
+      },
+      {
+        spec: {
+          type: 'gas_canopy',
+          w: 640,
+          h: 860,
+          params: { stationStyle: 'highway', accessSide: 'left' },
+          label: 'Posto AE (Estrada Esq.)',
+        },
+        icon: Layers,
+      },
+      {
+        spec: {
+          type: 'gas_canopy',
+          w: 860,
+          h: 640,
+          params: { stationStyle: 'highway', accessSide: 'top' },
+          label: 'Posto AE (Estrada Cima)',
+        },
+        icon: Layers,
+      },
+      {
+        spec: {
+          type: 'gas_canopy',
+          w: 860,
+          h: 640,
+          params: { stationStyle: 'highway', accessSide: 'bottom' },
+          label: 'Posto AE (Estrada Baixo)',
+        },
+        icon: Layers,
+      },
+      {
+        spec: {
+          type: 'gas_canopy',
+          w: 480,
+          h: 740,
+          params: { stationStyle: 'highway', accessSide: 'through' },
+          label: 'Posto AE (Passante)',
+        },
+        icon: Layers,
+      },
+      {
+        spec: {
+          type: 'gas_canopy',
+          w: 380,
+          h: 520,
+          params: { stationStyle: 'secondary', accessSide: 'right' },
+          label: 'Posto 1B (Estrada Dir.)',
+        },
+        icon: Layers,
+      },
+      {
+        spec: {
+          type: 'gas_canopy',
+          w: 380,
+          h: 520,
+          params: { stationStyle: 'secondary', accessSide: 'left' },
+          label: 'Posto 1B (Estrada Esq.)',
+        },
+        icon: Layers,
+      },
+      {
+        spec: {
+          type: 'gas_canopy',
+          w: 520,
+          h: 380,
+          params: { stationStyle: 'secondary', accessSide: 'top' },
+          label: 'Posto 1B (Estrada Cima)',
+        },
+        icon: Layers,
+      },
+      {
+        spec: {
+          type: 'gas_canopy',
+          w: 520,
+          h: 380,
+          params: { stationStyle: 'secondary', accessSide: 'bottom' },
+          label: 'Posto 1B (Estrada Baixo)',
+        },
+        icon: Layers,
+      },
+      {
+        spec: {
+          type: 'gas_canopy',
+          w: 270,
+          h: 480,
+          params: { stationStyle: 'secondary', accessSide: 'through' },
+          label: 'Posto 1B (Passante)',
+        },
+        icon: Layers,
+      },
+      { spec: { type: 'building', w: 128, h: 84, variant: 'fuel_kiosk', label: 'Casa Apoio Posto' }, icon: Store },
       { spec: { type: 'building', w: 240, h: 136, variant: 'convenience_store', label: 'Loja Conveniência' }, icon: Store },
       { spec: { type: 'building', w: 260, h: 150, variant: 'restaurant', label: 'Restaurante (A1)' }, icon: Store },
       { spec: { type: 'air_water', w: 84, h: 42, label: 'Ar / Água / Aspirador' }, icon: Wind },
@@ -423,6 +567,16 @@ export default function App() {
       parkingPads: number;
       garages: number;
     } | null;
+    gasCanopy: {
+      stationStyle: 'highway' | 'secondary';
+      accessSide: 'right' | 'left' | 'top' | 'bottom' | 'through';
+    } | null;
+    buildingFeatures: {
+      supportsGarage: boolean;
+      supportsParking: boolean;
+      garageAccess: boolean;
+      exteriorParking: boolean;
+    } | null;
   }>({
     hasSelection: false,
     id: '',
@@ -437,6 +591,8 @@ export default function App() {
     isCompound: false,
     compoundPartCount: 0,
     hubSign: null,
+    gasCanopy: null,
+    buildingFeatures: null,
   });
 
   // Real-time Telemetry
@@ -2756,6 +2912,125 @@ export default function App() {
                             </button>
                           ))}
                         </div>
+                      </>
+                    ) : null}
+                    {objectUI.type === 'gas_canopy' && objectUI.gasCanopy ? (
+                      <>
+                        <div className="ed-fs-sm font-bold text-slate-500 px-1 pt-0.5 shrink-0">tipo de posto</div>
+                        <div className="grid grid-cols-2 gap-1 shrink-0">
+                          {([
+                            ['Autoestrada', 'highway'],
+                            ['Secundário 1B', 'secondary'],
+                          ] as Array<[string, 'highway' | 'secondary']>).map(([lbl, val]) => (
+                            <button
+                              key={val}
+                              onClick={() => {
+                                const ed = getEditorScene();
+                                if (ed) {
+                                  ed.setGasCanopyConfig(objectUI.id, { stationStyle: val });
+                                  setObjectUI(ed.getObjectUIState());
+                                }
+                              }}
+                              className={`shrink-0 ed-fs font-bold px-1.5 py-1 rounded border text-left truncate ${
+                                objectUI.gasCanopy?.stationStyle === val
+                                  ? 'bg-emerald-400 text-slate-950 border-emerald-200'
+                                  : 'bg-slate-800 text-emerald-300 border-slate-600 hover:bg-slate-700'
+                              }`}
+                            >
+                              {lbl}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="ed-fs-sm font-bold text-slate-500 px-1 pt-0.5 shrink-0">lado da estrada</div>
+                        <div className="grid grid-cols-2 gap-1 shrink-0">
+                          {([
+                            ['Direita', 'right'],
+                            ['Esquerda', 'left'],
+                            ['Acima', 'top'],
+                            ['Abaixo', 'bottom'],
+                            ['Passante', 'through'],
+                          ] as Array<[string, 'right' | 'left' | 'top' | 'bottom' | 'through']>).map(([lbl, val]) => (
+                            <button
+                              key={val}
+                              onClick={() => {
+                                const ed = getEditorScene();
+                                if (ed) {
+                                  ed.setGasCanopyConfig(objectUI.id, { accessSide: val });
+                                  setObjectUI(ed.getObjectUIState());
+                                }
+                              }}
+                              className={`shrink-0 ed-fs font-bold px-1.5 py-1 rounded border text-left truncate ${
+                                objectUI.gasCanopy?.accessSide === val
+                                  ? 'bg-amber-400 text-slate-950 border-amber-200'
+                                  : 'bg-slate-800 text-amber-300 border-slate-600 hover:bg-slate-700'
+                              }`}
+                            >
+                              {lbl}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    ) : null}
+                    {objectUI.type === 'building' && objectUI.buildingFeatures ? (
+                      <>
+                        {objectUI.buildingFeatures.supportsGarage ? (
+                          <>
+                            <div className="ed-fs-sm font-bold text-slate-500 px-1 pt-0.5 shrink-0">acesso a garagem</div>
+                            <div className="grid grid-cols-2 gap-1 shrink-0">
+                              {([
+                                ['Sem', false],
+                                ['Com', true],
+                              ] as Array<[string, boolean]>).map(([lbl, val]) => (
+                                <button
+                                  key={lbl}
+                                  onClick={() => {
+                                    const ed = getEditorScene();
+                                    if (ed) {
+                                      ed.setBuildingFeatures(objectUI.id, { garageAccess: val });
+                                      setObjectUI(ed.getObjectUIState());
+                                    }
+                                  }}
+                                  className={`shrink-0 ed-fs font-bold px-1.5 py-1 rounded border text-center ${
+                                    objectUI.buildingFeatures?.garageAccess === val
+                                      ? 'bg-emerald-400 text-slate-950 border-emerald-200'
+                                      : 'bg-slate-800 text-emerald-300 border-slate-600 hover:bg-slate-700'
+                                  }`}
+                                >
+                                  {lbl}
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        ) : null}
+                        {objectUI.buildingFeatures.supportsParking ? (
+                          <>
+                            <div className="ed-fs-sm font-bold text-slate-500 px-1 pt-0.5 shrink-0">estacionamento exterior</div>
+                            <div className="grid grid-cols-2 gap-1 shrink-0">
+                              {([
+                                ['Sem', false],
+                                ['Com', true],
+                              ] as Array<[string, boolean]>).map(([lbl, val]) => (
+                                <button
+                                  key={lbl}
+                                  onClick={() => {
+                                    const ed = getEditorScene();
+                                    if (ed) {
+                                      ed.setBuildingFeatures(objectUI.id, { exteriorParking: val });
+                                      setObjectUI(ed.getObjectUIState());
+                                    }
+                                  }}
+                                  className={`shrink-0 ed-fs font-bold px-1.5 py-1 rounded border text-center ${
+                                    objectUI.buildingFeatures?.exteriorParking === val
+                                      ? 'bg-amber-400 text-slate-950 border-amber-200'
+                                      : 'bg-slate-800 text-amber-300 border-slate-600 hover:bg-slate-700'
+                                  }`}
+                                >
+                                  {lbl}
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        ) : null}
                       </>
                     ) : null}
                     {objectUI.type === 'trailer' ? (

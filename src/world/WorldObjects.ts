@@ -190,7 +190,7 @@ const FLAT_TYPES = new Set<WObjType>([
  *  para cobrir limpos os rebordos da via ao ligar à berma, mantendo-se abaixo de
  *  passadeiras, edifícios (depth 3) e veículos (depth 10+). */
 const ROAD_OVERLAY_TYPES = new Set<WObjType>([
-  'road_entry', 'road_entry_y', 'road_turnout',
+  'road_entry', 'road_entry_y', 'road_turnout', 'gas_canopy',
 ]);
 
 /** Superfícies pavimentadas que oferecem aderência de asfalto fora da estrada principal. */
@@ -203,6 +203,239 @@ const PAVED_SURFACE_TYPES = new Set<WObjType>([
 
 function isFlatType(t: WObjType): boolean { return FLAT_TYPES.has(t); }
 function isRoadOverlayType(t: WObjType): boolean { return ROAD_OVERLAY_TYPES.has(t); }
+
+/** Variantes urbanas que suportam acesso a garagem (driveway residencial ou rampa subterrânea). */
+export const RESIDENTIAL_GARAGE_VARIANTS = new Set<string>([
+  'house_traditional',
+  'house_townhouse',
+  'villa_classic',
+  'villa_modern',
+  'apartment_block',
+  'apartment_modern',
+]);
+
+/** Variantes urbanas/cívicas que suportam parque de estacionamento exterior integrado. */
+export const EXTERIOR_PARKING_VARIANTS = new Set<string>([
+  'apartment_block',
+  'apartment_modern',
+  'villa_classic',
+  'villa_modern',
+  'supermarket',
+  'hospital',
+  'school',
+  'town_hall',
+  'police_station',
+  'fire_station',
+]);
+
+/** Edifícios cívicos/de emergência com placa frontal funcional dedicada. */
+export const EMERGENCY_FORECOURT_VARIANTS = new Set<string>([
+  'fire_station',
+  'police_station',
+  'hospital',
+]);
+
+export interface BuildingApronExtent {
+  front: number;
+  side: number;
+  back: number;
+}
+
+/**
+ * Computes the drivable front apron extent (garage driveway/ramp, exterior parking lot,
+ * or emergency forecourt) attached to the local +y entrance face of an urban/civic building.
+ */
+export function getBuildingApronExtent(o: WorldObject): BuildingApronExtent {
+  if (o.type !== 'building') return { front: 0, side: 0, back: 0 };
+  const v = o.variant ?? '';
+  const hasGarage = Boolean(o.params?.garageAccess) && RESIDENTIAL_GARAGE_VARIANTS.has(v);
+  const hasParking = Boolean(o.params?.exteriorParking) && EXTERIOR_PARKING_VARIANTS.has(v);
+  const isEmergency = EMERGENCY_FORECOURT_VARIANTS.has(v);
+
+  if (!hasGarage && !hasParking && !isEmergency) {
+    return { front: 0, side: 0, back: 0 };
+  }
+
+  if (v === 'fire_station') {
+    return { front: hasParking ? 164 : 96, side: 14, back: 6 };
+  }
+  if (v === 'police_station') {
+    return { front: hasParking ? 160 : 94, side: 14, back: 6 };
+  }
+  if (v === 'hospital') {
+    return { front: hasParking ? 180 : 98, side: 18, back: 6 };
+  }
+  if (v === 'apartment_block' || v === 'apartment_modern') {
+    if (hasGarage && hasParking) return { front: 158, side: 20, back: 8 };
+    if (hasParking) return { front: 150, side: 18, back: 8 };
+    return { front: 98, side: 12, back: 6 };
+  }
+  if (v === 'house_traditional' || v === 'house_townhouse' || v === 'villa_classic' || v === 'villa_modern') {
+    if (hasParking) return { front: 138, side: 16, back: 8 };
+    return { front: 88, side: 12, back: 6 };
+  }
+  // supermarket, school, town_hall with exteriorParking
+  return { front: 154, side: 22, back: 8 };
+}
+
+export type GasStationStyle = 'highway' | 'secondary';
+export type GasAccessSide = 'right' | 'left' | 'top' | 'bottom' | 'through';
+
+export interface GasCanopyCoreInfo {
+  style: GasStationStyle;
+  accessSide: GasAccessSide;
+  /** World center of the pump deck / overhead canopy roof. */
+  cx: number;
+  cy: number;
+  /** World rotation of canonical frame (lanes run along local Y; for side-access, road is at +X). */
+  frameAngle: number;
+  /** Canonical bounding dimensions inside frameAngle. */
+  uW: number;
+  uH: number;
+  /** Local pump deck bounds inside canonical frame. */
+  deckLeft: number;
+  deckRight: number;
+  deckTop: number;
+  deckBottom: number;
+  deckW: number;
+  deckH: number;
+  deckCx: number;
+  /** Single-lane entry/exit road access mouth width. */
+  neckW: number;
+  /** Splitter island width between deckRight and road edge (+uW/2); 0 for 'through'. */
+  splitterBand: number;
+  /** Lane partitions across [0..1] of deckW. */
+  lanes: Array<{ startF: number; endF: number; heavy: boolean }>;
+  /** Recommended overhead roof sprite display size. */
+  roofW: number;
+  roofH: number;
+}
+
+/**
+ * Single source of truth for the pump-deck geometry, funnelled road-access frame,
+ * overhead canopy alignment, and night-light pool placement of any `gas_canopy` object.
+ */
+export function getGasCanopyCore(o: WorldObject): GasCanopyCoreInfo {
+  const rawStyle = o.params?.stationStyle;
+  const style: GasStationStyle = rawStyle === 'secondary' ? 'secondary' : 'highway';
+  const rawSide = o.params?.accessSide;
+  const accessSide: GasAccessSide =
+    rawSide === 'right' || rawSide === 'left' || rawSide === 'top' || rawSide === 'bottom' || rawSide === 'through'
+      ? rawSide
+      : 'through';
+
+  let sideRot = 0;
+  let uW = o.w;
+  let uH = o.h;
+  if (accessSide === 'bottom') {
+    sideRot = Math.PI / 2;
+    uW = o.h;
+    uH = o.w;
+  } else if (accessSide === 'left') {
+    sideRot = Math.PI;
+  } else if (accessSide === 'top') {
+    sideRot = -Math.PI / 2;
+    uW = o.h;
+    uH = o.w;
+  }
+  const frameAngle = o.angle + sideRot;
+
+  let splitterBand = 0;
+  let deckW: number;
+  let deckLeft: number;
+  let deckRight: number;
+  let deckCx: number;
+  let deckH: number;
+  let neckW: number;
+
+  if (accessSide === 'through') {
+    const pad = style === 'secondary' ? 10 : 12;
+    deckW = Math.max(style === 'secondary' ? 160 : 260, uW - pad * 2);
+    deckLeft = -deckW * 0.5;
+    deckRight = deckW * 0.5;
+    deckCx = 0;
+    deckH =
+      style === 'secondary'
+        ? Math.min(200, Math.max(144, uH * 0.42))
+        : Math.min(280, Math.max(190, uH * 0.40));
+    neckW =
+      style === 'secondary'
+        ? Math.min(92, Math.max(72, deckW * 0.38))
+        : Math.min(116, Math.max(92, deckW * 0.26));
+  } else {
+    const leftPad = style === 'secondary' ? 12 : 14;
+    splitterBand =
+      style === 'secondary'
+        ? Math.max(72, Math.min(110, uW * 0.26))
+        : Math.max(96, Math.min(144, uW * 0.21));
+    deckW = Math.max(style === 'secondary' ? 170 : 260, uW - leftPad - splitterBand);
+    deckLeft = -uW * 0.5 + leftPad;
+    deckRight = deckLeft + deckW;
+    deckCx = (deckLeft + deckRight) * 0.5;
+    deckH =
+      style === 'secondary'
+        ? Math.min(200, Math.max(146, uH * 0.36))
+        : Math.min(280, Math.max(190, uH * 0.33));
+    neckW =
+      style === 'secondary'
+        ? Math.min(86, Math.max(66, (uH - deckH) * 0.44))
+        : Math.min(106, Math.max(84, (uH - deckH) * 0.36));
+  }
+
+  const deckTop = -deckH * 0.5;
+  const deckBottom = deckH * 0.5;
+
+  const customHeavy = typeof o.params?.heavyLanes === 'number' ? o.params.heavyLanes : null;
+  const lanes: Array<{ startF: number; endF: number; heavy: boolean }> =
+    style === 'secondary'
+      ? [
+          { startF: 0.0, endF: 0.54, heavy: customHeavy !== null ? customHeavy >= 1 : true },
+          { startF: 0.54, endF: 1.0, heavy: customHeavy !== null ? customHeavy >= 2 : false },
+        ]
+      : deckW >= 420
+        ? [
+            { startF: 0.0, endF: 0.374, heavy: customHeavy !== null ? customHeavy >= 1 : true },
+            { startF: 0.374, endF: 0.74, heavy: customHeavy !== null ? customHeavy >= 2 : true },
+            { startF: 0.74, endF: 1.0, heavy: customHeavy !== null ? customHeavy >= 3 : false },
+          ]
+        : [
+            { startF: 0.0, endF: 0.52, heavy: customHeavy !== null ? customHeavy >= 1 : true },
+            { startF: 0.52, endF: 1.0, heavy: customHeavy !== null ? customHeavy >= 2 : false },
+          ];
+
+  const cos = Math.cos(frameAngle);
+  const sin = Math.sin(frameAngle);
+  const cx = o.x + deckCx * cos;
+  const cy = o.y + deckCx * sin;
+
+  const roofW = deckW * (style === 'secondary' ? 0.90 : 0.94);
+  const roofH =
+    style === 'secondary'
+      ? Math.min(deckH * 0.56, 114)
+      : Math.min(deckH * 0.54, Math.max(134, roofW / 3.1));
+
+  return {
+    style,
+    accessSide,
+    cx,
+    cy,
+    frameAngle,
+    uW,
+    uH,
+    deckLeft,
+    deckRight,
+    deckTop,
+    deckBottom,
+    deckW,
+    deckH,
+    deckCx,
+    neckW,
+    splitterBand,
+    lanes,
+    roofW,
+    roofH,
+  };
+}
 
 /** Marking colours for the driveway entrances (`params.mark`). */
 const ENTRANCE_MARKS: Record<string, number> = {
@@ -389,14 +622,35 @@ export class WorldObjects {
       let maxX = o.x + (c * o.w + s * o.h) / 2;
       let minY = o.y - (s * o.w + c * o.h) / 2;
       let maxY = o.y + (s * o.w + c * o.h) / 2;
+      if (o.type === 'building') {
+        const apron = getBuildingApronExtent(o);
+        if (apron.front > 0) {
+          const cosA = Math.cos(o.angle), sinA = Math.sin(o.angle);
+          const lx0 = -o.w / 2 - apron.side;
+          const lx1 = o.w / 2 + apron.side;
+          const ly0 = -o.h / 2 - apron.back;
+          const ly1 = o.h / 2 + apron.front;
+          for (const [lx, ly] of [[lx0, ly0], [lx1, ly0], [lx0, ly1], [lx1, ly1]]) {
+            const wx = o.x + lx * cosA - ly * sinA;
+            const wy = o.y + lx * sinA + ly * cosA;
+            if (wx < minX) minX = wx;
+            if (wx > maxX) maxX = wx;
+            if (wy < minY) minY = wy;
+            if (wy > maxY) maxY = wy;
+          }
+        }
+      }
       if (o.type === 'compound') {
         const parts = compoundParts(o);
         for (let i = 0; i < parts.length; i++) {
           const p = compoundPartWorldObject(o, i);
           if (!p) continue;
           const pc = Math.abs(Math.cos(p.angle)), ps = Math.abs(Math.sin(p.angle));
-          const phx = (pc * p.w + ps * p.h) / 2;
-          const phy = (ps * p.w + pc * p.h) / 2;
+          const apronP = p.type === 'building' ? getBuildingApronExtent(p) : { front: 0, side: 0, back: 0 };
+          const pw = p.w + apronP.side * 2;
+          const ph = p.h + apronP.front + apronP.back;
+          const phx = (pc * pw + ps * ph) / 2;
+          const phy = (ps * pw + pc * ph) / 2;
           minX = Math.min(minX, p.x - phx); maxX = Math.max(maxX, p.x + phx);
           minY = Math.min(minY, p.y - phy); maxY = Math.max(maxY, p.y + phy);
         }
@@ -550,6 +804,18 @@ export class WorldObjects {
 
     const gripOf = (o: WorldObject): number => {
       if (PAVED_SURFACE_TYPES.has(o.type) && testRect(o)) return SURFACE_GRIP.asphalt;
+      if (o.type === 'building') {
+        const apron = getBuildingApronExtent(o);
+        if (apron.front > 0) {
+          const dx = x - o.x, dy = y - o.y;
+          const cos = Math.cos(-o.angle), sin = Math.sin(-o.angle);
+          const lx = dx * cos - dy * sin;
+          const ly = dx * sin + dy * cos;
+          if (Math.abs(lx) <= o.w / 2 + apron.side && ly >= o.h / 2 - 4 && ly <= o.h / 2 + apron.front) {
+            return SURFACE_GRIP.asphalt;
+          }
+        }
+      }
       if (o.type === 'roundabout') {
         const d = Math.hypot(x - o.x, y - o.y);
         if (d <= o.w / 2 && d >= o.w * 0.18) return SURFACE_GRIP.asphalt;
@@ -595,6 +861,16 @@ export class WorldObjects {
       const sin = Math.sin(-o.angle);
       const lx = dx * cos - dy * sin;
       const ly = dx * sin + dy * cos;
+      if (o.type === 'building') {
+        const apron = getBuildingApronExtent(o);
+        if (apron.front > 0) {
+          return (
+            Math.abs(lx) <= o.w * 0.5 + apron.side + pad &&
+            ly >= -(o.h * 0.5 + apron.back + pad) &&
+            ly <= o.h * 0.5 + apron.front + pad
+          );
+        }
+      }
       return Math.abs(lx) <= o.w * 0.5 + pad && Math.abs(ly) <= o.h * 0.5 + pad;
     };
 
@@ -1009,14 +1285,13 @@ export class WorldObjects {
     this.add('jersey_barrier', 1530, 1680, 26, 360, { angle: Math.PI / 2 });
     // X exam (700,700): wet run — open approach, no barriers
 
-    // ---- Áreas de Serviço amplas inspiradas em Aveiras de Cima (A1 Brisa): amplas áreas de manobra, pistas PESADOS/LIGEIROS, loja, restauração e parque TIR ----
-    // Estação 1 (junto à arterial x=3456; bomba 2 em 3140,2350 com faixa PESADOS ampla e 450px+ de aproximação/saída)
-    this.add('pad_asphalt', 2780, 2495, 1220, 940);
-    this.add('pad_asphalt', 3100, 1865, 580, 370);
-    this.add('gas_canopy', 3030, 2350, 540, 320);
+    // ---- Áreas de Serviço de Autoestrada (acessos em funil 1 via -> múltiplas bombas -> 1 via) ----
+    // Estação 1 (junto à arterial x=3456, estrada à DIREITA; bomba 2 em 3140,2350)
+    this.add('pad_asphalt', 2480, 2480, 630, 860);
+    this.add('gas_canopy', 3082, 2350, 640, 880, { params: { stationStyle: 'highway', accessSide: 'right' } });
     this.add('gas_pump', 2960, 2350, 48, 116);
     this.add('gas_pump', 3140, 2350, 48, 116);
-    this.add('price_sign', 3345, 2090, 56, 120);
+    this.add('price_sign', 3330, 1840, 56, 120);
     this.add('building', 2615, 2245, 210, 124, { variant: 'convenience_store', angle: -Math.PI / 2 });
     this.add('building', 2610, 2500, 250, 144, { variant: 'restaurant', angle: -Math.PI / 2 });
     this.add('parking_lot', 2610, 2835, 320, 136);
@@ -1028,28 +1303,15 @@ export class WorldObjects {
     this.add('lamp', 2495, 2240, 14, 14);
     this.add('lamp', 2495, 2650, 14, 14);
 
-    // Estação 2 (Área de Serviço Sul paralela à arterial y=7168 — formato Aveiras A1 com rampas suaves, pistas E-O e fila de estacionamento TIR)
-    {
-      const rns = RoadNetwork.getInstance();
-      rns.addRoad('asphalt', [
-        { x: 8220, y: 7168, w: 132 },
-        { x: 8350, y: 7208, w: 134 },
-        { x: 8455, y: 7312, w: 142 },
-      ]);
-      rns.addRoad('asphalt', [
-        { x: 9945, y: 7312, w: 142 },
-        { x: 10050, y: 7208, w: 134 },
-        { x: 10180, y: 7168, w: 132 },
-      ]);
-    }
-    this.add('pad_asphalt', 9200, 7910, 1660, 1220);
-    this.add('gas_canopy', 9040, 7585, 540, 360, { angle: Math.PI / 2 });
-    this.add('gas_pump', 9040, 7515, 48, 116, { angle: Math.PI / 2 });
-    this.add('gas_pump', 9040, 7693, 48, 116, { angle: Math.PI / 2 });
-    this.add('price_sign', 8795, 7355, 56, 120);
+    // Estação 2 (Área de Serviço Sul paralela à arterial y=7168, estrada ACIMA)
+    this.add('pad_asphalt', 9160, 8170, 1420, 690);
+    this.add('gas_canopy', 9040, 7542, 920, 640, { params: { stationStyle: 'highway', accessSide: 'top' } });
+    this.add('gas_pump', 9040, 7664, 48, 116, { angle: Math.PI / 2 });
+    this.add('gas_pump', 9040, 7484, 48, 116, { angle: Math.PI / 2 });
+    this.add('price_sign', 8470, 7310, 56, 120);
     this.add('building', 9020, 7965, 240, 136, { variant: 'convenience_store', angle: Math.PI });
     this.add('building', 9315, 7970, 280, 154, { variant: 'restaurant', angle: Math.PI });
-    this.add('parking_lot', 9655, 7790, 340, 136);
+    this.add('parking_lot', 9655, 7965, 340, 136);
     this.add('parking_lot', 8695, 7965, 280, 136);
     this.add('parking_pad', 8730, 8375, 128, 260, { variant: 'asphalt' });
     this.add('parking_pad', 8880, 8375, 128, 260, { variant: 'asphalt' });
@@ -1057,11 +1319,28 @@ export class WorldObjects {
     this.add('parking_pad', 9180, 8375, 128, 260, { variant: 'asphalt' });
     this.add('parking_pad', 9330, 8375, 128, 260, { variant: 'asphalt' });
     this.add('parking_pad', 9640, 8375, 136, 320, { variant: 'asphalt', angle: Math.PI / 2 });
-    this.add('air_water', 9565, 7965, 84, 42);
+    this.add('air_water', 9565, 8135, 84, 42);
     this.add('lamp', 8870, 7875, 14, 14, { angle: Math.PI / 2 });
     this.add('lamp', 9200, 7875, 14, 14, { angle: Math.PI / 2 });
     this.add('lamp', 8520, 8165, 14, 14);
     this.add('lamp', 9860, 8165, 14, 14);
+
+    // ---- Postos de Estradas Secundárias (1 bomba + pequena casa de apoio + acesso em funil) ----
+    // Posto Secundário Oeste (estrada rd_1 à ESQUERDA)
+    this.add('pad_asphalt', 1645, 6150, 175, 165);
+    this.add('gas_canopy', 1396, 6150, 380, 520, { params: { stationStyle: 'secondary', accessSide: 'left' } });
+    this.add('gas_pump', 1429, 6150, 48, 116);
+    this.add('building', 1665, 6150, 128, 84, { variant: 'fuel_kiosk', angle: Math.PI / 2 });
+    this.add('price_sign', 1272, 6455, 52, 112);
+    this.add('lamp', 1588, 6035, 14, 14, { angle: Math.PI });
+
+    // Posto Secundário Centro (estrada rd_9 ABAIXO)
+    this.add('pad_asphalt', 6780, 4630, 175, 155);
+    this.add('gas_canopy', 6780, 4876, 520, 380, { params: { stationStyle: 'secondary', accessSide: 'bottom' } });
+    this.add('gas_pump', 6780, 4843, 48, 116, { angle: Math.PI / 2 });
+    this.add('building', 6780, 4612, 128, 84, { variant: 'fuel_kiosk', angle: 0 });
+    this.add('price_sign', 7085, 5000, 52, 112);
+    this.add('lamp', 6665, 4685, 14, 14, { angle: Math.PI / 2 });
 
     // ---- Demo industrial business park (SE, south of the arterial y=9216) ----
     {
@@ -1206,13 +1485,15 @@ export class WorldObjects {
     roadFlats?: Phaser.GameObjects.Graphics,
     flatTex?: FlatSurfaceTarget | null,
     solidTex?: SolidSpriteTarget | null,
+    roadFlatTex?: FlatSurfaceTarget | null,
   ) {
-    const M = 120;
+    const M = 180;
     const x0 = Math.floor((view.x - M) / OBJ_CELL), x1 = Math.floor((view.x + view.width + M) / OBJ_CELL);
     const y0 = Math.floor((view.y - M) / OBJ_CELL), y1 = Math.floor((view.y + view.height + M) / OBJ_CELL);
     const drawn = new Set<string>();
     const flatObjs: WorldObject[] = [];
     const roadFlatObjs: WorldObject[] = [];
+    const buildingApronObjs: WorldObject[] = [];
     for (let cy = y0; cy <= y1; cy++) {
       for (let cx = x0; cx <= x1; cx++) {
         const list = this.grid.get(`${cx}_${cy}`);
@@ -1231,14 +1512,17 @@ export class WorldObjects {
             for (let i = 0; i < parts.length; i++) {
               const p = compoundPartWorldObject(o, i);
               if (!p) continue;
+              const pApron = p.type === 'building' ? getBuildingApronExtent(p) : { front: 0, side: 0, back: 0 };
+              const padM = M + Math.max(pApron.front, pApron.side);
               // Culling por parte (compostos podem ser muito extensos)
-              if (p.x + p.w / 2 < view.x - M || p.x - p.w / 2 > view.x + view.width + M) continue;
-              if (p.y + p.h / 2 < view.y - M || p.y - p.h / 2 > view.y + view.height + M) continue;
+              if (p.x + p.w / 2 < view.x - padM || p.x - p.w / 2 > view.x + view.width + padM) continue;
+              if (p.y + p.h / 2 < view.y - padM || p.y - p.h / 2 > view.y + view.height + padM) continue;
               if (isRoadOverlayType(p.type) && roadFlats) {
                 roadFlatObjs.push(p);
               } else if (isFlatType(p.type)) {
                 flatObjs.push(p);
               } else {
+                if (pApron.front > 0) buildingApronObjs.push(p);
                 this.drawSolid(solids, p, solidTex);
                 if (p.type === 'lamp' && overhead) this.drawOverhead(overhead, p);
               }
@@ -1257,6 +1541,9 @@ export class WorldObjects {
             // can never cover it — parking lots always sit on top of pads.
             flatObjs.push(o);
           } else {
+            if (o.type === 'building' && getBuildingApronExtent(o).front > 0) {
+              buildingApronObjs.push(o);
+            }
             this.drawSolid(solids, o, solidTex);
             if (o.type === 'lamp' && overhead) {
               this.drawOverhead(overhead, o);
@@ -1269,9 +1556,10 @@ export class WorldObjects {
     // objects with the same z keep their original insertion order).
     flatObjs.sort((a, b) => this.flatZ(a) - this.flatZ(b));
     for (const o of flatObjs) this.drawFlat(flats, o, flatTex);
+    for (const o of buildingApronObjs) this.drawBuildingApron(flats, o, flatTex);
     if (roadFlats && roadFlatObjs.length > 0) {
       roadFlatObjs.sort((a, b) => this.flatZ(a) - this.flatZ(b));
-      for (const o of roadFlatObjs) this.drawFlat(roadFlats, o);
+      for (const o of roadFlatObjs) this.drawFlat(roadFlats, o, roadFlatTex ?? null);
     }
   }
 
@@ -1633,17 +1921,18 @@ export class WorldObjects {
       if (seen.has(o.id)) return;
       seen.add(o.id);
 
+      const core = getGasCanopyCore(o);
       let targetAlpha = 0.96;
       if (isEditorMode) {
         targetAlpha = 0.42;
       } else {
-        const dx = focusX - o.x;
-        const dy = focusY - o.y;
-        const cos = Math.cos(-o.angle);
-        const sin = Math.sin(-o.angle);
+        const dx = focusX - core.cx;
+        const dy = focusY - core.cy;
+        const cos = Math.cos(-core.frameAngle);
+        const sin = Math.sin(-core.frameAngle);
         const lx = dx * cos - dy * sin;
         const ly = dx * sin + dy * cos;
-        if (Math.abs(lx) < o.w * 0.56 && Math.abs(ly) < o.h * 0.58) {
+        if (Math.abs(lx) < core.deckW * 0.56 && Math.abs(ly) < core.deckH * 0.58) {
           targetAlpha = 0.22;
         }
       }
@@ -1651,14 +1940,14 @@ export class WorldObjects {
       let entry = this.gasCanopySprites.get(o.id);
       if (!entry) {
         const shadow = this.scene.add
-          .image(o.x + 10, o.y + 14, 'prop_gas_canopy')
+          .image(core.cx + 10, core.cy + 14, 'prop_gas_canopy')
           .setOrigin(0.5, 0.5)
           .setDepth(17.2)
           .setTint(0x020617)
           .setAlpha(targetAlpha * 0.34)
           .setLighting(false);
         const roof = this.scene.add
-          .image(o.x, o.y, 'prop_gas_canopy')
+          .image(core.cx, core.cy, 'prop_gas_canopy')
           .setOrigin(0.5, 0.5)
           .setDepth(17.5)
           .setAlpha(targetAlpha)
@@ -1669,19 +1958,17 @@ export class WorldObjects {
         entry.alpha += (targetAlpha - entry.alpha) * lerpK;
       }
 
-      // Canopy roof spans cleanly across the pump islands while leaving entry/exit PESADOS/LIGEIROS floor markings clearly visible
-      const roofW = o.w * 0.94;
-      const roofH = Math.min(o.h * 0.50, Math.max(132, roofW / 2.95));
+      // Canopy roof spans cleanly across the pump deck core (never stretched across the entry/exit funnels)
       entry.shadow
-        .setPosition(o.x + 10, o.y + 14)
-        .setDisplaySize(roofW, roofH)
-        .setRotation(o.angle)
+        .setPosition(core.cx + 10, core.cy + 14)
+        .setDisplaySize(core.roofW, core.roofH)
+        .setRotation(core.frameAngle)
         .setAlpha(entry.alpha * 0.34)
         .setVisible(true);
       entry.roof
-        .setPosition(o.x, o.y)
-        .setDisplaySize(roofW, roofH)
-        .setRotation(o.angle)
+        .setPosition(core.cx, core.cy)
+        .setDisplaySize(core.roofW, core.roofH)
+        .setRotation(core.frameAngle)
         .setAlpha(entry.alpha)
         .setVisible(true);
     };
@@ -2679,222 +2966,592 @@ export class WorldObjects {
           break;
         }
         case 'gas_canopy': {
-          // Pátio de abastecimento estilo Área de Serviço A1 (Brisa):
-          // alcatrão texturado, pistas diferenciadas PESADOS (amarelo + pictograma TIR) e LIGEIROS (branco/azul + pictograma),
-          // divisórias alinhadas com as ilhas de bomba, passadeira pedonal, drenagem e bocais subterrâneos.
-          if (flatTex?.patterns.asphalt) {
-            this.fillTexturedFlatRect(
-              flatTex,
-              o,
-              flatTex.patterns.asphalt,
-              'rgba(14, 20, 30, 0.34)',
-              'rgba(71, 85, 105, 0.92)',
-              3,
-            );
-            // Lancil exterior em betão (apenas contorno para não tapar o alcatrão texturado nem as marcações no piso)
-            g.lineStyle(4, 0x0d121a, 0.45);
-            g.strokeRoundedRect(x0 - 3, y0 - 3, o.w + 6, o.h + 6, 9);
-            g.lineStyle(2.5, 0x64748b, 0.9);
-            g.strokeRoundedRect(x0 - 1, y0 - 1, o.w + 2, o.h + 2, 7);
-          } else {
-            g.fillStyle(0x0d121a, 0.55);
-            g.fillRoundedRect(x0 - 4, y0 - 4, o.w + 8, o.h + 8, 10);
-            g.fillStyle(0x475569, 1);
-            g.fillRoundedRect(x0 - 2, y0 - 2, o.w + 4, o.h + 4, 8);
-            g.fillStyle(0x1e2634, 1);
-            g.fillRoundedRect(x0, y0, o.w, o.h, 6);
-          }
+          // Base paramétrica de estação de serviço com acessos em funil (1 via -> múltiplas pistas -> 1 via),
+          // adaptável a estradas à direita, esquerda, acima, abaixo ou passante, nos formatos Autoestrada e Secundário 1 Bomba.
+          const core = getGasCanopyCore(o);
+          const {
+            style,
+            accessSide,
+            frameAngle,
+            uW,
+            uH,
+            deckLeft,
+            deckRight,
+            deckTop,
+            deckBottom,
+            deckW,
+            deckH,
+            deckCx,
+            neckW,
+            splitterBand,
+            lanes,
+          } = core;
+          const isSecondary = style === 'secondary';
+          const isThrough = accessSide === 'through';
+          const halfW = uW * 0.5;
+          const halfH = uH * 0.5;
+          const roadLip = 16; // cobre limpo a linha de berma da estrada adjacente
+          const mouthInset = 6;
+          const mouthFlare = isSecondary ? 22 : 30;
+          const funnelSpan = Math.max(40, halfH - deckH * 0.5);
 
-          // Configuração das pistas (largas para manobras de pesados):
-          // >= 480px: 3 pistas (37% PESADOS, 33% PESADOS, 30% LIGEIROS) -> divisórias em 0.37*w e 0.70*w
-          // < 480px:  2 pistas (50% PESADOS, 50% LIGEIROS) -> divisória central em 0.50*w
-          const customHeavy = typeof o.params?.heavyLanes === 'number' ? o.params.heavyLanes : null;
-          const laneSpecs: Array<{ startF: number; endF: number; heavy: boolean }> =
-            o.w >= 480
-              ? [
-                  { startF: 0.0, endF: 0.37, heavy: customHeavy !== null ? customHeavy >= 1 : true },
-                  { startF: 0.37, endF: 0.7, heavy: customHeavy !== null ? customHeavy >= 2 : true },
-                  { startF: 0.7, endF: 1.0, heavy: customHeavy !== null ? customHeavy >= 3 : false },
-                ]
-              : [
-                  { startF: 0.0, endF: 0.5, heavy: customHeavy !== null ? customHeavy >= 1 : true },
-                  { startF: 0.5, endF: 1.0, heavy: customHeavy !== null ? customHeavy >= 2 : false },
-                ];
-
-          const bayY0 = y0 + 56;
-          const bayH = Math.max(76, o.h - 112);
-
-          for (let i = 0; i < laneSpecs.length; i++) {
-            const spec = laneSpecs[i];
-            const lx0 = x0 + spec.startF * o.w;
-            const lw = (spec.endF - spec.startF) * o.w;
-            const lcx = lx0 + lw * 0.5;
-            const isHeavy = spec.heavy;
-            const accentCol = isHeavy ? 0xfacc15 : 0x38bdf8;
-            const lineCol = isHeavy ? 0xfacc15 : 0xe2e8f0;
-
-            // Marcas subtis de rodado dentro da baia (mantendo as inscrições PESADOS/LIGEIROS 100% limpas)
-            const trackSpan = isHeavy ? 20 : 14;
-            const trackW = isHeavy ? 9 : 6;
-            g.fillStyle(0x0b0f17, 0.42);
-            g.fillRect(lcx - trackSpan - trackW * 0.5, bayY0 + 6, trackW, bayH - 12);
-            g.fillRect(lcx + trackSpan - trackW * 0.5, bayY0 + 6, trackW, bayH - 12);
-
-            // Zona de paragem / abastecimento centrada na pista
-            const sidePad = i === 0 ? 28 : 26;
-            const boxW = Math.max(54, lw - sidePad * 2);
-            const bx0 = lcx - boxW * 0.5;
-            const by0 = bayY0;
-            const bh = bayH;
-            g.fillStyle(isHeavy ? 0x26241b : 0x1e2c3a, 0.35);
-            g.fillRect(bx0, by0, boxW, bh);
-
-            // Linhas laterais tracejadas + cantoneiras reforçadas da baia
-            g.lineStyle(2, lineCol, isHeavy ? 0.62 : 0.48);
-            for (let sy = by0 + 4; sy < by0 + bh - 8; sy += 16) {
-              g.lineBetween(bx0, sy, bx0, Math.min(sy + 10, by0 + bh - 2));
-              g.lineBetween(bx0 + boxW, sy, bx0 + boxW, Math.min(sy + 10, by0 + bh - 2));
-            }
-            const cLen = 14;
-            g.lineStyle(2.8, accentCol, 0.88);
-            for (const [cx, cy, dx, dy] of [
-              [bx0, by0, 1, 1], [bx0 + boxW, by0, -1, 1],
-              [bx0, by0 + bh, 1, -1], [bx0 + boxW, by0 + bh, -1, -1],
-            ]) {
-              g.lineBetween(cx, cy, cx + dx * cLen, cy);
-              g.lineBetween(cx, cy, cx, cy + dy * cLen);
-            }
-
-            // Barras de paragem dianteira/traseira na baia
-            g.fillStyle(lineCol, 0.62);
-            g.fillRect(bx0 + 6, by0 + 5, boxW - 12, 3.5);
-            g.fillRect(bx0 + 6, by0 + bh - 8.5, boxW - 12, 3.5);
-
-            // Setas de fluxo na entrada (sul) e saída (norte)
-            const drawFloorArrow = (ax: number, ay: number, col: number) => {
-              g.lineStyle(2.6, col, 0.82);
-              g.lineBetween(ax, ay + 9, ax, ay - 7);
-              g.beginPath();
-              g.moveTo(ax - 7, ay - 1);
-              g.lineTo(ax, ay - 9);
-              g.lineTo(ax + 7, ay - 1);
-              g.strokePath();
-            };
-            drawFloorArrow(lcx, y0 + o.h - 16, accentCol);
-            drawFloorArrow(lcx, y0 + 16, lineCol);
-          }
-
-          // Pintura rodoviária nítida em Canvas2D: etiquetas "PESADOS" / "LIGEIROS" + pictogramas camião/carro
-          // posicionados fora do telhado central (nas zonas de aproximação norte e sul) para leitura imediata!
+          // ---- 1. Caminho Canvas2D de alta fidelidade (alcatrão texturado sem costuras + curvas Bézier + marcações) ----
           if (flatTex?.ctx) {
             const ctx = flatTex.ctx;
             ctx.save();
             ctx.translate(o.x, o.y);
-            if (o.angle !== 0) ctx.rotate(o.angle);
+            if (frameAngle !== 0) ctx.rotate(frameAngle);
 
+            const traceFunnelPath = (c: CanvasRenderingContext2D) => {
+              c.beginPath();
+              if (isThrough) {
+                const nHalf = neckW * 0.5;
+                // Boca norte (saída/entrada superior) -> alarga para a pista -> converge para boca sul
+                c.moveTo(-nHalf, -halfH - roadLip);
+                c.lineTo(nHalf, -halfH - roadLip);
+                c.lineTo(nHalf, -halfH + mouthInset);
+                c.bezierCurveTo(
+                  nHalf, -halfH + funnelSpan * 0.45,
+                  deckRight, deckTop - funnelSpan * 0.42,
+                  deckRight, deckTop,
+                );
+                c.lineTo(deckRight, deckBottom);
+                c.bezierCurveTo(
+                  deckRight, deckBottom + funnelSpan * 0.42,
+                  nHalf, halfH - funnelSpan * 0.45,
+                  nHalf, halfH - mouthInset,
+                );
+                c.lineTo(nHalf, halfH + roadLip);
+                c.lineTo(-nHalf, halfH + roadLip);
+                c.lineTo(-nHalf, halfH - mouthInset);
+                c.bezierCurveTo(
+                  -nHalf, halfH - funnelSpan * 0.45,
+                  deckLeft, deckBottom + funnelSpan * 0.42,
+                  deckLeft, deckBottom,
+                );
+                c.lineTo(deckLeft, deckTop);
+                c.bezierCurveTo(
+                  deckLeft, deckTop - funnelSpan * 0.42,
+                  -nHalf, -halfH + funnelSpan * 0.45,
+                  -nHalf, -halfH + mouthInset,
+                );
+                c.closePath();
+              } else {
+                // Acesso lateral pela estrada em +X: 1 via entra no topo-direita -> abre em funil para todas as pistas -> converge para 1 via na base-direita
+                const roadX = halfW;
+                const mouthX = halfW + roadLip;
+                const topOuterY = -halfH + mouthInset;
+                const topInnerY = Math.min(deckTop - 18, topOuterY + neckW + mouthFlare);
+                const botOuterY = halfH - mouthInset;
+                const botInnerY = Math.max(deckBottom + 18, botOuterY - neckW - mouthFlare);
+
+                c.moveTo(mouthX, topOuterY);
+                c.lineTo(roadX, topOuterY);
+                // Curva exterior superior: entrada única abre suavemente até à faixa mais externa (PESADOS)
+                c.bezierCurveTo(
+                  deckLeft + deckW * 0.34, topOuterY,
+                  deckLeft, -halfH + funnelSpan * 0.44,
+                  deckLeft, deckTop,
+                );
+                // Borda exterior reta ao longo da zona das bombas
+                c.lineTo(deckLeft, deckBottom);
+                // Curva exterior inferior: faixa externa converge suavemente até à saída única na estrada
+                c.bezierCurveTo(
+                  deckLeft, halfH - funnelSpan * 0.44,
+                  deckLeft + deckW * 0.34, botOuterY,
+                  roadX, botOuterY,
+                );
+                c.lineTo(mouthX, botOuterY);
+                // Boca inferior de saída (aberta sobre a estrada)
+                c.lineTo(mouthX, botInnerY);
+                c.lineTo(roadX, botInnerY);
+                // Curva interior inferior contornando o separador verde
+                c.bezierCurveTo(
+                  deckRight + splitterBand * 0.36, botInnerY - 6,
+                  deckRight, deckBottom + funnelSpan * 0.34,
+                  deckRight, deckBottom,
+                );
+                // Borda interior reta das bombas junto ao separador
+                c.lineTo(deckRight, deckTop);
+                // Curva interior superior contornando o separador verde até à boca superior
+                c.bezierCurveTo(
+                  deckRight, deckTop - funnelSpan * 0.34,
+                  deckRight + splitterBand * 0.36, topInnerY + 6,
+                  roadX, topInnerY,
+                );
+                c.lineTo(mouthX, topInnerY);
+                c.closePath();
+              }
+            };
+
+            // 1a. Preenchimento em alcatrão texturado (alinhado ao mundo = 0 costuras com a estrada)
+            traceFunnelPath(ctx);
+            if (flatTex.patterns.asphalt) {
+              ctx.fillStyle = flatTex.patterns.asphalt;
+              ctx.fill();
+              ctx.fillStyle = 'rgba(14, 20, 30, 0.28)';
+              ctx.fill();
+            } else {
+              ctx.fillStyle = '#1e2634';
+              ctx.fill();
+            }
+
+            // 1b. Ilha separadora ajardinada entre a estrada (+X) e as pistas das bombas (apenas acessos laterais)
+            if (!isThrough && splitterBand >= 60) {
+              const topOuterY = -halfH + mouthInset;
+              const topInnerY = Math.min(deckTop - 18, topOuterY + neckW + mouthFlare);
+              const botOuterY = halfH - mouthInset;
+              const botInnerY = Math.max(deckBottom + 18, botOuterY - neckW - mouthFlare);
+              const islPad = 7;
+              const islRight = halfW - 6;
+
+              ctx.save();
+              ctx.beginPath();
+              ctx.moveTo(islRight, topInnerY + 10);
+              ctx.bezierCurveTo(
+                deckRight + splitterBand * 0.36 + islPad, topInnerY + 12,
+                deckRight + islPad, deckTop - funnelSpan * 0.30,
+                deckRight + islPad, deckTop + 4,
+              );
+              ctx.lineTo(deckRight + islPad, deckBottom - 4);
+              ctx.bezierCurveTo(
+                deckRight + islPad, deckBottom + funnelSpan * 0.30,
+                deckRight + splitterBand * 0.36 + islPad, botInnerY - 12,
+                islRight, botInnerY - 10,
+              );
+              ctx.closePath();
+
+              // Sombra + lancil em betão claro + relvado paisagístico estilo Brisa A1
+              ctx.fillStyle = '#254229';
+              ctx.fill();
+              ctx.strokeStyle = 'rgba(148, 163, 184, 0.92)';
+              ctx.lineWidth = 4;
+              ctx.stroke();
+              ctx.strokeStyle = 'rgba(15, 23, 42, 0.55)';
+              ctx.lineWidth = 1.5;
+              ctx.stroke();
+
+              // Arbustos / canteiros subtis no interior da ilha separadora
+              const bushX = deckRight + islPad + (islRight - (deckRight + islPad)) * 0.52;
+              const bushCount = isSecondary ? 2 : 3;
+              for (let b = 0; b < bushCount; b++) {
+                const frac = (b / (bushCount - 1)) * 2 - 1;
+                const by = frac * (deckH * 0.32);
+                ctx.fillStyle = 'rgba(20, 48, 26, 0.72)';
+                ctx.beginPath();
+                ctx.arc(bushX + 2, by + 3, isSecondary ? 14 : 18, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = 'rgba(46, 102, 54, 0.88)';
+                ctx.beginPath();
+                ctx.arc(bushX, by, isSecondary ? 13 : 17, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = 'rgba(74, 140, 78, 0.55)';
+                ctx.beginPath();
+                ctx.arc(bushX - 3, by - 3, isSecondary ? 6 : 8, 0, Math.PI * 2);
+                ctx.fill();
+              }
+              ctx.restore();
+            }
+
+            // 1c. Lancis exteriores em betão (apenas nas bordas fechadas — bocas de entrada/saída ficam 100% abertas!)
+            ctx.save();
+            ctx.lineCap = 'round';
+            const strokeCurb = (drawCurve: (c: CanvasRenderingContext2D) => void) => {
+              ctx.strokeStyle = 'rgba(13, 18, 26, 0.55)';
+              ctx.lineWidth = 6.5;
+              ctx.beginPath();
+              drawCurve(ctx);
+              ctx.stroke();
+              ctx.strokeStyle = 'rgba(148, 163, 184, 0.88)';
+              ctx.lineWidth = 3;
+              ctx.beginPath();
+              drawCurve(ctx);
+              ctx.stroke();
+            };
+
+            if (isThrough) {
+              const nHalf = neckW * 0.5;
+              strokeCurb((c) => {
+                c.moveTo(nHalf, -halfH + mouthInset);
+                c.bezierCurveTo(nHalf, -halfH + funnelSpan * 0.45, deckRight, deckTop - funnelSpan * 0.42, deckRight, deckTop);
+                c.lineTo(deckRight, deckBottom);
+                c.bezierCurveTo(deckRight, deckBottom + funnelSpan * 0.42, nHalf, halfH - funnelSpan * 0.45, nHalf, halfH - mouthInset);
+              });
+              strokeCurb((c) => {
+                c.moveTo(-nHalf, -halfH + mouthInset);
+                c.bezierCurveTo(-nHalf, -halfH + funnelSpan * 0.45, deckLeft, deckTop - funnelSpan * 0.42, deckLeft, deckTop);
+                c.lineTo(deckLeft, deckBottom);
+                c.bezierCurveTo(deckLeft, deckBottom + funnelSpan * 0.42, -nHalf, halfH - funnelSpan * 0.45, -nHalf, halfH - mouthInset);
+              });
+            } else {
+              const roadX = halfW;
+              const topOuterY = -halfH + mouthInset;
+              const botOuterY = halfH - mouthInset;
+              strokeCurb((c) => {
+                c.moveTo(roadX, topOuterY);
+                c.bezierCurveTo(deckLeft + deckW * 0.34, topOuterY, deckLeft, -halfH + funnelSpan * 0.44, deckLeft, deckTop);
+                c.lineTo(deckLeft, deckBottom);
+                c.bezierCurveTo(deckLeft, halfH - funnelSpan * 0.44, deckLeft + deckW * 0.34, botOuterY, roadX, botOuterY);
+              });
+            }
+            ctx.restore();
+
+            // 1d. Guias tracejadas curvas no funil de entrada (1 via -> pistas) e no funil de saída (pistas -> 1 via)
+            ctx.save();
+            ctx.setLineDash([12, 10]);
+            ctx.lineCap = 'round';
+            const topOuterY = -halfH + mouthInset;
+            const topInnerY = Math.min(deckTop - 18, topOuterY + neckW + mouthFlare);
+            const botOuterY = halfH - mouthInset;
+            const botInnerY = Math.max(deckBottom + 18, botOuterY - neckW - mouthFlare);
+            const entryStemY = (topOuterY + topInnerY) * 0.5;
+            const exitStemY = (botOuterY + botInnerY) * 0.5;
+
+            for (let i = 1; i < lanes.length; i++) {
+              const divX = deckLeft + lanes[i].startF * deckW;
+              ctx.strokeStyle = 'rgba(250, 204, 21, 0.74)';
+              ctx.lineWidth = 2.4;
+              if (isThrough) {
+                const frac = lanes[i].startF - 0.5;
+                const stemX = frac * (neckW * 0.42);
+                const stemInset = isSecondary ? 42 : 52;
+                // Funil norte (converge para a via única de saída)
+                ctx.beginPath();
+                ctx.moveTo(stemX, -halfH + stemInset);
+                ctx.bezierCurveTo(stemX, -halfH + funnelSpan * 0.62, divX, deckTop - funnelSpan * 0.44, divX, deckTop - 4);
+                ctx.stroke();
+                // Funil sul (via única de entrada abre para as pistas)
+                ctx.beginPath();
+                ctx.moveTo(divX, deckBottom + 4);
+                ctx.bezierCurveTo(divX, deckBottom + funnelSpan * 0.44, stemX, halfH - funnelSpan * 0.62, stemX, halfH - stemInset);
+                ctx.stroke();
+              } else {
+                const stemX = halfW - (isSecondary ? 56 : 74);
+                const tOff = (i / lanes.length - 0.5) * (neckW * 0.34);
+                // Funil de entrada (via única entra limpa e depois abre em leque até às divisórias das bombas)
+                ctx.beginPath();
+                ctx.moveTo(stemX, entryStemY + tOff);
+                ctx.bezierCurveTo(
+                  divX + (stemX - divX) * 0.46, entryStemY + tOff,
+                  divX, deckTop - funnelSpan * 0.48,
+                  divX, deckTop - 4,
+                );
+                ctx.stroke();
+                // Funil de saída (pistas convergem suavemente para a via única de saída)
+                ctx.beginPath();
+                ctx.moveTo(divX, deckBottom + 4);
+                ctx.bezierCurveTo(
+                  divX, deckBottom + funnelSpan * 0.48,
+                  divX + (stemX - divX) * 0.46, exitStemY - tOff,
+                  stemX, exitStemY - tOff,
+                );
+                ctx.stroke();
+              }
+            }
+
+            // Linhas contínuas de berma interior nas bocas de acesso
+            ctx.setLineDash([]);
+            ctx.strokeStyle = 'rgba(226, 232, 240, 0.55)';
+            ctx.lineWidth = 2;
+            const drawArrow2D = (ax: number, ay: number, dirAngle: number, color: string, scale = 1) => {
+              ctx.save();
+              ctx.translate(ax, ay);
+              ctx.rotate(dirAngle);
+              ctx.strokeStyle = color;
+              ctx.lineWidth = 2.8 * scale;
+              ctx.lineCap = 'round';
+              ctx.lineJoin = 'round';
+              ctx.beginPath();
+              ctx.moveTo(0, -10 * scale);
+              ctx.lineTo(0, 9 * scale);
+              ctx.moveTo(-7 * scale, 2 * scale);
+              ctx.lineTo(0, 10 * scale);
+              ctx.lineTo(7 * scale, 2 * scale);
+              ctx.stroke();
+              ctx.restore();
+            };
+
+            if (isThrough) {
+              // Fluxo sul -> norte (entrada em +Y, saída em -Y)
+              drawArrow2D(0, halfH - 26, Math.PI, 'rgba(250, 204, 21, 0.90)', 1.15);
+              drawArrow2D(0, -halfH + 26, Math.PI, 'rgba(226, 232, 240, 0.88)', 1.15);
+            } else {
+              // Fluxo de mão direita: seta limpa na via única de entrada (+X -> -X) e de saída (-X -> +X)
+              drawArrow2D(halfW - 28, entryStemY, Math.PI * 0.48, 'rgba(250, 204, 21, 0.94)', 1.15);
+              drawArrow2D(halfW - 28, exitStemY, -Math.PI * 0.48, 'rgba(226, 232, 240, 0.90)', 1.15);
+              // Seta intermédia no leque de abertura e no funil de convergência
+              drawArrow2D(deckCx + deckW * 0.16, deckTop - funnelSpan * 0.44, 0.25, 'rgba(250, 204, 21, 0.72)', 0.95);
+              drawArrow2D(deckCx + deckW * 0.16, deckBottom + funnelSpan * 0.44, -0.25, 'rgba(226, 232, 240, 0.72)', 0.95);
+            }
+            ctx.restore();
+
+            // 1e. Pistas individuais dentro da zona compacta das bombas (rodados, baias, cantoneiras, setas)
+            const bayTop = deckTop + (isSecondary ? 36 : 44);
+            const bayH = Math.max(66, deckH - (isSecondary ? 72 : 88));
+            const flowDir = isThrough ? Math.PI : 0; // +Y para laterais, -Y para passante
+
+            for (let i = 0; i < lanes.length; i++) {
+              const spec = lanes[i];
+              const lx0 = deckLeft + spec.startF * deckW;
+              const lw = (spec.endF - spec.startF) * deckW;
+              const lcx = lx0 + lw * 0.5;
+              const isHeavy = spec.heavy;
+              const accentStr = isHeavy ? 'rgba(250, 204, 21, 0.9)' : 'rgba(56, 189, 248, 0.9)';
+              const lineStr = isHeavy ? 'rgba(250, 204, 21, 0.65)' : 'rgba(226, 232, 240, 0.55)';
+
+              // Marcas subtis de rodado
+              const trackSpan = isHeavy ? 20 : 13;
+              const trackW = isHeavy ? 8.5 : 5.5;
+              ctx.fillStyle = 'rgba(11, 15, 23, 0.42)';
+              ctx.fillRect(lcx - trackSpan - trackW * 0.5, bayTop + 6, trackW, bayH - 12);
+              ctx.fillRect(lcx + trackSpan - trackW * 0.5, bayTop + 6, trackW, bayH - 12);
+
+              // Baia de paragem centrada
+              const sidePad = isSecondary ? 18 : i === 0 ? 24 : 22;
+              const boxW = Math.max(50, lw - sidePad * 2);
+              const bx0 = lcx - boxW * 0.5;
+              ctx.fillStyle = isHeavy ? 'rgba(38, 36, 27, 0.34)' : 'rgba(30, 44, 58, 0.34)';
+              ctx.fillRect(bx0, bayTop, boxW, bayH);
+
+              ctx.save();
+              ctx.strokeStyle = lineStr;
+              ctx.lineWidth = 2;
+              ctx.setLineDash([9, 7]);
+              ctx.beginPath();
+              ctx.moveTo(bx0, bayTop + 4);
+              ctx.lineTo(bx0, bayTop + bayH - 4);
+              ctx.moveTo(bx0 + boxW, bayTop + 4);
+              ctx.lineTo(bx0 + boxW, bayTop + bayH - 4);
+              ctx.stroke();
+              ctx.setLineDash([]);
+
+              // Cantoneiras reforçadas da baia
+              const cLen = 13;
+              ctx.strokeStyle = accentStr;
+              ctx.lineWidth = 2.6;
+              for (const [cx, cy, dx, dy] of [
+                [bx0, bayTop, 1, 1],
+                [bx0 + boxW, bayTop, -1, 1],
+                [bx0, bayTop + bayH, 1, -1],
+                [bx0 + boxW, bayTop + bayH, -1, -1],
+              ]) {
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.lineTo(cx + dx * cLen, cy);
+                ctx.moveTo(cx, cy);
+                ctx.lineTo(cx, cy + dy * cLen);
+                ctx.stroke();
+              }
+              ctx.restore();
+
+              // Barras de paragem dianteira/traseira
+              ctx.fillStyle = lineStr;
+              ctx.fillRect(bx0 + 6, bayTop + 4, boxW - 12, 3.2);
+              ctx.fillRect(bx0 + 6, bayTop + bayH - 7.2, boxW - 12, 3.2);
+
+              // Setas de pista nas extremidades do deck
+              drawArrow2D(lcx, deckTop + 14, flowDir, accentStr, 0.85);
+              drawArrow2D(lcx, deckBottom - 14, flowDir, lineStr, 0.85);
+            }
+
+            // 1f. Inscrições rodoviárias PESADOS / LIGEIROS sempre legíveis (auto-endireitadas para qualquer orientação!)
+            const normA = Math.atan2(Math.sin(frameAngle), Math.cos(frameAngle));
+            const flipText = normA > Math.PI * 0.51 || normA < -Math.PI * 0.49;
             const drawLaneStencil = (localX: number, localY: number, isHeavy: boolean) => {
               ctx.save();
               ctx.translate(localX, localY);
+              if (flipText) ctx.rotate(Math.PI);
 
-              // Faixa de destaque subtil sob a inscrição
-              const badgeW = isHeavy ? 84 : 78;
-              const badgeH = 22;
-              ctx.fillStyle = isHeavy ? 'rgba(250, 204, 21, 0.16)' : 'rgba(56, 189, 248, 0.14)';
-              ctx.strokeStyle = isHeavy ? 'rgba(250, 204, 21, 0.72)' : 'rgba(226, 232, 240, 0.68)';
-              ctx.lineWidth = 1.6;
+              const badgeW = isSecondary ? 72 : isHeavy ? 82 : 76;
+              const badgeH = isSecondary ? 19 : 21;
+              ctx.fillStyle = isHeavy ? 'rgba(250, 204, 21, 0.16)' : 'rgba(56, 189, 248, 0.15)';
+              ctx.strokeStyle = isHeavy ? 'rgba(250, 204, 21, 0.76)' : 'rgba(226, 232, 240, 0.72)';
+              ctx.lineWidth = 1.5;
               ctx.beginPath();
               ctx.roundRect(-badgeW * 0.5, -badgeH * 0.5, badgeW, badgeH, 4);
               ctx.fill();
               ctx.stroke();
 
-              // Pictograma à esquerda (camião articulado para PESADOS, automóvel para LIGEIROS)
-              ctx.fillStyle = isHeavy ? 'rgba(250, 204, 21, 0.92)' : 'rgba(248, 250, 252, 0.92)';
-              const ix = -badgeW * 0.5 + 11;
+              ctx.fillStyle = isHeavy ? 'rgba(250, 204, 21, 0.94)' : 'rgba(248, 250, 252, 0.94)';
+              const ix = -badgeW * 0.5 + 10;
               if (isHeavy) {
-                // Silhueta topo/lateral estilizada de pesado (cabina + semi-reboque)
-                ctx.fillRect(ix - 5, -5, 11, 7); // reboque
-                ctx.fillRect(ix + 7, -3.5, 5, 5.5); // cabina
+                ctx.fillRect(ix - 4.5, -4.5, 10, 6.2);
+                ctx.fillRect(ix + 6.5, -3, 4.5, 4.8);
                 ctx.beginPath();
-                ctx.arc(ix - 2.5, 3.5, 2, 0, Math.PI * 2);
-                ctx.arc(ix + 3.5, 3.5, 2, 0, Math.PI * 2);
-                ctx.arc(ix + 9.5, 3.5, 2, 0, Math.PI * 2);
+                ctx.arc(ix - 2, 3, 1.8, 0, Math.PI * 2);
+                ctx.arc(ix + 3.2, 3, 1.8, 0, Math.PI * 2);
+                ctx.arc(ix + 8.5, 3, 1.8, 0, Math.PI * 2);
                 ctx.fill();
               } else {
-                // Silhueta estilizada de ligeiro
-                ctx.fillRect(ix - 4, -2.5, 13, 4.5);
-                ctx.fillRect(ix - 1.5, -5.5, 7.5, 3.5);
+                ctx.fillRect(ix - 3.5, -2.2, 11.5, 4);
+                ctx.fillRect(ix - 1.2, -5, 6.8, 3.2);
                 ctx.beginPath();
-                ctx.arc(ix - 1, 3.2, 1.9, 0, Math.PI * 2);
-                ctx.arc(ix + 6.5, 3.2, 1.9, 0, Math.PI * 2);
+                ctx.arc(ix - 0.8, 2.8, 1.7, 0, Math.PI * 2);
+                ctx.arc(ix + 5.8, 2.8, 1.7, 0, Math.PI * 2);
                 ctx.fill();
               }
 
-              // Texto rodoviário nítido ("PESADOS" / "LIGEIROS")
-              ctx.font = '800 10.5px "Inter", "Segoe UI", Arial, sans-serif';
+              ctx.font = isSecondary
+                ? '800 9.5px "Inter", "Segoe UI", Arial, sans-serif'
+                : '800 10.5px "Inter", "Segoe UI", Arial, sans-serif';
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
-              ctx.fillText(isHeavy ? 'PESADOS' : 'LIGEIROS', 9, 0.5);
+              ctx.fillText(isHeavy ? 'PESADOS' : 'LIGEIROS', 8.5, 0.5);
               ctx.restore();
             };
 
-            const southLabelY = o.h * 0.5 - 40;
-            const northLabelY = -o.h * 0.5 + 42;
-            for (const spec of laneSpecs) {
-              const localX = -o.w * 0.5 + (spec.startF + spec.endF) * 0.5 * o.w;
-              drawLaneStencil(localX, southLabelY, spec.heavy);
-              drawLaneStencil(localX, northLabelY, spec.heavy);
+            const labelOff = isSecondary ? 22 : 28;
+            for (const spec of lanes) {
+              const localX = deckLeft + (spec.startF + spec.endF) * 0.5 * deckW;
+              drawLaneStencil(localX, deckTop - labelOff, spec.heavy);
+              drawLaneStencil(localX, deckBottom + labelOff, spec.heavy);
             }
+
+            // 1g. Plataformas de guia das ilhas de bomba + zebrados nas pontas
+            for (let i = 1; i < lanes.length; i++) {
+              const divX = deckLeft + lanes[i].startF * deckW;
+              const padW = 34;
+              const padH = Math.min(126, deckH - 72);
+              ctx.fillStyle = 'rgba(42, 52, 68, 0.90)';
+              ctx.strokeStyle = 'rgba(250, 204, 21, 0.78)';
+              ctx.lineWidth = 2;
+              ctx.beginPath();
+              ctx.roundRect(divX - padW * 0.5, -padH * 0.5, padW, padH, 8);
+              ctx.fill();
+              ctx.stroke();
+
+              ctx.strokeStyle = 'rgba(250, 204, 21, 0.52)';
+              ctx.lineWidth = 2;
+              for (const zy of [-padH * 0.5 - 12, padH * 0.5 + 6]) {
+                ctx.beginPath();
+                ctx.moveTo(divX - 9, zy);
+                ctx.lineTo(divX + 9, zy + 6);
+                ctx.moveTo(divX + 9, zy);
+                ctx.lineTo(divX - 9, zy + 6);
+                ctx.stroke();
+              }
+            }
+
+            // 1h. Passadeira pedonal junto à borda da loja/casa de apoio + drenagem + tampas de tanques
+            ctx.fillStyle = 'rgba(248, 250, 252, 0.68)';
+            for (let py = deckTop + 18; py < deckBottom - 18; py += 18) {
+              ctx.fillRect(deckLeft + 4, py, 13, 8);
+            }
+            ctx.strokeStyle = 'rgba(250, 204, 21, 0.65)';
+            ctx.lineWidth = 1.8;
+            ctx.beginPath();
+            ctx.moveTo(deckLeft + 20, deckTop + 12);
+            ctx.lineTo(deckLeft + 20, deckBottom - 12);
+            ctx.stroke();
+
+            // Grelha de drenagem
+            const grateW = isSecondary ? 56 : 84;
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+            ctx.fillRect(deckCx - grateW * 0.5, deckBottom - 7, grateW, 4.5);
+
+            // Bocais subterrâneos (Gasóleo, 95, AdBlue)
+            const tankX = deckLeft + 24;
+            const tankY = deckTop + 6;
+            ctx.fillStyle = 'rgba(40, 50, 66, 0.95)';
+            ctx.fillRect(tankX, tankY, 44, 14);
+            ctx.strokeStyle = 'rgba(250, 204, 21, 0.8)';
+            ctx.lineWidth = 1.4;
+            ctx.strokeRect(tankX, tankY, 44, 14);
+            const capCols = ['#0f172a', '#16a34a', '#2563eb'];
+            for (let k = 0; k < 3; k++) {
+              const cx = tankX + 8.5 + k * 13.5;
+              const cy = tankY + 7;
+              ctx.fillStyle = '#11151d';
+              ctx.beginPath();
+              ctx.arc(cx, cy, 4.2, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.fillStyle = capCols[k];
+              ctx.beginPath();
+              ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
+              ctx.fill();
+            }
+
             ctx.restore();
             flatTex.markUsed();
-          }
+          } else {
+            // ---- 2. Fallback vetorial Phaser.Graphics (usado em zoom extremo do Editor) ----
+            const cosF = Math.cos(frameAngle - o.angle);
+            const sinF = Math.sin(frameAngle - o.angle);
+            const toObj = (lx: number, ly: number): Phaser.Math.Vector2 =>
+              new Phaser.Math.Vector2(
+                o.x + lx * cosF - ly * sinF,
+                o.y + lx * sinF + ly * cosF,
+              );
+            const sampleCubic = (
+              p0: [number, number],
+              p1: [number, number],
+              p2: [number, number],
+              p3: [number, number],
+              steps = 8,
+            ): Phaser.Math.Vector2[] => {
+              const pts: Phaser.Math.Vector2[] = [];
+              for (let s = 1; s <= steps; s++) {
+                const t = s / steps;
+                const mt = 1 - t;
+                const lx =
+                  mt * mt * mt * p0[0] +
+                  3 * mt * mt * t * p1[0] +
+                  3 * mt * t * t * p2[0] +
+                  t * t * t * p3[0];
+                const ly =
+                  mt * mt * mt * p0[1] +
+                  3 * mt * mt * t * p1[1] +
+                  3 * mt * t * t * p2[1] +
+                  t * t * t * p3[1];
+                pts.push(toObj(lx, ly));
+              }
+              return pts;
+            };
 
-          // Plataformas de guia entre pistas (alinhadas com os eixos das ilhas de bomba)
-          for (let i = 1; i < laneSpecs.length; i++) {
-            const divX = x0 + laneSpecs[i].startF * o.w;
-            const padW = 34;
-            const padH = Math.min(132, o.h - 96);
-            g.fillStyle(0x2a3444, 0.85);
-            g.fillRoundedRect(divX - padW / 2, o.y - padH / 2, padW, padH, 8);
-            g.lineStyle(2, 0xfacc15, 0.72);
-            g.strokeRoundedRect(divX - padW / 2, o.y - padH / 2, padW, padH, 8);
-            // Zonas zebradas nas pontas do eixo da ilha
-            g.lineStyle(2, 0xfacc15, 0.48);
-            for (const zy of [o.y - padH / 2 - 14, o.y + padH / 2 + 8]) {
-              g.lineBetween(divX - 10, zy, divX + 10, zy + 6);
-              g.lineBetween(divX + 10, zy, divX - 10, zy + 6);
+            const poly: Phaser.Math.Vector2[] = [];
+            if (isThrough) {
+              const nHalf = neckW * 0.5;
+              poly.push(toObj(-nHalf, -halfH - roadLip), toObj(nHalf, -halfH - roadLip), toObj(nHalf, -halfH + mouthInset));
+              poly.push(...sampleCubic([nHalf, -halfH + mouthInset], [nHalf, -halfH + funnelSpan * 0.45], [deckRight, deckTop - funnelSpan * 0.42], [deckRight, deckTop]));
+              poly.push(toObj(deckRight, deckBottom));
+              poly.push(...sampleCubic([deckRight, deckBottom], [deckRight, deckBottom + funnelSpan * 0.42], [nHalf, halfH - funnelSpan * 0.45], [nHalf, halfH - mouthInset]));
+              poly.push(toObj(nHalf, halfH + roadLip), toObj(-nHalf, halfH + roadLip), toObj(-nHalf, halfH - mouthInset));
+              poly.push(...sampleCubic([-nHalf, halfH - mouthInset], [-nHalf, halfH - funnelSpan * 0.45], [deckLeft, deckBottom + funnelSpan * 0.42], [deckLeft, deckBottom]));
+              poly.push(toObj(deckLeft, deckTop));
+              poly.push(...sampleCubic([deckLeft, deckTop], [deckLeft, deckTop - funnelSpan * 0.42], [-nHalf, -halfH + funnelSpan * 0.45], [-nHalf, -halfH + mouthInset]));
+            } else {
+              const roadX = halfW;
+              const mouthX = halfW + roadLip;
+              const topOuterY = -halfH + mouthInset;
+              const topInnerY = Math.min(deckTop - 18, topOuterY + neckW + mouthFlare);
+              const botOuterY = halfH - mouthInset;
+              const botInnerY = Math.max(deckBottom + 18, botOuterY - neckW - mouthFlare);
+              poly.push(toObj(mouthX, topOuterY), toObj(roadX, topOuterY));
+              poly.push(...sampleCubic([roadX, topOuterY], [deckLeft + deckW * 0.34, topOuterY], [deckLeft, -halfH + funnelSpan * 0.44], [deckLeft, deckTop]));
+              poly.push(toObj(deckLeft, deckBottom));
+              poly.push(...sampleCubic([deckLeft, deckBottom], [deckLeft, halfH - funnelSpan * 0.44], [deckLeft + deckW * 0.34, botOuterY], [roadX, botOuterY]));
+              poly.push(toObj(mouthX, botOuterY), toObj(mouthX, botInnerY), toObj(roadX, botInnerY));
+              poly.push(...sampleCubic([roadX, botInnerY], [deckRight + splitterBand * 0.36, botInnerY - 6], [deckRight, deckBottom + funnelSpan * 0.34], [deckRight, deckBottom]));
+              poly.push(toObj(deckRight, deckTop));
+              poly.push(...sampleCubic([deckRight, deckTop], [deckRight, deckTop - funnelSpan * 0.34], [deckRight + splitterBand * 0.36, topInnerY + 6], [roadX, topInnerY]));
+              poly.push(toObj(mouthX, topInnerY));
             }
-          }
 
-          // Passadeira pedonal ao longo da borda oeste (acesso seguro à loja e restauração)
-          g.fillStyle(0xf8fafc, 0.68);
-          for (let py = y0 + 26; py < y0 + o.h - 26; py += 18) {
-            g.fillRect(x0 + 5, py, 14, 9);
-          }
-          g.lineStyle(2, 0xfacc15, 0.65);
-          g.lineBetween(x0 + 22, y0 + 16, x0 + 22, y0 + o.h - 16);
+            g.fillStyle(0x1e2634, 1);
+            g.fillPoints(poly, true);
+            g.lineStyle(2.5, 0x64748b, 0.85);
+            g.strokePoints(poly, true);
 
-          // Grelha de drenagem / separador de hidrocarbonetos junto à borda sul
-          g.fillStyle(0x0f172a, 0.9);
-          g.fillRect(o.x - 48, y0 + o.h - 9, 96, 5);
-          g.lineStyle(1, 0x475569, 0.85);
-          for (let gx = o.x - 44; gx <= o.x + 44; gx += 6) {
-            g.lineBetween(gx, y0 + o.h - 9, gx, y0 + o.h - 4);
-          }
-
-          // Tampas de visita / bocais de enchimento dos tanques subterrâneos (canto NO, livre da inscrição PESADOS)
-          const tankX = x0 + 28, tankY = y0 + 7;
-          g.fillStyle(0x283242, 0.95);
-          g.fillRect(tankX, tankY, 46, 15);
-          g.lineStyle(1.5, 0xfacc15, 0.8);
-          g.strokeRect(tankX, tankY, 46, 15);
-          const capCols = [0x0f172a, 0x16a34a, 0x2563eb]; // Gasóleo, 95, AdBlue
-          for (let k = 0; k < 3; k++) {
-            const cx = tankX + 9 + k * 14;
-            const cy = tankY + 7.5;
-            g.fillStyle(0x11151d, 1);
-            g.fillCircle(cx, cy, 4.5);
-            g.fillStyle(capCols[k], 0.95);
-            g.fillCircle(cx, cy, 2.7);
+            // Plataformas de guia das bombas
+            for (let i = 1; i < lanes.length; i++) {
+              const divX = deckLeft + lanes[i].startF * deckW;
+              const p1 = toObj(divX, -48);
+              const p2 = toObj(divX, 48);
+              g.lineStyle(18, 0x334155, 0.9);
+              g.lineBetween(p1.x, p1.y, p2.x, p2.y);
+              g.lineStyle(2, 0xfacc15, 0.8);
+              g.lineBetween(p1.x, p1.y, p2.x, p2.y);
+            }
           }
           break;
         }
@@ -2957,6 +3614,475 @@ export class WorldObjects {
     ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
     ctx.restore();
     solidTex.markUsed();
+  }
+
+  /**
+   * Draws drivable residential driveways, apartment underground garage ramps,
+   * integrated exterior parking lots, and emergency civic forecourts in the FLATS pass
+   * (strictly underneath buildings and vehicles, zero static collision).
+   */
+  private drawBuildingApron(
+    g: Phaser.GameObjects.Graphics,
+    o: WorldObject,
+    flatTex?: FlatSurfaceTarget | null,
+  ) {
+    const apron = getBuildingApronExtent(o);
+    if (apron.front <= 0) return;
+    const v = o.variant ?? '';
+    const hasGarage = Boolean(o.params?.garageAccess) && RESIDENTIAL_GARAGE_VARIANTS.has(v);
+    const hasParking = Boolean(o.params?.exteriorParking) && EXTERIOR_PARKING_VARIANTS.has(v);
+    const halfW = o.w / 2;
+    const halfH = o.h / 2;
+    const numId = parseInt(o.id.replace(/\D/g, ''), 10) || 17;
+    const rnd = (k: number) => {
+      const s = Math.sin(numId * 12.9898 + k * 78.233) * 43758.5453;
+      return s - Math.floor(s);
+    };
+
+    if (flatTex?.ctx) {
+      const ctx = flatTex.ctx;
+      const concretePat = flatTex.patterns.concrete;
+      const asphaltPat = flatTex.patterns.asphalt;
+
+      const fillConcrete = (x: number, y: number, w: number, h: number, tint = 'rgba(205, 213, 224, 0.24)') => {
+        ctx.fillStyle = concretePat ?? '#7b8492';
+        ctx.fillRect(x, y, w, h);
+        if (tint) {
+          ctx.fillStyle = tint;
+          ctx.fillRect(x, y, w, h);
+        }
+      };
+
+      const fillAsphalt = (x: number, y: number, w: number, h: number, tint = 'rgba(18, 23, 33, 0.42)') => {
+        ctx.fillStyle = asphaltPat ?? '#242b36';
+        ctx.fillRect(x, y, w, h);
+        if (tint) {
+          ctx.fillStyle = tint;
+          ctx.fillRect(x, y, w, h);
+        }
+      };
+
+      const drawMiniCar = (
+        cx: number,
+        cy: number,
+        length: number,
+        width: number,
+        bodyColor: string,
+        special?: 'police' | 'ambulance',
+      ) => {
+        ctx.save();
+        ctx.translate(cx, cy);
+        // Drop shadow
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.34)';
+        ctx.beginPath();
+        ctx.roundRect(-width / 2 + 2.5, -length / 2 + 3.5, width, length, 5);
+        ctx.fill();
+        // Body
+        ctx.fillStyle = bodyColor;
+        ctx.beginPath();
+        ctx.roundRect(-width / 2, -length / 2, width, length, 5);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(15, 23, 42, 0.65)';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+        // Windshield + rear window
+        ctx.fillStyle = '#182230';
+        ctx.fillRect(-width / 2 + 3, -length / 2 + 9, width - 6, 9);
+        ctx.fillRect(-width / 2 + 3.5, length / 2 - 14, width - 7, 7);
+        // Roof panel highlight
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.14)';
+        ctx.fillRect(-width / 2 + 3.5, -length / 2 + 19, width - 7, length - 34);
+        if (special === 'police') {
+          ctx.fillStyle = '#1d4ed8';
+          ctx.fillRect(-width / 2 + 2, -length / 2 + 2, width - 4, 6);
+          ctx.fillRect(-width / 2 + 2, length / 2 - 7, width - 4, 5);
+          // Blue lightbar
+          ctx.fillStyle = '#38bdf8';
+          ctx.fillRect(-width / 2 + 4, -2.5, width - 8, 4.5);
+        } else if (special === 'ambulance') {
+          ctx.fillStyle = '#dc2626';
+          ctx.fillRect(-width / 2 + 1.5, -length / 2 + 20, 3, length - 28);
+          ctx.fillRect(width / 2 - 4.5, -length / 2 + 20, 3, length - 28);
+          // Red cross on roof
+          ctx.fillRect(-2, -1, 4, 10);
+          ctx.fillRect(-5, 2, 10, 4);
+          ctx.fillStyle = '#38bdf8';
+          ctx.fillRect(-width / 2 + 4, -length / 2 + 17, width - 8, 3);
+        }
+        ctx.restore();
+      };
+
+      const drawParkingRow = (
+        leftX: number,
+        topY: number,
+        totalW: number,
+        bayDepth: number,
+        aisleH: number,
+        seedOffset: number,
+        allowDisabled = true,
+        openRightAisle = false,
+      ) => {
+        const lotH = bayDepth + aisleH;
+        fillAsphalt(leftX, topY, totalW, lotH);
+        // Perimeter concrete curb (top, left, right; open bottom throat into road, and open right aisle when paired with garage ramp)
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.72)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(leftX + 1.5, topY + lotH);
+        ctx.lineTo(leftX + 1.5, topY + 1.5);
+        ctx.lineTo(leftX + totalW - 1.5, topY + 1.5);
+        ctx.lineTo(leftX + totalW - 1.5, openRightAisle ? topY + bayDepth : topY + lotH);
+        ctx.stroke();
+
+        const bayW = 42;
+        const count = Math.max(2, Math.floor((totalW - 16) / bayW));
+        const usedW = count * bayW;
+        const startX = leftX + (totalW - usedW) / 2;
+
+        // Blue disabled bay (first bay on left when >= 4 bays)
+        if (allowDisabled && count >= 4) {
+          ctx.fillStyle = 'rgba(37, 99, 235, 0.42)';
+          ctx.fillRect(startX + 2, topY + 4, bayW - 4, bayDepth - 6);
+          ctx.strokeStyle = 'rgba(147, 197, 253, 0.85)';
+          ctx.lineWidth = 1.6;
+          ctx.strokeRect(startX + 10, topY + bayDepth * 0.45, bayW - 20, bayW - 20);
+        }
+
+        // Crisp white parking bay stripes + yellow wheel-stops
+        ctx.strokeStyle = 'rgba(241, 245, 249, 0.78)';
+        ctx.lineWidth = 2;
+        for (let i = 0; i <= count; i++) {
+          const bx = startX + i * bayW;
+          ctx.beginPath();
+          ctx.moveTo(bx, topY + 4);
+          ctx.lineTo(bx, topY + bayDepth);
+          ctx.stroke();
+        }
+        ctx.fillStyle = 'rgba(250, 204, 21, 0.72)';
+        for (let i = 0; i < count; i++) {
+          const bx = startX + i * bayW + 8;
+          ctx.fillRect(bx, topY + 9, bayW - 16, 4);
+        }
+
+        // Dashed aisle center guide
+        if (aisleH >= 36) {
+          ctx.save();
+          ctx.strokeStyle = 'rgba(248, 250, 252, 0.28)';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([12, 10]);
+          ctx.beginPath();
+          ctx.moveTo(leftX + 14, topY + bayDepth + aisleH * 0.52);
+          ctx.lineTo(leftX + totalW - 14, topY + bayDepth + aisleH * 0.52);
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        // Deterministic parked passenger cars (~58% occupancy)
+        const carColors = ['#cbd5e1', '#94a3b8', '#334155', '#2563eb', '#991b1b', '#166534', '#d97706', '#e2e8f0'];
+        for (let i = 0; i < count; i++) {
+          if (allowDisabled && count >= 4 && i === 0) continue; // keep disabled bay clearly readable
+          if (rnd(seedOffset + i * 7 + 1) < 0.42) continue;
+          const col = carColors[Math.floor(rnd(seedOffset + i * 7 + 2) * carColors.length) % carColors.length];
+          const jitX = (rnd(seedOffset + i * 7 + 3) - 0.5) * 3.5;
+          const jitY = (rnd(seedOffset + i * 7 + 4) - 0.5) * 4;
+          drawMiniCar(startX + (i + 0.5) * bayW + jitX, topY + bayDepth * 0.56 + jitY, 52, 24, col);
+        }
+      };
+
+      ctx.save();
+      ctx.translate(o.x, o.y);
+      if (o.angle !== 0) ctx.rotate(o.angle);
+
+      const fullLeft = -halfW - apron.side;
+      const fullW = o.w + apron.side * 2;
+      const frontY = halfH;
+
+      if (v === 'fire_station') {
+        // Red-trimmed concrete emergency apron with 3 bay exit lanes + yellow keep-clear hatch
+        const emH = 96;
+        fillConcrete(fullLeft, frontY - 4, fullW, emH + 4, 'rgba(203, 213, 225, 0.24)');
+        // Red safety border on left & right curbs
+        ctx.fillStyle = 'rgba(220, 38, 38, 0.85)';
+        ctx.fillRect(fullLeft, frontY, 5, emH);
+        ctx.fillRect(fullLeft + fullW - 5, frontY, 5, emH);
+        // 3 bay lane guide lines matching the 3 red bay canopies
+        ctx.strokeStyle = 'rgba(248, 250, 252, 0.65)';
+        ctx.lineWidth = 2;
+        for (const frac of [1 / 3, 2 / 3]) {
+          const lx = -halfW + o.w * frac;
+          ctx.beginPath();
+          ctx.moveTo(lx, frontY + 4);
+          ctx.lineTo(lx, frontY + emH - 12);
+          ctx.stroke();
+        }
+        // Yellow cross-hatched keep-clear emergency zone
+        const boxW = Math.min(o.w * 0.82, 250);
+        const boxH = 54;
+        const bx0 = -boxW / 2;
+        const by0 = frontY + 24;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(bx0, by0, boxW, boxH);
+        ctx.clip();
+        ctx.strokeStyle = 'rgba(250, 204, 21, 0.72)';
+        ctx.lineWidth = 3;
+        for (let d = -boxH; d < boxW + boxH; d += 18) {
+          ctx.beginPath();
+          ctx.moveTo(bx0 + d, by0);
+          ctx.lineTo(bx0 + d - boxH, by0 + boxH);
+          ctx.stroke();
+        }
+        ctx.restore();
+        ctx.strokeStyle = 'rgba(250, 204, 21, 0.92)';
+        ctx.lineWidth = 2.5;
+        ctx.strokeRect(bx0, by0, boxW, boxH);
+
+        if (hasParking) {
+          drawParkingRow(fullLeft, frontY + emH, fullW, 56, 12, 41, false);
+        }
+      } else if (v === 'police_station') {
+        const emH = 94;
+        fillConcrete(fullLeft, frontY - 4, fullW, emH + 4, 'rgba(186, 200, 218, 0.22)');
+        // Central stone walkway to blue entrance canopy
+        ctx.fillStyle = 'rgba(226, 232, 240, 0.34)';
+        ctx.fillRect(-34, frontY, 68, emH);
+        ctx.fillStyle = 'rgba(29, 78, 216, 0.82)';
+        ctx.fillRect(-36, frontY, 3, emH);
+        ctx.fillRect(33, frontY, 3, emH);
+        // Reserved blue patrol bays on left and right wings
+        const bayW = 44;
+        const bayH = 66;
+        const leftBayX = -halfW + 14;
+        const rightBayX = halfW - 14 - bayW;
+        for (const bx of [leftBayX, rightBayX]) {
+          ctx.fillStyle = 'rgba(30, 58, 138, 0.26)';
+          ctx.fillRect(bx, frontY + 12, bayW, bayH);
+          ctx.strokeStyle = 'rgba(96, 165, 250, 0.88)';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(bx, frontY + 12, bayW, bayH);
+        }
+        // Parked police cruiser in left reserved bay
+        drawMiniCar(leftBayX + bayW / 2, frontY + 12 + bayH * 0.5, 52, 24, '#f8fafc', 'police');
+        if (hasParking) {
+          drawParkingRow(fullLeft, frontY + emH, fullW, 54, 12, 53, false);
+        }
+      } else if (v === 'hospital') {
+        const emH = 98;
+        fillConcrete(fullLeft, frontY - 4, fullW, emH + 4, 'rgba(220, 228, 236, 0.26)');
+        // Red & white hazard kerb strip along the sidewalk
+        for (let sx = fullLeft + 6; sx < fullLeft + fullW - 18; sx += 24) {
+          ctx.fillStyle = 'rgba(220, 38, 38, 0.85)';
+          ctx.fillRect(sx, frontY + 12, 12, 4);
+          ctx.fillStyle = 'rgba(248, 250, 252, 0.9)';
+          ctx.fillRect(sx + 12, frontY + 12, 12, 4);
+        }
+        // Ambulance arrival drop-off lane aligned with bottom emergency canopy
+        const ambW = Math.min(130, o.w * 0.36);
+        const ambH = 56;
+        ctx.fillStyle = 'rgba(220, 38, 38, 0.14)';
+        ctx.fillRect(-ambW / 2, frontY + 24, ambW, ambH);
+        ctx.save();
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.88)';
+        ctx.lineWidth = 2.2;
+        ctx.setLineDash([10, 6]);
+        ctx.strokeRect(-ambW / 2, frontY + 24, ambW, ambH);
+        ctx.restore();
+        // Crisp red cross painted inside emergency bay
+        ctx.fillStyle = 'rgba(220, 38, 38, 0.72)';
+        ctx.fillRect(-4, frontY + 40, 8, 24);
+        ctx.fillRect(-12, frontY + 48, 24, 8);
+        // Parked ambulance on right side emergency slot
+        const slotX = halfW - 46;
+        ctx.strokeStyle = 'rgba(248, 250, 252, 0.82)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(slotX - 24, frontY + 22, 48, 66);
+        drawMiniCar(slotX, frontY + 55, 56, 26, '#f8fafc', 'ambulance');
+
+        if (hasParking) {
+          drawParkingRow(fullLeft, frontY + emH, fullW, 66, 16, 67, true);
+        }
+      } else if (
+        v === 'house_traditional' ||
+        v === 'house_townhouse' ||
+        v === 'villa_classic' ||
+        v === 'villa_modern'
+      ) {
+        // Residential plot: paved garage driveway on right wing + landscaped front garden & walkway on left
+        const yardH = hasParking ? 88 : apron.front;
+        const driveW = Math.min(76, Math.max(48, o.w * 0.34));
+        const driveX = halfW - driveW - 4;
+
+        // Subtle landscaped front garden lawn on non-garage side
+        const lawnLeft = -halfW - 4;
+        const lawnW = Math.max(24, driveX - lawnLeft - 4);
+        ctx.fillStyle = 'rgba(54, 88, 48, 0.72)';
+        ctx.fillRect(lawnLeft, frontY - 2, lawnW, yardH + 2);
+        // Perimeter hedge / garden kerb
+        ctx.strokeStyle = 'rgba(34, 64, 32, 0.86)';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(lawnLeft + 2, frontY + 2, lawnW - 4, yardH - 4);
+        // Front doorstep walkway across garden
+        const walkX = v === 'villa_classic' ? -halfW * 0.45 : -14;
+        fillConcrete(walkX - 11, frontY - 2, 22, yardH + 2, 'rgba(226, 232, 240, 0.35)');
+        ctx.strokeStyle = 'rgba(100, 116, 139, 0.55)';
+        ctx.lineWidth = 1;
+        for (let sy = frontY + 14; sy < frontY + yardH; sy += 16) {
+          ctx.beginPath();
+          ctx.moveTo(walkX - 10, sy);
+          ctx.lineTo(walkX + 10, sy);
+          ctx.stroke();
+        }
+
+        if (hasGarage) {
+          // Dedicated concrete garage driveway with roller-door threshold shadow & side kerbs
+          fillConcrete(driveX, frontY - 4, driveW, yardH + 4, 'rgba(203, 213, 225, 0.28)');
+          // Garage roller door threshold dark recessed strip at facade
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.62)';
+          ctx.fillRect(driveX + 4, frontY - 2, driveW - 8, 7);
+          // Concrete slab expansion joints
+          ctx.strokeStyle = 'rgba(71, 85, 105, 0.42)';
+          ctx.lineWidth = 1.2;
+          for (let sy = frontY + 22; sy < frontY + yardH - 8; sy += 24) {
+            ctx.beginPath();
+            ctx.moveTo(driveX + 3, sy);
+            ctx.lineTo(driveX + driveW - 3, sy);
+            ctx.stroke();
+          }
+          // Subtle tire track marks
+          ctx.fillStyle = 'rgba(30, 41, 59, 0.14)';
+          ctx.fillRect(driveX + driveW * 0.24, frontY + 10, 7, yardH - 14);
+          ctx.fillRect(driveX + driveW * 0.76 - 7, frontY + 10, 7, yardH - 14);
+          // Stone side kerbs
+          ctx.fillStyle = 'rgba(226, 232, 240, 0.75)';
+          ctx.fillRect(driveX, frontY, 3, yardH);
+          ctx.fillRect(driveX + driveW - 3, frontY, 3, yardH);
+        }
+
+        if (hasParking) {
+          drawParkingRow(fullLeft, frontY + yardH, fullW, 44, 6, 83, false);
+        }
+      } else {
+        // Apartment blocks (with optional underground garage ramp + exterior parking) & civic/commercial parking
+        const sidewalkH = 18;
+        fillConcrete(fullLeft, frontY - 4, fullW, sidewalkH + 4, 'rgba(218, 226, 236, 0.34)');
+        // Sidewalk curb line + slab joints
+        ctx.strokeStyle = 'rgba(100, 116, 139, 0.65)';
+        ctx.lineWidth = 1.2;
+        for (let sx = fullLeft + 26; sx < fullLeft + fullW - 10; sx += 26) {
+          ctx.beginPath();
+          ctx.moveTo(sx, frontY);
+          ctx.lineTo(sx, frontY + sidewalkH);
+          ctx.stroke();
+        }
+        ctx.fillStyle = 'rgba(241, 245, 249, 0.72)';
+        ctx.fillRect(fullLeft, frontY + sidewalkH - 2, fullW, 2.5);
+
+        const rampW = hasGarage ? Math.min(92, Math.max(66, o.w * 0.27)) : 0;
+        const rampX = halfW + apron.side - rampW - 6;
+
+        if (hasGarage && !hasParking) {
+          // Underground garage ramp extending cleanly from sidewalk toward road
+          const rampH = apron.front - sidewalkH;
+          fillAsphalt(rampX, frontY + sidewalkH, rampW, rampH, 'rgba(18, 24, 34, 0.45)');
+          // Descending gradient toward building portal
+          const grad = ctx.createLinearGradient(0, frontY + sidewalkH, 0, frontY + apron.front);
+          grad.addColorStop(0, 'rgba(2, 6, 23, 0.68)');
+          grad.addColorStop(0.55, 'rgba(15, 23, 42, 0.22)');
+          grad.addColorStop(1, 'rgba(15, 23, 42, 0.04)');
+          ctx.fillStyle = grad;
+          ctx.fillRect(rampX + 5, frontY + sidewalkH, rampW - 10, rampH);
+          // Portal dark lintel + drain grate
+          ctx.fillStyle = 'rgba(2, 6, 23, 0.85)';
+          ctx.fillRect(rampX + 5, frontY + 4, rampW - 10, sidewalkH - 2);
+          ctx.strokeStyle = 'rgba(148, 163, 184, 0.55)';
+          ctx.lineWidth = 1.2;
+          for (let gy = frontY + sidewalkH + 8; gy < frontY + apron.front - 12; gy += 9) {
+            ctx.beginPath();
+            ctx.moveTo(rampX + 7, gy);
+            ctx.lineTo(rampX + rampW - 7, gy);
+            ctx.stroke();
+          }
+          // Center lane divider & yellow/black parapet curbs
+          ctx.strokeStyle = 'rgba(250, 204, 21, 0.72)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(rampX + rampW / 2, frontY + sidewalkH + 8);
+          ctx.lineTo(rampX + rampW / 2, frontY + apron.front - 8);
+          ctx.stroke();
+          ctx.fillStyle = '#cbd5e1';
+          ctx.fillRect(rampX, frontY + 4, 5, apron.front - 4);
+          ctx.fillRect(rampX + rampW - 5, frontY + 4, 5, apron.front - 4);
+          ctx.fillStyle = '#facc15';
+          ctx.fillRect(rampX, frontY + apron.front - 10, 5, 10);
+          ctx.fillRect(rampX + rampW - 5, frontY + apron.front - 10, 5, 10);
+        } else if (hasParking && !hasGarage) {
+          // Full-width exterior parking lot with bays + front maneuvering aisle
+          const lotTop = frontY + sidewalkH;
+          const lotH = apron.front - sidewalkH;
+          const bayD = Math.min(76, lotH * 0.56);
+          const aisleH = lotH - bayD;
+          drawParkingRow(fullLeft, lotTop, fullW, bayD, aisleH, 101, true);
+        } else if (hasParking && hasGarage) {
+          // Combined layout: underground garage ramp on right wing + exterior parking bays on left + shared front aisle!
+          const lotTop = frontY + sidewalkH;
+          const lotH = apron.front - sidewalkH;
+          const bayD = Math.min(78, lotH * 0.57);
+          const aisleH = lotH - bayD;
+          const parkW = rampX - fullLeft - 4;
+          // Unified asphalt floor covering parking + shared front aisle across entire width
+          fillAsphalt(fullLeft, lotTop, fullW, lotH);
+          // Exterior parking bays on left/center portion
+          if (parkW >= 92) {
+            drawParkingRow(fullLeft, lotTop, parkW, bayD, aisleH, 127, true, true);
+          }
+          // Underground garage ramp tucked neatly on right wing, feeding into shared front aisle
+          const grad = ctx.createLinearGradient(0, lotTop, 0, lotTop + bayD);
+          grad.addColorStop(0, 'rgba(2, 6, 23, 0.72)');
+          grad.addColorStop(0.65, 'rgba(15, 23, 42, 0.25)');
+          grad.addColorStop(1, 'rgba(15, 23, 42, 0.04)');
+          ctx.fillStyle = grad;
+          ctx.fillRect(rampX + 5, lotTop, rampW - 10, bayD);
+          ctx.fillStyle = 'rgba(2, 6, 23, 0.85)';
+          ctx.fillRect(rampX + 5, frontY + 4, rampW - 10, sidewalkH - 2);
+          ctx.strokeStyle = 'rgba(148, 163, 184, 0.5)';
+          ctx.lineWidth = 1.2;
+          for (let gy = lotTop + 8; gy < lotTop + bayD - 6; gy += 9) {
+            ctx.beginPath();
+            ctx.moveTo(rampX + 7, gy);
+            ctx.lineTo(rampX + rampW - 7, gy);
+            ctx.stroke();
+          }
+          ctx.strokeStyle = 'rgba(250, 204, 21, 0.78)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(rampX + rampW / 2, lotTop + 6);
+          ctx.lineTo(rampX + rampW / 2, lotTop + bayD - 4);
+          ctx.stroke();
+          // Concrete side parapet walls + yellow end caps
+          ctx.fillStyle = '#cbd5e1';
+          ctx.fillRect(rampX, frontY + 4, 5, sidewalkH + bayD - 4);
+          ctx.fillRect(rampX + rampW - 5, frontY + 4, 5, sidewalkH + bayD - 4);
+          ctx.fillStyle = '#facc15';
+          ctx.fillRect(rampX, lotTop + bayD - 9, 5, 9);
+          ctx.fillRect(rampX + rampW - 5, lotTop + bayD - 9, 5, 9);
+        }
+      }
+
+      ctx.restore();
+      flatTex.markUsed();
+      return;
+    }
+
+    // Fallback Phaser.Graphics rendering (when Canvas2D flatTex is absent)
+    this.rotated(g, o, () => {
+      const fullLeft = o.x - halfW - apron.side;
+      const fullW = o.w + apron.side * 2;
+      const frontY = o.y + halfH;
+      g.fillStyle(hasParking ? 0x1e2530 : 0x64748b, 0.92);
+      g.fillRect(fullLeft, frontY, fullW, apron.front);
+      g.lineStyle(2, 0xcbd5e1, 0.65);
+      g.strokeRect(fullLeft + 1, frontY + 1, fullW - 2, apron.front - 2);
+    });
   }
 
   private drawSolid(
@@ -3200,7 +4326,20 @@ export class WorldObjects {
               o.variant === 'warehouse_docks' ||
               o.variant === 'convenience_store' ||
               o.variant === 'restaurant' ||
-              o.variant === 'church';
+              o.variant === 'fuel_kiosk' ||
+              o.variant === 'church' ||
+              o.variant === 'house_traditional' ||
+              o.variant === 'house_townhouse' ||
+              o.variant === 'villa_classic' ||
+              o.variant === 'villa_modern' ||
+              o.variant === 'apartment_block' ||
+              o.variant === 'apartment_modern' ||
+              o.variant === 'fire_station' ||
+              o.variant === 'police_station' ||
+              o.variant === 'hospital' ||
+              o.variant === 'school' ||
+              o.variant === 'supermarket' ||
+              o.variant === 'town_hall';
             this.drawTexturedBuilding(solidTex, o, buildingImg, !directional);
             break;
           }
@@ -3488,6 +4627,26 @@ export class WorldObjects {
             break;
           }
 
+          if (o.variant === 'fuel_kiosk') {
+            // Pequena casa de apoio de posto secundário: telhado inclinado em telha cerâmica + pala frontal esmeralda/âmbar
+            g.fillStyle(0x9a3412, 1);
+            g.fillRect(x0, y0, o.w, o.h - 16);
+            g.fillStyle(0xc2410c, 1);
+            g.fillRect(x0 + 3, y0 + 3, o.w - 6, o.h - 22);
+            g.lineStyle(2.5, 0x7c2d12, 0.9);
+            g.lineBetween(o.x, y0 + 2, o.x, y0 + o.h - 17);
+            // Pala de entrada frontal (+y)
+            g.fillStyle(0x64748b, 1);
+            g.fillRect(x0 + 8, y0 + o.h - 16, o.w - 16, 16);
+            g.fillStyle(0x059669, 1);
+            g.fillRect(x0 + 8, y0 + o.h - 12, o.w - 16, 7);
+            g.fillStyle(0xf59e0b, 1);
+            g.fillRect(x0 + 8, y0 + o.h - 15, o.w - 16, 4);
+            g.lineStyle(2, 0x1e293b, 0.95);
+            g.strokeRect(x0, y0, o.w, o.h);
+            break;
+          }
+
           if (o.variant === 'convenience_store') {
             // Loja de conveniência de estação de serviço: cobertura plana em ardósia,
             // clarabóia, unidades frigoríficas/AC, testa esmeralda+âmbar, portas envidraçadas e arca/caixotes exteriores
@@ -3551,6 +4710,53 @@ export class WorldObjects {
               g.fillCircle(bx, y0 + o.h + 2, 3.2);
             }
             g.lineStyle(2, 0x0f172a, 1);
+            g.strokeRect(x0, y0, o.w, o.h);
+            break;
+          }
+
+          if (
+            o.variant === 'house_traditional' ||
+            o.variant === 'house_townhouse' ||
+            o.variant === 'villa_classic' ||
+            o.variant === 'villa_modern' ||
+            o.variant === 'apartment_block' ||
+            o.variant === 'apartment_modern' ||
+            o.variant === 'fire_station' ||
+            o.variant === 'police_station' ||
+            o.variant === 'hospital' ||
+            o.variant === 'school' ||
+            o.variant === 'supermarket' ||
+            o.variant === 'town_hall'
+          ) {
+            // Procedural vector fallback for urban & civic building variants
+            const baseColors: Record<string, { roof: number; trim: number }> = {
+              house_traditional: { roof: 0xb85236, trim: 0xf1f5f9 },
+              house_townhouse: { roof: 0xc25b3f, trim: 0xe2e8f0 },
+              villa_classic: { roof: 0xb95035, trim: 0xf8fafc },
+              villa_modern: { roof: 0xe2e8f0, trim: 0x334155 },
+              apartment_block: { roof: 0xa8553b, trim: 0xcbd5e1 },
+              apartment_modern: { roof: 0xcbd5e1, trim: 0x334155 },
+              fire_station: { roof: 0x94a3b8, trim: 0xdc2626 },
+              police_station: { roof: 0x94a3b8, trim: 0x1d4ed8 },
+              hospital: { roof: 0xe2e8f0, trim: 0x0d9488 },
+              school: { roof: 0xc25b3f, trim: 0xf59e0b },
+              supermarket: { roof: 0x94a3b8, trim: 0xf97316 },
+              town_hall: { roof: 0xb45339, trim: 0xd6d3d1 },
+            };
+            const pal = baseColors[o.variant] ?? { roof: 0x94a3b8, trim: 0x475569 };
+            g.fillStyle(pal.trim, 1);
+            g.fillRect(x0, y0, o.w, o.h);
+            g.fillStyle(pal.roof, 1);
+            g.fillRect(x0 + 5, y0 + 5, o.w - 10, o.h - 14);
+            // Front fascia bar (+y)
+            g.fillStyle(pal.trim, 1);
+            g.fillRect(x0 + 4, y0 + o.h - 10, o.w - 8, 8);
+            if (o.variant === 'hospital') {
+              g.fillStyle(0xdc2626, 1);
+              g.fillRect(o.x - 5, o.y - 16, 10, 32);
+              g.fillRect(o.x - 16, o.y - 5, 32, 10);
+            }
+            g.lineStyle(2, 0x0f172a, 0.9);
             g.strokeRect(x0, y0, o.w, o.h);
             break;
           }

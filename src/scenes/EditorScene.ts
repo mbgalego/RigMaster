@@ -3,7 +3,19 @@ import { MainScene } from './MainScene';
 import { GarageSystem, parseHexColor } from '../systems/GarageSystem';
 import { RoadNetwork, RoadData, RoadPoint, RoadSurface, RoadSnapResult, RoadSample, BridgeSample } from '../systems/RoadNetwork';
 import { IntersectionSystem, IntersectionNode, TrafficLightSpec } from '../systems/IntersectionSystem';
-import { WorldObject, WObjType, CompoundPart, compoundParts, isCompound, compoundBoundsFromParts } from '../world/WorldObjects';
+import {
+  WorldObject,
+  WObjType,
+  CompoundPart,
+  compoundParts,
+  isCompound,
+  compoundBoundsFromParts,
+  GasAccessSide,
+  GasStationStyle,
+  getGasCanopyCore,
+  RESIDENTIAL_GARAGE_VARIANTS,
+  EXTERIOR_PARKING_VARIANTS,
+} from '../world/WorldObjects';
 import { World } from '../world/World';
 import { TerrainPaintMaterial, TerrainPaintSoftness, TERRAIN_PAINT_MAP } from '../world/WorldTerrain';
 import { TrailerManager } from '../systems/TrailerManager';
@@ -1931,6 +1943,16 @@ export class EditorScene extends Phaser.Scene {
       parkingPads: number;
       garages: number;
     } | null;
+    gasCanopy: {
+      stationStyle: GasStationStyle;
+      accessSide: GasAccessSide;
+    } | null;
+    buildingFeatures: {
+      supportsGarage: boolean;
+      supportsParking: boolean;
+      garageAccess: boolean;
+      exteriorParking: boolean;
+    } | null;
   } {
     const o = this.selectedObject;
     let hubSign: {
@@ -1963,6 +1985,30 @@ export class EditorScene extends Phaser.Scene {
         garages: stats.garages,
       };
     }
+    let gasCanopy: { stationStyle: GasStationStyle; accessSide: GasAccessSide } | null = null;
+    if (o && o.type === 'gas_canopy') {
+      const core = getGasCanopyCore(o);
+      gasCanopy = { stationStyle: core.style, accessSide: core.accessSide };
+    }
+    let buildingFeatures: {
+      supportsGarage: boolean;
+      supportsParking: boolean;
+      garageAccess: boolean;
+      exteriorParking: boolean;
+    } | null = null;
+    if (o && o.type === 'building') {
+      const v = o.variant ?? '';
+      const supportsGarage = RESIDENTIAL_GARAGE_VARIANTS.has(v);
+      const supportsParking = EXTERIOR_PARKING_VARIANTS.has(v);
+      if (supportsGarage || supportsParking) {
+        buildingFeatures = {
+          supportsGarage,
+          supportsParking,
+          garageAccess: Boolean(o.params?.garageAccess),
+          exteriorParking: Boolean(o.params?.exteriorParking),
+        };
+      }
+    }
     return {
       hasSelection: !!o,
       id: o ? o.id : '',
@@ -1977,6 +2023,8 @@ export class EditorScene extends Phaser.Scene {
       isCompound: o ? isCompound(o) : false,
       compoundPartCount: o && isCompound(o) ? compoundParts(o).length : 0,
       hubSign,
+      gasCanopy,
+      buildingFeatures,
     };
   }
 
@@ -2078,6 +2126,73 @@ export class EditorScene extends Phaser.Scene {
     o.params = next;
     this.garageSystem.syncFromWorld(this.mainScene.world.objects);
     this.mainScene.world.objects.version++;
+    this.mainScene.world.version++;
+  }
+
+  /** Switches road-access side or station scale on a selected `gas_canopy` forecourt apron. */
+  public setGasCanopyConfig(
+    id: string,
+    patch: Partial<{ stationStyle: GasStationStyle; accessSide: GasAccessSide }>,
+  ) {
+    this.pushUndo();
+    const o = this.mainScene.world.objects.get(id);
+    if (!o || o.type !== 'gas_canopy') return;
+    const prev = getGasCanopyCore(o);
+    const nextStyle: GasStationStyle = patch.stationStyle ?? prev.style;
+    const nextSide: GasAccessSide = patch.accessSide ?? prev.accessSide;
+    o.params = { ...(o.params || {}), stationStyle: nextStyle, accessSide: nextSide };
+
+    // Keep aspect ratio coherent when switching scale or horizontal <-> vertical road sides
+    let nextW = o.w;
+    let nextH = o.h;
+    if (patch.stationStyle && patch.stationStyle !== prev.style) {
+      if (nextSide === 'through') {
+        nextW = nextStyle === 'secondary' ? 270 : 480;
+        nextH = nextStyle === 'secondary' ? 480 : 740;
+      } else if (nextSide === 'top' || nextSide === 'bottom') {
+        nextW = nextStyle === 'secondary' ? 520 : 860;
+        nextH = nextStyle === 'secondary' ? 380 : 640;
+      } else {
+        nextW = nextStyle === 'secondary' ? 380 : 640;
+        nextH = nextStyle === 'secondary' ? 520 : 860;
+      }
+    } else if (patch.accessSide && patch.accessSide !== prev.accessSide) {
+      const prevHoriz = prev.accessSide === 'top' || prev.accessSide === 'bottom';
+      const nextHoriz = nextSide === 'top' || nextSide === 'bottom';
+      if (nextSide === 'through') {
+        nextW = nextStyle === 'secondary' ? 270 : 480;
+        nextH = nextStyle === 'secondary' ? 480 : 740;
+      } else if (prev.accessSide === 'through') {
+        nextW = nextHoriz ? (nextStyle === 'secondary' ? 520 : 860) : (nextStyle === 'secondary' ? 380 : 640);
+        nextH = nextHoriz ? (nextStyle === 'secondary' ? 380 : 640) : (nextStyle === 'secondary' ? 520 : 860);
+      } else if (prevHoriz !== nextHoriz) {
+        nextW = o.h;
+        nextH = o.w;
+      }
+    }
+    this.mainScene.world.objects.resizeObject(id, nextW, nextH);
+    this.mainScene.world.version++;
+  }
+
+  /** Toggles residential garage driveway/ramp or exterior parking apron on a selected city building. */
+  public setBuildingFeatures(
+    id: string,
+    patch: Partial<{ garageAccess: boolean; exteriorParking: boolean }>,
+  ) {
+    this.pushUndo();
+    const o = this.mainScene.world.objects.get(id);
+    if (!o || o.type !== 'building') return;
+    const next: Record<string, any> = { ...(o.params || {}) };
+    if (patch.garageAccess !== undefined) {
+      if (patch.garageAccess) next.garageAccess = true;
+      else delete next.garageAccess;
+    }
+    if (patch.exteriorParking !== undefined) {
+      if (patch.exteriorParking) next.exteriorParking = true;
+      else delete next.exteriorParking;
+    }
+    o.params = Object.keys(next).length > 0 ? next : undefined;
+    this.mainScene.world.objects.rebuildIndex();
     this.mainScene.world.version++;
   }
 

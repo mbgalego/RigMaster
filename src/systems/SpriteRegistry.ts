@@ -37,7 +37,20 @@ export type BuildingAssetKey =
   | 'building_gabled'
   | 'building_church'
   | 'building_convenience_store'
-  | 'building_restaurant';
+  | 'building_restaurant'
+  | 'building_fuel_kiosk'
+  | 'building_house_traditional'
+  | 'building_house_townhouse'
+  | 'building_villa_classic'
+  | 'building_villa_modern'
+  | 'building_apartment_block'
+  | 'building_apartment_modern'
+  | 'building_fire_station'
+  | 'building_police_station'
+  | 'building_hospital'
+  | 'building_school'
+  | 'building_supermarket'
+  | 'building_town_hall';
 
 export const BUILDING_ASSET_KEYS: readonly BuildingAssetKey[] = [
   'building_warehouse_big',
@@ -49,6 +62,19 @@ export const BUILDING_ASSET_KEYS: readonly BuildingAssetKey[] = [
   'building_church',
   'building_convenience_store',
   'building_restaurant',
+  'building_fuel_kiosk',
+  'building_house_traditional',
+  'building_house_townhouse',
+  'building_villa_classic',
+  'building_villa_modern',
+  'building_apartment_block',
+  'building_apartment_modern',
+  'building_fire_station',
+  'building_police_station',
+  'building_hospital',
+  'building_school',
+  'building_supermarket',
+  'building_town_hall',
 ] as const;
 
 export type PropAssetKey =
@@ -162,7 +188,7 @@ export const AVAILABLE_SPRITES: readonly SpriteAssetEntry[] = [
   { key: 'trailer_fragile_glass', url: '/assets/sprites/vehicles/trailers/fragile_glass.png', category: 'trailer' },
   { key: 'trailer_tanker_hazmat', url: '/assets/sprites/vehicles/trailers/tanker_hazmat.png', category: 'trailer' },
 
-  // Phase D3.1 — Building Roofs (8/8 — 100% complete! RGBA PNG, top-down 90°)
+  // Phase D3.1 — Building Roofs & City/Civic Architecture (22/22 — RGBA PNG, top-down 90°)
   { key: 'building_warehouse_big', url: '/assets/sprites/buildings/warehouse_big.png', category: 'building' },
   { key: 'building_warehouse_docks', url: '/assets/sprites/buildings/warehouse_docks.png', category: 'building' },
   { key: 'building_shed', url: '/assets/sprites/buildings/shed.png', category: 'building' },
@@ -172,6 +198,19 @@ export const AVAILABLE_SPRITES: readonly SpriteAssetEntry[] = [
   { key: 'building_church', url: '/assets/sprites/buildings/church.png', category: 'building' },
   { key: 'building_convenience_store', url: '/assets/sprites/buildings/convenience_store.png', category: 'building' },
   { key: 'building_restaurant', url: '/assets/sprites/buildings/restaurant.png', category: 'building' },
+  { key: 'building_fuel_kiosk', url: '/assets/sprites/buildings/fuel_kiosk.png', category: 'building' },
+  { key: 'building_house_traditional', url: '/assets/sprites/buildings/house_traditional.png', category: 'building' },
+  { key: 'building_house_townhouse', url: '/assets/sprites/buildings/house_townhouse.png', category: 'building' },
+  { key: 'building_villa_classic', url: '/assets/sprites/buildings/villa_classic.png', category: 'building' },
+  { key: 'building_villa_modern', url: '/assets/sprites/buildings/villa_modern.png', category: 'building' },
+  { key: 'building_apartment_block', url: '/assets/sprites/buildings/apartment_block.png', category: 'building' },
+  { key: 'building_apartment_modern', url: '/assets/sprites/buildings/apartment_modern.png', category: 'building' },
+  { key: 'building_fire_station', url: '/assets/sprites/buildings/fire_station.png', category: 'building' },
+  { key: 'building_police_station', url: '/assets/sprites/buildings/police_station.png', category: 'building' },
+  { key: 'building_hospital', url: '/assets/sprites/buildings/hospital.png', category: 'building' },
+  { key: 'building_school', url: '/assets/sprites/buildings/school.png', category: 'building' },
+  { key: 'building_supermarket', url: '/assets/sprites/buildings/supermarket.png', category: 'building' },
+  { key: 'building_town_hall', url: '/assets/sprites/buildings/town_hall.png', category: 'building' },
 
   // Phase D3.2 — Containers, Vegetation, Rocks & Industrial/Service Station Props (12/12 — RGBA PNG)
   { key: 'prop_container_base', url: '/assets/sprites/props/container_base.png', category: 'prop' },
@@ -305,6 +344,32 @@ export class SpriteRegistry {
         return 'building_convenience_store';
       case 'restaurant':
         return 'building_restaurant';
+      case 'fuel_kiosk':
+        return 'building_fuel_kiosk';
+      case 'house_traditional':
+        return 'building_house_traditional';
+      case 'house_townhouse':
+        return 'building_house_townhouse';
+      case 'villa_classic':
+        return 'building_villa_classic';
+      case 'villa_modern':
+        return 'building_villa_modern';
+      case 'apartment_block':
+        return 'building_apartment_block';
+      case 'apartment_modern':
+        return 'building_apartment_modern';
+      case 'fire_station':
+        return 'building_fire_station';
+      case 'police_station':
+        return 'building_police_station';
+      case 'hospital':
+        return 'building_hospital';
+      case 'school':
+        return 'building_school';
+      case 'supermarket':
+        return 'building_supermarket';
+      case 'town_hall':
+        return 'building_town_hall';
       default:
         return null;
     }
