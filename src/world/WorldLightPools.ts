@@ -62,7 +62,7 @@ export class WorldLightPools {
   private lastCamH = 0;
   private lastObjVersion = -1;
   private lastTrafficKey = '';
-  private lastHubKey = '';
+  private lastHubSpots: HubGlowSpot[] = [];
   private lastLampFactor = -1;
   private wasHidden = true;
 
@@ -164,7 +164,17 @@ export class WorldLightPools {
 
     const lf = Phaser.Math.Clamp(lampFactor, 0, 1);
     const trafficKey = objects.getTrafficLightPhaseKey();
-    const hubKey = hubSpots.map((h) => `${h.x},${h.y},${h.color}`).join('|');
+    let hubsChanged = hubSpots.length !== this.lastHubSpots.length;
+    if (!hubsChanged) {
+      for (let i = 0; i < hubSpots.length; i++) {
+        const a = hubSpots[i];
+        const b = this.lastHubSpots[i];
+        if (a.x !== b.x || a.y !== b.y || a.color !== b.color) {
+          hubsChanged = true;
+          break;
+        }
+      }
+    }
     const midX = view.x + view.width * 0.5;
     const midY = view.y + view.height * 0.5;
 
@@ -181,7 +191,7 @@ export class WorldLightPools {
       Math.abs(view.height - this.lastCamH) > 64 ||
       objects.version !== this.lastObjVersion ||
       trafficKey !== this.lastTrafficKey ||
-      hubKey !== this.lastHubKey ||
+      hubsChanged ||
       nightActive !== prevNightActive;
 
     if (needsLayout) {
@@ -193,7 +203,7 @@ export class WorldLightPools {
       this.lastCamH = view.height;
       this.lastObjVersion = objects.version;
       this.lastTrafficKey = trafficKey;
-      this.lastHubKey = hubKey;
+      this.lastHubSpots = hubSpots.map((h) => ({ x: h.x, y: h.y, color: h.color }));
       this.rebuildLayout(objects, view, lf, hubSpots);
       this.lastLampFactor = lf;
       return;

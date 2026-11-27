@@ -49,7 +49,6 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
   const [handbrakeActive, setHandbrakeActive] = useState<boolean>(false);
 
   // Wheel tracking references
-  const touchStartAngle = useRef<number>(0);
   const currentAngleRef = useRef<number>(0);
   const wheelCenterRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
@@ -103,7 +102,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
 
   // Auto-center wheel smoothly when released
   useEffect(() => {
-    let animId: number;
+    let animId: number | undefined;
     if (!isDraggingWheel && Math.abs(currentAngleRef.current) > 0.5) {
       const step = () => {
         currentAngleRef.current *= 0.85;
@@ -119,8 +118,31 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
       };
       animId = requestAnimationFrame(step);
     }
-    return () => cancelAnimationFrame(animId);
+    return () => {
+      if (animId !== undefined) cancelAnimationFrame(animId);
+    };
   }, [isDraggingWheel, updateSteer]);
+
+  // Reset active touch pedals & steering whenever controls are hidden or unmounted
+  // so opening a modal or toggling Editor mode never leaves throttle/brake stuck on.
+  useEffect(() => {
+    const releaseInputs = () => {
+      currentAngleRef.current = 0;
+      setWheelAngleDeg(0);
+      setIsDraggingWheel(false);
+      setThrottlePressed(false);
+      setBrakePressed(false);
+      updateSteer(0);
+      updateThrottle(0);
+      updateBrake(0);
+    };
+    if (!visible) {
+      releaseInputs();
+    }
+    return () => {
+      releaseInputs();
+    };
+  }, [visible, updateSteer, updateThrottle, updateBrake]);
 
   // Suppress native mobile browser long-press context menus & text callouts on
   // continuous-hold controls (pedals & steering wheel) without blocking PointerEvents.

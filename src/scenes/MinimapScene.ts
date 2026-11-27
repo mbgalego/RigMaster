@@ -77,7 +77,15 @@ export class MinimapScene extends Phaser.Scene {
     this.lastViewCenterX = Number.NaN;
     this.lastViewCenterY = Number.NaN;
 
-    this.scale.on('resize', () => this.reposition());
+    const onScaleResize = () => this.reposition();
+    this.scale.on('resize', onScaleResize);
+    this.events.once('shutdown', () => {
+      this.scale.off('resize', onScaleResize);
+      this.minimapImage = null;
+      this.minimapOverlay = null;
+      if (this.textures.exists('minimap_base')) this.textures.remove('minimap_base');
+      if (this.textures.exists('minimap_view')) this.textures.remove('minimap_view');
+    });
   }
 
   private getLayoutMetrics(): { disp: number; marginRight: number; top: number } {
@@ -594,7 +602,8 @@ export class MinimapScene extends Phaser.Scene {
     const tx = toMapX(mainScene.truck.body.position.x);
     const ty = toMapY(mainScene.truck.body.position.y);
     if (isInside(tx, ty, 4)) {
-      const ang = mainScene.truck.body.angle;
+      // Truck angle = 0 faces North (0, -1), whereas cos/sin = 0 points East (+1, 0)
+      const ang = mainScene.truck.body.angle - Math.PI / 2;
       const size = 7.5;
       const p1 = { x: tx + Math.cos(ang) * size, y: ty + Math.sin(ang) * size };
       const p2 = { x: tx + Math.cos(ang + 2.5) * size * 0.75, y: ty + Math.sin(ang + 2.5) * size * 0.75 };

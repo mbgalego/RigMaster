@@ -265,6 +265,8 @@ export class MainScene extends Phaser.Scene {
   private audioCtx: AudioContext | null = null;
   private engineOsc: OscillatorNode | null = null;
   private engineGain: GainNode | null = null;
+  private airBrakeNoiseBuffer: AudioBuffer | null = null;
+  private thunderNoiseBuffer: AudioBuffer | null = null;
   private soundEnabled: boolean = true;
   private lastReverseBeepTime: number = 0;
   private autoLightsActive: boolean = false;
@@ -570,13 +572,17 @@ export class MainScene extends Phaser.Scene {
       }
       this.unsubReputation?.();
       this.unsubReputation = null;
+      this.disposeSyntheticAudio();
       this.staticWorldChunks?.destroy();
       this.staticWorldChunks = null;
       this.worldLightPools?.destroy();
       this.worldLightPools = null;
-      this.world?.objects?.hideDynamicSprites();
+      this.world?.destroy();
       this.parkedTruckManager?.destroyAll();
       TrailerManager.resetInstance();
+      if ((window as unknown as { __rig?: unknown }).__rig === this) {
+        delete (window as unknown as { __rig?: unknown }).__rig;
+      }
     });
 
     // 3. Camera Setup
@@ -1463,18 +1469,7 @@ export class MainScene extends Phaser.Scene {
   public tryRefuel(pumpX?: number, pumpY?: number) {
     if (!this.truck || this.isEditorMode) return;
 
-    // Kill any residual velocity from a teleport so the "stopped" check passes
-    this.matter.body.setVelocity(this.truck.body, { x: 0, y: 0 });
-    this.truck.vLong = 0;
-    this.truck.currentSpeed = 0;
-
-    // Must be (nearly) stopped to refuel safely
-    if (Math.abs(this.truck.speedKmh) > 3) {
-      this.setCouplingNotice('Pare totalmente para abastecer', 'info');
-      return;
-    }
-
-    // Find the nearest gas pump within reach if none was passed
+    // Find the nearest gas pump within reach first (never alter physics before validating)
     const tx = this.truck.body.position.x;
     const ty = this.truck.body.position.y;
     let nearest: { x: number; y: number } | null = null;
@@ -1497,6 +1492,17 @@ export class MainScene extends Phaser.Scene {
       this.setCouplingNotice('Não há bomba de combustível por perto', 'info');
       return;
     }
+
+    // Must be (nearly) stopped to refuel safely
+    if (Math.abs(this.truck.speedKmh) > 3) {
+      this.setCouplingNotice('Pare totalmente para abastecer', 'info');
+      return;
+    }
+
+    // Kill any tiny residual creep once validated
+    this.matter.body.setVelocity(this.truck.body, { x: 0, y: 0 });
+    this.truck.vLong = 0;
+    this.truck.currentSpeed = 0;
 
     // Full tank refill at the diesel price
     const pricePerLiter = 1.749;
@@ -5460,9 +5466,60 @@ export class MainScene extends Phaser.Scene {
       this.engineGain.connect(this.audioCtx.destination);
 
       this.engineOsc.start();
+      this.buildNoiseBuffers();
     } catch (e) {
       // Ignore audio restriction
     }
+  }
+
+  private buildNoiseBuffers() {
+    if (!this.audioCtx) return;
+    const sr = this.audioCtx.sampleRate;
+
+    // Reusable 0.35s white-noise buffer for pneumatic air-brake hiss
+    const airLen = Math.max(1, Math.floor(sr * 0.35));
+    const airBuf = this.audioCtx.createBuffer(1, airLen, sr);
+    const airData = airBuf.getChannelData(0);
+    for (let i = 0; i < airLen; i++) {
+      airData[i] = Math.random() * 2 - 1;
+    }
+    this.airBrakeNoiseBuffer = airBuf;
+
+    // Reusable 3.8s rolling brown-noise buffer for thunder rumbles
+    const thunderLen = Math.max(1, Math.floor(sr * 3.8));
+    const thunderBuf = this.audioCtx.createBuffer(1, thunderLen, sr);
+    const thunderData = thunderBuf.getChannelData(0);
+    let lastOut = 0;
+    for (let i = 0; i < thunderLen; i++) {
+      const white = Math.random() * 2 - 1;
+      lastOut = (lastOut + 0.045 * white) / 1.045;
+      const tNorm = i / thunderLen;
+      const rumble = 0.68 + 0.32 * Math.sin(tNorm * 22 + 0.7) * Math.cos(tNorm * 9.5);
+      thunderData[i] = Math.max(-1, Math.min(1, lastOut * 4.8 * rumble));
+    }
+    this.thunderNoiseBuffer = thunderBuf;
+  }
+
+  private disposeSyntheticAudio() {
+    try {
+      this.engineOsc?.stop();
+      this.engineOsc?.disconnect();
+    } catch {
+      // Ignore oscillator already stopped
+    }
+    try {
+      this.engineGain?.disconnect();
+    } catch {
+      // Ignore disconnect errors
+    }
+    if (this.audioCtx) {
+      this.audioCtx.close().catch(() => {});
+    }
+    this.engineOsc = null;
+    this.engineGain = null;
+    this.airBrakeNoiseBuffer = null;
+    this.thunderNoiseBuffer = null;
+    this.audioCtx = null;
   }
 
   private updateSyntheticAudio(time: number) {
@@ -5517,15 +5574,10 @@ export class MainScene extends Phaser.Scene {
   public playAirBrakeHiss() {
     if (!this.audioCtx || !this.soundEnabled) return;
     try {
-      // White noise buffer for pneumatic air brake release
-      const bufferSize = this.audioCtx.sampleRate * 0.35;
-      const buffer = this.audioCtx.createBuffer(1, bufferSize, this.audioCtx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) {
-        data[i] = Math.random() * 2 - 1;
-      }
+      if (!this.airBrakeNoiseBuffer) this.buildNoiseBuffers();
+      if (!this.airBrakeNoiseBuffer) return;
       const noise = this.audioCtx.createBufferSource();
-      noise.buffer = buffer;
+      noise.buffer = this.airBrakeNoiseBuffer;
 
       const filter = this.audioCtx.createBiquadFilter();
       filter.type = 'bandpass';
@@ -5547,27 +5599,16 @@ export class MainScene extends Phaser.Scene {
   private playThunder(distanceNorm: number = 0.35) {
     if (!this.audioCtx || !this.soundEnabled || this.audioCtx.state !== 'running') return;
     try {
+      if (!this.thunderNoiseBuffer) this.buildNoiseBuffers();
+      if (!this.thunderNoiseBuffer) return;
       const now = this.audioCtx.currentTime;
       const prox = Phaser.Math.Clamp(1 - distanceNorm * 0.68, 0.22, 1.0);
       const duration = 2.4 + distanceNorm * 1.4;
 
-      // 1. Rolling low-pass brown-noise thunder body
-      const sampleRate = this.audioCtx.sampleRate;
-      const bufferSize = Math.floor(sampleRate * duration);
-      const buffer = this.audioCtx.createBuffer(1, bufferSize, sampleRate);
-      const data = buffer.getChannelData(0);
-      let lastOut = 0;
-      for (let i = 0; i < bufferSize; i++) {
-        const white = Math.random() * 2 - 1;
-        lastOut = (lastOut + 0.045 * white) / 1.045;
-        // Rolling rumble modulation (natural multi-echo valleys)
-        const tNorm = i / bufferSize;
-        const rumble = 0.68 + 0.32 * Math.sin(tNorm * 22 + 0.7) * Math.cos(tNorm * 9.5);
-        data[i] = Math.max(-1, Math.min(1, lastOut * 4.8 * rumble));
-      }
-
+      // 1. Rolling low-pass brown-noise thunder body (reuses cached buffer with subtle pitch variation)
       const noise = this.audioCtx.createBufferSource();
-      noise.buffer = buffer;
+      noise.buffer = this.thunderNoiseBuffer;
+      noise.playbackRate.setValueAtTime(Phaser.Math.FloatBetween(0.88, 1.12), now);
 
       const lowpass = this.audioCtx.createBiquadFilter();
       lowpass.type = 'lowpass';
@@ -5583,7 +5624,7 @@ export class MainScene extends Phaser.Scene {
       noise.connect(lowpass);
       lowpass.connect(gain);
       gain.connect(this.audioCtx.destination);
-      noise.start(now);
+      noise.start(now, 0, duration);
 
       // 2. Deep sub-bass boom on close/medium strikes
       if (distanceNorm < 0.7) {

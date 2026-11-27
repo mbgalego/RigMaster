@@ -76,6 +76,7 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [showWeatherRadar, setShowWeatherRadar] = useState(true);
   const [weatherTick, setWeatherTick] = useState(0);
+  const [hasOpened, setHasOpened] = useState(open);
 
   const svgRef = useRef<SVGSVGElement | null>(null);
   const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
@@ -96,6 +97,7 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
 
   useEffect(() => {
     if (open) {
+      setHasOpened(true);
       setSelectedTruckId(initialFocusTruckId ?? null);
       setCamera(DEFAULT_CAMERA);
       pointersRef.current.clear();
@@ -169,8 +171,9 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
     [open, scene],
   );
 
-  // Bake true terrain coastline, ocean depth, foothills, mountain relief & contour isolines once from WorldTerrain
+  // Bake true terrain coastline, ocean depth, foothills, mountain relief & contour isolines lazily on first open
   const terrainBackdropUrl = useMemo(() => {
+    if (!hasOpened) return null;
     const terrain = scene?.world?.terrain;
     if (!terrain || typeof document === 'undefined') return null;
     const cw = 520;
@@ -223,7 +226,7 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
     }
     ctx.putImageData(img, 0, 0);
     return canvas.toDataURL('image/png');
-  }, [scene]);
+  }, [scene, hasOpened]);
 
   const viewW = WORLD_SPAN_W / camera.zoom;
   const viewH = WORLD_SPAN_H / camera.zoom;

@@ -364,7 +364,6 @@ export class Truck {
   public isRefuelling: boolean = false;
   private _lastBodyX: number = 0;
   private _lastBodyY: number = 0;
-  private _refuelTimer: number = 0;
 
   /** Refills the tank by `liters` (clamped to capacity). Returns liters actually added. */
   public refuel(liters: number): number {

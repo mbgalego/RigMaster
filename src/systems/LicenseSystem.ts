@@ -396,28 +396,30 @@ export class LicenseSystem {
 
   private saveProgress() {
     try {
+      if (typeof localStorage === 'undefined') return;
       const state = Object.fromEntries(
         Object.entries(this.licenses).map(([k, v]) => [k, v.unlocked])
       );
       localStorage.setItem('rigmaster_licenses', JSON.stringify(state));
-    } catch (e) {
+    } catch {
       // Ignore storage error
     }
   }
 
   private loadProgress() {
     try {
+      if (typeof localStorage === 'undefined') return;
       const raw = localStorage.getItem('rigmaster_licenses');
-      if (raw) {
-        const state = JSON.parse(raw);
-        Object.keys(state).forEach((key) => {
-          if (this.licenses[key as LicenseId]) {
-            this.licenses[key as LicenseId].unlocked = !!state[key];
-          }
-        });
+      if (!raw) return;
+      const state = JSON.parse(raw);
+      if (!state || typeof state !== 'object' || Array.isArray(state)) return;
+      for (const [key, val] of Object.entries(state as Record<string, unknown>)) {
+        if (key in this.licenses && typeof val === 'boolean') {
+          this.licenses[key as LicenseId].unlocked = val;
+        }
       }
-    } catch (e) {
-      // Ignore
+    } catch {
+      // Ignore corrupted storage
     }
   }
 }

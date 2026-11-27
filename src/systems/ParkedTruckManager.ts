@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { COLLISION_CAT, COLLISION_MASK } from '../physics/CollisionLayers';
+import { COLLISION_CAT } from '../physics/CollisionLayers';
 import { ReputationSystem, type FleetTruckState } from './ReputationSystem';
 import { TRUCK_CATALOG } from './TruckCatalog';
 import { SpriteRegistry } from './SpriteRegistry';
@@ -62,6 +62,10 @@ export class ParkedTruckManager {
         this.scene.matter.body.setAngle(existing.body, fleet.angle);
         existing.body.collisionFilter.category =
           fleet.layer === 1 ? COLLISION_CAT.BRIDGE_RAIL : COLLISION_CAT.GROUND_OBS;
+        existing.body.collisionFilter.mask =
+          fleet.layer === 1
+            ? COLLISION_CAT.TRUCK_L1 | COLLISION_CAT.TRAILER_L1 | COLLISION_CAT.FRONT_L1
+            : COLLISION_CAT.TRUCK_L0 | COLLISION_CAT.TRAILER_L0 | COLLISION_CAT.FRONT_L0;
         existing.container.setPosition(fleet.x, fleet.y);
         existing.container.setRotation(fleet.angle);
         existing.container.setDepth(fleet.layer === 1 ? 19.5 : 9.5);
@@ -140,7 +144,7 @@ export class ParkedTruckManager {
         category: fleet.layer === 1 ? COLLISION_CAT.BRIDGE_RAIL : COLLISION_CAT.GROUND_OBS,
         mask:
           fleet.layer === 1
-            ? COLLISION_MASK.TRUCK_L1 | COLLISION_CAT.TRUCK_L1 | COLLISION_CAT.TRAILER_L1
+            ? COLLISION_CAT.TRUCK_L1 | COLLISION_CAT.TRAILER_L1 | COLLISION_CAT.FRONT_L1
             : COLLISION_CAT.TRUCK_L0 | COLLISION_CAT.TRAILER_L0 | COLLISION_CAT.FRONT_L0,
         group: 0,
       },

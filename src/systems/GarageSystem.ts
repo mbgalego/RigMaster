@@ -625,26 +625,40 @@ export class GarageSystem {
   private loadProgress() {
     try {
       const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('rigmaster_garages') : null;
-      if (raw) {
-        const state = JSON.parse(raw);
-        if (state.hubs && typeof state.hubs === 'object') {
-          this.savedHubState = { ...state.hubs };
-          for (const [k, v] of Object.entries(state.hubs as Record<string, any>)) {
-            if (this.hubs[k as HubId]) {
-              this.hubs[k as HubId].progress = v.progress;
-              this.hubs[k as HubId].isDominant = v.isDominant;
-              if (v.contracts) {
-                v.contracts.forEach((savedC: any) => {
-                  const targetC = this.hubs[k as HubId].contracts.find((c) => c.id === savedC.id);
-                  if (targetC) targetC.completed = savedC.completed;
-                });
-              }
-            }
+      if (!raw) return;
+      const state = JSON.parse(raw);
+      if (!state || typeof state !== 'object' || !state.hubs || typeof state.hubs !== 'object' || Array.isArray(state.hubs)) {
+        return;
+      }
+      const sanitizedSaved: Record<string, { progress: number; isDominant: boolean; contracts: Array<{ id: string; completed: boolean }> }> = {};
+      for (const [k, rawVal] of Object.entries(state.hubs as Record<string, unknown>)) {
+        if (!rawVal || typeof rawVal !== 'object' || Array.isArray(rawVal)) continue;
+        const v = rawVal as Record<string, unknown>;
+        const rawProgress = Number(v.progress);
+        const progress = Number.isFinite(rawProgress) ? Math.max(0, Math.min(100, rawProgress)) : 0;
+        const isDominant = typeof v.isDominant === 'boolean' ? v.isDominant : progress >= 100;
+        const contracts: Array<{ id: string; completed: boolean }> = Array.isArray(v.contracts)
+          ? v.contracts
+              .filter((c): c is { id: string; completed: boolean } =>
+                Boolean(c) && typeof c === 'object' && typeof (c as Record<string, unknown>).id === 'string',
+              )
+              .map((c) => ({ id: c.id, completed: Boolean(c.completed) }))
+          : [];
+        sanitizedSaved[k] = { progress, isDominant, contracts };
+
+        const hub = this.hubs[k as HubId];
+        if (hub) {
+          hub.progress = progress;
+          hub.isDominant = isDominant;
+          for (const savedC of contracts) {
+            const targetC = hub.contracts.find((c) => c.id === savedC.id);
+            if (targetC) targetC.completed = savedC.completed;
           }
         }
       }
+      this.savedHubState = sanitizedSaved;
     } catch {
-      // Ignore
+      // Ignore corrupted storage
     }
   }
 }

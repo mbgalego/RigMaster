@@ -234,8 +234,10 @@ export class EditorScene extends Phaser.Scene {
     // Marca o ponto de partida da sessão de editor (para o botão Cancelar).
     this.mainScene.world.beginEditorSession();
 
-    // Enable multi-touch pointers for touch pan & pinch-to-zoom
-    this.input.addPointer(2);
+    // Enable multi-touch pointers for touch pan & pinch-to-zoom (guard against re-adding across editor toggles)
+    if (this.input.manager.pointersTotal < 4) {
+      this.input.addPointer(4 - this.input.manager.pointersTotal);
+    }
 
     // Seamless handoff: start the editor camera exactly where the drive camera is looking
     const mainCam = this.mainScene.cameras.main;

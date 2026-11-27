@@ -746,10 +746,16 @@ export default function App() {
   const prevCargoHealth = useRef(telemetry.cargoHealth);
   const prevEngineHealth = useRef(telemetry.truckDamage.engine);
 
+  const toastTimersRef = useRef<Set<number>>(new Set());
+
   const addToast = (text: string, kind: 'info' | 'success' | 'blocked' | 'fuel' = 'info', durationMs = 3000) => {
     const id = ++toastIdRef.current;
     setToasts((t) => [...t.slice(-2), { id, text, kind }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), durationMs);
+    const timerId = window.setTimeout(() => {
+      toastTimersRef.current.delete(timerId);
+      setToasts((t) => t.filter((x) => x.id !== id));
+    }, durationMs);
+    toastTimersRef.current.add(timerId);
   };
 
   // Out of fuel → toast (engine shutoff)
@@ -818,9 +824,7 @@ export default function App() {
     if (!n) return;
     const kind = telemetry.coupling?.noticeKind ?? 'info';
     const durationMs = telemetry.coupling?.noticeDurationMs ?? 3500;
-    const id = ++toastIdRef.current;
-    setToasts((t) => [...t.slice(-2), { id, text: n, kind }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), durationMs);
+    addToast(n, kind, durationMs);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [noticeSeq]);
 
@@ -991,19 +995,12 @@ export default function App() {
       }
     }, 100);
 
-    // Keep the Phaser canvas from stealing pointer events while any HTML modal is open,
-    // so buttons like "Continuar" on the exam result popup can actually be clicked.
-    const syncCanvasPointerEvents = () => {
-      const game = getGame();
-      const canvas = game?.canvas as HTMLCanvasElement | undefined;
-      if (canvas) {
-        canvas.style.pointerEvents = modalOpen ? 'none' : 'auto';
-      }
-    };
-    syncCanvasPointerEvents();
-
     return () => {
       clearInterval(interval);
+      for (const timerId of toastTimersRef.current) {
+        window.clearTimeout(timerId);
+      }
+      toastTimersRef.current.clear();
       unsubLic();
       unsubGar();
       unsubMis();
@@ -1298,16 +1295,46 @@ export default function App() {
 
   const handleApplyImport = () => {
     const scene = getMainScene();
-    if (scene) {
-      const ok = scene.world.importJSON(jsonContent);
-      if (ok) {
-        // Respawn every loose trailer from the imported pads + 'trailer' objects
-        scene.rebuildTrailers();
-        setShowJsonModal(false);
-        setJsonError(null);
-      } else {
-        setJsonError('Erro ao processar JSON: formato inválido.');
+    if (!scene) return;
+    const trimmed = jsonContent.trim();
+    if (!trimmed) {
+      setJsonError('Erro ao processar JSON: conteúdo vazio.');
+      return;
+    }
+    if (trimmed.length > 8 * 1024 * 1024) {
+      setJsonError('Erro ao processar JSON: ficheiro excede o limite máximo de 8 MB.');
+      return;
+    }
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        setJsonError('Erro ao processar JSON: o documento deve ser um objeto JSON válido.');
+        return;
       }
+      if (parsed.roads !== undefined && !Array.isArray(parsed.roads)) {
+        setJsonError('Erro ao processar JSON: o campo "roads" deve ser uma lista.');
+        return;
+      }
+      if (parsed.objects !== undefined && !Array.isArray(parsed.objects)) {
+        setJsonError('Erro ao processar JSON: o campo "objects" deve ser uma lista.');
+        return;
+      }
+      if (parsed.customMissions !== undefined && !Array.isArray(parsed.customMissions)) {
+        setJsonError('Erro ao processar JSON: o campo "customMissions" deve ser uma lista.');
+        return;
+      }
+    } catch {
+      setJsonError('Erro ao processar JSON: sintaxe inválida.');
+      return;
+    }
+    const ok = scene.world.importJSON(trimmed);
+    if (ok) {
+      // Respawn every loose trailer from the imported pads + 'trailer' objects
+      scene.rebuildTrailers();
+      setShowJsonModal(false);
+      setJsonError(null);
+    } else {
+      setJsonError('Erro ao processar JSON: formato de mapa não reconhecido.');
     }
   };
 
@@ -3834,9 +3861,7 @@ export default function App() {
               <button
                 onClick={() => {
                   GarageSystem.getInstance().dominateAllHubs();
-                  const id = ++toastIdRef.current;
-                  setToasts((t) => [...t.slice(-2), { id, text: 'Todos os hubs dominados — sinais néon, biomas e meteorologia desbloqueados', kind: 'success' }]);
-                  setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2800);
+                  addToast('Todos os hubs dominados — sinais néon, biomas e meteorologia desbloqueados', 'success', 2800);
                 }}
                 className="text-amber-400 hover:underline text-left sm:text-right font-medium"
               >

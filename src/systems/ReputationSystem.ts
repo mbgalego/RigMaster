@@ -1,4 +1,4 @@
-import type { HubId } from './GarageSystem';
+import { OFFICIAL_HUB_IDS, type HubId } from './GarageSystem';
 import type { TrailerType } from '../entities/Trailer';
 import { createCleanTruckDamage, type TruckDamageState } from './DamageSystem';
 import {
@@ -161,8 +161,6 @@ export const CERTIFICATE_IDS: CertificateId[] = [
   'Offroad_Master',
   'Fragile_Expert',
 ];
-
-const OFFICIAL_HUB_IDS: HubId[] = ['harbor', 'shipyard', 'industrial', 'historic', 'serra'];
 
 const STORAGE_KEYS = {
   hubReputation: 'rigmaster_hubReputation',

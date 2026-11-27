@@ -3,6 +3,7 @@ import { Award, CheckCircle, ClipboardList, Compass, X } from 'lucide-react';
 import { GarageSystem, type HubId } from '../systems/GarageSystem';
 import {
   MissionSystem,
+  TRAILER_TYPE_LABELS,
   type ActiveMissionState,
   type MissionOffer,
 } from '../systems/MissionSystem';
@@ -14,25 +15,7 @@ import {
 } from '../systems/ReputationSystem';
 import { TRUCK_CATALOG, type TruckType } from '../systems/TruckCatalog';
 import { LicenseSystem } from '../systems/LicenseSystem';
-import type { TrailerType } from '../entities/Trailer';
 import { SpriteRegistry } from '../systems/SpriteRegistry';
-
-const TRAILER_LABELS: Record<TrailerType, string> = {
-  standard: 'Standard 13.6m',
-  container: 'Contentor 40ft ISO',
-  reefer: 'Frigorífico',
-  tanker_milk: 'Cisterna Alimentar',
-  timber: 'Florestal / Toros',
-  long_cargo: 'Pá Eólica 62m',
-  flatbed_heavy: 'Prancha Pesada',
-  tanker_fuel: 'Cisterna Combustível',
-  bitrem_lead: 'Bitrem Standard',
-  bitrem_pup: 'Bitrem Pup',
-  bitrem_tanker_lead: 'Bitrem Cisterna ADR',
-  bitrem_tanker_pup: 'Bitrem Cisterna Pup',
-  fragile_glass: 'Vidro Óptico Frágil',
-  tanker_hazmat: 'Cisterna Químicos ADR',
-};
 
 interface MissionsModalProps {
   open: boolean;
@@ -386,7 +369,7 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
                         <div className="w-24 sm:w-32 h-14 sm:h-16 rounded-lg bg-gradient-to-b from-slate-900/90 to-slate-950 border border-slate-800/90 px-2 py-1.5 flex items-center justify-center shrink-0">
                           <img
                             src={trailerPreviewUrl}
-                            alt={TRAILER_LABELS[offer.trailerType] ?? offer.trailerType}
+                            alt={TRAILER_TYPE_LABELS[offer.trailerType] ?? offer.trailerType}
                             referrerPolicy="no-referrer"
                             loading="lazy"
                             className="max-w-full max-h-full object-contain drop-shadow-[0_3px_4px_rgba(0,0,0,0.65)]"
@@ -414,7 +397,7 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
                         {/* Clean unboxed metadata row */}
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-400 pt-0.5">
                           <span className="text-slate-300 font-medium">
-                            {TRAILER_LABELS[offer.trailerType] ?? offer.trailerType}
+                            {TRAILER_TYPE_LABELS[offer.trailerType] ?? offer.trailerType}
                           </span>
                           <span aria-hidden="true">·</span>
                           <span>Carta {offer.requiredLicense}</span>
@@ -436,10 +419,28 @@ export const MissionsModal: React.FC<MissionsModalProps> = ({
                               <span className="text-amber-300">Rota Terra</span>
                             </>
                           )}
+                          {offer.weatherHazard === 'storm' && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span className="text-indigo-300">⚡ Trovoada</span>
+                            </>
+                          )}
                           {offer.weatherHazard === 'rain' && (
                             <>
                               <span aria-hidden="true">·</span>
                               <span className="text-sky-300">Chuva</span>
+                            </>
+                          )}
+                          {offer.weatherHazard === 'fog' && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span className="text-slate-200">Nevoeiro</span>
+                            </>
+                          )}
+                          {offer.weatherHazard === 'night' && !offer.nightRecommended && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span className="text-indigo-300">Noturna</span>
                             </>
                           )}
                         </div>

@@ -34,8 +34,6 @@ export class World {
   // --- Draft autosave (localStorage) — protege as edições do editor ---
   private static readonly DRAFT_KEY = 'rigmaster_world_draft';
   private static readonly OFFICIAL_VERSION = 7;
-  private static readonly DRAFT_DEBOUNCE_MS = 2000;
-  private draftTimer = 0;
   private lastSavedVersion = -1;
 
   /** Snapshot do mundo no início da sessão de editor (para o botão Cancelar). */
@@ -272,12 +270,6 @@ export class World {
       }
       return ok;
     } catch { return false; }
-  }
-
-  // O autosave periódico a cada 2s foi removido: o draft só é gravado no fim
-  // da sessão de editor (ou explicitamente via saveDraft).
-  private autosaveDraft(_delta: number) {
-    // Mantido apenas por compatibilidade; não é mais chamado do update().
   }
 
   public updateActiveChunks(centerX: number, centerY: number, view?: Phaser.Geom.Rectangle) {

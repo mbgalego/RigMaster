@@ -16,6 +16,14 @@ import {
 } from '../systems/DamageSystem';
 import { SpriteRegistry } from '../systems/SpriteRegistry';
 
+interface WorldTrailerCollisionRouter {
+  byBodyId: Map<number, Trailer>;
+  handler: (event: { pairs?: any[] }) => void;
+}
+
+/** Single Matter `collisionstart` listener per physics world, dispatching O(1) by trailer body ID. */
+const trailerCollisionRouters = new WeakMap<Phaser.Physics.Matter.World, WorldTrailerCollisionRouter>();
+
 export type TrailerType =
   | 'standard'
   | 'reefer'
@@ -329,96 +337,123 @@ export class Trailer {
     this.bodySprite?.setLighting(enabled);
   }
 
-  private onCollisionStart = (event: any) => {
-    const now = this.scene.time?.now ?? performance.now();
+  private tailProbes: Array<{ x: number; y: number }> = [
+    { x: 0, y: 0 },
+    { x: 0, y: 0 },
+    { x: 0, y: 0 },
+    { x: 0, y: 0 },
+    { x: 0, y: 0 },
+    { x: 0, y: 0 },
+  ];
+
+  private handleCollisionPair(pair: any, other: MatterJS.BodyType, now: number) {
     const sc = this.scene as unknown as {
       truck?: { body: MatterJS.BodyType; frontBody: MatterJS.BodyType; currentSpeed: number; vLong: number };
       trailer?: { body: MatterJS.BodyType } | null;
       pupTrailer?: { body: MatterJS.BodyType } | null;
     };
-    for (const pair of event.pairs) {
-      if (pair.bodyA === this.body || pair.bodyB === this.body) {
-        const other = pair.bodyA === this.body ? pair.bodyB : pair.bodyA;
-        const isOwnRigBody =
-          other === this.body ||
-          other === this.blockerBody ||
-          (this.isCoupled &&
-            (other === sc.truck?.body ||
-              other === sc.truck?.frontBody ||
-              other === sc.trailer?.body ||
-              other === sc.pupTrailer?.body));
-        if (isOwnRigBody) continue;
+    const isOwnRigBody =
+      other === this.body ||
+      other === this.blockerBody ||
+      (this.isCoupled &&
+        (other === sc.truck?.body ||
+          other === sc.truck?.frontBody ||
+          other === sc.trailer?.body ||
+          other === sc.pupTrailer?.body));
+    if (isOwnRigBody) return;
 
-        const speedPxS = computeNormalImpactSpeedPxS(
-          this.vx,
-          this.vy,
-          0,
-          0,
-          this.body.velocity.x,
-          this.body.velocity.y,
-          other.velocity?.x ?? 0,
-          other.velocity?.y ?? 0,
-          pair.collision?.normal,
-        );
-        const impactG = impactSpeedPxSToG(speedPxS);
-        this.maxGForce = Math.max(this.maxGForce, impactG);
+    const speedPxS = computeNormalImpactSpeedPxS(
+      this.vx,
+      this.vy,
+      0,
+      0,
+      this.body.velocity.x,
+      this.body.velocity.y,
+      other.velocity?.x ?? 0,
+      other.velocity?.y ?? 0,
+      pair.collision?.normal,
+    );
+    const impactG = impactSpeedPxSToG(speedPxS);
+    this.maxGForce = Math.max(this.maxGForce, impactG);
 
-        const profile = CARGO_PROFILES[this.type] || CARGO_PROFILES.standard;
-        const minReportSpeed = Math.min(MIN_TRAILER_DAMAGE_SPEED_PXS, profile.minImpactPxS);
+    const profile = CARGO_PROFILES[this.type] || CARGO_PROFILES.standard;
+    const minReportSpeed = Math.min(MIN_TRAILER_DAMAGE_SPEED_PXS, profile.minImpactPxS);
 
-        if (now - this.lastDamageAt >= DAMAGE_COOLDOWN_MS && speedPxS >= minReportSpeed) {
-          this.impactCount++;
-          this.lastImpactG = Math.max(this.lastImpactG, impactG);
+    if (now - this.lastDamageAt >= DAMAGE_COOLDOWN_MS && speedPxS >= minReportSpeed) {
+      this.impactCount++;
+      this.lastImpactG = Math.max(this.lastImpactG, impactG);
 
-          const support = pair.collision?.supports?.[0];
-          const contactPt = support
-            ? { x: support.x, y: support.y }
-            : {
-                x: (this.body.position.x + (other.position?.x ?? this.body.position.x)) * 0.5,
-                y: (this.body.position.y + (other.position?.y ?? this.body.position.y)) * 0.5,
-              };
-          const { zone, sideSign } = localizeImpact(
-            this.body.position.x,
-            this.body.position.y,
-            this.body.angle,
-            this.width,
-            this.length,
-            contactPt,
-          );
-
-          const res = applyTrailerAndCargoImpact(this.trailerHealth, this.cargoHealth, profile, speedPxS);
-          this.trailerHealth = res.trailerHealth;
-          this.cargoHealth = res.cargoHealth;
-
-          if (zone === 'rear' && speedPxS >= MIN_TRAILER_DAMAGE_SPEED_PXS) {
-            applyRearLightsImpactDamage(this.rearLights, speedPxS, sideSign, MIN_TRAILER_DAMAGE_SPEED_PXS);
-            this.lastTrailerLightsKey = '';
-          }
-
-          this.lastDamageAt = now;
-          this.lastImpactEvent = {
-            x: contactPt.x,
-            y: contactPt.y,
-            speedPxS,
-            zone,
-            sideSign,
-            target: 'trailer',
-            damageDealt: res.trailerLoss,
-            cargoDamageDealt: res.cargoLoss,
+      const support = pair.collision?.supports?.[0];
+      const contactPt = support
+        ? { x: support.x, y: support.y }
+        : {
+            x: (this.body.position.x + (other.position?.x ?? this.body.position.x)) * 0.5,
+            y: (this.body.position.y + (other.position?.y ?? this.body.position.y)) * 0.5,
           };
-        }
+      const { zone, sideSign } = localizeImpact(
+        this.body.position.x,
+        this.body.position.y,
+        this.body.angle,
+        this.width,
+        this.length,
+        contactPt,
+      );
 
-        // If coupled trailer impacts obstacle or another trailer meaningfully, rebound truck motion slightly
-        if (this.isCoupled && speedPxS >= 18 && sc.truck) {
-          sc.truck.vLong = -sc.truck.vLong * 0.15;
-          sc.truck.currentSpeed = sc.truck.vLong;
-        }
+      const res = applyTrailerAndCargoImpact(this.trailerHealth, this.cargoHealth, profile, speedPxS);
+      this.trailerHealth = res.trailerHealth;
+      this.cargoHealth = res.cargoHealth;
+
+      if (zone === 'rear' && speedPxS >= MIN_TRAILER_DAMAGE_SPEED_PXS) {
+        applyRearLightsImpactDamage(this.rearLights, speedPxS, sideSign, MIN_TRAILER_DAMAGE_SPEED_PXS);
+        this.lastTrailerLightsKey = '';
       }
+
+      this.lastDamageAt = now;
+      this.lastImpactEvent = {
+        x: contactPt.x,
+        y: contactPt.y,
+        speedPxS,
+        zone,
+        sideSign,
+        target: 'trailer',
+        damageDealt: res.trailerLoss,
+        cargoDamageDealt: res.cargoLoss,
+      };
     }
-  };
+
+    // If coupled trailer impacts obstacle or another trailer meaningfully, rebound truck motion slightly
+    if (this.isCoupled && speedPxS >= 18 && sc.truck) {
+      sc.truck.vLong = -sc.truck.vLong * 0.15;
+      sc.truck.currentSpeed = sc.truck.vLong;
+    }
+  }
 
   private setupCollisionTracking() {
-    this.scene.matter.world.on('collisionstart', this.onCollisionStart);
+    const world = this.scene.matter?.world;
+    if (!world || !this.body) return;
+    let router = trailerCollisionRouters.get(world);
+    if (!router) {
+      const byBodyId = new Map<number, Trailer>();
+      const handler = (event: { pairs?: any[] }) => {
+        const pairs = event?.pairs;
+        if (!pairs || pairs.length === 0 || byBodyId.size === 0) return;
+        const now = this.scene.time?.now ?? performance.now();
+        for (let i = 0; i < pairs.length; i++) {
+          const pair = pairs[i];
+          const bodyA = pair.bodyA as MatterJS.BodyType | undefined;
+          const bodyB = pair.bodyB as MatterJS.BodyType | undefined;
+          if (!bodyA || !bodyB) continue;
+          const tA = byBodyId.get(bodyA.id);
+          if (tA) tA.handleCollisionPair(pair, bodyB, now);
+          const tB = byBodyId.get(bodyB.id);
+          if (tB) tB.handleCollisionPair(pair, bodyA, now);
+        }
+      };
+      router = { byBodyId, handler };
+      trailerCollisionRouters.set(world, router);
+      world.on('collisionstart', handler);
+    }
+    router.byBodyId.set(this.body.id, this);
   }
 
   /**
@@ -448,21 +483,28 @@ export class Trailer {
     const cy = this.body.position.y - fy * halfL;
     const midCx = this.body.position.x - fx * (halfL - 6);
     const midCy = this.body.position.y - fy * (halfL - 6);
-    const probes = [
-      { x: cx, y: cy },
-      { x: cx + rx * (halfW - 3), y: cy + ry * (halfW - 3) },
-      { x: cx - rx * (halfW - 3), y: cy - ry * (halfW - 3) },
-      { x: midCx, y: midCy },
-      { x: midCx + rx * (halfW - 3), y: midCy + ry * (halfW - 3) },
-      { x: midCx - rx * (halfW - 3), y: midCy - ry * (halfW - 3) },
-    ];
+    const latOff = halfW - 3;
+    const probes = this.tailProbes;
+    probes[0].x = cx; probes[0].y = cy;
+    probes[1].x = cx + rx * latOff; probes[1].y = cy + ry * latOff;
+    probes[2].x = cx - rx * latOff; probes[2].y = cy - ry * latOff;
+    probes[3].x = midCx; probes[3].y = midCy;
+    probes[4].x = midCx + rx * latOff; probes[4].y = midCy + ry * latOff;
+    probes[5].x = midCx - rx * latOff; probes[5].y = midCy - ry * latOff;
+
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const p of probes) {
+    for (let i = 0; i < probes.length; i++) {
+      const p = probes[i];
       if (p.x < minX) minX = p.x;
       if (p.x > maxX) maxX = p.x;
       if (p.y < minY) minY = p.y;
       if (p.y > maxY) maxY = p.y;
     }
+
+    const candidates: MatterJS.BodyType[] = ML?.Query?.region
+      ? ML.Query.region(allBodies, { min: { x: minX, y: minY }, max: { x: maxX, y: maxY } })
+      : allBodies;
+    if (!candidates.length) return false;
 
     // Match obstacles and parked trailers on the trailer's active layer (+ shared ramp side walls)
     const activeObsBits =
@@ -475,11 +517,13 @@ export class Trailer {
     };
     const allowPupNosePass = isBitremLeadType(this.type);
 
-    for (const b of allBodies) {
+    for (const b of candidates) {
       if (!b.isStatic) continue;
-      const bounds = (b as unknown as { bounds?: { min: { x: number; y: number }; max: { x: number; y: number } } }).bounds;
-      if (bounds && (bounds.max.x < minX || bounds.min.x > maxX || bounds.max.y < minY || bounds.min.y > maxY)) {
-        continue;
+      if (!ML?.Query?.region) {
+        const bounds = (b as unknown as { bounds?: { min: { x: number; y: number }; max: { x: number; y: number } } }).bounds;
+        if (bounds && (bounds.max.x < minX || bounds.min.x > maxX || bounds.max.y < minY || bounds.min.y > maxY)) {
+          continue;
+        }
       }
       if (((b.collisionFilter?.category ?? 0) & activeObsBits) === 0) continue;
       if (b === this.body || b === this.blockerBody) continue;
@@ -1211,10 +1255,18 @@ export class Trailer {
 
   public destroy() {
     this.container.destroy();
-    if (this.scene.matter && this.scene.matter.world) {
-      this.scene.matter.world.off('collisionstart', this.onCollisionStart);
-      this.scene.matter.world.remove(this.body);
-      this.scene.matter.world.remove(this.blockerBody);
+    const world = this.scene.matter?.world;
+    if (world) {
+      const router = trailerCollisionRouters.get(world);
+      if (router) {
+        router.byBodyId.delete(this.body.id);
+        if (router.byBodyId.size === 0) {
+          world.off('collisionstart', router.handler);
+          trailerCollisionRouters.delete(world);
+        }
+      }
+      world.remove(this.body);
+      world.remove(this.blockerBody);
     }
   }
 }

@@ -657,7 +657,11 @@ export class MissionSystem {
         nightRecommended: Boolean(r.nightRecommended),
         isOffroadRoute: Boolean(r.isOffroadRoute),
         weatherHazard:
-          r.weatherHazard === 'rain' || r.weatherHazard === 'fog' || r.weatherHazard === 'night' || r.weatherHazard === 'clear'
+          r.weatherHazard === 'rain' ||
+          r.weatherHazard === 'storm' ||
+          r.weatherHazard === 'fog' ||
+          r.weatherHazard === 'night' ||
+          r.weatherHazard === 'clear'
             ? r.weatherHazard
             : undefined,
         isCustom: true,
@@ -809,7 +813,14 @@ export class MissionSystem {
     const cargoFactor = CARGO_RISK_WEIGHT[template.trailerType] ?? 1.0;
     const distanceBonus = Math.min(0.35, Math.max(0, distancePx / 25000));
     const weather = template.weatherHazard ?? activeWeather;
-    const weatherBonus = weather === 'rain' ? 0.2 : weather === 'fog' || weather === 'night' ? 0.12 : 0;
+    const weatherBonus =
+      weather === 'storm'
+        ? 0.25
+        : weather === 'rain'
+          ? 0.2
+          : weather === 'fog' || weather === 'night'
+            ? 0.12
+            : 0;
     const nightBonus = template.nightRecommended && weather !== 'night' ? 0.1 : 0;
     const offroadBonus = template.isOffroadRoute ? 0.15 : 0;
 
