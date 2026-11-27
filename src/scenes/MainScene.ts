@@ -40,6 +40,7 @@ import {
   type UpgradeSlot,
 } from '../systems/TruckCatalog';
 import { ParkedTruckManager } from '../systems/ParkedTruckManager';
+import { AudioEngine } from '../systems/AudioEngine';
 import { COLLISION_CAT, COLLISION_MASK } from '../physics/CollisionLayers';
 import {
   TruckDamageState,
@@ -216,10 +217,6 @@ export class MainScene extends Phaser.Scene {
   private currentGForce: number = 0;
   private peakGForce: number = 0;
 
-  // Audio
-  private refuelOsc: OscillatorNode | null = null;
-  private refuelGain: GainNode | null = null;
-
   // Environmental layers (drifting ground cloud shadows, volumetric fog wisps, radial-cutout fog, slanted rain streaks)
   private weatherGraphics!: Phaser.GameObjects.Graphics;
   private cloudShadowSprites: Phaser.GameObjects.Image[] = [];
@@ -261,14 +258,8 @@ export class MainScene extends Phaser.Scene {
   private camLookAheadX: number = 0;
   private camLookAheadY: number = 0;
 
-  // Audio Context (Procedural synthesized audio)
-  private audioCtx: AudioContext | null = null;
-  private engineOsc: OscillatorNode | null = null;
-  private engineGain: GainNode | null = null;
-  private airBrakeNoiseBuffer: AudioBuffer | null = null;
-  private thunderNoiseBuffer: AudioBuffer | null = null;
-  private soundEnabled: boolean = true;
-  private lastReverseBeepTime: number = 0;
+  // Procedural Web Audio synthesis
+  private audio: AudioEngine = new AudioEngine();
   private autoLightsActive: boolean = false;
 
   // Latest Telemetry Cache for React / HUD
@@ -572,7 +563,27 @@ export class MainScene extends Phaser.Scene {
       }
       this.unsubReputation?.();
       this.unsubReputation = null;
-      this.disposeSyntheticAudio();
+      this.audio.dispose();
+      if (this.pupKingpin) {
+        this.pupKingpin.destroy();
+        this.pupKingpin = null;
+      }
+      if (this.pupTrailer) {
+        this.pupTrailer.destroy();
+        this.pupTrailer = null;
+      }
+      if (this.kingpin) {
+        this.kingpin.destroy();
+        this.kingpin = null;
+      }
+      if (this.trailer) {
+        this.trailer.destroy();
+        this.trailer = null;
+      }
+      if (this.truck) {
+        this.truck.destroy();
+        this.truck = undefined as unknown as Truck;
+      }
       this.staticWorldChunks?.destroy();
       this.staticWorldChunks = null;
       this.worldLightPools?.destroy();
@@ -762,9 +773,8 @@ export class MainScene extends Phaser.Scene {
       });
     }
 
-    // 6. Sound Synthesis Init on First User Interaction
-    this.input.keyboard?.once('keydown', () => this.initSyntheticAudio());
-    this.input.once('pointerdown', () => this.initSyntheticAudio());
+    // 6. Sound Synthesis Init & Resume on Any User Interaction (TouchControls, HUD, keyboard, or canvas)
+    this.audio.attachGestureUnlock();
 
     // Listen to garage system & dynamic weather updates
     const syncWeatherGripNow = () => {
@@ -1515,54 +1525,14 @@ export class MainScene extends Phaser.Scene {
     this.setCouplingNotice(`Abastecido: +${added.toFixed(0)} L · ${cost.toFixed(2)} €`, 'success');
 
     // Play refuel sound
-    this.playRefuelSound();
+    this.audio.playRefuel();
 
     // Auto-clear the refuelling flag after a moment
     this.time.delayedCall(1200, () => {
       this.isRefuelling = false;
       this.refuellingPump = null;
-      this.playRefuelEndSound();
+      this.audio.playRefuelEnd();
     });
-  }
-
-  /** Short refuel pump sound (fuel flowing). */
-  private playRefuelSound() {
-    if (!this.audioCtx || !this.soundEnabled) return;
-    try {
-      const osc = this.audioCtx.createOscillator();
-      const gain = this.audioCtx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(600, this.audioCtx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(900, this.audioCtx.currentTime + 0.3);
-      gain.gain.setValueAtTime(0.05, this.audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + 0.3);
-      osc.connect(gain);
-      gain.connect(this.audioCtx.destination);
-      osc.start();
-      osc.stop(this.audioCtx.currentTime + 0.3);
-    } catch (e) {
-      // Ignore audio errors
-    }
-  }
-
-  /** Short "clunk" sound when refuelling finishes. */
-  private playRefuelEndSound() {
-    if (!this.audioCtx || !this.soundEnabled) return;
-    try {
-      const osc = this.audioCtx.createOscillator();
-      const gain = this.audioCtx.createGain();
-      osc.type = 'square';
-      osc.frequency.setValueAtTime(440, this.audioCtx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(880, this.audioCtx.currentTime + 0.15);
-      gain.gain.setValueAtTime(0.08, this.audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + 0.25);
-      osc.connect(gain);
-      gain.connect(this.audioCtx.destination);
-      osc.start();
-      osc.stop(this.audioCtx.currentTime + 0.25);
-    } catch (e) {
-      // Ignore audio errors
-    }
   }
 
   /** Combined collision counter across tractor + lead trailer + bitrem pup. */
@@ -1669,12 +1639,12 @@ export class MainScene extends Phaser.Scene {
         : 'Camião e atrelado reparados a 100%',
       'success',
     );
-    this.playRepairSound();
+    this.audio.playRepair();
 
     this.time.delayedCall(1400, () => {
       this.isRepairing = false;
       this.repairingBay = null;
-      this.playRefuelEndSound();
+      this.audio.playRefuelEnd();
     });
     return true;
   }
@@ -1742,7 +1712,7 @@ export class MainScene extends Phaser.Scene {
 
     const spec = TRUCK_CATALOG[res.newTruck.type];
     this.setCouplingNotice(`Assumiste controlo do ${spec.name}`, 'success');
-    this.playRepairSound();
+    this.audio.playRepair();
     return true;
   }
 
@@ -1781,7 +1751,7 @@ export class MainScene extends Phaser.Scene {
     const updated = this.reputationSystem.getActiveTruck();
     this.truck.setUpgrades(updated.upgrades);
     this.setCouplingNotice(`Upgrade instalado: ${slot} → ${value}`, 'success');
-    this.playRepairSound();
+    this.audio.playRepair();
     return true;
   }
 
@@ -2038,66 +2008,6 @@ export class MainScene extends Phaser.Scene {
     );
   }
 
-  /** Synthesized pneumatic wrench / garage repair sound. */
-  private playRepairSound() {
-    if (!this.audioCtx || !this.soundEnabled) return;
-    try {
-      const now = this.audioCtx.currentTime;
-      for (let i = 0; i < 3; i++) {
-        const osc = this.audioCtx.createOscillator();
-        const gain = this.audioCtx.createGain();
-        osc.type = 'triangle';
-        const t0 = now + i * 0.14;
-        osc.frequency.setValueAtTime(320 + i * 90, t0);
-        osc.frequency.exponentialRampToValueAtTime(520 + i * 110, t0 + 0.09);
-        gain.gain.setValueAtTime(0.06, t0);
-        gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.11);
-        osc.connect(gain);
-        gain.connect(this.audioCtx.destination);
-        osc.start(t0);
-        osc.stop(t0 + 0.12);
-      }
-    } catch (e) {
-      // Ignore audio errors
-    }
-  }
-
-  /** Synthesized impact thud + optional fragile glass chime. */
-  private playImpactSound(speedPxS: number, withFragileChime: boolean) {
-    if (!this.audioCtx || !this.soundEnabled) return;
-    try {
-      const now = this.audioCtx.currentTime;
-      const strength = Phaser.Math.Clamp((speedPxS - 18) / 140, 0.15, 1.0);
-      const osc = this.audioCtx.createOscillator();
-      const gain = this.audioCtx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(125 + strength * 40, now);
-      osc.frequency.exponentialRampToValueAtTime(38, now + 0.18);
-      gain.gain.setValueAtTime(0.10 * strength, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
-      osc.connect(gain);
-      gain.connect(this.audioCtx.destination);
-      osc.start(now);
-      osc.stop(now + 0.21);
-
-      if (withFragileChime) {
-        const gOsc = this.audioCtx.createOscillator();
-        const gGain = this.audioCtx.createGain();
-        gOsc.type = 'sine';
-        gOsc.frequency.setValueAtTime(1950, now + 0.02);
-        gOsc.frequency.exponentialRampToValueAtTime(1180, now + 0.16);
-        gGain.gain.setValueAtTime(0.045 * strength, now + 0.02);
-        gGain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
-        gOsc.connect(gGain);
-        gGain.connect(this.audioCtx.destination);
-        gOsc.start(now + 0.02);
-        gOsc.stop(now + 0.19);
-      }
-    } catch (e) {
-      // Ignore audio errors
-    }
-  }
-
   private spawnImpactFeedback(ev: ImpactEvent, isFragileCargo: boolean) {
     const count = Phaser.Math.Clamp(Math.round(ev.speedPxS / 18), 4, 14);
     for (let i = 0; i < count; i++) {
@@ -2118,7 +2028,7 @@ export class MainScene extends Phaser.Scene {
       const intensity = Phaser.Math.Clamp((ev.speedPxS - 24) / 26000, 0.0015, 0.0085);
       this.cameras.main.shake(120, intensity);
     }
-    this.playImpactSound(ev.speedPxS, isFragileCargo && ev.cargoDamageDealt > 0);
+    this.audio.playImpact(ev.speedPxS, isFragileCargo && ev.cargoDamageDealt > 0);
   }
 
   private updateImpactEffects(dt: number, time: number) {
@@ -3242,7 +3152,7 @@ export class MainScene extends Phaser.Scene {
             'success',
             7000,
           );
-          this.playRefuelEndSound();
+          this.audio.playRefuelEnd();
         } else {
           const activeAfter = this.missionSystem.getActiveMission();
           if (activeAfter && prevPhase === 'pickup' && activeAfter.phase === 'transit') {
@@ -3344,7 +3254,14 @@ export class MainScene extends Phaser.Scene {
       };
 
       // Sound Updates
-      this.updateSyntheticAudio(time);
+      this.audio.updateEngine({
+        timeMs: time,
+        speedKmh: this.truck.speedKmh,
+        isAccelerating: this.truck.isAccelerating,
+        isReversing: this.truck.isReversing,
+        isOutOfFuel: this.truck.isOutOfFuel,
+        engineHealth: this.truck.damage.engine,
+      });
     } else if (this.impactGraphicsDirty) {
       this.impactGraphics?.clear();
       this.impactGraphicsDirty = false;
@@ -5412,7 +5329,7 @@ export class MainScene extends Phaser.Scene {
         if (this.pendingThunders[i].delaySec <= 0) {
           const { distanceNorm } = this.pendingThunders[i];
           this.pendingThunders.splice(i, 1);
-          this.playThunder(distanceNorm);
+          this.audio.playThunder(distanceNorm);
         }
       }
     }
@@ -5439,217 +5356,13 @@ export class MainScene extends Phaser.Scene {
   }
 
   // ==========================================
-  // PROCEDURAL WEB AUDIO SYNTHESIS
+  // PROCEDURAL WEB AUDIO DELEGATES
   // ==========================================
-  private initSyntheticAudio() {
-    if (this.audioCtx) return;
-    try {
-      const AudioClass = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioClass) return;
-      this.audioCtx = new AudioClass();
-
-      // Master Engine Oscillator (Diesel low rumbling frequency)
-      this.engineOsc = this.audioCtx.createOscillator();
-      this.engineOsc.type = 'sawtooth';
-      this.engineOsc.frequency.setValueAtTime(38, this.audioCtx.currentTime);
-
-      this.engineGain = this.audioCtx.createGain();
-      this.engineGain.gain.setValueAtTime(0.04, this.audioCtx.currentTime);
-
-      // Lowpass filter for deep diesel engine body
-      const filter = this.audioCtx.createBiquadFilter();
-      filter.type = 'lowpass';
-      filter.frequency.setValueAtTime(140, this.audioCtx.currentTime);
-
-      this.engineOsc.connect(filter);
-      filter.connect(this.engineGain);
-      this.engineGain.connect(this.audioCtx.destination);
-
-      this.engineOsc.start();
-      this.buildNoiseBuffers();
-    } catch (e) {
-      // Ignore audio restriction
-    }
-  }
-
-  private buildNoiseBuffers() {
-    if (!this.audioCtx) return;
-    const sr = this.audioCtx.sampleRate;
-
-    // Reusable 0.35s white-noise buffer for pneumatic air-brake hiss
-    const airLen = Math.max(1, Math.floor(sr * 0.35));
-    const airBuf = this.audioCtx.createBuffer(1, airLen, sr);
-    const airData = airBuf.getChannelData(0);
-    for (let i = 0; i < airLen; i++) {
-      airData[i] = Math.random() * 2 - 1;
-    }
-    this.airBrakeNoiseBuffer = airBuf;
-
-    // Reusable 3.8s rolling brown-noise buffer for thunder rumbles
-    const thunderLen = Math.max(1, Math.floor(sr * 3.8));
-    const thunderBuf = this.audioCtx.createBuffer(1, thunderLen, sr);
-    const thunderData = thunderBuf.getChannelData(0);
-    let lastOut = 0;
-    for (let i = 0; i < thunderLen; i++) {
-      const white = Math.random() * 2 - 1;
-      lastOut = (lastOut + 0.045 * white) / 1.045;
-      const tNorm = i / thunderLen;
-      const rumble = 0.68 + 0.32 * Math.sin(tNorm * 22 + 0.7) * Math.cos(tNorm * 9.5);
-      thunderData[i] = Math.max(-1, Math.min(1, lastOut * 4.8 * rumble));
-    }
-    this.thunderNoiseBuffer = thunderBuf;
-  }
-
-  private disposeSyntheticAudio() {
-    try {
-      this.engineOsc?.stop();
-      this.engineOsc?.disconnect();
-    } catch {
-      // Ignore oscillator already stopped
-    }
-    try {
-      this.engineGain?.disconnect();
-    } catch {
-      // Ignore disconnect errors
-    }
-    if (this.audioCtx) {
-      this.audioCtx.close().catch(() => {});
-    }
-    this.engineOsc = null;
-    this.engineGain = null;
-    this.airBrakeNoiseBuffer = null;
-    this.thunderNoiseBuffer = null;
-    this.audioCtx = null;
-  }
-
-  private updateSyntheticAudio(time: number) {
-    if (!this.audioCtx || !this.engineOsc || !this.engineGain || !this.soundEnabled) return;
-
-    if (this.audioCtx.state === 'suspended') {
-      this.audioCtx.resume();
-    }
-
-    // Engine off when out of fuel — silence engine & reverse beep while coasting
-    if (this.truck.isOutOfFuel) {
-      this.engineGain.gain.setTargetAtTime(0, this.audioCtx.currentTime, 0.06);
-      return;
-    }
-
-    this.engineGain.gain.setTargetAtTime(0.04, this.audioCtx.currentTime, 0.06);
-
-    // Engine RPM Pitch based on truck speed & throttle (+ sputter when engine is heavily worn)
-    const speedRatio = Math.min(this.truck.speedKmh / 65, 1.0);
-    const engineSputter =
-      this.truck.damage.engine < 35
-        ? Math.sin(time * 0.025) * (1 - this.truck.damage.engine / 35) * 6
-        : 0;
-    const targetFreq = Math.max(22, 34 + speedRatio * 48 + (this.truck.isAccelerating ? 12 : 0) + engineSputter);
-    this.engineOsc.frequency.setTargetAtTime(targetFreq, this.audioCtx.currentTime, 0.1);
-
-    // Reverse Beep Warning
-    if (this.truck.isReversing && time - this.lastReverseBeepTime > 650) {
-      this.lastReverseBeepTime = time;
-      this.playReverseBeep();
-    }
-  }
-
-  private playReverseBeep() {
-    if (!this.audioCtx || !this.soundEnabled) return;
-    try {
-      const osc = this.audioCtx.createOscillator();
-      const gain = this.audioCtx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(1050, this.audioCtx.currentTime);
-      gain.gain.setValueAtTime(0.06, this.audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + 0.18);
-      osc.connect(gain);
-      gain.connect(this.audioCtx.destination);
-      osc.start();
-      osc.stop(this.audioCtx.currentTime + 0.2);
-    } catch (e) {
-      // Ignore
-    }
-  }
-
   public playAirBrakeHiss() {
-    if (!this.audioCtx || !this.soundEnabled) return;
-    try {
-      if (!this.airBrakeNoiseBuffer) this.buildNoiseBuffers();
-      if (!this.airBrakeNoiseBuffer) return;
-      const noise = this.audioCtx.createBufferSource();
-      noise.buffer = this.airBrakeNoiseBuffer;
-
-      const filter = this.audioCtx.createBiquadFilter();
-      filter.type = 'bandpass';
-      filter.frequency.setValueAtTime(1800, this.audioCtx.currentTime);
-
-      const gain = this.audioCtx.createGain();
-      gain.gain.setValueAtTime(0.08, this.audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + 0.35);
-
-      noise.connect(filter);
-      filter.connect(gain);
-      gain.connect(this.audioCtx.destination);
-      noise.start();
-    } catch (e) {
-      // Ignore
-    }
-  }
-
-  private playThunder(distanceNorm: number = 0.35) {
-    if (!this.audioCtx || !this.soundEnabled || this.audioCtx.state !== 'running') return;
-    try {
-      if (!this.thunderNoiseBuffer) this.buildNoiseBuffers();
-      if (!this.thunderNoiseBuffer) return;
-      const now = this.audioCtx.currentTime;
-      const prox = Phaser.Math.Clamp(1 - distanceNorm * 0.68, 0.22, 1.0);
-      const duration = 2.4 + distanceNorm * 1.4;
-
-      // 1. Rolling low-pass brown-noise thunder body (reuses cached buffer with subtle pitch variation)
-      const noise = this.audioCtx.createBufferSource();
-      noise.buffer = this.thunderNoiseBuffer;
-      noise.playbackRate.setValueAtTime(Phaser.Math.FloatBetween(0.88, 1.12), now);
-
-      const lowpass = this.audioCtx.createBiquadFilter();
-      lowpass.type = 'lowpass';
-      lowpass.frequency.setValueAtTime(220 + prox * 280, now);
-      lowpass.frequency.exponentialRampToValueAtTime(58, now + duration);
-      lowpass.Q.setValueAtTime(1.4, now);
-
-      const gain = this.audioCtx.createGain();
-      gain.gain.setValueAtTime(0.001, now);
-      gain.gain.linearRampToValueAtTime(0.32 * prox, now + 0.06 + distanceNorm * 0.14);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
-
-      noise.connect(lowpass);
-      lowpass.connect(gain);
-      gain.connect(this.audioCtx.destination);
-      noise.start(now, 0, duration);
-
-      // 2. Deep sub-bass boom on close/medium strikes
-      if (distanceNorm < 0.7) {
-        const sub = this.audioCtx.createOscillator();
-        const subGain = this.audioCtx.createGain();
-        sub.type = 'sine';
-        sub.frequency.setValueAtTime(62, now);
-        sub.frequency.exponentialRampToValueAtTime(30, now + 0.95);
-        subGain.gain.setValueAtTime(0.20 * prox, now);
-        subGain.gain.exponentialRampToValueAtTime(0.001, now + 1.05);
-        sub.connect(subGain);
-        subGain.connect(this.audioCtx.destination);
-        sub.start(now);
-        sub.stop(now + 1.08);
-      }
-    } catch {
-      // Ignore audio failures
-    }
+    this.audio.playAirBrakeHiss();
   }
 
   public setSoundEnabled(enabled: boolean) {
-    this.soundEnabled = enabled;
-    if (this.engineGain && this.audioCtx) {
-      const targetGain = enabled && !this.truck?.isOutOfFuel ? 0.04 : 0;
-      this.engineGain.gain.setValueAtTime(targetGain, this.audioCtx.currentTime);
-    }
+    this.audio.setEnabled(enabled, Boolean(this.truck?.isOutOfFuel));
   }
 }

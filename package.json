@@ -10,6 +10,8 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test:phase1": "tsx scripts/test-phase1-systems.ts",
+    "test:core": "tsx scripts/test-core-systems.ts",
+    "test": "npm run test:phase1 && npm run test:core",
     "test:smoke": "node scripts/smoke-test.mjs",
     "test:smoke:fuel": "node scripts/smoke-fuel.mjs",
     "test:smoke:bridge": "node scripts/smoke-bridge.mjs",

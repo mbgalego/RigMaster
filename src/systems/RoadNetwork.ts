@@ -1,5 +1,9 @@
-import Phaser from 'phaser';
 import { IntersectionSystem } from './IntersectionSystem';
+
+const clamp = (v: number, min: number, max: number): number => (v < min ? min : v > max ? max : v);
+const distBetween = (x1: number, y1: number, x2: number, y2: number): number => Math.hypot(x2 - x1, y2 - y1);
+const degToRad = (deg: number): number => (deg * Math.PI) / 180;
+const radToDeg = (rad: number): number => (rad * 180) / Math.PI;
 
 /**
  * Vector road network — the Phase 1 "à la ETS2" layer.
@@ -216,17 +220,17 @@ export class RoadNetwork {
     return this.roads.find((r) => r.id === id) || null;
   }
 
-  public translateRoad(id: string, dx: number, dy: number) {
+  public translateRoad(id: string, dx: number, dy: number, deferIntersections = false) {
     const road = this.getRoad(id);
     if (!road) return;
     for (const p of road.points) {
       p.x += dx;
       p.y += dy;
     }
-    this.rebuildIndex();
+    this.rebuildIndex(deferIntersections);
   }
 
-  public movePoint(id: string, index: number, x: number, y: number) {
+  public movePoint(id: string, index: number, x: number, y: number, deferIntersections = false) {
     const road = this.getRoad(id);
     const p = road?.points[index];
     if (!road || !p) return;
@@ -252,7 +256,7 @@ export class RoadNetwork {
       keepAway(road.points[index - 1]);
       keepAway(road.points[index + 1]);
     }
-    this.rebuildIndex();
+    this.rebuildIndex(deferIntersections);
   }
 
   public setRoadOneWay(id: string, oneWay: boolean) {
@@ -297,26 +301,26 @@ export class RoadNetwork {
   public setRoadWidth(id: string, width: number) {
     const road = this.getRoad(id);
     if (!road) return;
-    const w = Phaser.Math.Clamp(width, MIN_ROAD_WIDTH, MAX_ROAD_WIDTH);
+    const w = clamp(width, MIN_ROAD_WIDTH, MAX_ROAD_WIDTH);
     for (const p of road.points) p.w = w;
     this.rebuildIndex();
   }
 
   /** Width of a single control point (one "section" of the road) */
-  public setPointWidth(id: string, index: number, width: number) {
+  public setPointWidth(id: string, index: number, width: number, deferIntersections = false) {
     const p = this.getRoad(id)?.points[index];
     if (!p) return;
-    p.w = Phaser.Math.Clamp(Math.round(width), MIN_ROAD_WIDTH, MAX_ROAD_WIDTH);
-    this.rebuildIndex();
+    p.w = clamp(Math.round(width), MIN_ROAD_WIDTH, MAX_ROAD_WIDTH);
+    this.rebuildIndex(deferIntersections);
   }
 
   /** Tangent rotation at a single control point (asymmetric curve control) */
-  public setPointTwist(id: string, index: number, twistRad: number) {
+  public setPointTwist(id: string, index: number, twistRad: number, deferIntersections = false) {
     const p = this.getRoad(id)?.points[index];
     if (!p) return;
-    p.twist = Phaser.Math.Clamp(twistRad, -MAX_TWIST, MAX_TWIST);
+    p.twist = clamp(twistRad, -MAX_TWIST, MAX_TWIST);
     if (Math.abs(p.twist) < 0.001) p.twist = undefined;
-    this.rebuildIndex();
+    this.rebuildIndex(deferIntersections);
   }
 
   public getPointTwist(id: string, index: number): number {
@@ -357,9 +361,9 @@ export class RoadNetwork {
           const abx = b.x - a.x, aby = b.y - a.y;
           const len2 = abx * abx + aby * aby;
           if (len2 < 1) continue;
-          const t = Phaser.Math.Clamp(((x - a.x) * abx + (y - a.y) * aby) / len2, 0, 1);
+          const t = clamp(((x - a.x) * abx + (y - a.y) * aby) / len2, 0, 1);
           const px = a.x + abx * t, py = a.y + aby * t;
-          const d = Phaser.Math.Distance.Between(x, y, px, py);
+          const d = distBetween(x, y, px, py);
           if (!best || d < best.d) best = { road, segIndex: i, t, d };
         }
       }
@@ -434,7 +438,7 @@ export class RoadNetwork {
         if (!compatible) continue;
 
         const p = road.points[i];
-        const d = Phaser.Math.Distance.Between(x, y, p.x, p.y);
+        const d = distBetween(x, y, p.x, p.y);
         if (isEnd && d <= snapDist && (!bestEnd || d < bestEnd.d)) {
           const t = n >= 2 ? RoadNetwork.pointTangent(road, i) : { tx: 1, ty: 0 };
           bestEnd = {
@@ -482,7 +486,7 @@ export class RoadNetwork {
         const a = samples[i], b = samples[i + 1];
         const abx = b.x - a.x, aby = b.y - a.y;
         const len2 = abx * abx + aby * aby;
-        const t = len2 > 0 ? Phaser.Math.Clamp(((x - a.x) * abx + (y - a.y) * aby) / len2, 0, 1) : 0;
+        const t = len2 > 0 ? clamp(((x - a.x) * abx + (y - a.y) * aby) / len2, 0, 1) : 0;
         const px = a.x + abx * t;
         const py = a.y + aby * t;
         const d = Math.hypot(x - px, y - py);
@@ -569,7 +573,7 @@ export class RoadNetwork {
         layer: road.layer ?? 0,
       });
       if (snap && snap.kind !== 'align') {
-        const dist = Phaser.Math.Distance.Between(p.x, p.y, snap.x, snap.y);
+        const dist = distBetween(p.x, p.y, snap.x, snap.y);
         const widthDiff = snap.width !== undefined ? Math.abs(p.w - snap.width) : 0;
         if (dist > 0.5 || widthDiff > 1 || snap.kind === 'endpoint') {
           hasWeldTarget = true;
@@ -604,7 +608,7 @@ export class RoadNetwork {
 
       const adj = road.points[idx === 0 ? 1 : road.points.length - 2];
       // Prevent collapsing a point onto its own neighbour
-      if (adj && Phaser.Math.Distance.Between(snap.x, snap.y, adj.x, adj.y) < MIN_POINT_DIST) {
+      if (adj && distBetween(snap.x, snap.y, adj.x, adj.y) < MIN_POINT_DIST) {
         continue;
       }
 
@@ -613,7 +617,7 @@ export class RoadNetwork {
       snappedCount++;
 
       if (snap.width !== undefined && Math.abs(p.w - snap.width) >= 1) {
-        p.w = Phaser.Math.Clamp(Math.round(snap.width), MIN_ROAD_WIDTH, MAX_ROAD_WIDTH);
+        p.w = clamp(Math.round(snap.width), MIN_ROAD_WIDTH, MAX_ROAD_WIDTH);
         widthMatched = true;
       }
 
@@ -631,7 +635,7 @@ export class RoadNetwork {
             if (aLen > 1 && bLen > 1) {
               ax /= aLen; ay /= aLen;
               bx /= bLen; by /= bLen;
-              if (ax * bx + ay * by > Math.cos(Phaser.Math.DegToRad(35))) {
+              if (ax * bx + ay * by > Math.cos(degToRad(35))) {
                 const avgX = ax + bx;
                 const avgY = ay + by;
                 const avgAngle = Math.atan2(avgY, avgX);
@@ -642,9 +646,9 @@ export class RoadNetwork {
                 };
                 const twistA = wrapAngle(avgAngle - Math.atan2(ay, ax));
                 const twistB = wrapAngle(avgAngle - Math.atan2(by, bx));
-                p.twist = Phaser.Math.Clamp(twistA, -MAX_TWIST, MAX_TWIST);
+                p.twist = clamp(twistA, -MAX_TWIST, MAX_TWIST);
                 if (Math.abs(p.twist) < 0.001) p.twist = undefined;
-                other.points[tIdx].twist = Phaser.Math.Clamp(twistB, -MAX_TWIST, MAX_TWIST);
+                other.points[tIdx].twist = clamp(twistB, -MAX_TWIST, MAX_TWIST);
                 if (Math.abs(other.points[tIdx].twist ?? 0) < 0.001) other.points[tIdx].twist = undefined;
               }
             }
@@ -685,7 +689,7 @@ export class RoadNetwork {
         for (const oe of oEnds) {
           // One-way roads can only merge head-to-tail in matching flow direction
           if (road.oneWay && me.end === oe.end) continue;
-          const d = Phaser.Math.Distance.Between(me.pt.x, me.pt.y, oe.pt.x, oe.pt.y);
+          const d = distBetween(me.pt.x, me.pt.y, oe.pt.x, oe.pt.y);
           if (d > maxDist) continue;
           // Do not swallow a 3-way junction where a third road also terminates at the same joint
           const jx = (me.pt.x + oe.pt.x) * 0.5;
@@ -696,8 +700,8 @@ export class RoadNetwork {
             const s0 = third.points[0];
             const s1 = third.points[third.points.length - 1];
             return (
-              Phaser.Math.Distance.Between(jx, jy, s0.x, s0.y) <= 36 ||
-              Phaser.Math.Distance.Between(jx, jy, s1.x, s1.y) <= 36
+              distBetween(jx, jy, s0.x, s0.y) <= 36 ||
+              distBetween(jx, jy, s1.x, s1.y) <= 36
             );
           });
           if (thirdRoadHere) continue;
@@ -748,8 +752,8 @@ export class RoadNetwork {
 
     const prev = combined[combined.length - 1];
     const next = tailTrimmed[0];
-    const farFromPrev = !prev || Phaser.Math.Distance.Between(prev.x, prev.y, seam.x, seam.y) >= MIN_POINT_DIST * 0.75;
-    const farFromNext = !next || Phaser.Math.Distance.Between(next.x, next.y, seam.x, seam.y) >= MIN_POINT_DIST * 0.75;
+    const farFromPrev = !prev || distBetween(prev.x, prev.y, seam.x, seam.y) >= MIN_POINT_DIST * 0.75;
+    const farFromNext = !next || distBetween(next.x, next.y, seam.x, seam.y) >= MIN_POINT_DIST * 0.75;
     if (farFromPrev && farFromNext) {
       combined.push(seam);
     }
@@ -777,7 +781,7 @@ export class RoadNetwork {
   // SPATIAL INDEX & QUERIES
   // ======================================================================
 
-  public rebuildIndex() {
+  public rebuildIndex(deferIntersections = false) {
     this.segments = [];
     for (const road of this.roads) {
       const pts = road.points;
@@ -815,11 +819,13 @@ export class RoadNetwork {
     this.rebuildBridgeCaches();
     this.version++;
 
-    // Recompute intersection nodes whenever the network topology changes
-    IntersectionSystem.getInstance().rebuild(this);
-    // Build ramp walls & deck guardrails after intersections so ramp portals
-    // clear any perpendicular ground road carriageway they connect to
-    this.rebuildBridgeBarriers();
+    if (!deferIntersections) {
+      // Recompute intersection nodes whenever the network topology changes
+      IntersectionSystem.getInstance().rebuild(this);
+      // Build ramp walls & deck guardrails after intersections so ramp portals
+      // clear any perpendicular ground road carriageway they connect to
+      this.rebuildBridgeBarriers();
+    }
   }
 
   /** Cached Hermite spline samples for a road (invalidated automatically on rebuildIndex). */
@@ -915,10 +921,10 @@ export class RoadNetwork {
         for (const n of nodes) {
           if (n.layer !== 0) continue;
           const maxW = n.arms.reduce((m, a) => Math.max(m, a.width), 0);
-          if (Phaser.Math.Distance.Between(p0.x, p0.y, n.x, n.y) < maxW / 2 + 45) {
+          if (distBetween(p0.x, p0.y, n.x, n.y) < maxW / 2 + 45) {
             startClear = Math.max(startClear, maxW / 2 + 10);
           }
-          if (Phaser.Math.Distance.Between(pLast.x, pLast.y, n.x, n.y) < maxW / 2 + 45) {
+          if (distBetween(pLast.x, pLast.y, n.x, n.y) < maxW / 2 + 45) {
             endClear = Math.max(endClear, maxW / 2 + 10);
           }
         }
@@ -980,7 +986,7 @@ export class RoadNetwork {
           if (seg.road.id === roadId || (seg.road.layer ?? 0) > 0) continue;
           const abx = seg.bx - seg.ax, aby = seg.by - seg.ay;
           const len2 = abx * abx + aby * aby;
-          const t = len2 > 0 ? Phaser.Math.Clamp(((px - seg.ax) * abx + (py - seg.ay) * aby) / len2, 0, 1) : 0;
+          const t = len2 > 0 ? clamp(((px - seg.ax) * abx + (py - seg.ay) * aby) / len2, 0, 1) : 0;
           const qx = seg.ax + abx * t, qy = seg.ay + aby * t;
           const halfW = (seg.wa + (seg.wb - seg.wa) * t) * 0.5;
           if (Math.hypot(px - qx, py - qy) < halfW + 6) return true;
@@ -1193,18 +1199,18 @@ export class RoadNetwork {
       const list = this.grid.get(key);
       if (!list) continue;
       for (const seg of list) {
-        const d = Phaser.Math.Distance.Between(x, y, seg.ax, seg.ay);
-        const db = Phaser.Math.Distance.Between(x, y, seg.bx, seg.by);
-        const segLen = Math.max(1, Phaser.Math.Distance.Between(seg.ax, seg.ay, seg.bx, seg.by));
+        const d = distBetween(x, y, seg.ax, seg.ay);
+        const db = distBetween(x, y, seg.bx, seg.by);
+        const segLen = Math.max(1, distBetween(seg.ax, seg.ay, seg.bx, seg.by));
         if (d > segLen + maxRadius && db > segLen + maxRadius) continue;
 
         // Point-to-segment distance + projected point + tangent
         const abx = seg.bx - seg.ax;
         const aby = seg.by - seg.ay;
-        const t = Phaser.Math.Clamp(((x - seg.ax) * abx + (y - seg.ay) * aby) / (segLen * segLen), 0, 1);
+        const t = clamp(((x - seg.ax) * abx + (y - seg.ay) * aby) / (segLen * segLen), 0, 1);
         const px = seg.ax + abx * t;
         const py = seg.ay + aby * t;
-        const dist = Phaser.Math.Distance.Between(x, y, px, py);
+        const dist = distBetween(x, y, px, py);
         if (dist > maxRadius) continue;
         const width = seg.wa + (seg.wb - seg.wa) * t;
         const tx = abx / segLen;
@@ -1250,7 +1256,7 @@ export class RoadNetwork {
         const a = samples[i], b = samples[i + 1];
         const abx = b.x - a.x, aby = b.y - a.y;
         const len2 = abx * abx + aby * aby;
-        const t = len2 > 0 ? Phaser.Math.Clamp(((x - a.x) * abx + (y - a.y) * aby) / len2, 0, 1) : 0;
+        const t = len2 > 0 ? clamp(((x - a.x) * abx + (y - a.y) * aby) / len2, 0, 1) : 0;
         const px = a.x + abx * t;
         const py = a.y + aby * t;
         const dist = Math.hypot(x - px, y - py);
@@ -1276,7 +1282,7 @@ export class RoadNetwork {
         if (Math.max(a.z, b.z) <= 0.35) continue;
         const abx = b.x - a.x, aby = b.y - a.y;
         const len2 = abx * abx + aby * aby;
-        const t = len2 > 0 ? Phaser.Math.Clamp(((x - a.x) * abx + (y - a.y) * aby) / len2, 0, 1) : 0;
+        const t = len2 > 0 ? clamp(((x - a.x) * abx + (y - a.y) * aby) / len2, 0, 1) : 0;
         const z = a.z + (b.z - a.z) * t;
         if (z <= 0.35) continue;
         const px = a.x + abx * t, py = a.y + aby * t;
@@ -1358,7 +1364,7 @@ export class RoadNetwork {
     if (n === 0) return [];
     if (n === 1) return [{ x: pts[0].x, y: pts[0].y, w: pts[0].w, tx: 1, ty: 0 }];
 
-    const wrap = (i: number) => (road.closed ? (i + n) % n : Phaser.Math.Clamp(i, 0, n - 1));
+    const wrap = (i: number) => (road.closed ? (i + n) % n : clamp(i, 0, n - 1));
     const P = (k: number) => pts[wrap(k)];
 
     // Finite-difference unit tangents at each control point, rotated by its twist
@@ -1471,7 +1477,7 @@ export class RoadNetwork {
         if (d < rampLen) z = d / rampLen;
         else if (d > totalLen - rampLen) z = (totalLen - d) / rampLen;
       }
-      return { ...p, s: d, z: Phaser.Math.Clamp(z, 0, 1) };
+      return { ...p, s: d, z: clamp(z, 0, 1) };
     });
 
     return { samples, totalLen, rampLen, tooShort };
@@ -1486,9 +1492,9 @@ export class RoadNetwork {
       for (const seg of list) {
         const abx = seg.bx - seg.ax, aby = seg.by - seg.ay;
         const len2 = abx * abx + aby * aby;
-        const t = len2 > 0 ? Phaser.Math.Clamp(((x - seg.ax) * abx + (y - seg.ay) * aby) / len2, 0, 1) : 0;
+        const t = len2 > 0 ? clamp(((x - seg.ax) * abx + (y - seg.ay) * aby) / len2, 0, 1) : 0;
         const px = seg.ax + abx * t, py = seg.ay + aby * t;
-        const dist = Phaser.Math.Distance.Between(x, y, px, py);
+        const dist = distBetween(x, y, px, py);
         const halfW = (seg.wa + (seg.wb - seg.wa) * t) * 0.5;
         if (dist > halfW + slackPx) continue;
         const prev = hits.get(seg.road);
@@ -1535,7 +1541,7 @@ export class RoadNetwork {
       if (filterRoadId && road.id !== filterRoadId) continue;
       for (let i = 0; i < road.points.length; i++) {
         const p = road.points[i];
-        const d = Phaser.Math.Distance.Between(x, y, p.x, p.y);
+        const d = distBetween(x, y, p.x, p.y);
         if (d <= slackPx && (!best || d < best.d)) {
           best = { road, index: i, d };
         }
@@ -1615,7 +1621,7 @@ export class RoadNetwork {
   public hitTestWidthHandle(road: RoadData, x: number, y: number, slackPx = 14): number | null {
     for (let i = 0; i < road.points.length; i++) {
       const h = RoadNetwork.widthHandlePos(road, i);
-      if (Phaser.Math.Distance.Between(x, y, h.x, h.y) <= slackPx) return i;
+      if (distBetween(x, y, h.x, h.y) <= slackPx) return i;
     }
     return null;
   }
@@ -1634,7 +1640,7 @@ export class RoadNetwork {
       ...(r.guardrail && r.guardrail !== 'none' ? { guardrail: r.guardrail } : {}),
       points: r.points.map((p) => ({
         x: Math.round(p.x), y: Math.round(p.y), w: Math.round(p.w),
-        ...(p.twist ? { twist: Math.round(Phaser.Math.RadToDeg(p.twist) * 10) / 10 } : {}),
+        ...(p.twist ? { twist: Math.round(radToDeg(p.twist) * 10) / 10 } : {}),
         ...(p.guardrail ? { guardrail: p.guardrail } : {}),
       })),
     }));
@@ -1654,8 +1660,8 @@ export class RoadNetwork {
           .map((p: any) => ({
             x: p.x,
             y: p.y,
-            w: Phaser.Math.Clamp(Number(p.w) || 128, MIN_ROAD_WIDTH, MAX_ROAD_WIDTH),
-            ...(Number.isFinite(p.twist) ? { twist: Phaser.Math.Clamp(Phaser.Math.DegToRad(Number(p.twist)), -MAX_TWIST, MAX_TWIST) } : {}),
+            w: clamp(Number(p.w) || 128, MIN_ROAD_WIDTH, MAX_ROAD_WIDTH),
+            ...(Number.isFinite(p.twist) ? { twist: clamp(degToRad(Number(p.twist)), -MAX_TWIST, MAX_TWIST) } : {}),
             ...(typeof p.guardrail === 'string' && validPtRail.has(p.guardrail as any)
               ? { guardrail: p.guardrail as Exclude<RoadPointGuardrail, 'auto'> }
               : {}),

@@ -40,6 +40,169 @@ export interface AddObjectSpec {
   label: string;
 }
 
+export type EditorTool = 'pan' | 'road' | 'terrain' | 'object' | 'spawn' | 'add' | 'compound';
+
+export interface TerrainUIState {
+  material: TerrainPaintMaterial;
+  mode: 'paint' | 'erase';
+  radius: number;
+  softness: TerrainPaintSoftness;
+  clipWater: boolean;
+  strokeCount: number;
+}
+
+export interface RoadUIState {
+  hasSelection: boolean;
+  hasPoint: boolean;
+  surface: RoadSurface;
+  width: number;
+  drawing: boolean;
+  twistDeg: number;
+  oneWay: boolean;
+  layer: number;
+  guardrail: RoadGuardrailMode;
+  pointGuardrail: RoadPointGuardrail;
+  tooShort: boolean;
+  snapToRoads: boolean;
+  isolateSelectedRoad: boolean;
+  overlapCount: number;
+  overlapIndex: number;
+  canWeld: boolean;
+  canMerge: boolean;
+}
+
+export interface ObjectUIState {
+  hasSelection: boolean;
+  id: string;
+  type: string;
+  variant: string;
+  angleDeg: number;
+  resizable: boolean;
+  trailer: string;
+  canPaste: boolean;
+  rotationSnap: boolean;
+  canUndo: boolean;
+  isCompound: boolean;
+  compoundPartCount: number;
+  hubSign: {
+    hubId: string;
+    name: string;
+    badge: string;
+    color: string;
+    regionRadius: number;
+    isCustom: boolean;
+    docks: number;
+    parkingPads: number;
+    garages: number;
+  } | null;
+  gasCanopy: {
+    stationStyle: GasStationStyle;
+    accessSide: GasAccessSide;
+  } | null;
+  buildingFeatures: {
+    supportsGarage: boolean;
+    supportsParking: boolean;
+    garageAccess: boolean;
+    exteriorParking: boolean;
+  } | null;
+}
+
+export interface EditorUIStateSnapshot {
+  editorTool: EditorTool;
+  road: RoadUIState;
+  object: ObjectUIState;
+  terrain: TerrainUIState;
+}
+
+function roadUIEqual(a: RoadUIState, b: RoadUIState): boolean {
+  return (
+    a.hasSelection === b.hasSelection &&
+    a.hasPoint === b.hasPoint &&
+    a.surface === b.surface &&
+    a.width === b.width &&
+    a.drawing === b.drawing &&
+    a.twistDeg === b.twistDeg &&
+    a.oneWay === b.oneWay &&
+    a.layer === b.layer &&
+    a.guardrail === b.guardrail &&
+    a.pointGuardrail === b.pointGuardrail &&
+    a.tooShort === b.tooShort &&
+    a.snapToRoads === b.snapToRoads &&
+    a.isolateSelectedRoad === b.isolateSelectedRoad &&
+    a.overlapCount === b.overlapCount &&
+    a.overlapIndex === b.overlapIndex &&
+    a.canWeld === b.canWeld &&
+    a.canMerge === b.canMerge
+  );
+}
+
+function terrainUIEqual(a: TerrainUIState, b: TerrainUIState): boolean {
+  return (
+    a.material === b.material &&
+    a.mode === b.mode &&
+    a.radius === b.radius &&
+    a.softness === b.softness &&
+    a.clipWater === b.clipWater &&
+    a.strokeCount === b.strokeCount
+  );
+}
+
+function objectUIEqual(a: ObjectUIState, b: ObjectUIState): boolean {
+  if (
+    a.hasSelection !== b.hasSelection ||
+    a.id !== b.id ||
+    a.type !== b.type ||
+    a.variant !== b.variant ||
+    a.angleDeg !== b.angleDeg ||
+    a.resizable !== b.resizable ||
+    a.trailer !== b.trailer ||
+    a.canPaste !== b.canPaste ||
+    a.rotationSnap !== b.rotationSnap ||
+    a.canUndo !== b.canUndo ||
+    a.isCompound !== b.isCompound ||
+    a.compoundPartCount !== b.compoundPartCount
+  ) {
+    return false;
+  }
+  if ((a.hubSign === null) !== (b.hubSign === null)) return false;
+  if (
+    a.hubSign &&
+    b.hubSign &&
+    (a.hubSign.hubId !== b.hubSign.hubId ||
+      a.hubSign.name !== b.hubSign.name ||
+      a.hubSign.badge !== b.hubSign.badge ||
+      a.hubSign.color !== b.hubSign.color ||
+      a.hubSign.regionRadius !== b.hubSign.regionRadius ||
+      a.hubSign.isCustom !== b.hubSign.isCustom ||
+      a.hubSign.docks !== b.hubSign.docks ||
+      a.hubSign.parkingPads !== b.hubSign.parkingPads ||
+      a.hubSign.garages !== b.hubSign.garages)
+  ) {
+    return false;
+  }
+  if ((a.gasCanopy === null) !== (b.gasCanopy === null)) return false;
+  if (
+    a.gasCanopy &&
+    b.gasCanopy &&
+    (a.gasCanopy.stationStyle !== b.gasCanopy.stationStyle ||
+      a.gasCanopy.accessSide !== b.gasCanopy.accessSide)
+  ) {
+    return false;
+  }
+  if ((a.buildingFeatures === null) !== (b.buildingFeatures === null)) return false;
+  if (
+    a.buildingFeatures &&
+    b.buildingFeatures &&
+    (a.buildingFeatures.supportsGarage !== b.buildingFeatures.supportsGarage ||
+      a.buildingFeatures.supportsParking !== b.buildingFeatures.supportsParking ||
+      a.buildingFeatures.garageAccess !== b.buildingFeatures.garageAccess ||
+      a.buildingFeatures.exteriorParking !== b.buildingFeatures.exteriorParking)
+  ) {
+    return false;
+  }
+  return true;
+}
+
 /**
  * The object-based editor: no tile painting — you edit the world directly.
  * Tools: Estrada (draw/edit spline roads), Objectos (select/move/rotate/delete
@@ -50,7 +213,10 @@ export class EditorScene extends Phaser.Scene {
   public mainScene!: MainScene;
   public garageSystem!: GarageSystem;
 
-  public editorTool: 'pan' | 'road' | 'terrain' | 'object' | 'spawn' | 'add' | 'compound' = 'pan';
+  public editorTool: EditorTool = 'pan';
+
+  private uiListeners = new Set<(snap: EditorUIStateSnapshot) => void>();
+  private lastEmittedUI: EditorUIStateSnapshot | null = null;
 
   private isDraggingPan: boolean = false;
   private lastDragX: number = 0;
@@ -85,7 +251,7 @@ export class EditorScene extends Phaser.Scene {
     index: number | null;
     grabX: number;
     grabY: number;
-    pendingUndo?: { json: string; version: number } | null;
+    pendingUndo?: { json: string; version: number; bytes: number } | null;
   } | null = null;
   private pendingRoad: { surface: RoadSurface; points: RoadPoint[]; oneWay: boolean; layer: number; guardrail: RoadGuardrailMode } | null = null;
   private pointerWorld: { x: number; y: number } = { x: 0, y: 0 };
@@ -100,6 +266,7 @@ export class EditorScene extends Phaser.Scene {
   public newRoadLayer: number = 0;
   public newRoadGuardrail: RoadGuardrailMode = 'none';
   private roadDirtySinceRelease: boolean = false;
+  private intersectionsDirtySinceRelease: boolean = false;
   public snapToRoads: boolean = true;
   public isolateSelectedRoad: boolean = false;
   private lastSnapResult: RoadSnapResult | null = null;
@@ -148,26 +315,46 @@ export class EditorScene extends Phaser.Scene {
   // (sessão de editor: desfaz uma operação de cada vez)
   // ======================================================================
 
-  private undoStack: Array<{ json: string; version: number }> = [];
+  private undoStack: Array<{ json: string; version: number; bytes: number }> = [];
+  private undoBytes: number = 0;
   private readonly undoLimit = 60;
+  private readonly undoMaxBytes = 12 * 1024 * 1024; // 12 MB cap on retained undo JSON snapshots
 
   /** Captura um snapshot do mundo atual sem empilhar na stack de undo. */
-  private captureUndoSnapshot(): { json: string; version: number } {
+  private captureUndoSnapshot(): { json: string; version: number; bytes: number } {
+    const json = this.mainScene.world.exportJSON();
     return {
-      json: this.mainScene.world.exportJSON(),
+      json,
       version: this.mainScene.world.version,
+      bytes: json.length * 2, // UTF-16 approximate memory footprint in JS strings
     };
   }
 
-  /** Empilha um snapshot previamente capturado na stack de undo. */
-  private commitUndoSnapshot(snap: { json: string; version: number }) {
-    if (this.undoStack.length >= this.undoLimit) this.undoStack.shift();
+  /** Empilha um snapshot previamente capturado na stack de undo (com deduplicação e teto de memória). */
+  private commitUndoSnapshot(snap: { json: string; version: number; bytes: number }) {
+    const prev = this.undoStack[this.undoStack.length - 1];
+    if (prev && prev.json === snap.json) return;
+
     this.undoStack.push(snap);
+    this.undoBytes += snap.bytes;
+
+    while (
+      this.undoStack.length > 1 &&
+      (this.undoStack.length > this.undoLimit || this.undoBytes > this.undoMaxBytes)
+    ) {
+      const evicted = this.undoStack.shift();
+      if (evicted) this.undoBytes -= evicted.bytes;
+    }
   }
 
   /** Guarda um snapshot do mundo atual (chamar imediatamente antes de mutar). */
   private pushUndo() {
     this.commitUndoSnapshot(this.captureUndoSnapshot());
+  }
+
+  private clearUndoStack() {
+    this.undoStack = [];
+    this.undoBytes = 0;
   }
 
   public canUndo(): boolean {
@@ -178,6 +365,7 @@ export class EditorScene extends Phaser.Scene {
   public undo() {
     if (this.undoStack.length === 0) return;
     const snap = this.undoStack.pop()!;
+    this.undoBytes = Math.max(0, this.undoBytes - snap.bytes);
     this.mainScene.world.importJSON(snap.json);
     this.mainScene.world.version = snap.version + 1;
     this.selectedObject = null;
@@ -200,7 +388,7 @@ export class EditorScene extends Phaser.Scene {
   /** Cancela toda a sessão: restaura o mundo ao estado de entrada no editor. */
   public cancelSession() {
     this.mainScene.world.endEditorSession(false);
-    this.undoStack = [];
+    this.clearUndoStack();
     this.selectedObject = null;
     this.objectDrag = null;
     this.compoundDrag = null;
@@ -233,6 +421,12 @@ export class EditorScene extends Phaser.Scene {
 
     // Marca o ponto de partida da sessão de editor (para o botão Cancelar).
     this.mainScene.world.beginEditorSession();
+    this.clearUndoStack();
+    this.events.once('shutdown', () => {
+      this.clearUndoStack();
+      this.uiListeners.clear();
+      this.lastEmittedUI = null;
+    });
 
     // Enable multi-touch pointers for touch pan & pinch-to-zoom (guard against re-adding across editor toggles)
     if (this.input.manager.pointersTotal < 4) {
@@ -461,6 +655,10 @@ export class EditorScene extends Phaser.Scene {
       this.lastSnapResult = null;
       this.isDraggingPan = false;
       this.prevPinchDist = 0;
+      if (this.intersectionsDirtySinceRelease) {
+        this.intersectionsDirtySinceRelease = false;
+        this.roadNetwork.rebuildIntersections();
+      }
       if (this.roadDirtySinceRelease) {
         this.roadDirtySinceRelease = false;
         this.garageSystem.syncFromWorld(this.mainScene.world.objects);
@@ -769,7 +967,7 @@ export class EditorScene extends Phaser.Scene {
     }
   }
 
-  public getTerrainUIState() {
+  public getTerrainUIState(): TerrainUIState {
     return {
       material: this.terrainBrushMaterial,
       mode: this.terrainBrushMode,
@@ -778,6 +976,51 @@ export class EditorScene extends Phaser.Scene {
       clipWater: this.terrainBrushClipWater,
       strokeCount: this.mainScene?.world?.terrain?.getPaintStrokeCount() ?? 0,
     };
+  }
+
+  /** Subscribes React UI to EditorScene state snapshots with shallow change detection. */
+  public subscribeUI(listener: (snap: EditorUIStateSnapshot) => void): () => void {
+    this.uiListeners.add(listener);
+    const snap: EditorUIStateSnapshot = {
+      editorTool: this.editorTool,
+      road: this.getRoadUIState(),
+      object: this.getObjectUIState(),
+      terrain: this.getTerrainUIState(),
+    };
+    this.lastEmittedUI = snap;
+    listener(snap);
+    return () => {
+      this.uiListeners.delete(listener);
+    };
+  }
+
+  /** Pushes updated UI state to subscribers only when at least one field actually changed. */
+  public emitUIState(force = false): void {
+    if (this.uiListeners.size === 0 || !this.mainScene) return;
+    const road = this.getRoadUIState();
+    const object = this.getObjectUIState();
+    const terrain = this.getTerrainUIState();
+    const prev = this.lastEmittedUI;
+    if (
+      !force &&
+      prev &&
+      prev.editorTool === this.editorTool &&
+      roadUIEqual(prev.road, road) &&
+      objectUIEqual(prev.object, object) &&
+      terrainUIEqual(prev.terrain, terrain)
+    ) {
+      return;
+    }
+    const next: EditorUIStateSnapshot = {
+      editorTool: this.editorTool,
+      road: prev && roadUIEqual(prev.road, road) ? prev.road : road,
+      object: prev && objectUIEqual(prev.object, object) ? prev.object : object,
+      terrain: prev && terrainUIEqual(prev.terrain, terrain) ? prev.terrain : terrain,
+    };
+    this.lastEmittedUI = next;
+    for (const listener of this.uiListeners) {
+      listener(next);
+    }
   }
 
   // ======================================================================
@@ -1117,8 +1360,9 @@ export class EditorScene extends Phaser.Scene {
         const clampedW = Phaser.Math.Clamp(Math.round(proj), 44, 420);
         if (clampedW !== Math.round(p.w)) {
           flushUndo();
-          this.roadNetwork.setPointWidth(d.road.id, d.index, clampedW);
+          this.roadNetwork.setPointWidth(d.road.id, d.index, clampedW, true);
           this.roadDirtySinceRelease = true;
+          this.intersectionsDirtySinceRelease = true;
         }
       }
     } else if (d.kind === 'point' && d.index !== null) {
@@ -1142,10 +1386,11 @@ export class EditorScene extends Phaser.Scene {
       this.lastSnapResult = res.snap;
       const prevX = p.x;
       const prevY = p.y;
-      this.roadNetwork.movePoint(d.road.id, idx, res.x, res.y);
+      this.roadNetwork.movePoint(d.road.id, idx, res.x, res.y, true);
       if (p.x !== prevX || p.y !== prevY) {
         flushUndo();
         this.roadDirtySinceRelease = true;
+        this.intersectionsDirtySinceRelease = true;
       }
     } else if (d.kind === 'twist' && d.index !== null) {
       const p = d.road.points[d.index];
@@ -1157,8 +1402,9 @@ export class EditorScene extends Phaser.Scene {
         const clamped = Phaser.Math.Clamp(delta, -Math.PI / 3, Math.PI / 3);
         if (Math.abs(clamped - (p.twist ?? 0)) > 0.001) {
           flushUndo();
-          this.roadNetwork.setPointTwist(d.road.id, d.index, clamped);
+          this.roadNetwork.setPointTwist(d.road.id, d.index, clamped, true);
           this.roadDirtySinceRelease = true;
+          this.intersectionsDirtySinceRelease = true;
         }
       }
     } else {
@@ -1166,10 +1412,11 @@ export class EditorScene extends Phaser.Scene {
       const dy = Math.round(wp.y - d.grabY);
       if (dx !== 0 || dy !== 0) {
         flushUndo();
-        this.roadNetwork.translateRoad(d.road.id, dx, dy);
+        this.roadNetwork.translateRoad(d.road.id, dx, dy, true);
         d.grabX += dx;
         d.grabY += dy;
         this.roadDirtySinceRelease = true;
+        this.intersectionsDirtySinceRelease = true;
       }
     }
   }
@@ -1359,25 +1606,7 @@ export class EditorScene extends Phaser.Scene {
     return true;
   }
 
-  public getRoadUIState(): {
-    hasSelection: boolean;
-    hasPoint: boolean;
-    surface: RoadSurface;
-    width: number;
-    drawing: boolean;
-    twistDeg: number;
-    oneWay: boolean;
-    layer: number;
-    guardrail: RoadGuardrailMode;
-    pointGuardrail: RoadPointGuardrail;
-    tooShort: boolean;
-    snapToRoads: boolean;
-    isolateSelectedRoad: boolean;
-    overlapCount: number;
-    overlapIndex: number;
-    canWeld: boolean;
-    canMerge: boolean;
-  } {
+  public getRoadUIState(): RoadUIState {
     const selPoint = this.selectedRoad && this.selectedPointIndex !== null ? this.selectedRoad.points[this.selectedPointIndex] : null;
     const layer = this.selectedRoad
       ? (this.selectedRoad.layer ?? 0)
@@ -2050,41 +2279,7 @@ export class EditorScene extends Phaser.Scene {
     this.roadDirtySinceRelease = true;
   }
 
-  public getObjectUIState(): {
-    hasSelection: boolean;
-    id: string;
-    type: string;
-    variant: string;
-    angleDeg: number;
-    resizable: boolean;
-    trailer: string;
-    canPaste: boolean;
-    rotationSnap: boolean;
-    canUndo: boolean;
-    isCompound: boolean;
-    compoundPartCount: number;
-    hubSign: {
-      hubId: string;
-      name: string;
-      badge: string;
-      color: string;
-      regionRadius: number;
-      isCustom: boolean;
-      docks: number;
-      parkingPads: number;
-      garages: number;
-    } | null;
-    gasCanopy: {
-      stationStyle: GasStationStyle;
-      accessSide: GasAccessSide;
-    } | null;
-    buildingFeatures: {
-      supportsGarage: boolean;
-      supportsParking: boolean;
-      garageAccess: boolean;
-      exteriorParking: boolean;
-    } | null;
-  } {
+  public getObjectUIState(): ObjectUIState {
     const o = this.selectedObject;
     let hubSign: {
       hubId: string;
@@ -2238,6 +2433,7 @@ export class EditorScene extends Phaser.Scene {
     TrailerManager.getInstance(this.mainScene).spawnObjectTrailer(o);
     this.mainScene.world.objects.version++;
     this.mainScene.world.version++;
+    this.emitUIState();
   }
 
   /** Updates editable metadata of a selected `hub_sign` object and syncs GarageSystem immediately. */
@@ -2258,6 +2454,7 @@ export class EditorScene extends Phaser.Scene {
     this.garageSystem.syncFromWorld(this.mainScene.world.objects);
     this.mainScene.world.objects.version++;
     this.mainScene.world.version++;
+    this.emitUIState();
   }
 
   /** Switches road-access side or station scale on a selected `gas_canopy` forecourt apron. */
@@ -2303,6 +2500,7 @@ export class EditorScene extends Phaser.Scene {
     }
     this.mainScene.world.objects.resizeObject(id, nextW, nextH);
     this.mainScene.world.version++;
+    this.emitUIState();
   }
 
   /** Toggles residential garage driveway/ramp or exterior parking apron on a selected city building. */
@@ -2325,6 +2523,7 @@ export class EditorScene extends Phaser.Scene {
     o.params = Object.keys(next).length > 0 ? next : undefined;
     this.mainScene.world.objects.rebuildIndex();
     this.mainScene.world.version++;
+    this.emitUIState();
   }
 
   // ======================================================================
@@ -2848,6 +3047,7 @@ export class EditorScene extends Phaser.Scene {
 
     // Editor overlay (spawn marker, selections, drawing preview)
     this.drawOverlay();
+    this.emitUIState();
   }
 
   public zoomIn() {

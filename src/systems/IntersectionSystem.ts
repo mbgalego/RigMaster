@@ -1,5 +1,7 @@
-import Phaser from 'phaser';
-import { RoadNetwork, RoadData, RoadPoint, RoadSurface } from './RoadNetwork';
+import { RoadNetwork, RoadData, RoadSurface } from './RoadNetwork';
+
+const clamp = (v: number, min: number, max: number): number => (v < min ? min : v > max ? max : v);
+const degToRad = (deg: number): number => (deg * Math.PI) / 180;
 
 /** Vertical layer of an intersection node — must match the roads that meet there. */
 export type IntersectionLayer = number;
@@ -69,19 +71,13 @@ export interface IntersectionNode {
 /** Threshold below which two intersection points are merged into one node (px). */
 const NODE_MERGE_DIST = 40;
 
-/** Minimum road width to be considered a "main road" eligible for traffic lights. */
-const MAIN_ROAD_MIN_WIDTH = 100;
-
-/** Surfaces eligible for traffic lights (dirt tracks never get them). */
-const SIGNALIZABLE_SURFACES = new Set<RoadSurface>(['asphalt', 'cobble']);
-
 /** Default phase timings (ms). */
 const DEFAULT_GREEN_MS = 6500;
 const DEFAULT_AMBER_MS = 1500;
 const DEFAULT_ALL_RED_MS = 1000;
 
 /** Max angle difference (radians) for two arms to share the same axis. */
-const AXIS_MERGE_RAD = Phaser.Math.DegToRad(15);
+const AXIS_MERGE_RAD = degToRad(15);
 
 /** Distance from node centre to the stop line / signal head along the approach (px).
  *  Matches the manual grid placement (132 px from centre to near-side signal). */
@@ -235,7 +231,7 @@ function pointToSegment(
   const len2 = abx * abx + aby * aby;
   let t = 0;
   if (len2 > 0) {
-    t = Phaser.Math.Clamp(((px - ax) * abx + (py - ay) * aby) / len2, 0, 1);
+    t = clamp(((px - ax) * abx + (py - ay) * aby) / len2, 0, 1);
   }
   const cx = ax + abx * t;
   const cy = ay + aby * t;
@@ -321,7 +317,7 @@ function evalPolylineAtS(
   if (closed) {
     s = ((s % totalLen) + totalLen) % totalLen;
   } else {
-    s = Phaser.Math.Clamp(s, 0, totalLen);
+    s = clamp(s, 0, totalLen);
   }
 
   // Binary search for segment containing s
@@ -335,7 +331,7 @@ function evalPolylineAtS(
   const a = samples[lo];
   const b = samples[lo + 1];
   const segLen = cumS[lo + 1] - cumS[lo];
-  const t = segLen > 1e-6 ? Phaser.Math.Clamp((s - cumS[lo]) / segLen, 0, 1) : 0;
+  const t = segLen > 1e-6 ? clamp((s - cumS[lo]) / segLen, 0, 1) : 0;
   const x = a.x + (b.x - a.x) * t;
   const y = a.y + (b.y - a.y) * t;
   const width = a.w + (b.w - a.w) * t;
@@ -996,7 +992,7 @@ export class IntersectionSystem {
     roadNetwork: RoadNetwork,
   ): IntersectionArm[] {
     const arms: IntersectionArm[] = [];
-    const DEDUP_ANGLE_RAD = Phaser.Math.DegToRad(22);
+    const DEDUP_ANGLE_RAD = degToRad(22);
 
     for (const m of members) {
       const road = roadNetwork.getRoad(m.roadId);

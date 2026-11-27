@@ -14,29 +14,40 @@ import { WeatherSystem } from './systems/WeatherSystem';
 import { TRAILER_TYPE_TO_LICENSE } from './systems/TrailerManager';
 import type { TrailerType } from './entities/Trailer';
 import type { RoadSurface, RoadGuardrailMode, RoadPointGuardrail } from './systems/RoadNetwork';
-import type { AddObjectSpec } from './scenes/EditorScene';
+import type {
+  AddObjectSpec,
+  EditorTool,
+  ObjectUIState,
+  RoadUIState,
+  TerrainUIState,
+} from './scenes/EditorScene';
 import { compoundParts } from './world/WorldObjects';
 import {
   TERRAIN_PAINT_CATALOG,
   type TerrainPaintMaterial,
   type TerrainPaintSoftness,
 } from './world/WorldTerrain';
-import { createCleanTruckDamage } from './systems/DamageSystem';
-import { DEFAULT_TRUCK_UPGRADES, TRUCK_CATALOG, type UpgradeSlot } from './systems/TruckCatalog';
-import {
-  CERTIFICATE_CATALOG,
-  createCleanTruckWear,
-  ReputationSystem,
-  type GameMode,
-} from './systems/ReputationSystem';
+import type { UpgradeSlot } from './systems/TruckCatalog';
+import { ReputationSystem, type GameMode } from './systems/ReputationSystem';
 import { MissionSystem } from './systems/MissionSystem';
 import { SpriteRegistry } from './systems/SpriteRegistry';
 import { TouchControls } from './components/TouchControls';
+import { TopDrivingBar, DrivingOverlays } from './components/GameHUD';
 import { MissionsModal } from './components/MissionsModal';
 import { FleetGarageModal } from './components/FleetGarageModal';
 import { WorkshopUpgradesModal } from './components/WorkshopUpgradesModal';
 import { WorldMapModal } from './components/WorldMapModal';
 import { MissionEditorModal } from './components/MissionEditorModal';
+import { LicensesModal } from './components/LicensesModal';
+import { GaragesModal } from './components/GaragesModal';
+import { JsonMapModal } from './components/JsonMapModal';
+import { CREATE_CATALOG } from './data/editorCatalog';
+import {
+  createInitialTelemetry,
+  cloneTelemetrySnapshot,
+  hasTelemetryChanged,
+  hasExamChanged,
+} from './hooks/useGameTelemetry';
 import {
   RotateCcw,
   Volume2,
@@ -45,11 +56,8 @@ import {
   AlertTriangle,
   Award,
   MapPin,
-  Download,
-  Upload,
   Play,
   Layers,
-  Sparkles,
   Compass,
   CheckCircle,
   XCircle,
@@ -60,23 +68,12 @@ import {
   Maximize,
   Minimize,
   Maximize2,
-  X,
   Hand,
   ZoomIn,
   ZoomOut,
   Route,
   Box,
-  Plus,
   Lamp,
-  BrickWall,
-  Warehouse,
-  CarFront,
-  DoorOpen,
-  Building2,
-  Factory,
-  Circle,
-  Equal,
-  Mountain,
   Truck,
   Sun,
   Sunrise,
@@ -84,441 +81,20 @@ import {
   Moon,
   Clock,
   Watch,
-  Container,
-  Signpost,
-  Fuel,
-  Cog,
   Copy,
   CopyPlus,
   ClipboardPaste,
   Undo,
-  OctagonAlert,
-  Gauge,
-  Ban,
-  PersonStanding,
-  Church,
-  Home,
-  Landmark,
   Wrench,
-  Store,
-  Wind,
   ClipboardList,
   Map as MapIcon,
   FlaskConical,
-  TrendingUp,
-  TrendingDown,
   Cloud,
-  CloudRain,
-  CloudLightning,
-  CloudFog,
   Paintbrush,
   Eraser,
   Waves,
   Trash2,
-  Building,
-  Flame,
-  Shield,
-  Cross,
-  GraduationCap,
-  ShoppingCart,
-  Anchor,
-  Coffee,
-  Sprout,
-  Trees,
-  Wheat,
-  RefreshCw,
-  ArrowUp,
-  CornerUpRight,
-  CornerUpLeft,
-  ArrowDownRight,
-  CircleMinus,
-  CircleOff,
-  Diamond,
-  MoveUp,
-  SquareParking,
-  Spline,
-  Construction,
 } from 'lucide-react';
-
-/** Catálogo do Criar, organizado por categorias — cada categoria tem o seu
- *  próprio botão na toolbar lateral, que abre um submenu a rolar para a direita. */
-const CREATE_CATALOG: Array<{
-  id: string;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-  items: Array<{ spec: AddObjectSpec; icon: React.ComponentType<{ className?: string }> }>;
-}> = [
-  {
-    id: 'edif',
-    label: 'Edifícios',
-    icon: Building2,
-    items: [
-      { spec: { type: 'building', w: 900, h: 420, variant: 'warehouse_big', label: 'Armazém' }, icon: Warehouse },
-      { spec: { type: 'building', w: 420, h: 360, variant: 'shed', label: 'Nave' }, icon: Factory },
-      { spec: { type: 'building', w: 320, h: 220, variant: 'garage', label: 'Garagem' }, icon: Wrench },
-      { spec: { type: 'building', w: 300, h: 200, variant: 'warehouse', label: 'Edifício' }, icon: Building2 },
-      { spec: { type: 'building', w: 300, h: 200, variant: 'gabled', label: 'Telhado 2 Águas' }, icon: Home },
-      { spec: { type: 'building', w: 220, h: 170, variant: 'church', label: 'Igreja' }, icon: Church },
-      { spec: { type: 'building', w: 260, h: 160, variant: 'archway', label: 'Arco' }, icon: Landmark },
-      { spec: { type: 'building', w: 240, h: 136, variant: 'convenience_store', label: 'Loja Conveniência' }, icon: Store },
-      { spec: { type: 'building', w: 260, h: 150, variant: 'restaurant', label: 'Restaurante (A1)' }, icon: Store },
-      { spec: { type: 'building', w: 900, h: 420, variant: 'warehouse_docks', params: { docks: 5 }, label: 'Armazém c/ Docas' }, icon: Warehouse },
-      { spec: { type: 'building', w: 600, h: 300, variant: 'warehouse_docks', params: { docks: 3 }, label: 'Armazém 3 Docas' }, icon: Warehouse },
-    ],
-  },
-  {
-    id: 'cidade',
-    label: 'Cidade',
-    icon: Home,
-    items: [
-      { spec: { type: 'building', w: 150, h: 110, variant: 'house_traditional', label: 'Casa Tradicional' }, icon: Home },
-      { spec: { type: 'building', w: 150, h: 110, variant: 'house_traditional', params: { garageAccess: true }, label: 'Casa c/ Garagem' }, icon: Home },
-      { spec: { type: 'building', w: 240, h: 124, variant: 'house_townhouse', label: 'Casas Geminadas' }, icon: Home },
-      { spec: { type: 'building', w: 182, h: 135, variant: 'house_urban_corner', label: 'Casa Citadina' }, icon: Home },
-      { spec: { type: 'building', w: 182, h: 135, variant: 'house_urban_corner', params: { garageAccess: true }, label: 'Casa Citadina c/ Garagem' }, icon: Home },
-      { spec: { type: 'building', w: 200, h: 150, variant: 'house_duplex', label: 'Moradia Urbana' }, icon: Home },
-      { spec: { type: 'building', w: 200, h: 150, variant: 'house_duplex', params: { garageAccess: true }, label: 'Moradia Urbana c/ Garagem' }, icon: Home },
-      { spec: { type: 'building', w: 210, h: 145, variant: 'villa_classic', label: 'Vivenda Tradicional' }, icon: Home },
-      { spec: { type: 'building', w: 210, h: 145, variant: 'villa_classic', params: { garageAccess: true }, label: 'Vivenda Trad. c/ Garagem' }, icon: Home },
-      { spec: { type: 'building', w: 200, h: 162, variant: 'villa_modern', label: 'Vivenda Moderna' }, icon: Home },
-      { spec: { type: 'building', w: 200, h: 162, variant: 'villa_modern', params: { garageAccess: true }, label: 'Vivenda Mod. c/ Garagem' }, icon: Home },
-      { spec: { type: 'building', w: 240, h: 200, variant: 'apartment_2f', label: 'Prédio 2 Andares' }, icon: Building },
-      { spec: { type: 'building', w: 240, h: 200, variant: 'apartment_2f', params: { garageAccess: true }, label: 'Prédio 2 And. c/ Garagem' }, icon: Building },
-      { spec: { type: 'building', w: 324, h: 220, variant: 'apartment_4f', label: 'Prédio 4 Andares' }, icon: Building },
-      { spec: { type: 'building', w: 324, h: 220, variant: 'apartment_4f', params: { garageAccess: true, exteriorParking: true }, label: 'Prédio 4 And. Completo' }, icon: Building2 },
-      { spec: { type: 'building', w: 246, h: 290, variant: 'apartment_10f', label: 'Torre 10 Andares' }, icon: Building2 },
-      { spec: { type: 'building', w: 246, h: 290, variant: 'apartment_10f', params: { garageAccess: true, exteriorParking: true }, label: 'Torre 10 And. Completa' }, icon: Building2 },
-      { spec: { type: 'building', w: 340, h: 166, variant: 'apartment_block', label: 'Prédio Residencial' }, icon: Building },
-      { spec: { type: 'building', w: 340, h: 166, variant: 'apartment_block', params: { garageAccess: true }, label: 'Prédio c/ Garagem' }, icon: Building },
-      { spec: { type: 'building', w: 340, h: 166, variant: 'apartment_block', params: { exteriorParking: true }, label: 'Prédio c/ Estacionamento' }, icon: CarFront },
-      { spec: { type: 'building', w: 340, h: 166, variant: 'apartment_block', params: { garageAccess: true, exteriorParking: true }, label: 'Prédio Garagem + Estac.' }, icon: Building2 },
-      { spec: { type: 'building', w: 320, h: 184, variant: 'apartment_modern', label: 'Prédio Moderno' }, icon: Building2 },
-      { spec: { type: 'building', w: 320, h: 184, variant: 'apartment_modern', params: { garageAccess: true }, label: 'Prédio Mod. c/ Garagem' }, icon: Building2 },
-      { spec: { type: 'building', w: 320, h: 184, variant: 'apartment_modern', params: { exteriorParking: true }, label: 'Prédio Mod. c/ Estac.' }, icon: CarFront },
-      { spec: { type: 'building', w: 320, h: 184, variant: 'apartment_modern', params: { garageAccess: true, exteriorParking: true }, label: 'Prédio Mod. Completo' }, icon: Building2 },
-    ],
-  },
-  {
-    id: 'civico',
-    label: 'Cívico',
-    icon: Landmark,
-    items: [
-      { spec: { type: 'building', w: 330, h: 180, variant: 'fire_station', label: 'Bombeiros' }, icon: Flame },
-      { spec: { type: 'building', w: 270, h: 190, variant: 'police_station', label: 'Polícia (PSP)' }, icon: Shield },
-      { spec: { type: 'building', w: 360, h: 278, variant: 'hospital', label: 'Hospital' }, icon: Cross },
-      { spec: { type: 'building', w: 360, h: 278, variant: 'hospital', params: { exteriorParking: true }, label: 'Hospital c/ Estacionamento' }, icon: Cross },
-      { spec: { type: 'building', w: 320, h: 185, variant: 'school', label: 'Escola' }, icon: GraduationCap },
-      { spec: { type: 'building', w: 360, h: 170, variant: 'supermarket', params: { exteriorParking: true }, label: 'Supermercado' }, icon: ShoppingCart },
-      { spec: { type: 'building', w: 540, h: 328, variant: 'hypermarket', params: { exteriorParking: true }, label: 'Hipermercado' }, icon: ShoppingCart },
-      { spec: { type: 'building', w: 250, h: 210, variant: 'town_hall', label: 'Câmara Municipal' }, icon: Landmark },
-      { spec: { type: 'building', w: 230, h: 180, variant: 'esplanade', label: 'Esplanada' }, icon: Coffee },
-      { spec: { type: 'building', w: 280, h: 280, variant: 'plaza_statue', label: 'Praça c/ Estátua' }, icon: Landmark },
-      { spec: { type: 'building', w: 250, h: 254, variant: 'monument', label: 'Monumento' }, icon: Landmark },
-      { spec: { type: 'building', w: 220, h: 170, variant: 'church', label: 'Igreja' }, icon: Church },
-      { spec: { type: 'building', w: 260, h: 160, variant: 'archway', label: 'Arco Histórico' }, icon: Landmark },
-    ],
-  },
-  {
-    id: 'rural',
-    label: 'Rural',
-    icon: Sprout,
-    items: [
-      { spec: { type: 'building', w: 300, h: 218, variant: 'farmhouse', label: 'Quinta Tradicional' }, icon: Home },
-      { spec: { type: 'building', w: 440, h: 220, variant: 'farm_pasture', label: 'Quinta c/ Animais' }, icon: Trees },
-      { spec: { type: 'building', w: 496, h: 210, variant: 'farm_crops', label: 'Quinta c/ Plantações' }, icon: Sprout },
-      { spec: { type: 'building', w: 432, h: 240, variant: 'crop_field', label: 'Campo de Plantações' }, icon: Sprout },
-      { spec: { type: 'building', w: 434, h: 240, variant: 'crop_wheat', label: 'Campo de Cereal' }, icon: Wheat },
-      { spec: { type: 'building', w: 500, h: 220, variant: 'sea_pier', label: 'Doca Marítima' }, icon: Anchor },
-    ],
-  },
-  {
-    id: 'docas',
-    label: 'Docas',
-    icon: Warehouse,
-    items: [
-      { spec: { type: 'dock', w: 128, h: 128, label: 'Doca' }, icon: Warehouse },
-      { spec: { type: 'dock_wall', w: 420, h: 56, params: { docks: 3 }, label: 'Muro Docas' }, icon: BrickWall },
-      { spec: { type: 'dock_wall', w: 700, h: 56, params: { docks: 6 }, label: 'Muro Docas ×6' }, icon: BrickWall },
-      { spec: { type: 'building', w: 500, h: 220, variant: 'sea_pier', label: 'Doca Marítima' }, icon: Anchor },
-    ],
-  },
-  {
-    id: 'tr',
-    label: 'Atrelados',
-    icon: Truck,
-    items: [
-      { spec: { type: 'trailer', w: 46, h: 220, params: { trailer: 'standard' }, label: 'Standard (C)' }, icon: Truck },
-      { spec: { type: 'trailer', w: 46, h: 220, params: { trailer: 'reefer' }, label: 'Frigorífico (C)' }, icon: Truck },
-      { spec: { type: 'trailer', w: 46, h: 220, params: { trailer: 'container' }, label: 'Contentor 40ft (C)' }, icon: Container },
-      { spec: { type: 'trailer', w: 46, h: 220, params: { trailer: 'tanker_milk' }, label: 'Cisterna Leite (C)' }, icon: Truck },
-      { spec: { type: 'trailer', w: 46, h: 310, params: { trailer: 'long_cargo' }, label: 'Pá Eólica (C+E)' }, icon: Truck },
-      { spec: { type: 'trailer', w: 48, h: 275, params: { trailer: 'flatbed_heavy' }, label: 'Prancha Escavadora (C+E)' }, icon: Truck },
-      { spec: { type: 'trailer', w: 46, h: 255, params: { trailer: 'timber' }, label: 'Florestal Toros (C+E)' }, icon: Truck },
-      { spec: { type: 'trailer', w: 46, h: 248, params: { trailer: 'tanker_fuel' }, label: 'Cisterna Petróleo (C+E)' }, icon: Fuel },
-      { spec: { type: 'trailer', w: 46, h: 155, params: { trailer: 'bitrem_lead' }, label: 'Bitrem Frente (H)' }, icon: Truck },
-      { spec: { type: 'trailer', w: 46, h: 155, params: { trailer: 'bitrem_pup' }, label: 'Bitrem Trás (H)' }, icon: Truck },
-      { spec: { type: 'trailer', w: 46, h: 155, params: { trailer: 'bitrem_tanker_lead' }, label: 'Bitrem Cist. Fr. (H)' }, icon: Fuel },
-      { spec: { type: 'trailer', w: 46, h: 155, params: { trailer: 'bitrem_tanker_pup' }, label: 'Bitrem Cist. Tr. (H)' }, icon: Fuel },
-      { spec: { type: 'trailer', w: 46, h: 220, params: { trailer: 'fragile_glass' }, label: 'Vidro Óptico (X)' }, icon: Truck },
-      { spec: { type: 'trailer', w: 46, h: 225, params: { trailer: 'tanker_hazmat' }, label: 'Cisterna ADR (X)' }, icon: AlertTriangle },
-    ],
-  },
-  {
-    id: 'pads',
-    label: 'Pads',
-    icon: CarFront,
-    items: [
-      { spec: { type: 'parking_pad', w: 130, h: 420, variant: 'asphalt', label: 'Baía Asfalto' }, icon: CarFront },
-      { spec: { type: 'parking_pad', w: 130, h: 420, variant: 'concrete', label: 'Baía Betão' }, icon: Layers },
-      { spec: { type: 'parking_pad', w: 140, h: 460, variant: 'hazard', label: 'Baía Segurança' }, icon: AlertTriangle },
-      { spec: { type: 'parking_pad', w: 165, h: 640, variant: 'clean', label: 'Baía Longa' }, icon: CarFront },
-    ],
-  },
-  {
-    id: 'bases',
-    label: 'Bases',
-    icon: Mountain,
-    items: [
-      { spec: { type: 'pad_asphalt', w: 700, h: 420, label: 'Alcatrão' }, icon: Layers },
-      { spec: { type: 'pad_dirt', w: 700, h: 420, label: 'Terra' }, icon: Mountain },
-      { spec: { type: 'parking_lot', w: 520, h: 340, label: 'Parque' }, icon: CarFront },
-    ],
-  },
-  {
-    id: 'piso',
-    label: 'Piso',
-    icon: DoorOpen,
-    items: [
-      { spec: { type: 'road_entry', w: 140, h: 160, params: { lanes: 1 }, label: 'Entrada Estrada (1 Faixa)' }, icon: DoorOpen },
-      { spec: { type: 'road_entry', w: 220, h: 180, params: { lanes: 2 }, label: 'Entrada Estrada (2 Faixas)' }, icon: Route },
-      { spec: { type: 'road_entry', w: 240, h: 190, params: { lanes: 2, island: true }, label: 'Entrada Estrada c/ Ilha' }, icon: Route },
-      { spec: { type: 'road_entry_y', w: 320, h: 240, params: { lanes: 1 }, label: 'Entrada Y (1 Faixa)' }, icon: Route },
-      { spec: { type: 'road_entry_y', w: 420, h: 280, params: { lanes: 2 }, label: 'Entrada Y (2 Faixas)' }, icon: Route },
-      { spec: { type: 'road_turnout', w: 440, h: 120, params: { layout: 'layby' }, label: 'Desvio Lateral (Baia)' }, icon: Route },
-      { spec: { type: 'road_turnout', w: 520, h: 110, params: { layout: 'parallel' }, label: 'Estac. Paralelo (Berma)' }, icon: CarFront },
-      { spec: { type: 'road_turnout', w: 480, h: 190, params: { layout: 'perpendicular' }, label: 'Estac. Perpendicular (90°)' }, icon: CarFront },
-      { spec: { type: 'road_turnout', w: 500, h: 170, params: { layout: 'diagonal' }, label: 'Estac. Diagonal (45°)' }, icon: CarFront },
-      { spec: { type: 'road_turnout', w: 620, h: 250, params: { layout: 'diagonal_truck' }, label: 'Estac. Diagonal Camiões' }, icon: Truck },
-      { spec: { type: 'entrance', w: 140, h: 220, label: 'Entrada' }, icon: DoorOpen },
-      { spec: { type: 'entrance_gas', w: 220, h: 300, params: { pumps: 1 }, label: 'Entrada Posto' }, icon: Fuel },
-      { spec: { type: 'entrance_gas', w: 320, h: 300, params: { pumps: 2 }, label: 'Entrada Posto 2 Bombas' }, icon: Fuel },
-      { spec: { type: 'crosswalk', w: 36, h: 170, label: 'Passadeira' }, icon: Equal },
-    ],
-  },
-  {
-    id: 'barreiras',
-    label: 'Barreiras',
-    icon: BrickWall,
-    items: [
-      { spec: { type: 'wall', w: 220, h: 26, label: 'Muro Betão' }, icon: BrickWall },
-      { spec: { type: 'wall', w: 220, h: 26, variant: 'brick', label: 'Muro Tijolo' }, icon: BrickWall },
-      { spec: { type: 'wall', w: 220, h: 28, variant: 'stone', label: 'Muro Pedra' }, icon: Mountain },
-      { spec: { type: 'wall', w: 220, h: 26, variant: 'whitewash', label: 'Muro Caiado' }, icon: Landmark },
-      { spec: { type: 'wall', w: 220, h: 24, variant: 'iron_fence', label: 'Muro c/ Grade' }, icon: Equal },
-      { spec: { type: 'wall', w: 240, h: 24, variant: 'sound_barrier', label: 'Barreira Acústica' }, icon: Volume2 },
-      { spec: { type: 'wall', w: 200, h: 28, variant: 'hedge', label: 'Sebe Viva' }, icon: Trees },
-      { spec: { type: 'wall', w: 200, h: 18, variant: 'wood_fence', label: 'Vedação Madeira' }, icon: Equal },
-      { spec: { type: 'wall', w: 220, h: 18, variant: 'chain_fence', label: 'Rede Metálica' }, icon: Shield },
-      { spec: { type: 'jersey_barrier', w: 140, h: 26, label: 'New Jersey' }, icon: BrickWall },
-      { spec: { type: 'jersey_barrier', w: 180, h: 16, variant: 'guardrail', label: 'Guarda Metálica' }, icon: Shield },
-      { spec: { type: 'jersey_barrier', w: 150, h: 24, variant: 'water_red_white', label: 'Barreira Obra' }, icon: Construction },
-      { spec: { type: 'jersey_barrier', w: 150, h: 24, variant: 'hazard_striped', label: 'Barreira Riscas' }, icon: AlertTriangle },
-      { spec: { type: 'jersey_barrier', w: 140, h: 18, variant: 'bollards', label: 'Pilaretes' }, icon: Circle },
-      { spec: { type: 'roundabout', w: 420, h: 420, label: 'Rotunda' }, icon: Circle },
-    ],
-  },
-  {
-    id: 'contentores',
-    label: 'Contentores',
-    icon: Container,
-    items: [
-      { spec: { type: 'container_stack', w: 110, h: 44, variant: 'blue', label: 'Azul' }, icon: Container },
-      { spec: { type: 'container_stack', w: 110, h: 44, variant: 'red', label: 'Vermelho' }, icon: Container },
-      { spec: { type: 'container_stack', w: 110, h: 44, variant: 'green', label: 'Verde' }, icon: Container },
-      { spec: { type: 'container_stack', w: 110, h: 44, variant: 'rust', label: 'Ferrugem' }, icon: Container },
-      { spec: { type: 'container_stack', w: 110, h: 44, variant: 'orange', label: 'Laranja' }, icon: Container },
-      { spec: { type: 'container_stack', w: 110, h: 44, variant: 'yellow', label: 'Amarelo' }, icon: Container },
-      { spec: { type: 'container_stack', w: 110, h: 44, variant: 'white', label: 'Branco' }, icon: Container },
-      { spec: { type: 'container_stack', w: 180, h: 150, variant: 'blue', label: 'Pilha Azul' }, icon: Box },
-      { spec: { type: 'container_stack', w: 180, h: 150, variant: 'red', label: 'Pilha Vermelha' }, icon: Box },
-      { spec: { type: 'container_stack', w: 180, h: 150, variant: 'rust', label: 'Pilha Ferrugem' }, icon: Box },
-    ],
-  },
-  {
-    id: 'transito',
-    label: 'Trânsito',
-    icon: Signpost,
-    items: [
-      { spec: { type: 'sign', w: 22, h: 22, variant: 'stop', label: 'STOP' }, icon: OctagonAlert },
-      { spec: { type: 'sign', w: 22, h: 22, variant: 'yield', label: 'Cedência' }, icon: AlertTriangle },
-      { spec: { type: 'sign', w: 22, h: 22, variant: 'priority_road', label: 'Via c/ Prioridade' }, icon: Diamond },
-      { spec: { type: 'sign', w: 22, h: 22, variant: 'roundabout', label: 'Rotunda' }, icon: RefreshCw },
-      { spec: { type: 'sign', w: 22, h: 22, variant: 'mandatory_straight', label: 'Sentido Obrigatório' }, icon: ArrowUp },
-      { spec: { type: 'sign', w: 22, h: 22, variant: 'mandatory_right', label: 'Obrigatório Direita' }, icon: CornerUpRight },
-      { spec: { type: 'sign', w: 22, h: 22, variant: 'mandatory_left', label: 'Obrigatório Esquerda' }, icon: CornerUpLeft },
-      { spec: { type: 'sign', w: 22, h: 22, variant: 'keep_right', label: 'Contornar Direita' }, icon: ArrowDownRight },
-      { spec: { type: 'sign', w: 22, h: 22, variant: 'one_way', label: 'Sentido Único' }, icon: MoveUp },
-      { spec: { type: 'sign', w: 22, h: 22, variant: 'no_entry', label: 'Sentido Proibido' }, icon: CircleMinus },
-      { spec: { type: 'sign', w: 22, h: 22, variant: 'no_trucks', label: 'Proibido Pesados' }, icon: CircleOff },
-      { spec: { type: 'sign', w: 22, h: 22, variant: 'no_parking', label: 'Proibido Estacionar' }, icon: Ban },
-      { spec: { type: 'sign', w: 22, h: 22, variant: 'speed_30', label: 'Limite 30' }, icon: Gauge },
-      { spec: { type: 'sign', w: 22, h: 22, variant: 'speed', label: 'Limite 50' }, icon: Gauge },
-      { spec: { type: 'sign', w: 22, h: 22, variant: 'speed_80', label: 'Limite 80' }, icon: Gauge },
-      { spec: { type: 'sign', w: 22, h: 22, variant: 'speed_120', label: 'Limite 120' }, icon: Gauge },
-      { spec: { type: 'sign', w: 22, h: 22, variant: 'parking', label: 'Estacionamento' }, icon: SquareParking },
-      { spec: { type: 'sign', w: 22, h: 22, variant: 'pedestrian', label: 'Peões' }, icon: PersonStanding },
-      { spec: { type: 'sign', w: 28, h: 28, variant: 'danger_roundabout', label: 'Aprox. Rotunda' }, icon: RefreshCw },
-      { spec: { type: 'sign', w: 28, h: 28, variant: 'danger_curve', label: 'Curva Perigosa' }, icon: Spline },
-      { spec: { type: 'sign', w: 28, h: 28, variant: 'danger_work', label: 'Obras na Via' }, icon: Construction },
-      { spec: { type: 'sign', w: 36, h: 36, variant: 'steep_uphill', label: 'Subida Acentuada' }, icon: TrendingUp },
-      { spec: { type: 'sign', w: 36, h: 36, variant: 'steep_downhill', label: 'Descida Acentuada' }, icon: TrendingDown },
-      { spec: { type: 'traffic_light', w: 22, h: 22, params: { dir: 'n', group: 0 }, label: 'Semáforo' }, icon: Lamp },
-      { spec: { type: 'lamp', w: 14, h: 14, label: 'Candeeiro' }, icon: Lamp },
-    ],
-  },
-  {
-    id: 'industrial',
-    label: 'Industrial',
-    icon: Cog,
-    items: [
-      { spec: { type: 'crane', w: 110, h: 280, label: 'Guindaste' }, icon: Cog },
-      { spec: { type: 'silo', w: 128, h: 128, label: 'Silo' }, icon: Cog },
-    ],
-  },
-  {
-    id: 'servicos',
-    label: 'Serviços',
-    icon: Fuel,
-    items: [
-      { spec: { type: 'hub_sign', w: 68, h: 68, label: 'Sinal de HUB' }, icon: MapPin },
-      { spec: { type: 'gas_pump', w: 48, h: 116, label: 'Bomba Combustível' }, icon: Fuel },
-      {
-        spec: {
-          type: 'gas_canopy',
-          w: 640,
-          h: 860,
-          params: { stationStyle: 'highway', accessSide: 'right' },
-          label: 'Posto AE (Estrada Dir.)',
-        },
-        icon: Layers,
-      },
-      {
-        spec: {
-          type: 'gas_canopy',
-          w: 640,
-          h: 860,
-          params: { stationStyle: 'highway', accessSide: 'left' },
-          label: 'Posto AE (Estrada Esq.)',
-        },
-        icon: Layers,
-      },
-      {
-        spec: {
-          type: 'gas_canopy',
-          w: 860,
-          h: 640,
-          params: { stationStyle: 'highway', accessSide: 'top' },
-          label: 'Posto AE (Estrada Cima)',
-        },
-        icon: Layers,
-      },
-      {
-        spec: {
-          type: 'gas_canopy',
-          w: 860,
-          h: 640,
-          params: { stationStyle: 'highway', accessSide: 'bottom' },
-          label: 'Posto AE (Estrada Baixo)',
-        },
-        icon: Layers,
-      },
-      {
-        spec: {
-          type: 'gas_canopy',
-          w: 480,
-          h: 740,
-          params: { stationStyle: 'highway', accessSide: 'through' },
-          label: 'Posto AE (Passante)',
-        },
-        icon: Layers,
-      },
-      {
-        spec: {
-          type: 'gas_canopy',
-          w: 380,
-          h: 520,
-          params: { stationStyle: 'secondary', accessSide: 'right' },
-          label: 'Posto 1B (Estrada Dir.)',
-        },
-        icon: Layers,
-      },
-      {
-        spec: {
-          type: 'gas_canopy',
-          w: 380,
-          h: 520,
-          params: { stationStyle: 'secondary', accessSide: 'left' },
-          label: 'Posto 1B (Estrada Esq.)',
-        },
-        icon: Layers,
-      },
-      {
-        spec: {
-          type: 'gas_canopy',
-          w: 520,
-          h: 380,
-          params: { stationStyle: 'secondary', accessSide: 'top' },
-          label: 'Posto 1B (Estrada Cima)',
-        },
-        icon: Layers,
-      },
-      {
-        spec: {
-          type: 'gas_canopy',
-          w: 520,
-          h: 380,
-          params: { stationStyle: 'secondary', accessSide: 'bottom' },
-          label: 'Posto 1B (Estrada Baixo)',
-        },
-        icon: Layers,
-      },
-      {
-        spec: {
-          type: 'gas_canopy',
-          w: 270,
-          h: 480,
-          params: { stationStyle: 'secondary', accessSide: 'through' },
-          label: 'Posto 1B (Passante)',
-        },
-        icon: Layers,
-      },
-      { spec: { type: 'building', w: 128, h: 84, variant: 'fuel_kiosk', label: 'Casa Apoio Posto' }, icon: Store },
-      { spec: { type: 'building', w: 240, h: 136, variant: 'convenience_store', label: 'Loja Conveniência' }, icon: Store },
-      { spec: { type: 'building', w: 260, h: 150, variant: 'restaurant', label: 'Restaurante (A1)' }, icon: Store },
-      { spec: { type: 'air_water', w: 84, h: 42, label: 'Ar / Água / Aspirador' }, icon: Wind },
-      { spec: { type: 'price_sign', w: 56, h: 120, label: 'Totem Preços' }, icon: Gauge },
-    ],
-  },
-  {
-    id: 'serra',
-    label: 'Serra',
-    icon: Mountain,
-    items: [
-      { spec: { type: 'wind_turbine', w: 120, h: 120, label: 'Torre Eólica' }, icon: Wind },
-      { spec: { type: 'log_pile', w: 170, h: 64, label: 'Pilha de Toros' }, icon: Layers },
-      { spec: { type: 'rock_outcrop', w: 96, h: 84, label: 'Afloramento Rochoso' }, icon: Mountain },
-      { spec: { type: 'pine_tree', w: 72, h: 72, label: 'Pinheiro Alpino' }, icon: Mountain },
-    ],
-  },
-];
-
-/** Ícone de período do dia usado pelo relógio 24h do HUD superior. */
-const PERIOD_ICONS: Record<TimePeriod, React.ComponentType<{ className?: string }>> = {
-  dawn: Sunrise,
-  day: Sun,
-  dusk: Sunset,
-  night: Moon,
-};
 
 export default function App() {
   const gameContainerRef = useRef<HTMLDivElement>(null);
@@ -558,21 +134,14 @@ export default function App() {
   const [hubs, setHubs] = useState<HubData[]>([]);
   const [activeWeather, setActiveWeather] = useState<WeatherModifier>('clear');
   const [weatherDynamic, setWeatherDynamic] = useState<boolean>(() => WeatherSystem.getInstance().isDynamicEnabled());
-  const [editorTool, setEditorTool] = useState<'pan' | 'road' | 'terrain' | 'object' | 'spawn' | 'add' | 'compound'>('pan');
-  const editorToolRef = useRef<'pan' | 'road' | 'terrain' | 'object' | 'spawn' | 'add' | 'compound'>('pan');
+  const [editorTool, setEditorTool] = useState<EditorTool>('pan');
+  const editorToolRef = useRef<EditorTool>('pan');
   // Catalog selection for the 'add' (Criar) tool
   const [addType, setAddType] = useState<AddObjectSpec>({ type: 'wall', w: 220, h: 26, label: 'Muro' });
   const [addCat, setAddCat] = useState<string>('barreiras');
 
-  // Terrain brush tool live state (polled from EditorScene)
-  const [terrainUI, setTerrainUI] = useState<{
-    material: TerrainPaintMaterial;
-    mode: 'paint' | 'erase';
-    radius: number;
-    softness: TerrainPaintSoftness;
-    clipWater: boolean;
-    strokeCount: number;
-  }>({
+  // Terrain brush tool live state (pushed via EditorScene.subscribeUI)
+  const [terrainUI, setTerrainUI] = useState<TerrainUIState>({
     material: 'concrete',
     mode: 'paint',
     radius: 96,
@@ -581,26 +150,8 @@ export default function App() {
     strokeCount: 0,
   });
 
-  // Road tool live state (polled from EditorScene in the telemetry loop)
-  const [roadUI, setRoadUI] = useState<{
-    hasSelection: boolean;
-    hasPoint: boolean;
-    surface: RoadSurface;
-    width: number;
-    drawing: boolean;
-    twistDeg: number;
-    oneWay: boolean;
-    layer: number;
-    guardrail: RoadGuardrailMode;
-    pointGuardrail: RoadPointGuardrail;
-    tooShort: boolean;
-    snapToRoads: boolean;
-    isolateSelectedRoad: boolean;
-    overlapCount: number;
-    overlapIndex: number;
-    canWeld: boolean;
-    canMerge: boolean;
-  }>({
+  // Road tool live state (pushed via EditorScene.subscribeUI)
+  const [roadUI, setRoadUI] = useState<RoadUIState>({
     hasSelection: false,
     hasPoint: false,
     surface: 'asphalt',
@@ -619,42 +170,9 @@ export default function App() {
     canWeld: false,
     canMerge: false,
   });
-  // Object tool live state (polled from EditorScene in the telemetry loop)
-  const [objectUI, setObjectUI] = useState<{
-    hasSelection: boolean;
-    id: string;
-    type: string;
-    variant: string;
-    angleDeg: number;
-    resizable: boolean;
-    trailer: string;
-    canPaste: boolean;
-    rotationSnap: boolean;
-    canUndo: boolean;
-    isCompound: boolean;
-    compoundPartCount: number;
-    hubSign: {
-      hubId: string;
-      name: string;
-      badge: string;
-      color: string;
-      regionRadius: number;
-      isCustom: boolean;
-      docks: number;
-      parkingPads: number;
-      garages: number;
-    } | null;
-    gasCanopy: {
-      stationStyle: 'highway' | 'secondary';
-      accessSide: 'right' | 'left' | 'top' | 'bottom' | 'through';
-    } | null;
-    buildingFeatures: {
-      supportsGarage: boolean;
-      supportsParking: boolean;
-      garageAccess: boolean;
-      exteriorParking: boolean;
-    } | null;
-  }>({
+
+  // Object tool live state (pushed via EditorScene.subscribeUI)
+  const [objectUI, setObjectUI] = useState<ObjectUIState>({
     hasSelection: false,
     id: '',
     type: '',
@@ -673,65 +191,7 @@ export default function App() {
   });
 
   // Real-time Telemetry
-  const [telemetry, setTelemetry] = useState<MainScene['telemetry']>({
-    speedKmh: 0,
-    steeringDeg: 0,
-    articulationDeg: 0,
-    isJackknifed: false,
-    isMechanicalLocked: false,
-    jackknifeSeverity: 0,
-    tailSwingPx: 0,
-    offTrackingPx: 0,
-    isReversing: false,
-    collisions: 0,
-    fragileHealth: 100,
-    truckHealth: 100,
-    truckDamage: createCleanTruckDamage(),
-    trailerHealth: 100,
-    cargoHealth: 100,
-    currentGForce: 0,
-    peakGForce: 0,
-    weather: 'clear',
-    weatherDynamic: true,
-    weatherCondition: 'clear',
-    rainIntensity: 0,
-    stormIntensity: 0,
-    fogDensity: 0,
-    cloudCover: 0.22,
-    roadWetness: 0,
-    headlightMode: 'off',
-    autoHeadlights: true,
-    timePeriod: 'day',
-    timeClock: '09:07',
-    autoTimeCycle: true,
-    timeRealTime: false,
-    activeLicenseExam: null,
-    fuelLevel: 500,
-    fuelCapacity: 500,
-    fuelPercent: 100,
-    isOutOfFuel: false,
-    isRefuelling: false,
-    isRepairing: false,
-    fuelPrice: 1.749,
-    nearbyPump: null,
-    nearbyRepairBay: null,
-    gameMode: 'career',
-    activeTruckId: 'iveco_daily_4x2',
-    activeTruckType: 'iveco_daily_4x2',
-    activeTruckName: 'Iveco Daily 4×2',
-    activeTruckUpgrades: { ...DEFAULT_TRUCK_UPGRADES },
-    truckWear: createCleanTruckWear(),
-    brakeHeat: 0,
-    altitudeM: 0,
-    gradePercent: 0,
-    nearbySwapTruck: null,
-    currentHubId: 'harbor',
-    hubReputation: { harbor: 0, shipyard: 0, industrial: 0, historic: 0, serra: 0 },
-    activeMission: null,
-    missionNavTarget: null,
-    lastMissionCompletion: null,
-    coupling: { decoupleReady: false, coupledName: null, blocked: null, notice: null, noticeKind: 'info', noticeSeq: 0, noticeDurationMs: 3500 },
-  });
+  const [telemetry, setTelemetry] = useState<MainScene['telemetry']>(createInitialTelemetry);
 
   // Toast notifications (coupling feedback) — triggered by noticeSeq changes
   const [toasts, setToasts] = useState<Array<{ id: number; text: string; kind: string }>>([]);
@@ -906,13 +366,10 @@ export default function App() {
       setWeatherDynamic(weatherSys.isDynamicEnabled());
     });
 
-    // Telemetry polling loop from MainScene
-    let lastTelKey = '';
+    // Telemetry polling loop from MainScene (shallow typed comparison — zero string/JSON GC churn)
+    let lastTelemetrySnap: MainScene['telemetry'] | null = null;
     let lastEditorFlag: boolean | null = null;
-    let lastExamKey = '';
-    let lastRoadUIKey = '';
-    let lastObjUIKey = '';
-    let lastTerrainUIKey = '';
+    let lastExamSnap: ExamStatus | null = null;
     const interval = setInterval(() => {
       const scene = getMainScene();
       const edScene = getEditorScene();
@@ -922,43 +379,18 @@ export default function App() {
           addToast('Mapa restaurado a partir do browser storage', 'success', 4000);
         }
         const t = scene.telemetry;
-        const am = t.activeMission;
-        const nav = t.missionNavTarget;
-        const lmc = t.lastMissionCompletion;
-        const telKey =
-          `${t.speedKmh}|${t.isReversing ? 1 : 0}|${t.truckHealth}|${t.trailerHealth}|${t.cargoHealth}|` +
-          `${t.truckDamage.engine},${t.truckDamage.steering},${t.truckDamage.chassis},${t.truckDamage.lights},${Math.round(t.truckDamage.leftLight)},${Math.round(t.truckDamage.rightLight)},` +
-          `${Math.round(t.truckDamage.rearLights.brakeLeft)},${Math.round(t.truckDamage.rearLights.brakeRight)},${Math.round(t.truckDamage.rearLights.reverseLeft)},${Math.round(t.truckDamage.rearLights.reverseRight)}|` +
-          `${Math.round(t.fuelPercent * 10)}|${Math.round(t.fuelLevel * 10)}|${t.isOutOfFuel ? 1 : 0}|` +
-          `${t.isRefuelling ? 1 : 0}|${t.isRepairing ? 1 : 0}|${t.isJackknifed ? 1 : 0}|${t.isMechanicalLocked ? 1 : 0}|` +
-          `${t.articulationDeg}|${t.collisions}|${t.weather}|${t.weatherDynamic ? 1 : 0},${t.weatherCondition},${Math.round(t.rainIntensity * 10)},${Math.round(t.stormIntensity * 10)},${Math.round(t.fogDensity * 10)}|${t.currentGForce.toFixed(2)}|${t.peakGForce.toFixed(2)}|` +
-          `${t.headlightMode}|${t.autoHeadlights ? 1 : 0}|${t.timePeriod}|${t.timeClock}|${t.autoTimeCycle ? 1 : 0}|${t.timeRealTime ? 1 : 0}|` +
-          `${t.nearbyPump ? `${t.nearbyPump.x},${t.nearbyPump.y}` : ''}|` +
-          `${t.nearbyRepairBay ? `${t.nearbyRepairBay.x},${t.nearbyRepairBay.y}` : ''}|` +
-          `${t.gameMode}|${t.activeTruckId}|${t.activeTruckUpgrades.engine},${t.activeTruckUpgrades.brakes},${t.activeTruckUpgrades.suspension},${t.activeTruckUpgrades.tires}|` +
-          `${Math.round(t.truckWear.engine)},${Math.round(t.truckWear.brakes)},${Math.round(t.truckWear.tires)}|${Math.round(t.brakeHeat * 20)}|${Math.round(t.altitudeM / 5)},${Math.round(t.gradePercent)}|` +
-          `${t.nearbySwapTruck ? `${t.nearbySwapTruck.id}:${Math.round(t.nearbySwapTruck.dist)}` : ''}|${t.currentHubId}|` +
-          `${Object.entries(t.hubReputation).map(([k, v]) => `${k}:${v}`).join(',')}|` +
-          `${am ? `${am.mission.id}:${am.phase}:${Math.floor(am.elapsedSec)}:${am.collisions}:${Math.round(am.minCargoHealth)}:${am.inTargetDock ? 1 : 0}:${am.dockHoldSec.toFixed(1)}` : ''}|` +
-          `${nav ? `${nav.phase}:${Math.round(nav.distPx / 100)}:${nav.pickupHubName}:${nav.hasWrongTrailerCoupled ? 1 : 0}:${nav.needsPupOnly ? 1 : 0}` : ''}|` +
-          `${lmc ? lmc.completedAt : ''}|` +
-          `${t.coupling.noticeSeq}|${t.coupling.decoupleReady ? 1 : 0}|${t.coupling.coupledName ?? ''}|${t.coupling.blocked ?? ''}`;
-        if (telKey !== lastTelKey) {
-          lastTelKey = telKey;
-          setTelemetry({ ...t });
+        if (hasTelemetryChanged(lastTelemetrySnap, t)) {
+          lastTelemetrySnap = cloneTelemetrySnapshot(t);
+          setTelemetry(lastTelemetrySnap);
         }
         if (scene.isEditorMode !== lastEditorFlag) {
           lastEditorFlag = scene.isEditorMode;
           setIsEditorMode(scene.isEditorMode);
         }
         const ex = licSys.getActiveExam();
-        const examKey =
-          ex.active || ex.isPassed || ex.isFailed
-            ? `${ex.active}|${ex.isPassed}|${ex.isFailed}|${Math.ceil(ex.remainingTime)}|${ex.collisionCount}|${ex.inDockZone}|${Math.round(ex.dockAlignmentDeg)}|${ex.dockHoldSec.toFixed(1)}|${ex.jackknifeSec.toFixed(1)}|${ex.currentGForce.toFixed(2)}|${ex.peakGForce.toFixed(2)}|${ex.reversedDuringExam ? 1 : 0}`
-            : 'idle';
-        if (examKey !== lastExamKey) {
-          lastExamKey = examKey;
-          setActiveExam(ex);
+        if (hasExamChanged(lastExamSnap, ex)) {
+          lastExamSnap = { ...ex };
+          setActiveExam(lastExamSnap);
         }
         const activeZoom =
           (scene.isEditorMode ? edScene?.cameras?.main?.zoom : scene.cameras?.main?.zoom) ?? 1;
@@ -966,31 +398,6 @@ export default function App() {
         if (Math.abs(roundedZoom - lastZoomRef.current) >= 0.01) {
           lastZoomRef.current = roundedZoom;
           setCameraZoom(roundedZoom);
-        }
-      }
-      if (edScene && scene?.isEditorMode) {
-        const nextRoad = edScene.getRoadUIState();
-        const roadKey = JSON.stringify(nextRoad);
-        if (roadKey !== lastRoadUIKey) {
-          lastRoadUIKey = roadKey;
-          setRoadUI(nextRoad);
-        }
-        const nextObj = edScene.getObjectUIState();
-        const objKey = JSON.stringify(nextObj);
-        if (objKey !== lastObjUIKey) {
-          lastObjUIKey = objKey;
-          setObjectUI(nextObj);
-        }
-        const nextTerrain = edScene.getTerrainUIState();
-        const terrainKey = JSON.stringify(nextTerrain);
-        if (terrainKey !== lastTerrainUIKey) {
-          lastTerrainUIKey = terrainKey;
-          setTerrainUI(nextTerrain);
-        }
-        // The scene can switch tools by itself (e.g. Criar → Objectos after placing)
-        if (edScene.editorTool !== editorToolRef.current) {
-          editorToolRef.current = edScene.editorTool;
-          setEditorTool(edScene.editorTool);
         }
       }
     }, 100);
@@ -1008,6 +415,36 @@ export default function App() {
       destroyGame();
     };
   }, []);
+
+  // Push-based EditorScene UI subscription (replaces 100ms JSON.stringify polling & manual setObjectUI calls)
+  useEffect(() => {
+    if (!isEditorMode) return;
+    let unsub: (() => void) | null = null;
+    let retryTimer: number | null = null;
+
+    const attach = () => {
+      const ed = getEditorScene();
+      if (!ed) {
+        retryTimer = window.setTimeout(attach, 50);
+        return;
+      }
+      unsub = ed.subscribeUI((snap) => {
+        setRoadUI((prev) => (prev === snap.road ? prev : snap.road));
+        setObjectUI((prev) => (prev === snap.object ? prev : snap.object));
+        setTerrainUI((prev) => (prev === snap.terrain ? prev : snap.terrain));
+        if (snap.editorTool !== editorToolRef.current) {
+          editorToolRef.current = snap.editorTool;
+          setEditorTool(snap.editorTool);
+        }
+      });
+    };
+
+    attach();
+    return () => {
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+      unsub?.();
+    };
+  }, [isEditorMode]);
 
   // Keep the Phaser canvas & keyboard plugins from stealing pointer or keyboard events
   // while any HTML modal is open or any text/select input has focus.
@@ -1367,9 +804,6 @@ export default function App() {
     }
   };
 
-  // Relógio 24h no HUD superior segue o período atual do ciclo dia/noite
-  const PeriodIcon = PERIOD_ICONS[telemetry.timePeriod] ?? Sun;
-
   return (
     <div className="relative w-screen h-dvh overflow-hidden bg-[#0c0f17] font-sans text-slate-100 select-none">
       {/* Phaser Canvas Viewport */}
@@ -1404,93 +838,7 @@ export default function App() {
         </div>
 
         {/* TOP SPEED & GEAR HUD (minimal — warnings are toasts) */}
-        {!isEditorMode && (
-          <div className="flex items-center gap-2 bg-black/60 border border-cyan-500/40 px-2.5 sm:px-3.5 py-1 rounded-full shadow-inner">
-            <div className="flex items-baseline gap-1 whitespace-nowrap">
-              <span className="font-mono text-xs font-black text-white">{telemetry.speedKmh}</span>
-              <span className="text-[9px] text-slate-400 font-bold uppercase whitespace-nowrap">km/h</span>
-            </div>
-            <div className="w-px h-3 bg-white/20" />
-            <span className={`font-mono text-xs font-black ${telemetry.isReversing ? 'text-amber-400' : 'text-cyan-400'}`}>
-              {telemetry.isReversing ? 'R' : 'D'}
-            </span>
-            {telemetry.brakeHeat >= 0.45 && (
-              <>
-                <div className="w-px h-3 bg-white/20" />
-                <span
-                  className={`whitespace-nowrap font-mono tabular-nums text-xs font-bold ${
-                    telemetry.brakeHeat >= 0.65 ? 'text-red-400' : 'text-amber-300'
-                  }`}
-                  title="Temperatura dos travões (fade térmico acima de 55%)"
-                >
-                  Travões {Math.round(telemetry.brakeHeat * 100)}%
-                </span>
-              </>
-            )}
-            {(telemetry.altitudeM >= 25 || Math.abs(telemetry.gradePercent) >= 2.5) && (
-              <>
-                <div className="w-px h-3 bg-white/20" />
-                <span
-                  data-testid="hud-mountain-altitude"
-                  className="flex items-center gap-1 whitespace-nowrap font-mono tabular-nums text-xs font-bold text-emerald-300"
-                  title={`Altitude ${telemetry.altitudeM}m · Inclinação ${telemetry.gradePercent > 0 ? '+' : ''}${telemetry.gradePercent.toFixed(1)}%`}
-                >
-                  <Mountain className="w-3 h-3 text-emerald-400" />
-                  <span>{telemetry.altitudeM}m</span>
-                  {Math.abs(telemetry.gradePercent) >= 1.5 && (
-                    <span className={telemetry.gradePercent > 0 ? 'text-amber-300' : 'text-sky-300'}>
-                      {telemetry.gradePercent > 0 ? `+${Math.round(telemetry.gradePercent)}%` : `${Math.round(telemetry.gradePercent)}%`}
-                    </span>
-                  )}
-                </span>
-              </>
-            )}
-            <div className="w-px h-3 bg-white/20" />
-            <span className="flex items-center gap-1 whitespace-nowrap" title="Hora do mundo (24h)">
-              <PeriodIcon className="w-3 h-3 text-amber-300" />
-              <span className="font-mono text-xs font-black text-amber-100 tabular-nums">{telemetry.timeClock}</span>
-            </span>
-            {(telemetry.stormIntensity >= 0.15 || telemetry.rainIntensity >= 0.15 || telemetry.fogDensity >= 0.18) && (
-              <span
-                data-testid="hud-weather-indicator"
-                className={`flex items-center ${
-                  telemetry.stormIntensity >= 0.15
-                    ? 'text-indigo-300'
-                    : telemetry.rainIntensity >= 0.15
-                      ? 'text-sky-300'
-                      : 'text-slate-300'
-                }`}
-                title={
-                  telemetry.stormIntensity >= 0.15
-                    ? `Trovoada ${telemetry.stormIntensity >= 0.65 ? 'intensa' : 'local'} · Piso muito escorregadio (${Math.round(telemetry.roadWetness * 100)}%)`
-                    : telemetry.rainIntensity >= 0.15
-                      ? `Chuva ${telemetry.rainIntensity >= 0.65 ? 'forte' : 'local'} · Piso molhado (${Math.round(telemetry.roadWetness * 100)}%)`
-                      : `Nevoeiro local (${Math.round(telemetry.fogDensity * 100)}%)`
-                }
-              >
-                {telemetry.stormIntensity >= 0.15 ? (
-                  <CloudLightning className="w-3.5 h-3.5 text-amber-300" />
-                ) : telemetry.rainIntensity >= 0.15 ? (
-                  <CloudRain className="w-3.5 h-3.5" />
-                ) : (
-                  <CloudFog className="w-3.5 h-3.5" />
-                )}
-              </span>
-            )}
-            {telemetry.gameMode === 'sandbox' && (
-              <>
-                <div className="w-px h-3 bg-white/20" />
-                <span
-                  data-testid="hud-sandbox-indicator"
-                  className="font-mono text-[10px] font-bold text-amber-300 tracking-wide whitespace-nowrap"
-                  title="Modo Sandbox ativo (Carreira preservada)"
-                >
-                  SANDBOX
-                </span>
-              </>
-            )}
-          </div>
-        )}
+        {!isEditorMode && <TopDrivingBar telemetry={telemetry} />}
 
         {/* Action Controls & Consolidated Dropdown Menu */}
         <div className="flex items-center gap-1 sm:gap-1.5">
@@ -2118,198 +1466,22 @@ export default function App() {
         </div>
       )}
 
-      {/* MINIMAP TAP/CLICK HOTSPOT — opens Strategic World Map directly on mobile & desktop */}
-      {!isEditorMode && !modalOpen && (
-        <button
-          type="button"
-          data-testid="minimap-open-map-btn"
-          aria-label="Abrir Mapa Estratégico"
-          title="Abrir Mapa Estratégico (M)"
-          onClick={() => {
-            setMapFocusTruckId(null);
-            setShowWorldMapModal(true);
-            setIsMenuOpen(false);
-          }}
-          className="fixed right-[10px] top-[58px] w-[116px] h-[116px] sm:w-[150px] sm:h-[150px] z-20 rounded-sm bg-transparent hover:ring-2 hover:ring-cyan-400/80 active:bg-cyan-500/15 transition cursor-pointer flex items-end justify-end p-1"
-        >
-          <span className="px-1.5 py-0.5 rounded bg-slate-950/85 border border-cyan-500/40 text-[9px] font-semibold text-cyan-300 leading-none pointer-events-none">
-            Mapa
-          </span>
-        </button>
-      )}
-
-      {/* ACTIVE MISSION COMPACT BANNER (positioned clear of the top-right Minimap on all screen widths) */}
-      {!isEditorMode && telemetry.activeMission && !(activeExam && activeExam.active) && (() => {
-        const am = telemetry.activeMission;
-        const nav = telemetry.missionNavTarget;
-        const isPickup = am.phase === 'pickup';
-        const distLabel = nav
-          ? nav.distPx < 1000
-            ? `${Math.round(nav.distPx)} m`
-            : `${(nav.distPx / 1000).toFixed(1)} km`
-          : null;
-        return (
-          <div
-            data-testid="active-mission-banner"
-            className={`absolute top-[58px] left-2 right-[134px] sm:right-[170px] lg:left-1/2 lg:right-auto lg:-translate-x-1/2 lg:max-w-[calc(100vw-360px)] bg-slate-950/92 border ${
-              isPickup ? 'border-amber-500/60' : 'border-emerald-500/60'
-            } px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-lg shadow-xl z-30`}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span
-                    className={`text-[10px] font-bold uppercase tracking-wide shrink-0 ${
-                      isPickup ? 'text-amber-400' : 'text-emerald-400'
-                    }`}
-                  >
-                    <span className="sm:hidden">{isPickup ? '1/2 Recolha' : '2/2 Entrega'}</span>
-                    <span className="hidden sm:inline">{isPickup ? 'Passo 1/2 · Recolha' : 'Passo 2/2 · Entrega'}</span>
-                  </span>
-                  <span className="text-[11px] sm:text-xs font-semibold text-white truncate">
-                    {am.mission.title}
-                  </span>
-                </div>
-                <div className={`text-[10px] sm:text-[11px] leading-snug truncate ${isPickup ? 'text-amber-200/90' : 'text-slate-300'}`}>
-                  {isPickup
-                    ? nav
-                      ? `${nav.needsPupOnly ? 'Engatar' : 'Recolher'} ${nav.trailerLabel} · ${nav.pickupHubName}${distLabel ? ` · ${distLabel}` : ''}${nav.hasWrongTrailerCoupled ? ' (C deseng.)' : ''}`
-                      : `Recolher em ${am.mission.originHubName}`
-                    : `${am.mission.targetHubName} · ${am.mission.targetDock.label}${distLabel ? ` · ${distLabel}` : ''}`}
-                </div>
-                <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 mt-0.5 text-[10px] sm:text-xs font-mono tabular-nums">
-                  <span className="text-slate-300">
-                    {Math.floor(am.elapsedSec)}s/{am.mission.targetTimeSec}s
-                  </span>
-                  <span className={am.minCargoHealth < 90 ? 'text-amber-300' : 'text-emerald-300'}>
-                    Carga {Math.round(am.minCargoHealth)}%
-                  </span>
-                  <span className={am.collisions > 0 ? 'text-red-400' : 'text-slate-300'}>
-                    Col {am.collisions}
-                  </span>
-                  {am.inTargetDock && (
-                    <span className="text-emerald-400 font-semibold">
-                      Doca {am.dockHoldSec.toFixed(1)}s/1.5s
-                    </span>
-                  )}
-                </div>
-              </div>
-              <button
-                type="button"
-                aria-label="Cancelar missão"
-                onClick={handleCancelMission}
-                className="shrink-0 text-[10px] sm:text-xs px-1.5 py-0.5 sm:px-2.5 sm:py-1 rounded bg-slate-900 hover:bg-red-950 text-red-300 border border-slate-700 hover:border-red-800 transition-colors whitespace-nowrap"
-              >
-                <span className="sm:hidden">✕</span>
-                <span className="hidden sm:inline">Cancelar</span>
-              </button>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* MISSION COMPLETION SUMMARY MODAL */}
-      {telemetry.lastMissionCompletion && (
-        <div
-          data-testid="mission-completion-modal"
-          className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[65] flex items-center justify-center p-2.5 sm:p-4"
-        >
-          <div className="bg-slate-950 border border-emerald-500/50 max-w-md w-full max-h-[92dvh] overflow-y-auto overscroll-contain p-4 sm:p-6 rounded-xl shadow-2xl space-y-3.5 sm:space-y-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-xs font-medium text-emerald-400">Missão Concluída</div>
-                <h3 className="text-base sm:text-lg font-bold text-white mt-0.5 leading-snug">
-                  {telemetry.lastMissionCompletion.mission.title}
-                </h3>
-                <div className="text-xs text-slate-400">
-                  {telemetry.lastMissionCompletion.mission.originHubName} → {telemetry.lastMissionCompletion.mission.targetHubName}
-                </div>
-              </div>
-              <div className="text-2xl sm:text-3xl font-black font-mono tabular-nums text-emerald-300 leading-none px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg bg-slate-900 border border-slate-800 shrink-0">
-                {telemetry.lastMissionCompletion.rating}
-              </div>
-            </div>
-
-            <div className="border-t border-b border-slate-800 py-3 space-y-1.5 text-xs font-mono tabular-nums">
-              <div className="flex justify-between">
-                <span className="text-slate-400">Reputação ganha ({telemetry.lastMissionCompletion.mission.originHubName})</span>
-                <span className="text-emerald-300 font-bold">+{telemetry.lastMissionCompletion.reputationAwarded} rep</span>
-              </div>
-              <div className="flex justify-between text-slate-400">
-                <span>Fórmula</span>
-                <span>
-                  {telemetry.lastMissionCompletion.baseReputation} × {telemetry.lastMissionCompletion.ratingMultiplier.toFixed(1)} × {telemetry.lastMissionCompletion.riskMultiplier.toFixed(2)}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Total no hub</span>
-                <span className="text-slate-200">{telemetry.lastMissionCompletion.hubReputationAfter.toLocaleString('pt-PT')} rep</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Alinhamento / Colisões / Carga</span>
-                <span className="text-slate-200">
-                  {telemetry.lastMissionCompletion.metrics.alignmentDeg.toFixed(1)}° · {telemetry.lastMissionCompletion.metrics.collisions} · {Math.round(telemetry.lastMissionCompletion.metrics.minCargoHealth)}%
-                </span>
-              </div>
-            </div>
-
-            {telemetry.lastMissionCompletion.newlyUnlockedCertificates.length > 0 && (
-              <div className="text-xs text-amber-300 space-y-0.5">
-                <div className="font-semibold">Novo Certificado Desbloqueado:</div>
-                {telemetry.lastMissionCompletion.newlyUnlockedCertificates.map((cid) => (
-                  <div key={cid}>{CERTIFICATE_CATALOG[cid]?.name ?? cid}</div>
-                ))}
-              </div>
-            )}
-
-            {telemetry.lastMissionCompletion.newlyUnlockedTrucks.length > 0 && (
-              <div className="text-xs text-cyan-300 space-y-0.5">
-                <div className="font-semibold">Novo Camião Desbloqueado no Mapa:</div>
-                {telemetry.lastMissionCompletion.newlyUnlockedTrucks.map((tid) => (
-                  <div key={tid}>
-                    {TRUCK_CATALOG[tid]?.name ?? tid} — {TRUCK_CATALOG[tid]?.locationLabel}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <button
-              type="button"
-              onClick={() => MissionSystem.getInstance().clearLastCompletion()}
-              className="w-full py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold text-sm transition-colors"
-            >
-              Continuar
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* PHYSICAL TRUCK SWAP PROMPT (when stopped/approaching an unlocked parked truck <= 160 px) */}
-      {!isEditorMode && telemetry.nearbySwapTruck && !modalOpen && (
-        <div
-          data-testid="swap-truck-prompt"
-          className="fixed bottom-24 left-1/2 -translate-x-1/2 z-30 bg-slate-950/95 border border-emerald-500/60 px-4 py-2 rounded-lg shadow-xl flex items-center gap-3"
-        >
-          <div className="text-xs">
-            <div className="font-semibold text-white">{telemetry.nearbySwapTruck.name}</div>
-            <div className="text-[11px] text-slate-400 font-mono tabular-nums">
-              {Math.round(telemetry.nearbySwapTruck.dist)} px · {Math.abs(telemetry.speedKmh) <= 3 ? 'Pronto para trocar (T)' : 'Pare totalmente'}
-            </div>
-          </div>
-          <button
-            type="button"
-            disabled={Math.abs(telemetry.speedKmh) > 3}
-            onClick={() => handleSwapTruck(telemetry.nearbySwapTruck!.id, false)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
-              Math.abs(telemetry.speedKmh) <= 3
-                ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950'
-                : 'bg-slate-800 text-slate-500 cursor-not-allowed'
-            }`}
-          >
-            Assumir Controlo (T)
-          </button>
-        </div>
-      )}
+      {/* DRIVING MODE OVERLAYS (minimap hotspot, active mission, completion summary, truck swap, toasts) */}
+      <DrivingOverlays
+        isEditorMode={isEditorMode}
+        modalOpen={modalOpen}
+        telemetry={telemetry}
+        activeExam={activeExam}
+        toasts={toasts}
+        onDismissToast={(id) => setToasts((cur) => cur.filter((x) => x.id !== id))}
+        onOpenWorldMap={() => {
+          setMapFocusTruckId(null);
+          setShowWorldMapModal(true);
+          setIsMenuOpen(false);
+        }}
+        onCancelMission={handleCancelMission}
+        onSwapTruck={handleSwapTruck}
+      />
 
 
 
@@ -3133,10 +2305,7 @@ export default function App() {
                               key={val}
                               onClick={() => {
                                 const ed = getEditorScene();
-                                if (ed) {
-                                  ed.setGasCanopyConfig(objectUI.id, { stationStyle: val });
-                                  setObjectUI(ed.getObjectUIState());
-                                }
+                                if (ed) ed.setGasCanopyConfig(objectUI.id, { stationStyle: val });
                               }}
                               className={`shrink-0 ed-fs font-bold px-1.5 py-1 rounded border text-left truncate ${
                                 objectUI.gasCanopy?.stationStyle === val
@@ -3161,10 +2330,7 @@ export default function App() {
                               key={val}
                               onClick={() => {
                                 const ed = getEditorScene();
-                                if (ed) {
-                                  ed.setGasCanopyConfig(objectUI.id, { accessSide: val });
-                                  setObjectUI(ed.getObjectUIState());
-                                }
+                                if (ed) ed.setGasCanopyConfig(objectUI.id, { accessSide: val });
                               }}
                               className={`shrink-0 ed-fs font-bold px-1.5 py-1 rounded border text-left truncate ${
                                 objectUI.gasCanopy?.accessSide === val
@@ -3192,10 +2358,7 @@ export default function App() {
                                   key={lbl}
                                   onClick={() => {
                                     const ed = getEditorScene();
-                                    if (ed) {
-                                      ed.setBuildingFeatures(objectUI.id, { garageAccess: val });
-                                      setObjectUI(ed.getObjectUIState());
-                                    }
+                                    if (ed) ed.setBuildingFeatures(objectUI.id, { garageAccess: val });
                                   }}
                                   className={`shrink-0 ed-fs font-bold px-1.5 py-1 rounded border text-center ${
                                     objectUI.buildingFeatures?.garageAccess === val
@@ -3221,10 +2384,7 @@ export default function App() {
                                   key={lbl}
                                   onClick={() => {
                                     const ed = getEditorScene();
-                                    if (ed) {
-                                      ed.setBuildingFeatures(objectUI.id, { exteriorParking: val });
-                                      setObjectUI(ed.getObjectUIState());
-                                    }
+                                    if (ed) ed.setBuildingFeatures(objectUI.id, { exteriorParking: val });
                                   }}
                                   className={`shrink-0 ed-fs font-bold px-1.5 py-1 rounded border text-center ${
                                     objectUI.buildingFeatures?.exteriorParking === val
@@ -3297,9 +2457,7 @@ export default function App() {
                             maxLength={32}
                             onChange={(e) => {
                               const ed = getEditorScene();
-                              if (!ed) return;
-                              ed.updateHubSignParams(objectUI.id, { name: e.target.value });
-                              setObjectUI(ed.getObjectUIState());
+                              if (ed) ed.updateHubSignParams(objectUI.id, { name: e.target.value });
                             }}
                             className="w-full px-1.5 py-1 rounded bg-slate-900 border border-slate-700 text-[11px] text-white focus:outline-none focus:border-cyan-400"
                           />
@@ -3313,9 +2471,7 @@ export default function App() {
                             maxLength={8}
                             onChange={(e) => {
                               const ed = getEditorScene();
-                              if (!ed) return;
-                              ed.updateHubSignParams(objectUI.id, { badge: e.target.value });
-                              setObjectUI(ed.getObjectUIState());
+                              if (ed) ed.updateHubSignParams(objectUI.id, { badge: e.target.value });
                             }}
                             className="w-full px-1.5 py-1 rounded bg-slate-900 border border-slate-700 text-[11px] font-mono uppercase text-white focus:outline-none focus:border-cyan-400"
                           />
@@ -3338,9 +2494,7 @@ export default function App() {
                                 type="button"
                                 onClick={() => {
                                   const ed = getEditorScene();
-                                  if (!ed) return;
-                                  ed.updateHubSignParams(objectUI.id, { color: hex });
-                                  setObjectUI(ed.getObjectUIState());
+                                  if (ed) ed.updateHubSignParams(objectUI.id, { color: hex });
                                 }}
                                 aria-label={`Cor ${hex}`}
                                 className={`h-5 rounded border transition ${
@@ -3368,9 +2522,7 @@ export default function App() {
                             value={objectUI.hubSign.regionRadius}
                             onChange={(e) => {
                               const ed = getEditorScene();
-                              if (!ed) return;
-                              ed.updateHubSignParams(objectUI.id, { regionRadius: Number(e.target.value) });
-                              setObjectUI(ed.getObjectUIState());
+                              if (ed) ed.updateHubSignParams(objectUI.id, { regionRadius: Number(e.target.value) });
                             }}
                             className="w-full accent-cyan-400"
                           />
@@ -3516,436 +2668,40 @@ export default function App() {
       )}
 
       {/* LICENSE SYSTEM MODAL */}
-      {showLicenseModal && (
-        <div
-          className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[60] flex items-center justify-center p-2 sm:p-4"
-          onClick={() => setShowLicenseModal(false)}
-        >
-          <div
-            className="bg-slate-950 border border-cyan-500/50 max-w-3xl w-full rounded-xl sm:rounded-2xl shadow-2xl p-3.5 sm:p-6 flex flex-col max-h-[92dvh] overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start sm:items-center justify-between gap-2.5 border-b border-slate-800 pb-3 sm:pb-4 mb-3 sm:mb-4 shrink-0">
-              <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-                <div className="p-1.5 sm:p-2 bg-cyan-500/20 text-cyan-400 rounded-lg border border-cyan-500/40 shrink-0">
-                  <Award className="w-5 h-5 sm:w-6 sm:h-6" />
-                </div>
-                <div className="min-w-0">
-                  <h2 className="text-base sm:text-xl font-black text-white leading-snug">SISTEMA DE LICENÇAS</h2>
-                  <p className="text-[11px] sm:text-xs text-slate-400">
-                    Provas práticas de manobra para desbloqueio de veículos.
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowLicenseModal(false)}
-                aria-label="Fechar"
-                className="text-slate-400 hover:text-white text-sm px-2 py-1 bg-slate-900 rounded shrink-0"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 overflow-y-auto overscroll-contain flex-1 min-h-0 pr-0.5 sm:pr-1">
-              {licenses.map((lic) => {
-                const isPassed = lic.unlocked;
-
-                const badgeUrl = SpriteRegistry.getLicenseBadgeSprite(lic.id);
-
-                return (
-                  <div
-                    key={lic.id}
-                    className={`p-4 rounded-xl border flex flex-col justify-between transition ${
-                      isPassed
-                        ? 'bg-slate-900/60 border-cyan-500/40'
-                        : 'bg-slate-950/80 border-slate-800 hover:border-slate-700'
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-start gap-3 mb-3">
-                        <div className="w-14 h-14 sm:w-16 sm:h-16 shrink-0 flex items-center justify-center">
-                          <img
-                            src={badgeUrl}
-                            alt={`Emblema ${lic.name}`}
-                            referrerPolicy="no-referrer"
-                            className={`w-full h-full object-contain transition-all ${
-                              isPassed
-                                ? 'drop-shadow-[0_0_12px_rgba(34,211,238,0.3)]'
-                                : 'opacity-70 grayscale-[35%]'
-                            }`}
-                          />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
-                            <span
-                              className="px-2 py-0.5 rounded font-black text-xs font-mono"
-                              style={{ backgroundColor: `${lic.color}22`, color: lic.color, border: `1px solid ${lic.color}66` }}
-                            >
-                              {lic.badge} • {lic.level}
-                            </span>
-                            {isPassed ? (
-                              <span className="text-emerald-400 text-xs font-bold flex items-center gap-1">
-                                <CheckCircle className="w-3.5 h-3.5" /> DESBLOQUEADA
-                              </span>
-                            ) : (
-                              <span className="text-amber-400 text-xs font-bold flex items-center gap-1">
-                                <AlertTriangle className="w-3.5 h-3.5" /> EXAME PENDENTE
-                              </span>
-                            )}
-                          </div>
-
-                          <h3 className="font-bold text-sm text-white mb-0.5">{lic.name} - {lic.title}</h3>
-                          <p className="text-xs text-slate-400">{lic.description}</p>
-                        </div>
-                      </div>
-
-                      <div className="bg-slate-950 p-2.5 rounded border border-slate-850 mb-3 text-[11px] space-y-1">
-                        <div className="text-slate-300 font-semibold">{lic.exam.title}</div>
-                        <ul className="text-slate-400 list-disc list-inside space-y-0.5">
-                          {lic.exam.instructions.map((ins, i) => (
-                            <li key={i}>{ins}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => handleStartExam(lic.id)}
-                      className={`w-full py-2 rounded text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                        isPassed
-                          ? 'bg-slate-800 text-cyan-300 hover:bg-slate-700'
-                          : 'bg-cyan-500 hover:bg-cyan-400 text-black font-black shadow-lg shadow-cyan-500/20'
-                      }`}
-                    >
-                      <Play className="w-3.5 h-3.5" />
-                      {isPassed ? 'Repetir Exame Prático' : 'Realizar Exame Prático'}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="mt-3 sm:mt-4 pt-3 border-t border-slate-800 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 text-[11px] sm:text-xs shrink-0">
-              <span className="text-slate-400">Progressão por mestria pura, sem economia monetária.</span>
-              <button
-                onClick={() => LicenseSystem.getInstance().unlockAllLicenses()}
-                className="text-cyan-400 hover:underline text-left sm:text-right font-medium"
-              >
-                Desbloquear Todas (Sandbox)
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <LicensesModal
+        open={showLicenseModal}
+        onClose={() => setShowLicenseModal(false)}
+        licenses={licenses}
+        onStartExam={handleStartExam}
+      />
 
       {/* GARAGE & REGIONAL HUBS MODAL */}
-      {showGarageModal && (
-        <div
-          className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[60] flex items-center justify-center p-2 sm:p-4"
-          onClick={() => setShowGarageModal(false)}
-        >
-          <div
-            className="bg-slate-950 border border-amber-500/50 max-w-3xl w-full rounded-xl sm:rounded-2xl shadow-2xl p-3.5 sm:p-6 flex flex-col max-h-[92dvh] overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start sm:items-center justify-between gap-2.5 border-b border-slate-800 pb-3 sm:pb-4 mb-3 sm:mb-4 shrink-0">
-              <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-                <div className="p-1.5 sm:p-2 bg-amber-500/20 text-amber-400 rounded-lg border border-amber-500/40 shrink-0">
-                  <MapPin className="w-5 h-5 sm:w-6 sm:h-6" />
-                </div>
-                <div className="min-w-0">
-                  <h2 className="text-base sm:text-xl font-black text-white leading-snug">HUBS & GARAGENS</h2>
-                  <p className="text-[11px] sm:text-xs text-slate-400">
-                    Domina os hubs regionais para desbloquear modificadores de clima.
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowGarageModal(false)}
-                aria-label="Fechar"
-                className="text-slate-400 hover:text-white text-sm px-2 py-1 bg-slate-900 rounded shrink-0"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Weather Modifier Quick Bar — wraps cleanly on narrow mobile screens */}
-            <div className="bg-slate-900/80 p-2.5 sm:p-3 rounded-xl border border-slate-800 mb-3 sm:mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shrink-0">
-              <div className="min-w-0">
-                <div className="text-xs font-bold text-white">Modificadores de Ambiente</div>
-                <div className="text-[11px] text-slate-400">
-                  Dinâmico (frentes móveis e sombras de nuvens) ou clima fixo dos hubs.
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <button
-                  type="button"
-                  data-testid="btn-weather-dynamic"
-                  onClick={handleSetDynamicWeather}
-                  className={`px-2.5 sm:px-3 py-1 rounded text-[11px] sm:text-xs font-semibold transition whitespace-nowrap flex items-center gap-1 ${
-                    activeWeather === 'clear' && weatherDynamic
-                      ? 'bg-sky-400 text-slate-950 font-bold shadow-md shadow-sky-400/30'
-                      : 'bg-slate-950 text-slate-300 hover:text-white border border-slate-800'
-                  }`}
-                >
-                  <Cloud className="w-3 h-3" />
-                  Dinâmico
-                </button>
-                {(['clear', 'rain', 'storm', 'fog', 'night'] as const).map((weather) => {
-                  const unlocked = GarageSystem.getInstance().getUnlockedModifiers().includes(weather);
-                  const isActive =
-                    weather === 'clear'
-                      ? activeWeather === 'clear' && !weatherDynamic
-                      : activeWeather === weather;
-                  return (
-                    <button
-                      key={weather}
-                      data-testid={`btn-weather-${weather}`}
-                      onClick={() => handleSetWeather(weather)}
-                      disabled={!unlocked}
-                      title={unlocked ? undefined : 'Bloqueado: domina o Hub correspondente a 100%'}
-                      className={`px-2.5 sm:px-3 py-1 rounded text-[11px] sm:text-xs font-semibold capitalize transition whitespace-nowrap ${
-                        isActive
-                          ? weather === 'storm'
-                            ? 'bg-indigo-400 text-slate-950 font-bold shadow-md shadow-indigo-400/30'
-                            : 'bg-cyan-500 text-black font-bold shadow-md shadow-cyan-500/30'
-                          : unlocked
-                            ? 'bg-slate-950 text-slate-300 hover:text-white border border-slate-800'
-                            : 'bg-slate-950 text-slate-600 border border-slate-900 cursor-not-allowed'
-                      }`}
-                    >
-                      {weather === 'storm'
-                        ? 'Trovoada'
-                        : weather === 'rain'
-                          ? 'Chuva'
-                          : weather === 'fog'
-                            ? 'Nevoeiro'
-                            : weather === 'night'
-                              ? 'Noturno'
-                              : 'Limpo'}
-                      {!unlocked && ' 🔒'}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="overflow-y-auto overscroll-contain flex-1 min-h-0 pr-0.5 sm:pr-1">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-              {hubs.map((hub) => {
-                const bannerUrl = SpriteRegistry.getHubBanner(hub.id);
-                return (
-                <div
-                  key={hub.id}
-                  className={`rounded-xl border flex flex-col justify-between transition ${
-                    hub.isDominant
-                      ? 'bg-slate-900/80 border-amber-500/50 shadow-lg shadow-amber-500/10'
-                      : 'bg-slate-950/80 border-slate-800'
-                  }`}
-                >
-                  <div>
-                    {bannerUrl ? (
-                      <div className="relative h-28 sm:h-32 w-full rounded-t-xl overflow-hidden border-b border-slate-800/80">
-                        <img
-                          src={bannerUrl}
-                          alt={hub.name}
-                          referrerPolicy="no-referrer"
-                          loading="lazy"
-                          className="w-full h-full object-cover object-center"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/45 to-slate-950/15" />
-                        <div className="absolute top-2.5 left-3 right-3 flex items-center justify-between gap-2">
-                          <span
-                            className="px-2 py-0.5 rounded font-black text-[11px] font-mono bg-slate-950/92"
-                            style={{ color: hub.color, border: `1px solid ${hub.color}88` }}
-                          >
-                            {hub.badge} • HUB REGIONAL
-                          </span>
-                          {hub.isDominant ? (
-                            <span className="px-2 py-0.5 rounded bg-slate-950/85 text-amber-400 text-[11px] font-black flex items-center gap-1 animate-pulse">
-                              <Sparkles className="w-3 h-3" /> NÉON 100%
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded bg-slate-950/80 text-slate-200 text-[11px] font-mono">
-                              {hub.progress}% DOMINADO
-                            </span>
-                          )}
-                        </div>
-                        <div className="absolute bottom-2 left-3 right-3">
-                          <h3 className="font-bold text-base text-white drop-shadow leading-tight">{hub.name}</h3>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="px-4 pt-4">
-                        <div className="flex items-center justify-between mb-2">
-                          <span
-                            className="px-2 py-0.5 rounded font-black text-xs font-mono"
-                            style={{ backgroundColor: `${hub.color}22`, color: hub.color, border: `1px solid ${hub.color}66` }}
-                          >
-                            {hub.badge} • HUB REGIONAL
-                          </span>
-                          {hub.isDominant ? (
-                            <span className="text-amber-400 text-xs font-black flex items-center gap-1 animate-pulse">
-                              <Sparkles className="w-3.5 h-3.5" /> SINAL NÉON ATIVO (100%)
-                            </span>
-                          ) : (
-                            <span className="text-slate-400 text-xs font-mono">{hub.progress}% DOMINADO</span>
-                          )}
-                        </div>
-                        <h3 className="font-bold text-base text-white mb-1">{hub.name}</h3>
-                      </div>
-                    )}
-
-                    <div className="p-4 pt-3">
-                      <p className="text-xs text-slate-400 mb-3">{hub.description}</p>
-
-                      {/* Progress Bar */}
-                      <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden mb-3 border border-slate-800">
-                        <div
-                          className="h-full transition-all"
-                          style={{
-                            width: `${hub.progress}%`,
-                            backgroundColor: hub.color,
-                          }}
-                        />
-                      </div>
-
-                      {/* Regional Contracts */}
-                      <div className="space-y-1.5">
-                        <div className="text-[11px] font-mono text-slate-300 font-semibold">Contratos Regionais:</div>
-                        {hub.contracts.map((c) => (
-                          <div
-                            key={c.id}
-                            className="flex items-center justify-between text-xs bg-slate-950 p-2 rounded border border-slate-850"
-                          >
-                            <div>
-                              <div className="text-slate-200 font-medium">{c.title}</div>
-                              <div className="text-[10px] text-slate-400">{c.cargoDescription}</div>
-                            </div>
-                            {c.completed ? (
-                              <span className="text-emerald-400 text-[11px] font-bold">Concluído</span>
-                            ) : (
-                              <button
-                                onClick={() => {
-                                  GarageSystem.getInstance().completeContract(c.id);
-                                  handleReset();
-                                }}
-                                className="text-[11px] bg-amber-500/20 text-amber-300 px-2 py-1 rounded border border-amber-500/50 hover:bg-amber-500 hover:text-black font-semibold"
-                              >
-                                Entregar (+{c.rewardProgress}%)
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="px-4 py-2.5 border-t border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
-                    <span>Desbloqueia: Peças de bioma + {hub.unlockedModifier}</span>
-                    <button
-                      onClick={() => GarageSystem.getInstance().addProgress(hub.id, 25)}
-                      className="text-amber-400 hover:underline"
-                    >
-                      +25% Progresso
-                    </button>
-                  </div>
-                </div>
-                );
-              })}
-              </div>
-            </div>
-
-            <div className="mt-3 sm:mt-4 pt-3 border-t border-slate-800 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 text-[11px] sm:text-xs shrink-0">
-              <span className="text-slate-400">Dominar a 100% ativa sinais néon no mapa e clima regional.</span>
-              <button
-                onClick={() => {
-                  GarageSystem.getInstance().dominateAllHubs();
-                  addToast('Todos os hubs dominados — sinais néon, biomas e meteorologia desbloqueados', 'success', 2800);
-                }}
-                className="text-amber-400 hover:underline text-left sm:text-right font-medium"
-              >
-                Dominar Todos (100% Instantâneo)
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <GaragesModal
+        open={showGarageModal}
+        onClose={() => setShowGarageModal(false)}
+        hubs={hubs}
+        activeWeather={activeWeather}
+        weatherDynamic={weatherDynamic}
+        onSetDynamicWeather={handleSetDynamicWeather}
+        onSetWeather={handleSetWeather}
+        onContractCompleted={handleReset}
+        onDominateAll={() => {
+          GarageSystem.getInstance().dominateAllHubs();
+          addToast('Todos os hubs dominados — sinais néon, biomas e meteorologia desbloqueados', 'success', 2800);
+        }}
+      />
 
       {/* JSON EXPORT & IMPORT MODAL */}
-      {showJsonModal && (
-        <div
-          className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[60] flex items-center justify-center p-2 sm:p-4"
-          onClick={() => setShowJsonModal(false)}
-        >
-          <div
-            className="bg-slate-950 border border-slate-700 max-w-2xl w-full rounded-xl sm:rounded-2xl shadow-2xl p-3.5 sm:p-6 flex flex-col max-h-[92dvh] overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-3 mb-2.5 sm:mb-3 shrink-0">
-              <div className="flex items-center gap-2 min-w-0">
-                <FileCode className="w-5 h-5 text-cyan-400 shrink-0" />
-                <h3 className="font-bold text-white text-sm sm:text-base truncate">Exportar / Importar Mapa JSON</h3>
-              </div>
-              <button
-                onClick={() => setShowJsonModal(false)}
-                aria-label="Fechar"
-                className="text-slate-400 hover:text-white text-sm px-2 py-1 bg-slate-900 rounded shrink-0"
-              >
-                ✕
-              </button>
-            </div>
-
-            {jsonError && (
-              <div className="bg-red-950/80 border border-red-500 text-red-200 p-2 rounded text-xs mb-2.5 shrink-0">
-                {jsonError}
-              </div>
-            )}
-
-            <p className="text-[11px] sm:text-xs text-slate-400 mb-2 shrink-0">
-              Edita diretamente ou cola os dados JSON do mapa. Podes descarregar ou copiar para partilha.
-            </p>
-
-            <textarea
-              value={jsonContent}
-              onChange={(e) => setJsonContent(e.target.value)}
-              className="w-full flex-1 min-h-[180px] sm:min-h-[300px] bg-slate-900 text-cyan-300 font-mono text-xs p-2.5 sm:p-3 rounded border border-slate-800 focus:border-cyan-400 outline-none resize-none"
-            />
-
-            <div className="mt-3 sm:mt-4 pt-3 border-t border-slate-800 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 shrink-0">
-              <div className="flex gap-2">
-                <button
-                  onClick={handleDownloadJSON}
-                  className="flex-1 sm:flex-initial justify-center px-3 py-2 rounded bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white flex items-center gap-1.5"
-                >
-                  <Download className="w-4 h-4" /> .json
-                </button>
-                <button
-                  onClick={handleCopyJSON}
-                  className="flex-1 sm:flex-initial justify-center px-3 py-2 rounded bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-cyan-300 flex items-center gap-1.5"
-                >
-                  <Copy className="w-4 h-4" /> Copiar JSON
-                </button>
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setShowJsonModal(false)}
-                  className="flex-1 sm:flex-initial px-4 py-2 rounded bg-slate-900 hover:bg-slate-800 text-xs text-slate-300"
-                >
-                  Fechar
-                </button>
-                <button
-                  onClick={handleApplyImport}
-                  className="flex-1 sm:flex-initial justify-center px-4 py-2 rounded bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-cyan-500/20"
-                >
-                  <Upload className="w-4 h-4" /> Aplicar
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <JsonMapModal
+        open={showJsonModal}
+        onClose={() => setShowJsonModal(false)}
+        jsonContent={jsonContent}
+        onChangeJsonContent={setJsonContent}
+        jsonError={jsonError}
+        onDownload={handleDownloadJSON}
+        onCopy={handleCopyJSON}
+        onApply={handleApplyImport}
+      />
 
       {/* PHASE 3 PROGRESSION MODALS */}
       <MissionsModal
@@ -4032,39 +2788,7 @@ export default function App() {
         onSwapTruck={handleSwapTruck}
       />
 
-      {/* TOASTS (coupling/mission feedback + persistent <=20% low-fuel reserve toaster; kept clear of Minimap & Mission Banner) */}
-      {!isEditorMode && (
-        <div
-          className={`absolute ${
-            telemetry.activeMission ? 'top-[132px] sm:top-[140px] lg:top-[132px]' : 'top-[58px]'
-          } left-2 right-[134px] sm:right-[170px] lg:inset-x-0 z-40 flex flex-col items-start lg:items-center gap-1.5 pointer-events-none lg:px-4`}
-        >
-          {telemetry.fuelPercent <= 20 && !telemetry.isOutOfFuel && (
-            <div className="px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg border shadow-lg text-[11px] sm:text-xs font-bold bg-red-950/95 border-amber-400/90 text-amber-100 shadow-amber-500/30 animate-pulse">
-              ⛽ Combustível na reserva ({Math.round(telemetry.fuelPercent)}% ≤ 20%) — abasteça numa bomba
-            </div>
-          )}
-          {toasts.map((t) => (
-            <div
-              key={t.id}
-              onClick={() => setToasts((cur) => cur.filter((x) => x.id !== t.id))}
-              title="Toque para fechar"
-              className={`pointer-events-auto cursor-pointer px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg border shadow-lg text-[11px] sm:text-xs font-bold max-w-full lg:max-w-lg ${
-                t.kind === 'fuel'
-                  ? 'bg-red-950/95 border-red-400/80 text-red-100 shadow-red-500/30'
-                  : t.kind === 'blocked'
-                    ? 'bg-amber-950/90 border-amber-500/60 text-amber-200 shadow-amber-500/20'
-                    : t.kind === 'success'
-                      ? 'bg-emerald-950/90 border-emerald-500/60 text-emerald-200 shadow-emerald-500/20'
-                      : 'bg-slate-900/90 border-cyan-500/50 text-cyan-100 shadow-cyan-500/20'
-              }`}
-            >
-              {t.kind === 'fuel' ? '⛽ ' : t.kind === 'blocked' ? '🔒 ' : t.kind === 'success' ? '✅ ' : 'ℹ️ '}
-              {t.text}
-            </div>
-          ))}
-        </div>
-      )}
+
 
       {/* TOUCH CONTROLS (STEERING WHEEL LEFT, THROTTLE & BRAKE RIGHT) */}
       <TouchControls
