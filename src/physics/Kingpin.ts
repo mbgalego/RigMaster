@@ -1,4 +1,10 @@
 import Phaser from 'phaser';
+import {
+  normalizeAngleRad,
+  radToDeg,
+  computeSoftMechanicalLock,
+  computeArticulationGeometry,
+} from './kingpinMath';
 
 export interface KingpinOptions {
   parentOffset?: { x: number; y: number };
@@ -63,67 +69,38 @@ export class Kingpin {
   }
 
   public getArticulationAngle(): { rad: number; deg: number } {
-    let diff = this.trailerBody.angle - this.parentBody.angle;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    while (diff < -Math.PI) diff += Math.PI * 2;
-    return { rad: diff, deg: Phaser.Math.RadToDeg(diff) };
+    const diff = normalizeAngleRad(this.trailerBody.angle - this.parentBody.angle);
+    return { rad: diff, deg: radToDeg(diff) };
   }
 
-  public update(isReversing: boolean, speed: number): ArticulationTelemetry {
-    const { rad: angleRad, deg: angleDeg } = this.getArticulationAngle();
-    const absAngleDeg = Math.abs(angleDeg);
-
-    const isJackknifed = isReversing && absAngleDeg >= this.jackknifeLimitDeg;
-    // Mechanical physical limit (trailer apron contact against tractor chassis)
-    const isMechanicalLocked = isReversing && absAngleDeg >= this.mechanicalLockDeg;
-
-    const jackknifeSeverity = Phaser.Math.Clamp(
-      (absAngleDeg - (this.jackknifeLimitDeg - 20)) / 20,
-      0,
-      1.5
+  public update(isReversing: boolean, _speed: number): ArticulationTelemetry {
+    // Progressive soft mechanical contact limit in reverse past mechanicalLockDeg.
+    // Forward pulling NEVER locks, ensuring smooth, natural articulation through any corner.
+    const lock = computeSoftMechanicalLock(
+      this.parentBody.angle,
+      this.trailerBody.angle,
+      this.trailerBody.angularVelocity,
+      this.mechanicalLockDeg,
+      isReversing,
     );
-
-    // Only apply mechanical contact limit in reverse at extreme angle (> 92-95 deg).
-    // Forward pulling NEVER locks, ensuring smooth, non-slip natural articulation through any corner.
-    if (isReversing && absAngleDeg > this.mechanicalLockDeg) {
-      const sign = Math.sign(angleDeg) || 1;
-      const lockedDiffRad = Phaser.Math.DegToRad(sign * this.mechanicalLockDeg);
-      const clampedTrailerAngle = this.parentBody.angle + lockedDiffRad;
-      this.scene.matter.body.setAngle(this.trailerBody, clampedTrailerAngle);
+    if (lock.applied) {
+      this.scene.matter.body.setAngle(this.trailerBody, lock.nextTrailerAngleRad);
+      this.scene.matter.body.setAngularVelocity(this.trailerBody, lock.nextAngularVelocity);
     }
 
-    // Geometry data
-    const trailerAngle = this.trailerBody.angle;
-    const angularVelocity = this.trailerBody.angularVelocity;
-    const tailSwingOffsetPx = angularVelocity * this.rearOverhang * 20;
-
-    const rearBumperDist = this.trailerLength / 2;
-    const rearCenterX = this.trailerBody.position.x - Math.sin(trailerAngle) * rearBumperDist;
-    const rearCenterY = this.trailerBody.position.y + Math.cos(trailerAngle) * rearBumperDist;
-
-    const sweepSign = Math.sign(angleRad) || 1;
-    const halfWidth = 24;
-    const tailSwingWorldX = rearCenterX + Math.cos(trailerAngle) * (halfWidth * sweepSign);
-    const tailSwingWorldY = rearCenterY + Math.sin(trailerAngle) * (halfWidth * sweepSign);
-
-    const axleDist = this.rearAxleOffset;
-    const axleCenterX = this.trailerBody.position.x - Math.sin(trailerAngle) * axleDist;
-    const axleCenterY = this.trailerBody.position.y + Math.cos(trailerAngle) * axleDist;
-
-    const wheelbase = this.trailerLength * 0.72;
-    const offTrackingDeltaPx = wheelbase * Math.sin(Math.abs(angleRad));
-
-    return {
-      angleDeg,
-      angleRad,
-      isJackknifed,
-      isMechanicalLocked,
-      jackknifeSeverity,
-      tailSwingOffsetPx,
-      tailSwingWorldPos: { x: tailSwingWorldX, y: tailSwingWorldY },
-      offTrackingDeltaPx,
-      offTrackingWorldPos: { x: axleCenterX, y: axleCenterY },
-    };
+    return computeArticulationGeometry({
+      parentAngleRad: this.parentBody.angle,
+      trailerAngleRad: this.trailerBody.angle,
+      trailerPosX: this.trailerBody.position.x,
+      trailerPosY: this.trailerBody.position.y,
+      trailerAngularVelocity: this.trailerBody.angularVelocity,
+      trailerLength: this.trailerLength,
+      rearAxleOffset: this.rearAxleOffset,
+      rearOverhang: this.rearOverhang,
+      jackknifeLimitDeg: this.jackknifeLimitDeg,
+      mechanicalLockDeg: this.mechanicalLockDeg,
+      isReversing,
+    });
   }
 
   public renderDebug(telemetry: ArticulationTelemetry, showDebug: boolean) {

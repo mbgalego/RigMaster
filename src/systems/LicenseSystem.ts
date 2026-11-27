@@ -1,3 +1,5 @@
+import { SaveManager, SAVE_KEYS } from './SaveManager';
+
 export type LicenseId = 'C' | 'CE' | 'H' | 'X';
 
 /** Shared hex color palette per license class (used by UI badges and parking pads). */
@@ -395,31 +397,19 @@ export class LicenseSystem {
   }
 
   private saveProgress() {
-    try {
-      if (typeof localStorage === 'undefined') return;
-      const state = Object.fromEntries(
-        Object.entries(this.licenses).map(([k, v]) => [k, v.unlocked])
-      );
-      localStorage.setItem('rigmaster_licenses', JSON.stringify(state));
-    } catch {
-      // Ignore storage error
-    }
+    const state = Object.fromEntries(
+      Object.entries(this.licenses).map(([k, v]) => [k, v.unlocked])
+    );
+    SaveManager.writeJson(SAVE_KEYS.licenses, state);
   }
 
   private loadProgress() {
-    try {
-      if (typeof localStorage === 'undefined') return;
-      const raw = localStorage.getItem('rigmaster_licenses');
-      if (!raw) return;
-      const state = JSON.parse(raw);
-      if (!state || typeof state !== 'object' || Array.isArray(state)) return;
-      for (const [key, val] of Object.entries(state as Record<string, unknown>)) {
-        if (key in this.licenses && typeof val === 'boolean') {
-          this.licenses[key as LicenseId].unlocked = val;
-        }
+    const state = SaveManager.readJson<unknown>(SAVE_KEYS.licenses);
+    if (!state || typeof state !== 'object' || Array.isArray(state)) return;
+    for (const [key, val] of Object.entries(state as Record<string, unknown>)) {
+      if (key in this.licenses && typeof val === 'boolean') {
+        this.licenses[key as LicenseId].unlocked = val;
       }
-    } catch {
-      // Ignore corrupted storage
     }
   }
 }

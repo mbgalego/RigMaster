@@ -41,6 +41,8 @@ import {
 } from '../systems/TruckCatalog';
 import { ParkedTruckManager } from '../systems/ParkedTruckManager';
 import { AudioEngine } from '../systems/AudioEngine';
+import { WeatherRenderer } from '../systems/WeatherRenderer';
+import { ExamController } from '../systems/ExamController';
 import { COLLISION_CAT, COLLISION_MASK } from '../physics/CollisionLayers';
 import {
   TruckDamageState,
@@ -210,42 +212,22 @@ export class MainScene extends Phaser.Scene {
   private windTurbineGraphics: Phaser.GameObjects.Graphics | null = null;
   private impactGraphicsDirty: boolean = false;
   private pumpGraphicsDirty: boolean = false;
-  private weatherGraphicsDirty: boolean = false;
   private impactSparks: Array<{ x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: number; size: number }> = [];
   private lastEngineSmokeAt: number = 0;
   private jackknifeWearTimer: number = 0;
   private currentGForce: number = 0;
   private peakGForce: number = 0;
 
-  // Environmental layers (drifting ground cloud shadows, volumetric fog wisps, radial-cutout fog, slanted rain streaks)
-  private weatherGraphics!: Phaser.GameObjects.Graphics;
-  private cloudShadowSprites: Phaser.GameObjects.Image[] = [];
-  private fogWispSprites: Phaser.GameObjects.Image[] = [];
-  private fogVignetteSprite: Phaser.GameObjects.Image | null = null;
-  private rainParticles: Array<{ x: number; y: number; speed: number; length: number }> = [];
+  // Environmental layers (drifting ground cloud shadows, volumetric fog wisps, radial-cutout fog, slanted rain streaks, lightning)
+  private weatherRenderer: WeatherRenderer | null = null;
   private localWeather: LocalWeatherSample = WeatherSystem.getInstance().getLatestSample();
   private lastAppliedSurfaceGrip: number = 1.0;
 
-  // Dynamic thunderstorm state (lightning double-flashes, forked bolts & speed-of-sound thunder delays)
-  private lightningCooldownSec: number = 1.6;
-  private lightningFlashAlpha: number = 0;
-  private lightningRestrikeDelay: number = 0;
-  private lightningRestrikeAmp: number = 0;
-  private lightningBoltTimer: number = 0;
-  private lightningBoltSegments: Array<{ x1: number; y1: number; x2: number; y2: number; width: number }> = [];
-  private pendingThunders: Array<{ delaySec: number; distanceNorm: number }> = [];
-  private wasInStorm: boolean = false;
-
   // Exam target dock handling (marker + guaranteed physical dock at the exam's coordinates)
-  private examTargetMarker: Phaser.GameObjects.Graphics | null = null;
-  private examTargetLabel: Phaser.GameObjects.Text | null = null;
-  private preparedExamId: LicenseId | null = null;
-  private preExamWeather: WeatherModifier | null = null;
+  private examController: ExamController | null = null;
   // Cumulative collision counters (truck + lead trailer + pup trailer) at exam start:
   // updateExam counts only collisions occurring DURING the exam.
   private examCollisionBaseline: number = 0;
-  // Road-snapped world position of the current exam dock (the real pass target)
-  private examDockWorld: LicenseExam['targetDock'] | null = null;
 
   // Dynamic HUB neon sign overlays + labels (driven by editable `hub_sign` world objects)
   private hubSignsGraphics: Phaser.GameObjects.Graphics | null = null;
@@ -564,6 +546,10 @@ export class MainScene extends Phaser.Scene {
       this.unsubReputation?.();
       this.unsubReputation = null;
       this.audio.dispose();
+      this.weatherRenderer?.destroy();
+      this.weatherRenderer = null;
+      this.examController?.destroy();
+      this.examController = null;
       if (this.pupKingpin) {
         this.pupKingpin.destroy();
         this.pupKingpin = null;
@@ -706,11 +692,15 @@ export class MainScene extends Phaser.Scene {
       }
     });
 
-    // 4. Weather Layers (world-anchored cloud shadows, radial-cutout fog, screen rain)
-    this.initWeatherLayers();
-    this.weatherGraphics = this.add.graphics().setLighting(false);
-    this.weatherGraphics.setDepth(20);
-    this.weatherGraphics.setScrollFactor(0); // Fixed to screen
+    // 4. Weather Layers & Exam Controller
+    this.weatherRenderer = new WeatherRenderer(this, this.weatherSystem, this.audio);
+    this.examController = new ExamController(
+      this,
+      this.licenseSystem,
+      this.garageSystem,
+      this.roadNetwork,
+      this.world,
+    );
 
     // 4b. Minimap HUD (dedicated overlay scene so camera zoom never scales it)
     this.createMinimap();
@@ -2360,6 +2350,34 @@ export class MainScene extends Phaser.Scene {
     t.isReversing = false;
     t.update(16, false); // reset lamps to idle
     TrailerManager.getInstance(this).release(t);
+
+    // Edge-case #18: if the player decouples the required trailer during an active mission,
+    // lock the GPS/minimap pickup beacon directly onto this detached trailer and notify them clearly.
+    const activeMission = this.missionSystem?.getActiveMission();
+    if (activeMission) {
+      const mType = activeMission.mission.trailerType;
+      const expectedPup: TrailerType | null =
+        mType === 'bitrem_tanker_lead'
+          ? 'bitrem_tanker_pup'
+          : mType === 'bitrem_lead'
+            ? 'bitrem_pup'
+            : null;
+      if (isPup && expectedPup && t.type === expectedPup) {
+        this.missionPickupPup = t;
+        this.setCouplingNotice(
+          'Reboque traseiro da missão desengatado — volte a engatar para concluir a entrega',
+          'blocked',
+          4500,
+        );
+      } else if (!isPup && t.type === mType) {
+        this.missionPickupLead = t;
+        this.setCouplingNotice(
+          'Atrelado da missão desengatado — siga o marcador âmbar para voltar a engatar',
+          'blocked',
+          4500,
+        );
+      }
+    }
   }
 
   /**
@@ -2638,7 +2656,14 @@ export class MainScene extends Phaser.Scene {
     this.world.update(delta);
 
     // Keep exam target dock (marker + painted dock tile) in sync with the active exam
-    this.syncExamTarget(time);
+    this.examController?.syncExamTarget(time, {
+      getTotalRigCollisions: () => this.getTotalRigCollisions(),
+      onExamPrepared: () => {
+        this.examCollisionBaseline = this.getTotalRigCollisions();
+        this.currentGForce = 0;
+        this.peakGForce = 0;
+      },
+    });
 
     // Keep Matter bridge ramp walls / deck guardrails synced with roadNetwork edits
     this.syncBridgeBarriers();
@@ -3269,7 +3294,21 @@ export class MainScene extends Phaser.Scene {
 
     // Real Phaser 4 WebGL dynamic lighting & atmospheric weather
     this.updateWebGLLighting(timeSnap, cam);
-    this.renderWeather(time, delta, timeSnap);
+    this.weatherRenderer?.render(
+      time,
+      delta,
+      timeSnap,
+      this.localWeather,
+      this.isEditorMode,
+      this.truck
+        ? {
+            x: this.truck.body.position.x,
+            y: this.truck.body.position.y,
+            angle: this.truck.body.angle,
+            headlightMode: this.truck.headlightMode,
+          }
+        : null,
+    );
   }
 
   private normalizeAngleDiffDeg(actualRad: number, requiredDeg: number): number {
@@ -3286,7 +3325,7 @@ export class MainScene extends Phaser.Scene {
     // For bitrem rigs, BOTH lead and pup trailers must be inside the dock zone and aligned.
     const exam = this.licenseSystem.getActiveExam();
     if (exam.active && exam.licenseId) {
-      const td = this.examDockWorld || this.licenseSystem.getLicense(exam.licenseId).exam.targetDock;
+      const td = this.examController?.getExamDockWorld() || this.licenseSystem.getLicense(exam.licenseId).exam.targetDock;
       const radius = Math.max(td.width, td.height) / 2 + 25;
       const dist = Phaser.Math.Distance.Between(checkBody.position.x, checkBody.position.y, td.x, td.y);
       if (dist < radius) {
@@ -3397,11 +3436,11 @@ export class MainScene extends Phaser.Scene {
       const originHubPos = this.garageSystem.getHub(active.mission.originHub).locationWorld;
       const mgr = TrailerManager.getInstance(this);
 
-      // 1. If we already have a dedicated live pickup trailer for this mission, lock onto it directly.
+      // 1. If we already have a dedicated live pickup trailer for this mission (initial spawn or just decoupled), lock onto it directly.
       let targetTrailer: Trailer | null = null;
       if (needsPupOnly && mgr.isLoose(this.missionPickupPup)) {
         targetTrailer = this.missionPickupPup;
-      } else if (!needsPupOnly && !active.hasPickedUpOnce && mgr.isLoose(this.missionPickupLead)) {
+      } else if (!needsPupOnly && mgr.isLoose(this.missionPickupLead)) {
         targetTrailer = this.missionPickupLead;
       }
 
@@ -3512,112 +3551,7 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
-  // ==========================================
-  // EXAM TARGET DOCK (MARKER + PHYSICAL DOCK)
-  // ==========================================
 
-  /**
-   * Ensures the active exam has a visible marker and a physically painted dock at its
-   * target coordinates; applies & restores Exam X rain weather cleanly.
-   */
-  private syncExamTarget(time: number) {
-    const exam = this.licenseSystem.getActiveExam();
-
-    if (exam.active && exam.licenseId) {
-      const lic = this.licenseSystem.getLicense(exam.licenseId);
-
-      if (this.preparedExamId !== exam.licenseId) {
-        this.preparedExamId = exam.licenseId;
-        this.examCollisionBaseline = this.getTotalRigCollisions();
-        this.currentGForce = 0;
-        this.peakGForce = 0;
-        if (exam.licenseId === 'X') {
-          if (this.preExamWeather === null) {
-            this.preExamWeather = this.garageSystem.getActiveModifier();
-          }
-          this.garageSystem.setActiveModifier('rain');
-        }
-        this.prepareExamTargetDock(lic.exam.targetDock);
-      }
-      if (this.examDockWorld) {
-        this.renderExamTargetMarker(this.examDockWorld, time);
-      }
-    } else if (this.preparedExamId) {
-      if (this.preExamWeather !== null) {
-        const restore = this.preExamWeather;
-        this.preExamWeather = null;
-        this.garageSystem.setActiveModifier(restore);
-      }
-      this.preparedExamId = null;
-      this.examDockWorld = null;
-      this.world.objects.removeExamDock();
-      this.examTargetMarker?.destroy();
-      this.examTargetMarker = null;
-      this.examTargetLabel?.destroy();
-      this.examTargetLabel = null;
-    }
-  }
-
-  /**
-   * The exam's targetDock coordinates are authored independently of the world,
-   * so the exam dock is snapped to the nearest vector-road point and placed on
-   * its shoulder (long side parallel to the road). The snapped world position
-   * becomes the real exam target; the dock itself is a temporary prefab that
-   * disappears when the exam ends.
-   */
-  private prepareExamTargetDock(td: LicenseExam['targetDock']) {
-    const np = this.roadNetwork.query(td.x, td.y, 4096);
-    let cx = td.x;
-    let cy = td.y;
-    let angle = Phaser.Math.DegToRad(td.requiredAngleDeg);
-    if (np) {
-      // Long axis of the dock parallels the road; sit on the right shoulder
-      const off = np.width / 2 + Math.min(td.width, td.height) / 2 + 24;
-      cx = np.px + -np.ty * off;
-      cy = np.py + np.tx * off;
-      angle = Math.atan2(np.ty, np.tx) + Math.PI / 2;
-    }
-    this.world.objects.addExamDock(cx, cy, td.width, td.height, angle);
-
-    this.examDockWorld = {
-      x: cx,
-      y: cy,
-      width: td.width,
-      height: td.height,
-      requiredAngleDeg: td.requiredAngleDeg,
-      angleToleranceDeg: td.angleToleranceDeg,
-    };
-  }
-
-  /**
-   * Pulsing highlighted outline showing the player where the exam's target dock is.
-   */
-  private renderExamTargetMarker(td: LicenseExam['targetDock'], time: number) {
-    if (!this.examTargetMarker) {
-      this.examTargetMarker = this.add.graphics();
-      this.examTargetMarker.setDepth(12);
-    }
-    if (!this.examTargetLabel) {
-      this.examTargetLabel = this.add.text(td.x, td.y - td.height / 2 - 34, 'DOCA DO EXAME', {
-        fontFamily: 'monospace',
-        fontSize: '22px',
-        color: '#22d3ee',
-        backgroundColor: '#0f172acc',
-        padding: { x: 8, y: 4 },
-      });
-      this.examTargetLabel.setOrigin(0.5);
-      this.examTargetLabel.setDepth(12);
-    }
-
-    const g = this.examTargetMarker;
-    g.clear();
-    const pulse = 0.55 + Math.sin(time * 0.005) * 0.25;
-    g.lineStyle(4, 0x22d3ee, pulse);
-    g.strokeRect(td.x - (td.width + 40) / 2, td.y - (td.height + 40) / 2, td.width + 40, td.height + 40);
-    g.lineStyle(2, 0x22d3ee, 0.5);
-    g.strokeRect(td.x - td.width / 2, td.y - td.height / 2, td.width, td.height);
-    this.examTargetLabel.setPosition(td.x, td.y - td.height / 2 - 34);
-  }
 
   // ==========================================
   // VECTOR ROAD RENDERER (Phase 1)
@@ -4574,7 +4508,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   public getExamDockWorld(): LicenseExam['targetDock'] | null {
-    return this.examDockWorld;
+    return this.examController?.getExamDockWorld() ?? null;
   }
 
   public getMinimapRect(): { x: number; y: number; width: number; height: number } {
@@ -4671,7 +4605,7 @@ export class MainScene extends Phaser.Scene {
       g = Math.round(g * Math.max(0.62, gMul));
       b = Math.round(b * Math.max(0.74, bMul));
     }
-    const flashBoost = Phaser.Math.Clamp(this.lightningFlashAlpha * 1.45, 0, 0.92);
+    const flashBoost = Phaser.Math.Clamp((this.weatherRenderer?.getLightningFlashAlpha() ?? 0) * 1.45, 0, 0.92);
     if (flashBoost > 0.01) {
       r = Math.round(Phaser.Math.Linear(r, 224, flashBoost));
       g = Math.round(Phaser.Math.Linear(g, 238, flashBoost));
@@ -4855,504 +4789,11 @@ export class MainScene extends Phaser.Scene {
   }
 
   /**
-   * Generates lightweight procedural CanvasTextures once for:
-   * 1. Soft multi-lobe cloud shadow puff (`cloud_shadow_puff`, 128×128) rendered as
-   *    batched world-space Image sprites (zero TileSprite shader overhead, crisp sunlit gaps)
-   * 2. Radial-cutout atmospheric fog mask (`fog_cutout_mask`, 256×256) that keeps
-   *    the truck, trailer, and immediate road crystal clear while misting the perimeter.
-   */
-  private initWeatherLayers() {
-    const w = Math.max(1, this.scale.width);
-    const h = Math.max(1, this.scale.height);
-
-    if (!this.textures.exists('cloud_shadow_puff')) {
-      const size = 128;
-      const tex = this.textures.createCanvas('cloud_shadow_puff', size, size);
-      if (tex) {
-        const ctx = tex.getContext();
-        ctx.clearRect(0, 0, size, size);
-        // Organic 4-lobe cumulus silhouette with feathered radial edges
-        const lobes: Array<[number, number, number, number]> = [
-          [64, 64, 46, 0.72],
-          [44, 68, 34, 0.54],
-          [86, 62, 32, 0.52],
-          [60, 48, 30, 0.46],
-        ];
-        for (const [cx, cy, r, peak] of lobes) {
-          const grad = ctx.createRadialGradient(cx, cy, r * 0.1, cx, cy, r);
-          grad.addColorStop(0, `rgba(11, 20, 38, ${peak.toFixed(2)})`);
-          grad.addColorStop(0.55, `rgba(15, 23, 42, ${(peak * 0.48).toFixed(2)})`);
-          grad.addColorStop(1, 'rgba(15, 23, 42, 0)');
-          ctx.fillStyle = grad;
-          ctx.beginPath();
-          ctx.arc(cx, cy, r, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        tex.refresh();
-      }
-    }
-
-    if (!this.textures.exists('fog_wisp_puff')) {
-      const size = 256;
-      const tex = this.textures.createCanvas('fog_wisp_puff', size, size);
-      if (tex) {
-        const ctx = tex.getContext();
-        ctx.clearRect(0, 0, size, size);
-        const lobes: Array<[number, number, number, number]> = [
-          [128, 128, 108, 0.55],
-          [82, 134, 82, 0.42],
-          [176, 122, 78, 0.40],
-          [118, 92, 72, 0.36],
-          [148, 160, 70, 0.34],
-        ];
-        for (const [cx, cy, r, peak] of lobes) {
-          const grad = ctx.createRadialGradient(cx, cy, r * 0.08, cx, cy, r);
-          grad.addColorStop(0, `rgba(255, 255, 255, ${peak.toFixed(2)})`);
-          grad.addColorStop(0.55, `rgba(255, 255, 255, ${(peak * 0.44).toFixed(2)})`);
-          grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-          ctx.fillStyle = grad;
-          ctx.beginPath();
-          ctx.arc(cx, cy, r, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        tex.refresh();
-      }
-    }
-
-    if (!this.textures.exists('fog_cutout_mask')) {
-      const size = 512;
-      const tex = this.textures.createCanvas('fog_cutout_mask', size, size);
-      if (tex) {
-        const ctx = tex.getContext();
-        const half = size / 2;
-        // Pure white RGB so setTint() cleanly controls daytime mist vs moonlight night fog.
-        // Outer gradient reaches solid opacity at 0.72*half so all 4 viewport corners stay seamlessly fogged
-        // while keeping the driving pocket right around the truck & immediate lane readable.
-        const grad = ctx.createRadialGradient(half, half, half * 0.03, half, half, half * 0.60);
-        grad.addColorStop(0, 'rgba(255, 255, 255, 0.20)');
-        grad.addColorStop(0.22, 'rgba(255, 255, 255, 0.30)');
-        grad.addColorStop(0.46, 'rgba(255, 255, 255, 0.70)');
-        grad.addColorStop(0.72, 'rgba(255, 255, 255, 0.93)');
-        grad.addColorStop(1, 'rgba(255, 255, 255, 1.0)');
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, size, size);
-        tex.refresh();
-      }
-    }
-
-    // Pool of 5 world-space drifting cloud shadow clusters (standard batched Images, depth 14)
-    this.cloudShadowSprites = [];
-    for (let i = 0; i < 5; i++) {
-      const img = this.add
-        .image(0, 0, 'cloud_shadow_puff')
-        .setOrigin(0.5, 0.5)
-        .setDepth(14)
-        .setLighting(false)
-        .setAlpha(0)
-        .setVisible(false);
-      this.cloudShadowSprites.push(img);
-    }
-
-    // Pool of 6 world-space drifting volumetric fog banks (depth 18.6 — above trees/bridges, below fog veil)
-    this.fogWispSprites = [];
-    for (let i = 0; i < 6; i++) {
-      const img = this.add
-        .image(0, 0, 'fog_wisp_puff')
-        .setOrigin(0.5, 0.5)
-        .setDepth(18.6)
-        .setLighting(false)
-        .setAlpha(0)
-        .setVisible(false);
-      this.fogWispSprites.push(img);
-    }
-
-    this.fogVignetteSprite = this.add
-      .image(w / 2, h / 2, 'fog_cutout_mask')
-      .setOrigin(0.5, 0.5)
-      .setScrollFactor(0)
-      .setDepth(19)
-      .setLighting(false)
-      .setDisplaySize(Math.hypot(w, h) * 1.25, Math.hypot(w, h) * 1.25)
-      .setAlpha(0)
-      .setVisible(false);
-
-    const onWeatherResize = (gameSize: Phaser.Structs.Size) => {
-      if (!this.sys?.isActive()) return;
-      const nw = Math.max(1, gameSize.width);
-      const nh = Math.max(1, gameSize.height);
-      const span = Math.hypot(nw, nh) * 1.25;
-      this.fogVignetteSprite?.setDisplaySize(span, span);
-    };
-    this.scale.on('resize', onWeatherResize);
-    this.events.once('shutdown', () => this.scale.off('resize', onWeatherResize));
-    this.events.once('destroy', () => this.scale.off('resize', onWeatherResize));
-  }
-
-  private renderWeather(time: number, delta: number, snap: TimeOfDaySnapshot) {
-    const g = this.weatherGraphics;
-    const w = this.scale.width;
-    const h = this.scale.height;
-
-    // Keep Map Editor completely crisp and unobstructed
-    if (this.isEditorMode) {
-      for (const s of this.cloudShadowSprites) s.setVisible(false);
-      for (const s of this.fogWispSprites) s.setVisible(false);
-      this.fogVignetteSprite?.setVisible(false);
-      if (this.weatherGraphicsDirty) {
-        g.clear();
-        this.weatherGraphicsDirty = false;
-      }
-      return;
-    }
-
-    const lw = this.localWeather;
-    const cam = this.cameras.main;
-    const dt = Math.min(delta / 1000, 0.05);
-    const zoom = Math.max(0.05, cam.zoom);
-    const invZoom = 1 / zoom;
-    const viewW = w * invZoom;
-    const viewH = h * invZoom;
-    const viewMinX = w * 0.5 - viewW * 0.5;
-    const viewMinY = h * 0.5 - viewH * 0.5;
-
-    // 1. World-space drifting ground cloud shadows (imagined overhead above the camera -> zero obstruction!)
-    if (this.cloudShadowSprites.length > 0) {
-      const daylightFactor = Phaser.Math.Clamp(1 - snap.lampFactor * 1.15, 0.06, 1);
-      const baseAlpha = Phaser.Math.Clamp(lw.cloudCover * daylightFactor * 0.28, 0, 0.28);
-      if (baseAlpha > 0.01) {
-        const cloudOff = this.weatherSystem.getCloudOffset();
-        const midX = cam.midPoint.x;
-        const midY = cam.midPoint.y;
-        const halfViewW = (cam.width * 0.5) * invZoom;
-        const halfViewH = (cam.height * 0.5) * invZoom;
-        const wrapW = Math.max(2400, Math.ceil(halfViewW * 2.2));
-        const wrapH = Math.max(1900, Math.ceil(halfViewH * 2.2));
-        // Deterministic cloud shadow blueprint (x0, y0, widthPx, heightPx, rotRad, minCoverThreshold)
-        const specs: ReadonlyArray<[number, number, number, number, number, number]> = [
-          [260, 260, 620, 420, -0.18, 0.05],
-          [1420, 420, 680, 450, 0.12, 0.12],
-          [820, 1140, 640, 430, -0.09, 0.22],
-          [2020, 1380, 660, 440, 0.20, 0.40],
-          [420, 1680, 700, 460, -0.22, 0.58],
-        ];
-        for (let i = 0; i < this.cloudShadowSprites.length; i++) {
-          const sprite = this.cloudShadowSprites[i];
-          const [ox, oy, sw, sh, rot, minCov] = specs[i];
-          const presence = Phaser.Math.Clamp((lw.cloudCover - minCov) / 0.25, 0, 1);
-          if (presence <= 0.02) {
-            sprite.setVisible(false);
-            continue;
-          }
-          // Wrap each shadow smoothly into the nearest cell around the camera midpoint
-          const rawX = ox + cloudOff.x;
-          const rawY = oy + cloudOff.y;
-          const relX = ((((rawX - midX) % wrapW) + wrapW * 1.5) % wrapW) - wrapW * 0.5;
-          const relY = ((((rawY - midY) % wrapH) + wrapH * 1.5) % wrapH) - wrapH * 0.5;
-          // Frustum cull shadows outside the visible camera view to keep fill-rate minimal
-          if (Math.abs(relX) > halfViewW + sw * 0.55 || Math.abs(relY) > halfViewH + sh * 0.55) {
-            sprite.setVisible(false);
-            continue;
-          }
-          sprite
-            .setVisible(true)
-            .setPosition(midX + relX, midY + relY)
-            .setDisplaySize(sw, sh)
-            .setRotation(rot)
-            .setAlpha(Math.min(0.29, baseAlpha * (0.68 + 0.32 * presence)));
-        }
-      } else {
-        for (const s of this.cloudShadowSprites) s.setVisible(false);
-      }
-    }
-
-    // 2. Atmospheric fog: drifting world-space mist banks + calibrated visibility-pocket fog veil
-    const fogRaw = Phaser.Math.Clamp(lw.fogDensity, 0, 1);
-    const fogVis = fogRaw >= 0.03 ? Math.pow(fogRaw, 0.72) : 0;
-    // Smoothly blend fog color between crisp coastal daylight mist and moonlight-lit night mist
-    const nightT = Phaser.Math.Clamp(snap.lampFactor, 0, 1);
-    const fogR = Math.round(Phaser.Math.Linear(224, 82, nightT));
-    const fogG = Math.round(Phaser.Math.Linear(234, 102, nightT));
-    const fogB = Math.round(Phaser.Math.Linear(244, 126, nightT));
-    const fogTint = (fogR << 16) | (fogG << 8) | fogB;
-
-    if (this.fogWispSprites.length > 0) {
-      if (fogVis >= 0.06) {
-        const cloudOff = this.weatherSystem.getCloudOffset();
-        const midX = cam.midPoint.x;
-        const midY = cam.midPoint.y;
-        const halfViewW = (cam.width * 0.5) * invZoom;
-        const halfViewH = (cam.height * 0.5) * invZoom;
-        const wrapW = Math.max(1800, Math.ceil(halfViewW * 2.15));
-        const wrapH = Math.max(1400, Math.ceil(halfViewH * 2.15));
-        const wispSpecs: ReadonlyArray<[number, number, number, number, number, number]> = [
-          [180, 210, 740, 520, 0.14, 0.55],
-          [920, 480, 820, 560, -0.22, 0.42],
-          [1540, 160, 700, 490, 0.28, 0.65],
-          [420, 1040, 860, 580, -0.11, 0.48],
-          [1280, 960, 760, 520, 0.19, 0.58],
-          [760, 1340, 800, 540, -0.26, 0.38],
-        ];
-        const wispR = Math.round(Phaser.Math.Linear(240, 128, nightT));
-        const wispG = Math.round(Phaser.Math.Linear(246, 150, nightT));
-        const wispB = Math.round(Phaser.Math.Linear(252, 174, nightT));
-        const wispTint = (wispR << 16) | (wispG << 8) | wispB;
-        for (let i = 0; i < this.fogWispSprites.length; i++) {
-          const sprite = this.fogWispSprites[i];
-          const [ox, oy, sw, sh, rot, driftMul] = wispSpecs[i];
-          const rawX = ox + cloudOff.x * driftMul + Math.sin(time * 0.00025 + i * 1.7) * 45;
-          const rawY = oy + cloudOff.y * driftMul + Math.cos(time * 0.00021 + i * 1.3) * 35;
-          const relX = ((((rawX - midX) % wrapW) + wrapW * 1.5) % wrapW) - wrapW * 0.5;
-          const relY = ((((rawY - midY) % wrapH) + wrapH * 1.5) % wrapH) - wrapH * 0.5;
-          if (Math.abs(relX) > halfViewW + sw * 0.55 || Math.abs(relY) > halfViewH + sh * 0.55) {
-            sprite.setVisible(false);
-            continue;
-          }
-          const pulse = 0.86 + Math.sin(time * 0.0009 + i * 2.1) * 0.14;
-          sprite
-            .setVisible(true)
-            .setPosition(midX + relX, midY + relY)
-            .setDisplaySize(sw, sh)
-            .setRotation(rot + Math.sin(time * 0.00018 + i) * 0.08)
-            .setTint(wispTint)
-            .setAlpha(Phaser.Math.Clamp(fogVis * 0.42 * pulse, 0, 0.44));
-        }
-      } else {
-        for (const s of this.fogWispSprites) s.setVisible(false);
-      }
-    }
-
-    if (this.fogVignetteSprite) {
-      if (fogVis >= 0.03) {
-        const breath = Math.sin(time * 0.0012) * 0.025 * fogVis;
-        const fogAlpha = Phaser.Math.Clamp(
-          fogVis * Phaser.Math.Linear(0.90, 0.84, nightT) + breath,
-          0,
-          0.92,
-        );
-        // Center the visibility pocket over the truck (+ slight forward shift when headlights pierce the mist)
-        let cx = w * 0.5;
-        let cy = h * 0.5;
-        if (this.truck) {
-          const beamMode = this.truck.headlightMode;
-          const beamForward = beamMode === 'high' ? 78 : beamMode === 'low' ? 46 : 0;
-          const tAng = this.truck.body.angle;
-          const targetWorldX = this.truck.body.position.x + Math.sin(tAng) * beamForward;
-          const targetWorldY = this.truck.body.position.y - Math.cos(tAng) * beamForward;
-          const truckOffX = Phaser.Math.Clamp(targetWorldX - cam.midPoint.x, -viewW * 0.30, viewW * 0.30);
-          const truckOffY = Phaser.Math.Clamp(targetWorldY - cam.midPoint.y, -viewH * 0.30, viewH * 0.30);
-          cx = w * 0.5 + truckOffX;
-          cy = h * 0.5 + truckOffY;
-        }
-        // Tight visibility pocket well inside the screen, while guaranteeing 100% corner coverage at any zoom/offset
-        const offsetMargin = Math.hypot(cx - w * 0.5, cy - h * 0.5) * 2.1;
-        const diag = Math.hypot(viewW, viewH);
-        const span = Math.max(
-          diag * Phaser.Math.Linear(1.66, 1.32, fogVis),
-          Math.max(viewW, viewH) * 1.54 + offsetMargin,
-        );
-        this.fogVignetteSprite
-          .setVisible(true)
-          .setPosition(cx, cy)
-          .setDisplaySize(span, span)
-          .setTint(fogTint)
-          .setAlpha(fogAlpha);
-      } else {
-        this.fogVignetteSprite.setVisible(false);
-      }
-    }
-
-    // 3. Dynamic thunderstorm lightning & delayed thunderclap state machine
-    this.updateThunderstorm(dt, w, h, lw.stormIntensity);
-
-    // 4. Intensity-scaled wind-slanted rain streaks & lightning flashes/bolts (zoom-compensated 1:1 to screen pixels)
-    const hasRain = lw.rainIntensity >= 0.04;
-    const hasFlash = this.lightningFlashAlpha > 0.01 || this.lightningBoltTimer > 0;
-    if (!hasRain && !hasFlash) {
-      if (this.weatherGraphicsDirty) {
-        g.clear();
-        this.weatherGraphicsDirty = false;
-      }
-      return;
-    }
-
-    g.setPosition(viewMinX, viewMinY);
-    g.setScale(invZoom);
-    g.clear();
-    this.weatherGraphicsDirty = true;
-
-    if (hasRain) {
-      const rInt = lw.rainIntensity;
-      const sInt = lw.stormIntensity;
-      const washColor = sInt > 0.25 ? 0x1e293b : 0x0284c7;
-      g.fillStyle(washColor, 0.075 * rInt + 0.075 * sInt);
-      g.fillRect(-4, -4, w + 8, h + 8);
-
-      const maxDrops = sInt > 0.2 ? 175 : 130;
-      while (this.rainParticles.length < maxDrops) {
-        this.rainParticles.push({
-          x: Phaser.Math.Between(0, w),
-          y: Phaser.Math.Between(0, h),
-          speed: Phaser.Math.Between(560, 920),
-          length: Phaser.Math.Between(14, 30),
-        });
-      }
-
-      const activeDrops = Math.min(maxDrops, Math.round(16 + rInt * (maxDrops - 16)));
-      const slantVx = Phaser.Math.Clamp(lw.windVx * (4.8 + sInt * 1.4), -300, 300);
-      const slantDx = (slantVx / 700) * 22;
-
-      g.lineStyle(1.1 + rInt * 0.65 + sInt * 0.2, sInt > 0.25 ? 0xc7d2fe : 0x93c5fd, 0.18 + rInt * 0.34 + sInt * 0.10);
-      for (let i = 0; i < activeDrops; i++) {
-        const drop = this.rainParticles[i];
-        drop.y += drop.speed * (0.85 + rInt * 0.25 + sInt * 0.18) * dt;
-        drop.x += slantVx * dt;
-        if (drop.y > h + 20) {
-          drop.y = -15;
-          drop.x = Phaser.Math.Between(-60, w + 60);
-        } else if (drop.x < -70) {
-          drop.x = w + 35;
-        } else if (drop.x > w + 70) {
-          drop.x = -35;
-        }
-        g.lineBetween(drop.x, drop.y, drop.x + slantDx, drop.y + drop.length);
-      }
-    }
-
-    // 5. Thunderstorm screen illumination flash & crisp forked lightning bolt
-    if (this.lightningFlashAlpha > 0.01) {
-      const sheetAlpha = Phaser.Math.Clamp(this.lightningFlashAlpha * 0.68, 0, 0.44);
-      g.fillStyle(0xdbeafe, sheetAlpha);
-      g.fillRect(-4, -4, w + 8, h + 8);
-    }
-    if (this.lightningBoltTimer > 0 && this.lightningBoltSegments.length > 0) {
-      const boltFade = Phaser.Math.Clamp(this.lightningBoltTimer / 0.19, 0, 1);
-      // Outer electric indigo/cyan bloom
-      for (const seg of this.lightningBoltSegments) {
-        g.lineStyle(seg.width * 3.1, 0x93c5fd, 0.42 * boltFade);
-        g.lineBetween(seg.x1, seg.y1, seg.x2, seg.y2);
-      }
-      // Hot white-blue core
-      for (const seg of this.lightningBoltSegments) {
-        g.lineStyle(seg.width, 0xf8fafc, 0.96 * boltFade);
-        g.lineBetween(seg.x1, seg.y1, seg.x2, seg.y2);
-      }
-    }
-  }
-
-  /**
    * Triggers a realistic lightning flash (double-pulse flicker + optional forked sky bolt
-   * + delayed speed-of-sound Web Audio thunderclap).
+   * + delayed speed-of-sound Web Audio thunderclap) via WeatherRenderer.
    */
   public triggerLightningFlash(forceCloseBolt: boolean = false): void {
-    const w = Math.max(320, this.scale.width);
-    const h = Math.max(240, this.scale.height);
-    const distanceNorm = forceCloseBolt ? Phaser.Math.FloatBetween(0.08, 0.28) : Math.random();
-    const peakAlpha = Phaser.Math.Linear(0.62, 0.26, distanceNorm);
-
-    this.lightningFlashAlpha = peakAlpha;
-    // Authentic multi-stroke lightning restrike ~90-160ms after initial flash
-    this.lightningRestrikeDelay = Phaser.Math.FloatBetween(0.085, 0.155);
-    this.lightningRestrikeAmp = peakAlpha * Phaser.Math.FloatBetween(0.65, 0.92);
-
-    if (forceCloseBolt || distanceNorm < 0.68) {
-      this.lightningBoltSegments = this.generateLightningBolt(w, h);
-      this.lightningBoltTimer = 0.21;
-    } else {
-      this.lightningBoltSegments = [];
-      this.lightningBoltTimer = 0;
-    }
-
-    // Queue delayed thunderclap matching visual distance (0.25s for close crack up to 2.1s for distant rumble)
-    this.pendingThunders.push({
-      delaySec: 0.22 + distanceNorm * 1.85,
-      distanceNorm,
-    });
-  }
-
-  private generateLightningBolt(w: number, h: number): Array<{ x1: number; y1: number; x2: number; y2: number; width: number }> {
-    const segs: Array<{ x1: number; y1: number; x2: number; y2: number; width: number }> = [];
-    // Keep bolt near the upper perimeter / horizon edges so the driving lane center stays unobstructed
-    const startX = Phaser.Math.FloatBetween(w * 0.14, w * 0.86);
-    let cx = startX;
-    let cy = -6;
-    const steps = Phaser.Math.Between(7, 10);
-    const targetH = h * Phaser.Math.FloatBetween(0.32, 0.56);
-    const stepY = targetH / steps;
-    const driftX = (startX > w * 0.5 ? -1 : 1) * Phaser.Math.FloatBetween(8, 22);
-
-    for (let i = 0; i < steps; i++) {
-      const nx = cx + driftX + Phaser.Math.FloatBetween(-26, 26);
-      const ny = cy + stepY * Phaser.Math.FloatBetween(0.85, 1.15);
-      const width = Math.max(1.4, 3.2 - i * 0.22);
-      segs.push({ x1: cx, y1: cy, x2: nx, y2: ny, width });
-
-      // Forked secondary branch on 2–3 joints
-      if (i >= 1 && i <= steps - 2 && Math.random() < 0.48) {
-        let bx = nx;
-        let by = ny;
-        const bDir = Math.random() < 0.5 ? -1 : 1;
-        const bSteps = Phaser.Math.Between(2, 4);
-        for (let b = 0; b < bSteps; b++) {
-          const bnx = bx + bDir * Phaser.Math.FloatBetween(14, 34);
-          const bny = by + Phaser.Math.FloatBetween(14, 30);
-          segs.push({ x1: bx, y1: by, x2: bnx, y2: bny, width: Math.max(0.9, width * 0.55) });
-          bx = bnx;
-          by = bny;
-        }
-      }
-      cx = nx;
-      cy = ny;
-    }
-    return segs;
-  }
-
-  private updateThunderstorm(dt: number, _w: number, _h: number, stormIntensity: number): void {
-    // Decay flash & bolt smoothly
-    if (this.lightningFlashAlpha > 0) {
-      this.lightningFlashAlpha = Math.max(0, this.lightningFlashAlpha - dt * 3.1);
-    }
-    if (this.lightningRestrikeDelay > 0) {
-      this.lightningRestrikeDelay -= dt;
-      if (this.lightningRestrikeDelay <= 0) {
-        this.lightningFlashAlpha = Math.max(this.lightningFlashAlpha, this.lightningRestrikeAmp);
-        this.lightningRestrikeAmp = 0;
-      }
-    }
-    if (this.lightningBoltTimer > 0) {
-      this.lightningBoltTimer = Math.max(0, this.lightningBoltTimer - dt);
-    }
-
-    // Tick pending thunder delays even if player just exited the storm edge
-    if (this.pendingThunders.length > 0) {
-      for (let i = this.pendingThunders.length - 1; i >= 0; i--) {
-        this.pendingThunders[i].delaySec -= dt;
-        if (this.pendingThunders[i].delaySec <= 0) {
-          const { distanceNorm } = this.pendingThunders[i];
-          this.pendingThunders.splice(i, 1);
-          this.audio.playThunder(distanceNorm);
-        }
-      }
-    }
-
-    const inStorm = stormIntensity >= 0.16;
-    if (!inStorm) {
-      this.wasInStorm = false;
-      this.lightningCooldownSec = 1.4;
-      return;
-    }
-
-    // Deliver a crisp introductory flash shortly after entering a thunderstorm cell
-    if (!this.wasInStorm) {
-      this.wasInStorm = true;
-      this.lightningCooldownSec = Phaser.Math.FloatBetween(0.75, 1.55);
-    }
-
-    this.lightningCooldownSec -= dt;
-    if (this.lightningCooldownSec <= 0) {
-      this.triggerLightningFlash(false);
-      const baseInterval = Phaser.Math.FloatBetween(3.4, 8.6);
-      this.lightningCooldownSec = baseInterval / Math.max(0.45, stormIntensity);
-    }
+    this.weatherRenderer?.triggerLightningFlash(forceCloseBolt);
   }
 
   // ==========================================

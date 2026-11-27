@@ -305,13 +305,23 @@ export default function App() {
       (activeExam && (activeExam.active || activeExam.isPassed || activeExam.isFailed))
   );
 
-  // Global keyboard shortcuts: M toggles World Map (in drive mode), Escape closes active modals
+  // Restore focus to previously focused control when a modal closes
+  const prevFocusedRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (modalOpen) {
+      const activeEl = document.activeElement;
+      if (activeEl instanceof HTMLElement) {
+        prevFocusedRef.current = activeEl;
+      }
+    } else if (prevFocusedRef.current && document.contains(prevFocusedRef.current)) {
+      prevFocusedRef.current.focus();
+      prevFocusedRef.current = null;
+    }
+  }, [modalOpen]);
+
+  // Global keyboard shortcuts: Escape closes active modals (even when focused inside inputs), M toggles World Map
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-        return;
-      }
       if (e.key === 'Escape') {
         setShowMissionsModal(false);
         setShowMissionEditorModal(false);
@@ -322,7 +332,14 @@ export default function App() {
         setShowGarageModal(false);
         setShowJsonModal(false);
         setIsMenuOpen(false);
-      } else if ((e.key === 'm' || e.key === 'M') && !isEditorMode) {
+        MissionSystem.getInstance().clearLastCompletion();
+        return;
+      }
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+      if ((e.key === 'm' || e.key === 'M') && !isEditorMode) {
         e.preventDefault();
         setMapFocusTruckId(null);
         setShowWorldMapModal((v) => !v);

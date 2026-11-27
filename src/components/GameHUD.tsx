@@ -239,6 +239,9 @@ export const DrivingOverlays: React.FC<DrivingOverlaysProps> = React.memo(
         {telemetry.lastMissionCompletion && (
           <div
             data-testid="mission-completion-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Resumo de conclusão da missão"
             className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[65] flex items-center justify-center p-2.5 sm:p-4"
           >
             <div className="bg-slate-950 border border-emerald-500/50 max-w-md w-full max-h-[92dvh] overflow-y-auto overscroll-contain p-4 sm:p-6 rounded-xl shadow-2xl space-y-3.5 sm:space-y-4">

@@ -1,5 +1,6 @@
 import type { TrailerType } from '../entities/Trailer';
 import type { WorldObjects } from '../world/WorldObjects';
+import { SaveManager, SAVE_KEYS } from './SaveManager';
 import { ReputationSystem } from './ReputationSystem';
 
 export const OFFICIAL_HUB_IDS = ['harbor', 'shipyard', 'industrial', 'historic', 'serra'] as const;
@@ -604,29 +605,21 @@ export class GarageSystem {
   }
 
   private saveProgress() {
-    try {
-      const merged: Record<string, any> = { ...this.savedHubState };
-      for (const [k, v] of Object.entries(this.hubs)) {
-        merged[k] = {
-          progress: v.progress,
-          isDominant: v.isDominant,
-          contracts: v.contracts.map((c) => ({ id: c.id, completed: c.completed })),
-        };
-      }
-      this.savedHubState = merged;
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem('rigmaster_garages', JSON.stringify({ hubs: merged }));
-      }
-    } catch {
-      // Ignore
+    const merged: Record<string, any> = { ...this.savedHubState };
+    for (const [k, v] of Object.entries(this.hubs)) {
+      merged[k] = {
+        progress: v.progress,
+        isDominant: v.isDominant,
+        contracts: v.contracts.map((c) => ({ id: c.id, completed: c.completed })),
+      };
     }
+    this.savedHubState = merged;
+    SaveManager.writeJson(SAVE_KEYS.garages, { hubs: merged });
   }
 
   private loadProgress() {
     try {
-      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('rigmaster_garages') : null;
-      if (!raw) return;
-      const state = JSON.parse(raw);
+      const state = SaveManager.readJson<{ hubs?: unknown }>(SAVE_KEYS.garages);
       if (!state || typeof state !== 'object' || !state.hubs || typeof state.hubs !== 'object' || Array.isArray(state.hubs)) {
         return;
       }

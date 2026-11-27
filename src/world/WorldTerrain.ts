@@ -357,8 +357,10 @@ export class WorldTerrain {
   }
 
   /**
-   * Re-bakes only the chunks intersecting [minX..maxX, minY..maxY].
-   * Currently visible/loaded chunks re-bake immediately for zero-flicker interactive painting.
+   * Marks terrain chunks intersecting [minX..maxX, minY..maxY] for rebake.
+   * Loaded chunks are coalesced into `dirtyChunks` and atomically swapped in
+   * `updateView()` (bounded per frame), eliminating synchronous drag stutter
+   * while keeping previous textures on-screen with zero flicker.
    */
   public invalidateRegion(
     minX: number,
@@ -376,24 +378,32 @@ export class WorldTerrain {
       for (let cx = c0x; cx <= c1x; cx++) {
         const key = `${cx}_${cy}`;
         const wasLoaded = this.chunks.has(key);
-        if (wasLoaded) {
-          this.chunks.get(key)!.destroy();
-          this.chunks.delete(key);
-          this.scene.textures.remove(`terrain_${key}`);
-        }
-        const canopy = this.canopyChunks.get(key);
-        if (canopy) {
-          canopy.destroy();
-          this.canopyChunks.delete(key);
-          this.scene.textures.remove(`terrain_canopy_${key}`);
-        }
-        this.clearChunkTrunks(cx, cy);
         if (wasLoaded && immediateVisibleRebake) {
+          this.dirtyChunks.add(key);
           this.queue.delete(key);
-          this.ensureChunk(cx, cy);
+        } else {
+          this.dirtyChunks.delete(key);
+          this.evictSingleChunk(key, cx, cy);
         }
       }
     }
+  }
+
+  /** Destroys a single loaded terrain chunk, its canopy sprite, textures, and trunk bodies. */
+  private evictSingleChunk(key: string, cx: number, cy: number): void {
+    const img = this.chunks.get(key);
+    if (img) {
+      img.destroy();
+      this.chunks.delete(key);
+      this.scene.textures.remove(`terrain_${key}`);
+    }
+    const canopy = this.canopyChunks.get(key);
+    if (canopy) {
+      canopy.destroy();
+      this.canopyChunks.delete(key);
+      this.scene.textures.remove(`terrain_canopy_${key}`);
+    }
+    this.clearChunkTrunks(cx, cy);
   }
 
   /** Removes cached trunk positions & active Matter bodies belonging to terrain chunk (cx, cy). */
@@ -1172,6 +1182,28 @@ export class WorldTerrain {
       }
     }
 
+    // Flush coalesced paint-dirty chunks (bounded per frame so rapid brush drags never stutter)
+    if (this.dirtyChunks.size > 0) {
+      let rebuiltThisFrame = 0;
+      const MAX_DIRTY_PER_FRAME = 2;
+      for (const key of Array.from(this.dirtyChunks)) {
+        const sep = key.indexOf('_');
+        const cx = Number(key.slice(0, sep));
+        const cy = Number(key.slice(sep + 1));
+        const inView = cx >= c0x && cx <= c1x && cy >= c0y && cy <= c1y;
+        if (!inView) {
+          this.dirtyChunks.delete(key);
+          this.evictSingleChunk(key, cx, cy);
+          continue;
+        }
+        if (rebuiltThisFrame >= MAX_DIRTY_PER_FRAME) break;
+        this.dirtyChunks.delete(key);
+        this.evictSingleChunk(key, cx, cy);
+        this.ensureChunk(cx, cy);
+        rebuiltThisFrame++;
+      }
+    }
+
     // Build at most one queued chunk per frame
     if (this.queue.size > 0) {
       for (const key of this.queue) {
@@ -1229,9 +1261,11 @@ export class WorldTerrain {
   }
 
   private queue = new Set<string>();
+  private dirtyChunks = new Set<string>();
 
   private evictAll() {
     this.queue.clear();
+    this.dirtyChunks.clear();
     this.lastViewBoundsKey = '';
     for (const [key, img] of Array.from(this.chunks.entries())) {
       img.destroy();

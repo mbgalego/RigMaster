@@ -56,6 +56,13 @@ import {
   hasExamChanged,
 } from '../src/hooks/useGameTelemetry';
 import { ReputationSystem } from '../src/systems/ReputationSystem';
+import {
+  computeArticulationGeometry,
+  computeSoftMechanicalLock,
+  degToRad,
+  radToDeg,
+} from '../src/physics/kingpinMath';
+import { SaveManager, SAVE_KEYS, SAVE_SCHEMA_VERSION } from '../src/systems/SaveManager';
 
 let failures = 0;
 let passed = 0;
@@ -490,6 +497,105 @@ function check(name: string, ok: boolean, detail: string = ''): void {
     'useGameTelemetry: hasExamChanged skips idle frames and detects active countdown updates',
     idleNoChange && activeDetected && tickDetected,
     `idle=${idleNoChange}, active=${activeDetected}, tick=${tickDetected}`,
+  );
+}
+
+// ============================================================================
+// 9. Kingpin soft mechanical lock (P4 #12) & SaveManager export/import (P4 #25)
+// ============================================================================
+{
+  const limitDeg = 75;
+  // Forward pulling past lock angle must NOT clamp (allows recovery pulling forward)
+  const forwardCheck = computeSoftMechanicalLock(0, degToRad(84), 0.12, limitDeg, false);
+  check(
+    'kingpinMath: forward driving past mechanicalLockDeg does not lock or clamp trailer',
+    !forwardCheck.applied && forwardCheck.nextTrailerAngleRad === degToRad(84),
+    `applied=${forwardCheck.applied}`,
+  );
+
+  // Reversing moderately past limit blends smoothly instead of rigid snap and damps outward angular velocity
+  const revSoft = computeSoftMechanicalLock(0, degToRad(79), 0.2, limitDeg, true);
+  const revSoftDeg = radToDeg(revSoft.nextTrailerAngleRad);
+  check(
+    'kingpinMath: reversing past limit applies progressive soft spring-blend and damps outward spin',
+    revSoft.applied &&
+      revSoftDeg > limitDeg &&
+      revSoftDeg < 79 &&
+      revSoft.nextAngularVelocity < 0.2,
+    `targetDeg=${revSoftDeg.toFixed(2)}, dampVel=${revSoft.nextAngularVelocity.toFixed(3)}`,
+  );
+
+  // Reversing far past ceiling is hard-bounded to mechanicalLockDeg + 6°
+  const revExtreme = computeSoftMechanicalLock(0, degToRad(110), 0.35, limitDeg, true);
+  const revExtremeDeg = radToDeg(revExtreme.nextTrailerAngleRad);
+  check(
+    'kingpinMath: reversing extreme angle stays bounded by mechanicalLockDeg + 6° safety ceiling',
+    revExtreme.applied && revExtremeDeg <= limitDeg + 6 + 1e-6,
+    `clampedDeg=${revExtremeDeg.toFixed(2)}`,
+  );
+
+  // Articulation geometry computes jackknife flag, severity, off-tracking, and rear tail swing
+  const geo = computeArticulationGeometry({
+    parentAngleRad: 0,
+    trailerAngleRad: degToRad(68),
+    trailerPosX: 0,
+    trailerPosY: 0,
+    trailerAngularVelocity: 0.08,
+    trailerLength: 200,
+    rearAxleOffset: 70,
+    rearOverhang: 30,
+    jackknifeLimitDeg: 62,
+    mechanicalLockDeg: 75,
+    isReversing: true,
+  });
+  check(
+    'kingpinMath: computeArticulationGeometry flags jackknife >= 62° and computes positive off-tracking',
+    geo.isJackknifed &&
+      geo.jackknifeSeverity > 1 &&
+      geo.offTrackingDeltaPx > 100 &&
+      Math.hypot(geo.tailSwingWorldPos.x, geo.tailSwingWorldPos.y) > 95,
+    `deg=${geo.angleDeg.toFixed(1)}, sev=${geo.jackknifeSeverity.toFixed(2)}, offTrack=${geo.offTrackingDeltaPx.toFixed(1)}`,
+  );
+
+  // SaveManager export/import roundtrip & validation
+  localStorage.clear();
+  SaveManager.resetForTests();
+  SaveManager.writeJson(SAVE_KEYS.licenses, ['C', 'CE']);
+  SaveManager.writeJson(SAVE_KEYS.garages, { activeModifier: 'fog' });
+
+  const exportedJson = SaveManager.exportProgressJSON();
+  const parsedExport = JSON.parse(exportedJson) as { schemaVersion?: number; entries?: Record<string, string> };
+  const exportValid =
+    parsedExport.schemaVersion === SAVE_SCHEMA_VERSION &&
+    typeof parsedExport.entries?.[SAVE_KEYS.licenses] === 'string' &&
+    typeof parsedExport.entries?.[SAVE_KEYS.garages] === 'string';
+
+  // Reject malformed JSON and future unsupported schema version; ignore non-whitelisted keys
+  const badJsonRes = SaveManager.importProgressJSON('{broken json');
+  const futureVerRes = SaveManager.importProgressJSON(
+    JSON.stringify({ schemaVersion: 999, entries: { [SAVE_KEYS.licenses]: '["C"]' } }),
+  );
+  const unknownKeyRes = SaveManager.importProgressJSON(
+    JSON.stringify({ schemaVersion: SAVE_SCHEMA_VERSION, entries: { arbitrary_evil_key: '123' } }),
+  );
+
+  // Clear and re-import valid backup
+  localStorage.clear();
+  SaveManager.resetForTests();
+  const goodRes = SaveManager.importProgressJSON(exportedJson);
+  const restoredLicenses = SaveManager.readJson<string[]>(SAVE_KEYS.licenses) ?? [];
+
+  check(
+    'SaveManager: exports versioned snapshot, rejects invalid/future payloads, ignores unknown keys, and restores valid saves',
+    exportValid &&
+      !badJsonRes.ok &&
+      !futureVerRes.ok &&
+      unknownKeyRes.restoredKeys === 0 &&
+      localStorage.getItem('arbitrary_evil_key') === null &&
+      goodRes.ok &&
+      goodRes.restoredKeys === 2 &&
+      restoredLicenses.includes('CE'),
+    `restored=${goodRes.restoredKeys}, licenses=${restoredLicenses.join(',')}`,
   );
 }
 
