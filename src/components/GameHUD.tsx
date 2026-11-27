@@ -8,12 +8,22 @@ import {
   CloudRain,
   CloudLightning,
   CloudFog,
+  ArrowUp,
+  ArrowUpLeft,
+  ArrowUpRight,
+  CornerUpLeft,
+  CornerUpRight,
+  Undo2,
+  Flag,
+  Navigation,
+  X,
 } from 'lucide-react';
 import type { TimePeriod } from '../systems/TimeOfDaySystem';
 import type { ExamStatus } from '../systems/LicenseSystem';
 import { CERTIFICATE_CATALOG } from '../systems/ReputationSystem';
 import { TRUCK_CATALOG } from '../systems/TruckCatalog';
 import { MissionSystem } from '../systems/MissionSystem';
+import { formatGpsDistance, type GpsManeuverType } from '../systems/GpsSystem';
 import type { GameTelemetry } from '../hooks/useGameTelemetry';
 
 const PERIOD_ICONS: Record<TimePeriod, React.ComponentType<{ className?: string }>> = {
@@ -22,6 +32,28 @@ const PERIOD_ICONS: Record<TimePeriod, React.ComponentType<{ className?: string 
   dusk: Sunset,
   night: Moon,
 };
+
+function renderManeuverIcon(maneuver: GpsManeuverType, className: string) {
+  switch (maneuver) {
+    case 'slight_left':
+      return <ArrowUpLeft className={className} />;
+    case 'left':
+    case 'sharp_left':
+      return <CornerUpLeft className={className} />;
+    case 'slight_right':
+      return <ArrowUpRight className={className} />;
+    case 'right':
+    case 'sharp_right':
+      return <CornerUpRight className={className} />;
+    case 'uturn':
+      return <Undo2 className={className} />;
+    case 'arrive':
+      return <Flag className={className} />;
+    case 'straight':
+    default:
+      return <ArrowUp className={className} />;
+  }
+}
 
 export interface TopDrivingBarProps {
   telemetry: GameTelemetry;
@@ -130,13 +162,15 @@ export interface DrivingOverlaysProps {
   onOpenWorldMap: () => void;
   onCancelMission: () => void;
   onCancelExam: () => void;
+  onCancelGps: () => void;
+  onResumeAutoGps: () => void;
   onSwapTruck: (truckId: string, teleport: boolean) => void;
   onOpenDrivingSchool: () => void;
 }
 
 /**
- * Driving-mode viewport overlays: minimap hotspot, active mission banner,
- * mission completion summary modal, physical truck-swap prompt, and toasts.
+ * Driving-mode viewport overlays: minimap hotspot, active mission/exam banner,
+ * turn-by-turn GPS strip, mission completion summary modal, truck-swap prompt, and toasts.
  */
 export const DrivingOverlays: React.FC<DrivingOverlaysProps> = React.memo(
   ({
@@ -149,6 +183,8 @@ export const DrivingOverlays: React.FC<DrivingOverlaysProps> = React.memo(
     onOpenWorldMap,
     onCancelMission,
     onCancelExam,
+    onCancelGps,
+    onResumeAutoGps,
     onSwapTruck,
     onOpenDrivingSchool,
   }) => {
@@ -169,7 +205,38 @@ export const DrivingOverlays: React.FC<DrivingOverlaysProps> = React.memo(
         ? `${Math.round(examNav.distPx)} m`
         : `${(examNav.distPx / 1000).toFixed(1)} km`
       : null;
-    const hasTopBanner = Boolean(examActive || am);
+
+    const gps = telemetry.gps;
+    const gpsActive = Boolean(gps?.active);
+    const hasMissionOrExam = Boolean(examActive || am);
+    const bannerCount = (hasMissionOrExam ? 1 : 0) + (gpsActive ? 1 : 0);
+
+    // Accent style for GPS strip matches active route colour (amber pickup, emerald delivery, cyan manual/POI)
+    const gpsTheme =
+      gps?.colorHex === 0xf59e0b
+        ? {
+            border: 'border-amber-500/60',
+            iconBox: 'bg-amber-500/15 border-amber-500/40 text-amber-300',
+            accentText: 'text-amber-300',
+          }
+        : gps?.colorHex === 0x10b981
+          ? {
+              border: 'border-emerald-500/60',
+              iconBox: 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300',
+              accentText: 'text-emerald-300',
+            }
+          : {
+              border: 'border-cyan-500/60',
+              iconBox: 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300',
+              accentText: 'text-cyan-300',
+            };
+
+    const showTurnDist =
+      gpsActive &&
+      gps &&
+      gps.maneuver !== 'uturn' &&
+      gps.maneuver !== 'arrive' &&
+      gps.distToManeuverPx > 25;
 
     return (
       <>
@@ -178,159 +245,243 @@ export const DrivingOverlays: React.FC<DrivingOverlaysProps> = React.memo(
           <button
             type="button"
             data-testid="minimap-open-map-btn"
-            aria-label="Abrir Mapa Estratégico"
-            title="Abrir Mapa Estratégico (M)"
+            aria-label="Abrir Mapa Estratégico e GPS"
+            title="Abrir Mapa Estratégico e Destinos GPS (M)"
             onClick={onOpenWorldMap}
             className="fixed right-[10px] top-[58px] w-[116px] h-[116px] sm:w-[150px] sm:h-[150px] z-20 rounded-sm bg-transparent hover:ring-2 hover:ring-cyan-400/80 active:bg-cyan-500/15 transition cursor-pointer flex items-end justify-end p-1"
           >
             <span className="px-1.5 py-0.5 rounded bg-slate-950/85 border border-cyan-500/40 text-[9px] font-semibold text-cyan-300 leading-none pointer-events-none">
-              Mapa
+              Mapa / GPS
             </span>
           </button>
         )}
 
-        {/* ACTIVE LICENSE EXAM COMPACT BANNER (positioned clear of the top-right Minimap on all screen widths) */}
-        {!isEditorMode && activeExam && activeExam.active && (
-          <div
-            data-testid="active-exam-banner"
-            className={`absolute top-[58px] left-2 right-[134px] sm:right-[170px] lg:left-1/2 lg:right-auto lg:-translate-x-1/2 lg:max-w-[calc(100vw-360px)] bg-slate-950/92 border ${
-              isExamAmber ? 'border-amber-500/60' : 'border-emerald-500/60'
-            } px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-lg shadow-xl z-30`}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span
-                    className={`text-[10px] font-bold uppercase tracking-wide shrink-0 ${
-                      isExamAmber ? 'text-amber-400' : 'text-emerald-400'
-                    }`}
-                  >
-                    <span className="sm:hidden">Exame {activeExam.licenseId}</span>
-                    <span className="hidden sm:inline">Exame · Classe {activeExam.licenseId}</span>
-                  </span>
-                  {examNav?.examTitle && (
-                    <span className="text-[11px] sm:text-xs font-semibold text-white truncate">
-                      {examNav.examTitle}
-                    </span>
-                  )}
-                </div>
+        {/* TOP-CENTER STACK BELOW TOP HUD: Turn-by-Turn GPS + Active Exam / Mission (kept clear of Minimap) */}
+        {!isEditorMode && (hasMissionOrExam || gpsActive) && (
+          <div className="absolute top-[58px] left-2 right-[134px] sm:right-[170px] lg:left-1/2 lg:right-auto lg:-translate-x-1/2 lg:w-[540px] lg:max-w-[calc(100vw-360px)] z-30 flex flex-col gap-1.5 pointer-events-none">
+            {/* TURN-BY-TURN GPS NAVIGATION BAR */}
+            {gpsActive && gps && (
+              <div
+                data-testid="gps-nav-banner"
+                className={`pointer-events-auto bg-slate-950/92 border ${gpsTheme.border} px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg shadow-xl flex items-center gap-2.5`}
+              >
                 <div
-                  className={`text-[10px] sm:text-[11px] leading-snug truncate ${
-                    isExamAmber ? 'text-amber-200/95' : 'text-emerald-200/90'
-                  }`}
+                  className={`w-9 h-9 sm:w-10 sm:h-10 rounded-md border flex flex-col items-center justify-center shrink-0 ${gpsTheme.iconBox}`}
+                  aria-hidden="true"
                 >
-                  {examNav?.phase === 'recouple'
-                    ? `Reengatar ${examNav.trailerLabel ?? 'atrelado'}${examDistLabel ? ` · ${examDistLabel}` : ''}`
-                    : activeExam.inDockZone && activeExam.dockHoldSec > 0
-                      ? `Manter alinhado na Doca (${activeExam.dockHoldSec.toFixed(1)}s/1.5s)`
-                      : activeExam.inDockZone && examNav?.requireReverse && !activeExam.reversedDuringExam
-                        ? 'Engrene marcha-atrás (R) na Doca'
-                        : activeExam.inDockZone
-                          ? `Alinhar na Doca (${Math.abs(Math.round(activeExam.dockAlignmentDeg))}°)`
-                          : `Doca do Exame${examNav?.targetHubName ? ` · ${examNav.targetHubName}` : ''}${examDistLabel ? ` · ${examDistLabel}` : ''}`}
+                  {renderManeuverIcon(gps.maneuver, 'w-5 h-5 sm:w-5 sm:h-5 stroke-[2.5]')}
                 </div>
-                <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 mt-0.5 text-[10px] sm:text-xs font-mono tabular-nums">
-                  <span className={activeExam.remainingTime <= 15 ? 'text-red-400 font-bold' : 'text-amber-300 font-semibold'}>
-                    {Math.ceil(activeExam.remainingTime)}s
-                  </span>
-                  <span className={activeExam.collisionCount > 0 ? 'text-red-400 font-semibold' : 'text-slate-300'}>
-                    Col {activeExam.collisionCount}
-                    {examNav ? `/${examNav.maxCollisions}` : ''}
-                  </span>
-                  {activeExam.maxGForce !== null && (
-                    <span
-                      data-testid="exam-g-meter"
-                      className={
-                        activeExam.currentGForce > activeExam.maxGForce
-                          ? 'text-red-400 font-bold'
-                          : activeExam.currentGForce > activeExam.maxGForce * 0.75
-                            ? 'text-amber-300 font-bold'
-                            : 'text-emerald-400 font-semibold'
-                      }
-                    >
-                      G {activeExam.currentGForce.toFixed(2)}/{activeExam.maxGForce.toFixed(1)}g
-                    </span>
-                  )}
-                  {examNav?.requireReverse && !activeExam.reversedDuringExam && (
-                    <span className="text-amber-300 font-semibold">Ré obrig.</span>
-                  )}
-                  {activeExam.inDockZone && activeExam.dockHoldSec > 0 && (
-                    <span className="text-emerald-400 font-semibold">
-                      Doca {activeExam.dockHoldSec.toFixed(1)}s/1.5s
-                    </span>
-                  )}
-                </div>
-              </div>
-              <button
-                type="button"
-                aria-label="Cancelar exame"
-                onClick={onCancelExam}
-                className="shrink-0 text-[10px] sm:text-xs px-1.5 py-0.5 sm:px-2.5 sm:py-1 rounded bg-slate-900 hover:bg-red-950 text-red-300 border border-slate-700 hover:border-red-800 transition-colors whitespace-nowrap"
-              >
-                <span className="sm:hidden">✕</span>
-                <span className="hidden sm:inline">Cancelar</span>
-              </button>
-            </div>
-          </div>
-        )}
 
-        {/* ACTIVE MISSION COMPACT BANNER (positioned clear of the top-right Minimap on all screen widths) */}
-        {!isEditorMode && am && !examActive && (
-          <div
-            data-testid="active-mission-banner"
-            className={`absolute top-[58px] left-2 right-[134px] sm:right-[170px] lg:left-1/2 lg:right-auto lg:-translate-x-1/2 lg:max-w-[calc(100vw-360px)] bg-slate-950/92 border ${
-              isPickup ? 'border-amber-500/60' : 'border-emerald-500/60'
-            } px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-lg shadow-xl z-30`}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span
-                    className={`text-[10px] font-bold uppercase tracking-wide shrink-0 ${
-                      isPickup ? 'text-amber-400' : 'text-emerald-400'
-                    }`}
-                  >
-                    <span className="sm:hidden">{isPickup ? '1/2 Recolha' : '2/2 Entrega'}</span>
-                    <span className="hidden sm:inline">{isPickup ? 'Passo 1/2 · Recolha' : 'Passo 2/2 · Entrega'}</span>
-                  </span>
-                  <span className="text-[11px] sm:text-xs font-semibold text-white truncate">
-                    {am.mission.title}
-                  </span>
-                </div>
-                <div className={`text-[10px] sm:text-[11px] leading-snug truncate ${isPickup ? 'text-amber-200/90' : 'text-slate-300'}`}>
-                  {isPickup
-                    ? nav
-                      ? `${nav.needsPupOnly ? 'Engatar' : 'Recolher'} ${nav.trailerLabel} · ${nav.pickupHubName}${distLabel ? ` · ${distLabel}` : ''}${nav.hasWrongTrailerCoupled ? ' (C deseng.)' : ''}`
-                      : `Recolher em ${am.mission.originHubName}`
-                    : `${am.mission.targetHubName} · ${am.mission.targetDock.label}${distLabel ? ` · ${distLabel}` : ''}`}
-                </div>
-                <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 mt-0.5 text-[10px] sm:text-xs font-mono tabular-nums">
-                  <span className="text-slate-300">
-                    {Math.floor(am.elapsedSec)}s/{am.mission.targetTimeSec}s
-                  </span>
-                  <span className={am.minCargoHealth < 90 ? 'text-amber-300' : 'text-emerald-300'}>
-                    Carga {Math.round(am.minCargoHealth)}%
-                  </span>
-                  <span className={am.collisions > 0 ? 'text-red-400' : 'text-slate-300'}>
-                    Col {am.collisions}
-                  </span>
-                  {am.inTargetDock && (
-                    <span className="text-emerald-400 font-semibold">
-                      Doca {am.dockHoldSec.toFixed(1)}s/1.5s
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline gap-1.5 min-w-0">
+                    <span className="text-xs sm:text-sm font-bold text-white truncate">
+                      {gps.maneuverLabel}
                     </span>
-                  )}
+                    {showTurnDist && (
+                      <span className={`text-[11px] sm:text-xs font-mono font-bold tabular-nums shrink-0 ${gpsTheme.accentText}`}>
+                        em {formatGpsDistance(gps.distToManeuverPx)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[10px] sm:text-[11px] text-slate-300 min-w-0">
+                    <Navigation className="w-3 h-3 text-slate-400 shrink-0" />
+                    <span className="truncate font-medium text-slate-200">{gps.label}</span>
+                    <span className="text-slate-500 shrink-0">·</span>
+                    <span className="font-mono tabular-nums text-slate-300 shrink-0">
+                      {formatGpsDistance(gps.remainingDistPx)}
+                    </span>
+                    {gps.recalculated ? (
+                      <span className="text-amber-300 font-semibold shrink-0">· Rota recalculada</span>
+                    ) : (
+                      gps.isAutoMission && (
+                        <span className="hidden sm:inline text-slate-500 shrink-0">· Auto</span>
+                      )
+                    )}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  data-testid="btn-cancel-gps-hud"
+                  aria-label="Cancelar destino GPS"
+                  title="Cancelar destino GPS"
+                  onClick={onCancelGps}
+                  className="shrink-0 inline-flex items-center gap-1 text-[10px] sm:text-xs px-1.5 py-1 sm:px-2.5 sm:py-1 rounded bg-slate-900 hover:bg-red-950 text-slate-300 hover:text-red-300 border border-slate-700 hover:border-red-800 transition-colors whitespace-nowrap"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Cancelar</span>
+                </button>
+              </div>
+            )}
+
+            {/* ACTIVE LICENSE EXAM COMPACT BANNER */}
+            {activeExam && activeExam.active && (
+              <div
+                data-testid="active-exam-banner"
+                className={`pointer-events-auto bg-slate-950/92 border ${
+                  isExamAmber ? 'border-amber-500/60' : 'border-emerald-500/60'
+                } px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-lg shadow-xl`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span
+                        className={`text-[10px] font-bold uppercase tracking-wide shrink-0 ${
+                          isExamAmber ? 'text-amber-400' : 'text-emerald-400'
+                        }`}
+                      >
+                        <span className="sm:hidden">Exame {activeExam.licenseId}</span>
+                        <span className="hidden sm:inline">Exame · Classe {activeExam.licenseId}</span>
+                      </span>
+                      {examNav?.examTitle && (
+                        <span className="text-[11px] sm:text-xs font-semibold text-white truncate">
+                          {examNav.examTitle}
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      className={`text-[10px] sm:text-[11px] leading-snug truncate ${
+                        isExamAmber ? 'text-amber-200/95' : 'text-emerald-200/90'
+                      }`}
+                    >
+                      {examNav?.phase === 'recouple'
+                        ? `Reengatar ${examNav.trailerLabel ?? 'atrelado'}${examDistLabel ? ` · ${examDistLabel}` : ''}`
+                        : activeExam.inDockZone && activeExam.dockHoldSec > 0
+                          ? `Manter alinhado na Doca (${activeExam.dockHoldSec.toFixed(1)}s/1.5s)`
+                          : activeExam.inDockZone && examNav?.requireReverse && !activeExam.reversedDuringExam
+                            ? 'Engrene marcha-atrás (R) na Doca'
+                            : activeExam.inDockZone
+                              ? `Alinhar na Doca (${Math.abs(Math.round(activeExam.dockAlignmentDeg))}°)`
+                              : `Doca do Exame${examNav?.targetHubName ? ` · ${examNav.targetHubName}` : ''}${examDistLabel ? ` · ${examDistLabel}` : ''}`}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 mt-0.5 text-[10px] sm:text-xs font-mono tabular-nums">
+                      <span className={activeExam.remainingTime <= 15 ? 'text-red-400 font-bold' : 'text-amber-300 font-semibold'}>
+                        {Math.ceil(activeExam.remainingTime)}s
+                      </span>
+                      <span className={activeExam.collisionCount > 0 ? 'text-red-400 font-semibold' : 'text-slate-300'}>
+                        Col {activeExam.collisionCount}
+                        {examNav ? `/${examNav.maxCollisions}` : ''}
+                      </span>
+                      {activeExam.maxGForce !== null && (
+                        <span
+                          data-testid="exam-g-meter"
+                          className={
+                            activeExam.currentGForce > activeExam.maxGForce
+                              ? 'text-red-400 font-bold'
+                              : activeExam.currentGForce > activeExam.maxGForce * 0.75
+                                ? 'text-amber-300 font-bold'
+                                : 'text-emerald-400 font-semibold'
+                          }
+                        >
+                          G {activeExam.currentGForce.toFixed(2)}/{activeExam.maxGForce.toFixed(1)}g
+                        </span>
+                      )}
+                      {examNav?.requireReverse && !activeExam.reversedDuringExam && (
+                        <span className="text-amber-300 font-semibold">Ré obrig.</span>
+                      )}
+                      {activeExam.inDockZone && activeExam.dockHoldSec > 0 && (
+                        <span className="text-emerald-400 font-semibold">
+                          Doca {activeExam.dockHoldSec.toFixed(1)}s/1.5s
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {!gpsActive && gps?.mutedAutoAvailable && (
+                      <button
+                        type="button"
+                        onClick={onResumeAutoGps}
+                        title="Reativar rota GPS do exame"
+                        className="text-[10px] sm:text-xs px-1.5 py-0.5 sm:px-2 sm:py-1 rounded bg-slate-900 hover:bg-cyan-950 text-cyan-300 border border-cyan-500/40 transition-colors whitespace-nowrap"
+                      >
+                        GPS
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      aria-label="Cancelar exame"
+                      onClick={onCancelExam}
+                      className="text-[10px] sm:text-xs px-1.5 py-0.5 sm:px-2.5 sm:py-1 rounded bg-slate-900 hover:bg-red-950 text-red-300 border border-slate-700 hover:border-red-800 transition-colors whitespace-nowrap"
+                    >
+                      <span className="sm:hidden">✕</span>
+                      <span className="hidden sm:inline">Cancelar</span>
+                    </button>
+                  </div>
                 </div>
               </div>
-              <button
-                type="button"
-                aria-label="Cancelar missão"
-                onClick={onCancelMission}
-                className="shrink-0 text-[10px] sm:text-xs px-1.5 py-0.5 sm:px-2.5 sm:py-1 rounded bg-slate-900 hover:bg-red-950 text-red-300 border border-slate-700 hover:border-red-800 transition-colors whitespace-nowrap"
+            )}
+
+            {/* ACTIVE MISSION COMPACT BANNER */}
+            {am && !examActive && (
+              <div
+                data-testid="active-mission-banner"
+                className={`pointer-events-auto bg-slate-950/92 border ${
+                  isPickup ? 'border-amber-500/60' : 'border-emerald-500/60'
+                } px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-lg shadow-xl`}
               >
-                <span className="sm:hidden">✕</span>
-                <span className="hidden sm:inline">Cancelar</span>
-              </button>
-            </div>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span
+                        className={`text-[10px] font-bold uppercase tracking-wide shrink-0 ${
+                          isPickup ? 'text-amber-400' : 'text-emerald-400'
+                        }`}
+                      >
+                        <span className="sm:hidden">{isPickup ? '1/2 Recolha' : '2/2 Entrega'}</span>
+                        <span className="hidden sm:inline">{isPickup ? 'Passo 1/2 · Recolha' : 'Passo 2/2 · Entrega'}</span>
+                      </span>
+                      <span className="text-[11px] sm:text-xs font-semibold text-white truncate">
+                        {am.mission.title}
+                      </span>
+                    </div>
+                    <div className={`text-[10px] sm:text-[11px] leading-snug truncate ${isPickup ? 'text-amber-200/90' : 'text-slate-300'}`}>
+                      {isPickup
+                        ? nav
+                          ? `${nav.needsPupOnly ? 'Engatar' : 'Recolher'} ${nav.trailerLabel} · ${nav.pickupHubName}${distLabel ? ` · ${distLabel}` : ''}${nav.hasWrongTrailerCoupled ? ' (C deseng.)' : ''}`
+                          : `Recolher em ${am.mission.originHubName}`
+                        : `${am.mission.targetHubName} · ${am.mission.targetDock.label}${distLabel ? ` · ${distLabel}` : ''}`}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 mt-0.5 text-[10px] sm:text-xs font-mono tabular-nums">
+                      <span className="text-slate-300">
+                        {Math.floor(am.elapsedSec)}s/{am.mission.targetTimeSec}s
+                      </span>
+                      <span className={am.minCargoHealth < 90 ? 'text-amber-300' : 'text-emerald-300'}>
+                        Carga {Math.round(am.minCargoHealth)}%
+                      </span>
+                      <span className={am.collisions > 0 ? 'text-red-400' : 'text-slate-300'}>
+                        Col {am.collisions}
+                      </span>
+                      {am.inTargetDock && (
+                        <span className="text-emerald-400 font-semibold">
+                          Doca {am.dockHoldSec.toFixed(1)}s/1.5s
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {!gpsActive && gps?.mutedAutoAvailable && (
+                      <button
+                        type="button"
+                        onClick={onResumeAutoGps}
+                        title="Reativar rota GPS da missão"
+                        className="text-[10px] sm:text-xs px-1.5 py-0.5 sm:px-2 sm:py-1 rounded bg-slate-900 hover:bg-cyan-950 text-cyan-300 border border-cyan-500/40 transition-colors whitespace-nowrap"
+                      >
+                        GPS
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      aria-label="Cancelar missão"
+                      onClick={onCancelMission}
+                      className="text-[10px] sm:text-xs px-1.5 py-0.5 sm:px-2.5 sm:py-1 rounded bg-slate-900 hover:bg-red-950 text-red-300 border border-slate-700 hover:border-red-800 transition-colors whitespace-nowrap"
+                    >
+                      <span className="sm:hidden">✕</span>
+                      <span className="hidden sm:inline">Cancelar</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -462,11 +613,15 @@ export const DrivingOverlays: React.FC<DrivingOverlaysProps> = React.memo(
           </div>
         )}
 
-        {/* TOASTS (coupling/mission feedback + persistent <=20% low-fuel reserve toaster; kept clear of Minimap & Mission Banner) */}
+        {/* TOASTS (coupling/mission feedback + persistent <=20% low-fuel reserve toaster; kept clear of Minimap, GPS & Mission Banners) */}
         {!isEditorMode && (
           <div
             className={`absolute ${
-              hasTopBanner ? 'top-[132px] sm:top-[140px] lg:top-[132px]' : 'top-[58px]'
+              bannerCount >= 2
+                ? 'top-[198px] sm:top-[208px] lg:top-[200px]'
+                : bannerCount === 1
+                  ? 'top-[128px] sm:top-[136px] lg:top-[128px]'
+                  : 'top-[58px]'
             } left-2 right-[134px] sm:right-[170px] lg:inset-x-0 z-40 flex flex-col items-start lg:items-center gap-1.5 pointer-events-none lg:px-4`}
           >
             {telemetry.fuelPercent <= 20 && !telemetry.isOutOfFuel && (

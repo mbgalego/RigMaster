@@ -358,7 +358,7 @@ export default function App() {
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
         return;
       }
-      if ((e.key === 'm' || e.key === 'M') && !isEditorMode) {
+      if ((e.key === 'm' || e.key === 'M' || e.key === 'g' || e.key === 'G') && !isEditorMode) {
         e.preventDefault();
         setMapFocusTruckId(null);
         setMapFocusPoint(null);
@@ -1152,7 +1152,7 @@ export default function App() {
                       className="text-left px-2 py-1.5 rounded text-slate-200 hover:bg-slate-900 flex items-center gap-2"
                     >
                       <MapIcon className="w-4 h-4 text-sky-400 shrink-0" />
-                      <span>Mapa Estratégico (M)</span>
+                      <span>Mapa Estratégico &amp; GPS (M)</span>
                     </button>
                     <button
                       onClick={() => {
@@ -1491,6 +1491,8 @@ export default function App() {
         }}
         onCancelMission={handleCancelMission}
         onCancelExam={() => LicenseSystem.getInstance().cancelExam()}
+        onCancelGps={() => getMainScene()?.cancelGpsDestination()}
+        onResumeAutoGps={() => getMainScene()?.resumeAutoGpsDestination()}
         onSwapTruck={handleSwapTruck}
         onOpenDrivingSchool={() => {
           setIsMenuOpen(false);
@@ -2816,9 +2818,13 @@ export default function App() {
         missionNavTarget={telemetry.missionNavTarget}
         activeExam={activeExam}
         examNavTarget={telemetry.examNavTarget}
+        gps={telemetry.gps}
         initialFocusTruckId={mapFocusTruckId}
         initialFocusPoint={mapFocusPoint}
         onSwapTruck={handleSwapTruck}
+        onSetGpsDestination={(dest) => getMainScene()?.setManualGpsDestination(dest)}
+        onCancelGps={() => getMainScene()?.cancelGpsDestination()}
+        onResumeAutoGps={() => getMainScene()?.resumeAutoGpsDestination()}
       />
 
 

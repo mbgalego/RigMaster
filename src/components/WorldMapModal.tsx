@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Cloud, Crosshair, Maximize2, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { Cloud, Crosshair, MapPin, Maximize2, Navigation, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { GarageSystem, type HubId } from '../systems/GarageSystem';
 import { ReputationSystem, type FleetTruckState, type GameMode } from '../systems/ReputationSystem';
 import { WeatherSystem } from '../systems/WeatherSystem';
@@ -7,6 +7,11 @@ import { TRUCK_CATALOG } from '../systems/TruckCatalog';
 import type { ActiveMissionState, MissionNavTarget } from '../systems/MissionSystem';
 import type { ExamStatus } from '../systems/LicenseSystem';
 import type { ExamNavTarget } from '../systems/ExamController';
+import {
+  formatGpsDistance,
+  type GpsHudState,
+  type GpsPoiCategory,
+} from '../systems/GpsSystem';
 import { World } from '../world/World';
 import type { MainScene } from '../scenes/MainScene';
 
@@ -23,9 +28,21 @@ interface WorldMapModalProps {
   missionNavTarget: MissionNavTarget | null;
   activeExam?: ExamStatus | null;
   examNavTarget?: ExamNavTarget | null;
+  gps?: GpsHudState | null;
   initialFocusTruckId?: string | null;
   initialFocusPoint?: { x: number; y: number; zoom?: number } | null;
   onSwapTruck: (truckId: string, remoteSandbox: boolean) => void;
+  onSetGpsDestination: (dest: {
+    x: number;
+    y: number;
+    label: string;
+    subtitle?: string;
+    kind?: 'manual_pin' | 'poi';
+    colorHex?: number;
+    poiId?: string;
+  }) => void;
+  onCancelGps: () => void;
+  onResumeAutoGps: () => void;
 }
 
 const WORLD_MIN_X = World.WORLD_MIN_X;
@@ -75,9 +92,13 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
   missionNavTarget,
   activeExam,
   examNavTarget,
+  gps,
   initialFocusTruckId,
   initialFocusPoint,
   onSwapTruck,
+  onSetGpsDestination,
+  onCancelGps,
+  onResumeAutoGps,
 }) => {
   const [selectedTruckId, setSelectedTruckId] = useState<string | null>(initialFocusTruckId ?? null);
   const [camera, setCamera] = useState<MapCamera>(DEFAULT_CAMERA);
@@ -85,6 +106,9 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
   const [showWeatherRadar, setShowWeatherRadar] = useState(true);
   const [weatherTick, setWeatherTick] = useState(0);
   const [hasOpened, setHasOpened] = useState(open);
+  const [sidebarTab, setSidebarTab] = useState<'destinations' | 'legend'>('destinations');
+  const [poiFilter, setPoiFilter] = useState<'all' | GpsPoiCategory>('all');
+  const [gpsTick, setGpsTick] = useState(0);
 
   const svgRef = useRef<SVGSVGElement | null>(null);
   const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
@@ -187,6 +211,35 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
         : [],
     [open, scene],
   );
+
+  // Live categorized POI list sorted by distance from player truck
+  const worldPois = useMemo(() => {
+    if (!open || !scene) return [];
+    return scene
+      .getWorldPois()
+      .map((p) => ({
+        ...p,
+        distPx: Math.hypot(p.x - activeTruckPos.x, p.y - activeTruckPos.y),
+      }))
+      .sort((a, b) => a.distPx - b.distPx);
+  }, [open, scene, hubsVersion, activeTruckId, activeTruckPos.x, activeTruckPos.y]);
+
+  const filteredPois = useMemo(
+    () => (poiFilter === 'all' ? worldPois : worldPois.filter((p) => p.category === poiFilter)),
+    [worldPois, poiFilter],
+  );
+
+  const gpsSnapshot = useMemo(() => {
+    if (!open || !scene) return null;
+    return scene.getGpsRouteSnapshot();
+  }, [open, scene, gps, gpsTick, weatherTick]);
+
+  const gpsRoutePathD = useMemo(() => {
+    if (!gpsSnapshot?.active || gpsSnapshot.path.length < 2) return null;
+    return gpsSnapshot.path
+      .map((p, idx) => `${idx === 0 ? 'M' : 'L'}${Math.round(p.x)} ${Math.round(p.y)}`)
+      .join(' ');
+  }, [gpsSnapshot]);
 
   // Bake true terrain coastline, ocean depth, foothills, mountain relief & contour isolines lazily on first open
   const terrainBackdropUrl = useMemo(() => {
@@ -398,6 +451,28 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
     }
   }, []);
 
+  const handleMapClick = useCallback(
+    (e: React.MouseEvent<SVGSVGElement>) => {
+      if (suppressClickRef.current) return;
+      const pt = clientToWorld(e.clientX, e.clientY);
+      const wx = Math.max(WORLD_MIN_X, Math.min(WORLD_MIN_X + WORLD_SPAN_W, Math.round(pt.x)));
+      const wy = Math.max(WORLD_MIN_Y, Math.min(WORLD_MIN_Y + WORLD_SPAN_H, Math.round(pt.y)));
+      const hubId = GarageSystem.getInstance().findHubForPosition(wx, wy);
+      const hubName = GarageSystem.getInstance().getHub(hubId)?.name ?? 'RigWorld';
+      onSetGpsDestination({
+        x: wx,
+        y: wy,
+        label: 'Ponto no Mapa',
+        subtitle: `Perto de ${hubName}`,
+        kind: 'manual_pin',
+        colorHex: 0x22d3ee,
+      });
+      setSelectedTruckId(null);
+      setGpsTick((t) => t + 1);
+    },
+    [clientToWorld, onSetGpsDestination],
+  );
+
   if (!open) return null;
 
   // Keep labels, icons, and target rings readable as zoom increases instead of ballooning
@@ -425,10 +500,10 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
         <div className="px-3.5 sm:px-6 py-2.5 sm:py-3.5 border-b border-slate-800 flex items-start sm:items-center justify-between gap-3 shrink-0">
           <div className="min-w-0">
             <h2 className="text-base sm:text-lg font-bold text-white tracking-tight leading-snug">
-              Mapa Estratégico — RigWorld
+              Mapa Estratégico &amp; GPS — RigWorld
             </h2>
             <p className="text-[11px] sm:text-xs text-slate-400">
-              Roda do rato ou pinça para zoom · Arrasta para navegar · Toca num camião para ver estado.
+              Clique em qualquer ponto para definir destino GPS · Arrasta para navegar · Roda/pinça para zoom.
             </p>
           </div>
           <button
@@ -578,8 +653,9 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUpOrCancel}
               onPointerCancel={handlePointerUpOrCancel}
+              onClick={handleMapClick}
               className={`w-full h-auto lg:h-full max-h-[52dvh] lg:max-h-[65vh] rounded-lg border border-slate-800 bg-[#0b1927] select-none touch-none ${
-                isDragging ? 'cursor-grabbing' : camera.zoom > 1 ? 'cursor-grab' : 'cursor-default'
+                isDragging ? 'cursor-grabbing' : 'cursor-crosshair'
               }`}
             >
               <defs>
@@ -911,16 +987,18 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                       >
                         Doca do Exame
                       </text>
-                      <line
-                        x1={activeTruckPos.x}
-                        y1={activeTruckPos.y}
-                        x2={enav.x}
-                        y2={enav.y}
-                        stroke="#f59e0b"
-                        strokeWidth={48 * s}
-                        strokeDasharray={`${160 * s} ${110 * s}`}
-                        opacity={0.92}
-                      />
+                      {!(gpsRoutePathD && gpsSnapshot?.isAutoMission) && (
+                        <line
+                          x1={activeTruckPos.x}
+                          y1={activeTruckPos.y}
+                          x2={enav.x}
+                          y2={enav.y}
+                          stroke="#f59e0b"
+                          strokeWidth={48 * s}
+                          strokeDasharray={`${160 * s} ${110 * s}`}
+                          opacity={0.92}
+                        />
+                      )}
                       <circle
                         cx={enav.x}
                         cy={enav.y}
@@ -949,16 +1027,18 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                 const textCol = enav.phase === 'align' ? '#fde68a' : '#6ee7b7';
                 return (
                   <g data-testid="world-map-exam-route" pointerEvents="none">
-                    <line
-                      x1={activeTruckPos.x}
-                      y1={activeTruckPos.y}
-                      x2={enav.dockPos.x}
-                      y2={enav.dockPos.y}
-                      stroke={strokeCol}
-                      strokeWidth={48 * s}
-                      strokeDasharray={`${160 * s} ${120 * s}`}
-                      opacity={0.92}
-                    />
+                    {!(gpsRoutePathD && gpsSnapshot?.isAutoMission) && (
+                      <line
+                        x1={activeTruckPos.x}
+                        y1={activeTruckPos.y}
+                        x2={enav.dockPos.x}
+                        y2={enav.dockPos.y}
+                        stroke={strokeCol}
+                        strokeWidth={48 * s}
+                        strokeDasharray={`${160 * s} ${120 * s}`}
+                        opacity={0.92}
+                      />
+                    )}
                     <circle
                       cx={enav.dockPos.x}
                       cy={enav.dockPos.y}
@@ -1026,16 +1106,18 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                         2. Entrega
                       </text>
 
-                      <line
-                        x1={activeTruckPos.x}
-                        y1={activeTruckPos.y}
-                        x2={nav.pickupPos.x}
-                        y2={nav.pickupPos.y}
-                        stroke="#f59e0b"
-                        strokeWidth={48 * s}
-                        strokeDasharray={`${160 * s} ${110 * s}`}
-                        opacity={0.92}
-                      />
+                      {!(gpsRoutePathD && gpsSnapshot?.isAutoMission) && (
+                        <line
+                          x1={activeTruckPos.x}
+                          y1={activeTruckPos.y}
+                          x2={nav.pickupPos.x}
+                          y2={nav.pickupPos.y}
+                          stroke="#f59e0b"
+                          strokeWidth={48 * s}
+                          strokeDasharray={`${160 * s} ${110 * s}`}
+                          opacity={0.92}
+                        />
+                      )}
                       <circle
                         cx={nav.pickupPos.x}
                         cy={nav.pickupPos.y}
@@ -1061,16 +1143,18 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
 
                 return (
                   <g data-testid="world-map-mission-delivery-route" pointerEvents="none">
-                    <line
-                      x1={activeTruckPos.x}
-                      y1={activeTruckPos.y}
-                      x2={deliveryPos.x}
-                      y2={deliveryPos.y}
-                      stroke="#34d399"
-                      strokeWidth={48 * s}
-                      strokeDasharray={`${160 * s} ${120 * s}`}
-                      opacity={0.9}
-                    />
+                    {!(gpsRoutePathD && gpsSnapshot?.isAutoMission) && (
+                      <line
+                        x1={activeTruckPos.x}
+                        y1={activeTruckPos.y}
+                        x2={deliveryPos.x}
+                        y2={deliveryPos.y}
+                        stroke="#34d399"
+                        strokeWidth={48 * s}
+                        strokeDasharray={`${160 * s} ${120 * s}`}
+                        opacity={0.9}
+                      />
+                    )}
                     <circle
                       cx={deliveryPos.x}
                       cy={deliveryPos.y}
@@ -1094,6 +1178,69 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                 );
               })()}
 
+              {/* Active Road-Following GPS Route Polyline & Manual Destination Pin */}
+              {gpsRoutePathD && gpsSnapshot?.destination && (() => {
+                const routeHex = `#${(gpsSnapshot.destination.colorHex ?? 0x22d3ee).toString(16).padStart(6, '0')}`;
+                const dest = gpsSnapshot.destination;
+                return (
+                  <g data-testid="world-map-gps-route" pointerEvents="none">
+                    <path
+                      d={gpsRoutePathD}
+                      fill="none"
+                      stroke="#020617"
+                      strokeWidth={112 * s}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      opacity={0.85}
+                    />
+                    <path
+                      d={gpsRoutePathD}
+                      fill="none"
+                      stroke={routeHex}
+                      strokeWidth={62 * s}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      opacity={0.96}
+                    />
+                    {!gpsSnapshot.isAutoMission && (
+                      <g data-testid="world-map-gps-pin">
+                        <circle
+                          cx={dest.x}
+                          cy={dest.y}
+                          r={245 * s}
+                          fill={routeHex}
+                          fillOpacity={0.22}
+                          stroke={routeHex}
+                          strokeWidth={44 * s}
+                        />
+                        <circle
+                          cx={dest.x}
+                          cy={dest.y}
+                          r={92 * s}
+                          fill="#f8fafc"
+                          stroke="#020617"
+                          strokeWidth={28 * s}
+                        />
+                        <text
+                          x={dest.x}
+                          y={dest.y - 310 * s}
+                          textAnchor="middle"
+                          fill="#a5f3fc"
+                          fontSize={240 * s}
+                          fontWeight="800"
+                          style={{ paintOrder: 'stroke' }}
+                          stroke="#0b1927"
+                          strokeWidth={55 * s}
+                          strokeLinejoin="round"
+                        >
+                          {dest.label}
+                        </text>
+                      </g>
+                    )}
+                  </g>
+                );
+              })()}
+
               {/* Fleet Trucks */}
               {fleet.map((truck) => {
                 if (truck.id === activeTruckId || truck.isActive) return null;
@@ -1106,7 +1253,8 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                   <g
                     key={truck.id}
                     transform={`translate(${truck.x}, ${truck.y}) scale(${s})`}
-                    onClick={() => {
+                    onClick={(ev) => {
+                      ev.stopPropagation();
                       if (suppressClickRef.current) return;
                       setSelectedTruckId(truck.id);
                     }}
@@ -1185,36 +1333,143 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
             </svg>
           </div>
 
-          {/* Right Legend & Selected Truck Inspector */}
-          <div className="w-full lg:w-72 lg:overflow-y-auto border-t lg:border-t-0 lg:border-l border-slate-800 p-3.5 sm:p-4 flex flex-col justify-between gap-3 sm:gap-4 bg-slate-950 shrink-0">
-            <div className="space-y-3 sm:space-y-4">
-              <div>
-                <h3 className="text-xs font-semibold text-slate-300 mb-1.5 sm:mb-2">Legenda</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-1 sm:gap-1.5 text-[11px] sm:text-xs text-slate-400">
-                  <div>Seta ciano — Camião ativo</div>
-                  <div>Círculo / Quad. / Losango — 4×2 / 6×4 / 8×4</div>
-                  <div>Estrada castanha — Terra batida</div>
-                  <div>Traço âmbar — Viadutos (Piso 1)</div>
-                  <div>Verde / Âmbar — Oficinas / Bombas</div>
-                  <div>Ícone azul/amarelo [E] — Escola de Camionagem</div>
-                  <div>Rota âmbar / verde — Recolha / Entrega</div>
-                  <div>Hélice branca — Torres Eólicas (Serra NW)</div>
-                  <div>Índigo / Azul / Névoa — Trovoada, chuva, nevoeiro e nuvens</div>
-                </div>
+          {/* Right Panel: GPS Destinations List, Active Route, Truck Inspector & Legend */}
+          <div className="w-full lg:w-80 lg:min-h-0 lg:flex lg:flex-col border-t lg:border-t-0 lg:border-l border-slate-800 bg-slate-950 shrink-0">
+            {/* Sidebar Segmented Switcher */}
+            <div className="p-2.5 sm:p-3 border-b border-slate-800 shrink-0">
+              <div className="grid grid-cols-2 gap-1 p-1 bg-slate-900 rounded-lg border border-slate-800">
+                <button
+                  type="button"
+                  data-testid="tab-worldmap-destinations"
+                  onClick={() => setSidebarTab('destinations')}
+                  className={`py-1.5 px-2 rounded text-xs font-semibold transition-colors whitespace-nowrap ${
+                    sidebarTab === 'destinations'
+                      ? 'bg-cyan-500 text-slate-950'
+                      : 'text-slate-300 hover:text-white'
+                  }`}
+                >
+                  Destinos GPS
+                </button>
+                <button
+                  type="button"
+                  data-testid="tab-worldmap-legend"
+                  onClick={() => setSidebarTab('legend')}
+                  className={`py-1.5 px-2 rounded text-xs font-semibold transition-colors whitespace-nowrap ${
+                    sidebarTab === 'legend'
+                      ? 'bg-cyan-500 text-slate-950'
+                      : 'text-slate-300 hover:text-white'
+                  }`}
+                >
+                  Legenda
+                </button>
               </div>
+            </div>
 
-              {focusedTruck && focusedSpec && (
-                <div className="border-t border-slate-800 pt-3 space-y-2">
-                  <div className="text-sm font-bold text-white">{focusedSpec.name}</div>
-                  <div className="text-xs text-slate-400">{focusedSpec.locationLabel}</div>
-                  <div className="text-xs font-mono tabular-nums text-slate-300">
-                    Distância: {focusedDist < 1000 ? `${Math.round(focusedDist)} px` : `${(focusedDist / 1000).toFixed(2)} km`}
-                  </div>
-                  {!isSandbox && !focusedTruck.unlocked && (
-                    <div className="text-xs text-amber-300">
-                      Requisitos: {focusedSpec.unlockReq.summary}
+            {/* Active GPS Route Card (always visible at top when active, or resume prompt if muted) */}
+            {(gpsSnapshot?.active || gpsSnapshot?.mutedAutoAvailable) && (
+              <div className="px-3 py-2.5 border-b border-slate-800 bg-slate-900/60 shrink-0 space-y-2">
+                {gpsSnapshot.active && gpsSnapshot.destination ? (
+                  <>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-[10px] font-semibold uppercase tracking-wide text-cyan-400">
+                          {gpsSnapshot.isAutoMission ? 'GPS Automático' : 'Destino GPS Ativo'}
+                        </div>
+                        <div className="text-xs font-bold text-white truncate">
+                          {gpsSnapshot.destination.label}
+                        </div>
+                        <div className="text-[11px] text-slate-400 font-mono tabular-nums truncate">
+                          {formatGpsDistance(gpsSnapshot.remainingDistPx)}
+                          {gpsSnapshot.destination.subtitle ? ` · ${gpsSnapshot.destination.subtitle}` : ''}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        data-testid="btn-cancel-gps-map"
+                        onClick={() => {
+                          onCancelGps();
+                          setGpsTick((t) => t + 1);
+                        }}
+                        className="shrink-0 px-2 py-1 rounded text-[11px] font-semibold bg-slate-900 hover:bg-red-950 text-red-300 border border-slate-700 hover:border-red-800 transition-colors whitespace-nowrap"
+                      >
+                        Cancelar GPS
+                      </button>
                     </div>
-                  )}
+                    {!gpsSnapshot.isAutoMission && gpsSnapshot.mutedAutoAvailable && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onResumeAutoGps();
+                          setGpsTick((t) => t + 1);
+                        }}
+                        className="w-full py-1 px-2 rounded text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/30 transition-colors"
+                      >
+                        Voltar à rota da missão/exame
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onResumeAutoGps();
+                      setGpsTick((t) => t + 1);
+                    }}
+                    className="w-full py-1.5 px-2.5 rounded-lg text-xs font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/40 transition-colors"
+                  >
+                    Retomar GPS da Missão / Exame
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Selected Fleet Truck Inspector (when user clicked a parked truck) */}
+            {focusedTruck && focusedSpec && (
+              <div className="px-3 py-2.5 border-b border-slate-800 bg-slate-900/40 shrink-0 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-white truncate">{focusedSpec.name}</div>
+                    <div className="text-[11px] text-slate-400 truncate">
+                      {focusedSpec.locationLabel} ·{' '}
+                      <span className="font-mono tabular-nums text-slate-300">
+                        {formatGpsDistance(focusedDist)}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTruckId(null)}
+                    aria-label="Fechar seleção"
+                    className="p-1 rounded text-slate-500 hover:text-white"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                {!isSandbox && !focusedTruck.unlocked && (
+                  <div className="text-[11px] text-amber-300">
+                    Requisitos: {focusedSpec.unlockReq.summary}
+                  </div>
+                )}
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSetGpsDestination({
+                        x: Math.round(focusedTruck.x),
+                        y: Math.round(focusedTruck.y),
+                        label: focusedSpec.name,
+                        subtitle: focusedSpec.locationLabel,
+                        kind: 'poi',
+                        colorHex: 0x22d3ee,
+                        poiId: `fleet:${focusedTruck.id}`,
+                      });
+                      setGpsTick((t) => t + 1);
+                    }}
+                    className="flex-1 py-1.5 px-2.5 rounded-lg text-xs font-semibold bg-cyan-500 hover:bg-cyan-400 text-slate-950 transition-colors whitespace-nowrap flex items-center justify-center gap-1"
+                  >
+                    <Navigation className="w-3.5 h-3.5" />
+                    Navegar
+                  </button>
                   {(isSandbox || (focusedTruck.unlocked && focusedDist <= 160 && isStopped)) &&
                     focusedTruck.id !== activeTruckId && (
                       <button
@@ -1223,32 +1478,138 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                           onSwapTruck(focusedTruck.id, isSandbox && !(focusedDist <= 160 && isStopped));
                           onClose();
                         }}
-                        className="w-full py-2 px-3 rounded-lg text-xs font-semibold bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition-colors"
+                        className="flex-1 py-1.5 px-2.5 rounded-lg text-xs font-semibold bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition-colors whitespace-nowrap"
                       >
-                        {isSandbox && focusedDist > 160 ? 'Trocar Agora (Sandbox)' : 'Assumir Controlo'}
+                        {isSandbox && focusedDist > 160 ? 'Trocar (Sandbox)' : 'Assumir'}
                       </button>
                     )}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
 
+            {/* Tab Content */}
+            {sidebarTab === 'destinations' ? (
+              <div className="flex-1 min-h-0 flex flex-col">
+                {/* Category Filter Row */}
+                <div className="px-3 pt-2.5 pb-2 border-b border-slate-800/80 shrink-0 space-y-2">
+                  <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+                    {(
+                      [
+                        { id: 'all', label: 'Todos' },
+                        { id: 'hub', label: 'Hubs' },
+                        { id: 'special', label: 'Especiais' },
+                        { id: 'service', label: 'Serviços' },
+                        { id: 'fleet', label: 'Frota' },
+                      ] as Array<{ id: 'all' | GpsPoiCategory; label: string }>
+                    ).map((cat) => (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        data-testid={`btn-poi-filter-${cat.id}`}
+                        onClick={() => setPoiFilter(cat.id)}
+                        className={`px-2 py-1 rounded text-[11px] font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                          poiFilter === cat.id
+                            ? 'bg-slate-200 text-slate-950'
+                            : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
+                        }`}
+                      >
+                        {cat.label}
+                      </button>
+                    ))}
+                  </div>
+                  {!gpsSnapshot?.active && (
+                    <p className="text-[11px] text-slate-400 leading-snug">
+                      Selecione um local abaixo ou clique em qualquer ponto no mapa.
+                    </p>
+                  )}
+                </div>
+
+                {/* Scrollable POI List */}
+                <div
+                  data-testid="gps-poi-list"
+                  className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-2 space-y-1 max-h-[36dvh] lg:max-h-none"
+                >
+                  {filteredPois.map((poi) => {
+                    const isCurrentDest =
+                      gpsSnapshot?.active && gpsSnapshot.destination?.poiId === poi.id;
+                    return (
+                      <button
+                        key={poi.id}
+                        type="button"
+                        data-testid={`poi-item-${poi.id}`}
+                        onClick={() => {
+                          onSetGpsDestination({
+                            x: poi.x,
+                            y: poi.y,
+                            label: poi.name,
+                            subtitle: poi.subtitle,
+                            kind: 'poi',
+                            colorHex: 0x22d3ee,
+                            poiId: poi.id,
+                          });
+                          setGpsTick((t) => t + 1);
+                          if (camera.zoom > 1.2) {
+                            setCamera((prev) => clampCamera(prev.zoom, poi.x, poi.y));
+                          }
+                        }}
+                        className={`w-full text-left px-2.5 py-2 rounded-lg border transition-colors flex items-center justify-between gap-2 ${
+                          isCurrentDest
+                            ? 'bg-cyan-500/15 border-cyan-400/70 text-white'
+                            : 'bg-slate-900/60 border-slate-800/80 hover:border-slate-600 hover:bg-slate-900 text-slate-200'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className="w-2.5 h-2.5 rounded-full shrink-0"
+                            style={{ backgroundColor: poi.color }}
+                          />
+                          <div className="min-w-0">
+                            <div className="text-xs font-semibold truncate">{poi.name}</div>
+                            <div className="text-[10px] text-slate-400 truncate">{poi.subtitle}</div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0 text-[11px] font-mono tabular-nums text-slate-300">
+                          <span>{formatGpsDistance(poi.distPx)}</span>
+                          <MapPin
+                            className={`w-3.5 h-3.5 ${
+                              isCurrentDest ? 'text-cyan-300' : 'text-slate-500'
+                            }`}
+                          />
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="flex-1 overflow-y-auto p-3.5 sm:p-4 space-y-3 text-[11px] sm:text-xs text-slate-400">
+                <h3 className="text-xs font-semibold text-slate-200">Legenda do Mapa</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-1.5">
+                  <div>Seta ciano — Camião ativo</div>
+                  <div>Linha ciano / âmbar / verde — Rota GPS</div>
+                  <div>Círculo / Quad. / Losango — 4×2 / 6×4 / 8×4</div>
+                  <div>Estrada castanha — Terra batida</div>
+                  <div>Traço âmbar — Viadutos (Piso 1)</div>
+                  <div>Verde / Âmbar — Oficinas / Bombas</div>
+                  <div>Ícone azul/amarelo [E] — Escola de Camionagem</div>
+                  <div>Hélice branca — Torres Eólicas (Serra NW)</div>
+                  <div>Índigo / Azul / Névoa — Trovoada, chuva, nevoeiro</div>
+                </div>
+              </div>
+            )}
+
+            {/* Active Exam / Mission Footer Summary */}
             {activeExam?.active && (() => {
               const enav = examNavTarget ?? scene?.getActiveExamNavTarget() ?? null;
               if (!enav) return null;
               return (
-                <div className="border-t border-slate-800 pt-3 text-xs space-y-1">
+                <div className="border-t border-slate-800 px-3 py-2.5 text-xs space-y-0.5 shrink-0 bg-slate-950">
                   <div className={`font-semibold ${enav.phase === 'dock' ? 'text-emerald-300' : 'text-amber-300'}`}>
                     Exame Ativo · Classe {enav.licenseId}
                   </div>
-                  <div className="text-slate-200">{enav.examTitle}</div>
-                  {enav.phase === 'recouple' && (
-                    <div className="text-amber-200/90">
-                      Reengatar: {enav.trailerLabel ?? 'Atrelado do exame'}
-                    </div>
-                  )}
-                  <div className="text-slate-400">
-                    Doca do Exame: {enav.targetHubName} ·{' '}
-                    {enav.distPx < 1000 ? `${Math.round(enav.distPx)} m` : `${(enav.distPx / 1000).toFixed(1)} km`}
+                  <div className="text-slate-200 truncate">{enav.examTitle}</div>
+                  <div className="text-[11px] text-slate-400 font-mono tabular-nums">
+                    {enav.targetHubName} · {formatGpsDistance(enav.distPx)}
                   </div>
                 </div>
               );
@@ -1257,18 +1618,15 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
             {!activeExam?.active && activeMission && (() => {
               const nav = missionNavTarget ?? scene?.getActiveMissionNavTarget() ?? null;
               return (
-                <div className="border-t border-slate-800 pt-3 text-xs space-y-1">
+                <div className="border-t border-slate-800 px-3 py-2.5 text-xs space-y-0.5 shrink-0 bg-slate-950">
                   <div className={`font-semibold ${activeMission.phase === 'pickup' ? 'text-amber-300' : 'text-emerald-300'}`}>
-                    {activeMission.phase === 'pickup' ? 'Missão Ativa · Passo 1/2 (Recolha)' : 'Missão Ativa · Passo 2/2 (Entrega)'}
+                    {activeMission.phase === 'pickup' ? 'Missão Ativa · 1/2 Recolha' : 'Missão Ativa · 2/2 Entrega'}
                   </div>
-                  <div className="text-slate-200">{activeMission.mission.title}</div>
-                  {activeMission.phase === 'pickup' && nav && (
-                    <div className="text-amber-200/90">
-                      Recolher: {nav.trailerLabel} em {nav.pickupHubName}
-                    </div>
-                  )}
-                  <div className="text-slate-400">
-                    Entrega: {activeMission.mission.targetHubName} ({activeMission.mission.targetDock.label})
+                  <div className="text-slate-200 truncate">{activeMission.mission.title}</div>
+                  <div className="text-[11px] text-slate-400 truncate">
+                    {activeMission.phase === 'pickup' && nav
+                      ? `${nav.trailerLabel} · ${nav.pickupHubName}`
+                      : `${activeMission.mission.targetHubName} (${activeMission.mission.targetDock.label})`}
                   </div>
                 </div>
               );

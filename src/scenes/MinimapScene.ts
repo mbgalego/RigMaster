@@ -393,6 +393,45 @@ export class MinimapScene extends Phaser.Scene {
     g.strokeTriangle(p1x, p1y, p2x, p2y, p3x, p3y);
   }
 
+  /** Liang-Barsky 2D segment clipper against an axis-aligned rectangle. */
+  private clipSegmentToRect(
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    minX: number,
+    minY: number,
+    maxX: number,
+    maxY: number,
+  ): { ax: number; ay: number; bx: number; by: number } | null {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    let t0 = 0;
+    let t1 = 1;
+    const p = [-dx, dx, -dy, dy];
+    const q = [x1 - minX, maxX - x1, y1 - minY, maxY - y1];
+    for (let i = 0; i < 4; i++) {
+      if (Math.abs(p[i]) < 1e-6) {
+        if (q[i] < 0) return null;
+      } else {
+        const t = q[i] / p[i];
+        if (p[i] < 0) {
+          if (t > t1) return null;
+          if (t > t0) t0 = t;
+        } else {
+          if (t < t0) return null;
+          if (t < t1) t1 = t;
+        }
+      }
+    }
+    return {
+      ax: x1 + t0 * dx,
+      ay: y1 + t0 * dy,
+      bx: x1 + t1 * dx,
+      by: y1 + t1 * dy,
+    };
+  }
+
   private drawOverlay(mainScene: MainScene, time: number, centerX: number, centerY: number) {
     const g = this.minimapOverlay;
     const img = this.minimapImage;
@@ -507,6 +546,52 @@ export class MinimapScene extends Phaser.Scene {
       g.strokeRect(rx1, ry1, rx2 - rx1, ry2 - ry1);
     }
 
+    // Active GPS road-following route polyline (clipped cleanly to the local minimap bounds)
+    const gpsSnap = mainScene.getGpsRouteSnapshot?.();
+    if (gpsSnap?.active && gpsSnap.path.length >= 2) {
+      const routeColor = gpsSnap.destination?.colorHex ?? 0x22d3ee;
+      const clipMinX = img.x + 2;
+      const clipMinY = img.y + 2;
+      const clipMaxX = img.x + w - 2;
+      const clipMaxY = img.y + h - 2;
+
+      const clippedSegs: Array<{ ax: number; ay: number; bx: number; by: number }> = [];
+      for (let i = 0; i < gpsSnap.path.length - 1; i++) {
+        const a = gpsSnap.path[i];
+        const b = gpsSnap.path[i + 1];
+        const c = this.clipSegmentToRect(
+          toMapX(a.x),
+          toMapY(a.y),
+          toMapX(b.x),
+          toMapY(b.y),
+          clipMinX,
+          clipMinY,
+          clipMaxX,
+          clipMaxY,
+        );
+        if (c) clippedSegs.push(c);
+      }
+
+      if (clippedSegs.length > 0) {
+        // Dark casing for crisp contrast on bright terrain & roads
+        g.lineStyle(4.4, 0x020617, 0.82);
+        for (const s of clippedSegs) {
+          g.beginPath();
+          g.moveTo(s.ax, s.ay);
+          g.lineTo(s.bx, s.by);
+          g.strokePath();
+        }
+        // Bright GPS path core
+        g.lineStyle(2.4, routeColor, 0.96);
+        for (const s of clippedSegs) {
+          g.beginPath();
+          g.moveTo(s.ax, s.ay);
+          g.lineTo(s.bx, s.by);
+          g.strokePath();
+        }
+      }
+    }
+
     // Exam target marker (emerald/amber pulsing beacon or edge-clamped directional arrow)
     const examNav = mainScene.getActiveExamNavTarget();
     if (examNav) {
@@ -616,6 +701,22 @@ export class MinimapScene extends Phaser.Scene {
         } else {
           this.drawEdgeArrow(g, img.x, img.y, w, mx, my, 0x10b981, Math.min(1, pulse + 0.15));
         }
+      }
+    }
+
+    // Manual / POI GPS destination pin or edge arrow on Minimap
+    if (gpsSnap?.active && gpsSnap.destination && !gpsSnap.isAutoMission) {
+      const pulse = 0.6 + Math.sin(time * 0.0065) * 0.35;
+      const col = gpsSnap.destination.colorHex ?? 0x22d3ee;
+      const gx = toMapX(gpsSnap.destination.x);
+      const gy = toMapY(gpsSnap.destination.y);
+      if (isInside(gx, gy, 6)) {
+        g.lineStyle(2.2, col, pulse);
+        g.strokeCircle(gx, gy, 6.2);
+        g.fillStyle(col, 0.96);
+        g.fillCircle(gx, gy, 2.8);
+      } else {
+        this.drawEdgeArrow(g, img.x, img.y, w, gx, gy, col, Math.min(1, pulse + 0.15));
       }
     }
 

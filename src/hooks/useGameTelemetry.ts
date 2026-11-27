@@ -67,6 +67,7 @@ export function createInitialTelemetry(): GameTelemetry {
     activeMission: null,
     missionNavTarget: null,
     examNavTarget: null,
+    gps: null,
     lastMissionCompletion: null,
     coupling: {
       decoupleReady: false,
@@ -102,6 +103,7 @@ export function cloneTelemetrySnapshot(t: GameTelemetry): GameTelemetry {
     activeMission: t.activeMission ? { ...t.activeMission } : null,
     missionNavTarget: t.missionNavTarget ? { ...t.missionNavTarget } : null,
     examNavTarget: t.examNavTarget ? { ...t.examNavTarget, dockPos: { ...t.examNavTarget.dockPos } } : null,
+    gps: t.gps ? { ...t.gps } : null,
     coupling: { ...t.coupling },
   };
 }
@@ -294,6 +296,27 @@ export function hasTelemetryChanged(prev: GameTelemetry | null, next: GameTeleme
         penav.colorHex !== nenav.colorHex ||
         Math.round(penav.distPx / 50) !== Math.round(nenav.distPx / 50) ||
         penav.targetHubName !== nenav.targetHubName))
+  ) {
+    return true;
+  }
+
+  const pgps = prev.gps;
+  const ngps = next.gps;
+  if (
+    (pgps === null) !== (ngps === null) ||
+    (pgps &&
+      ngps &&
+      (pgps.active !== ngps.active ||
+        pgps.mutedAutoAvailable !== ngps.mutedAutoAvailable ||
+        pgps.label !== ngps.label ||
+        pgps.subtitle !== ngps.subtitle ||
+        pgps.kind !== ngps.kind ||
+        pgps.colorHex !== ngps.colorHex ||
+        pgps.maneuver !== ngps.maneuver ||
+        pgps.isAutoMission !== ngps.isAutoMission ||
+        pgps.recalculated !== ngps.recalculated ||
+        Math.round(pgps.remainingDistPx / 25) !== Math.round(ngps.remainingDistPx / 25) ||
+        Math.round(pgps.distToManeuverPx / 15) !== Math.round(ngps.distToManeuverPx / 15)))
   ) {
     return true;
   }

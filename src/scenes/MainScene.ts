@@ -43,6 +43,13 @@ import { ParkedTruckManager } from '../systems/ParkedTruckManager';
 import { AudioEngine } from '../systems/AudioEngine';
 import { WeatherRenderer } from '../systems/WeatherRenderer';
 import { ExamController, type ExamNavTarget } from '../systems/ExamController';
+import {
+  GpsSystem,
+  collectWorldPois,
+  type GpsHudState,
+  type GpsPoiItem,
+  type GpsRouteSnapshot,
+} from '../systems/GpsSystem';
 import { BootProgress, getAssetCategoryMessage } from '../systems/BootProgress';
 import { COLLISION_CAT, COLLISION_MASK } from '../physics/CollisionLayers';
 import {
@@ -249,6 +256,10 @@ export class MainScene extends Phaser.Scene {
   private audio: AudioEngine = new AudioEngine();
   private autoLightsActive: boolean = false;
 
+  // Road-graph GPS navigation & turn-by-turn router
+  public gpsSystem: GpsSystem = new GpsSystem();
+  private lastGpsUpdateAt: number = -1000;
+
   // Latest Telemetry Cache for React / HUD
   public telemetry: {
     speedKmh: number;
@@ -309,6 +320,7 @@ export class MainScene extends Phaser.Scene {
     activeMission: ActiveMissionState | null;
     missionNavTarget: MissionNavTarget | null;
     examNavTarget: ExamNavTarget | null;
+    gps: GpsHudState | null;
     lastMissionCompletion: MissionCompletionResult | null;
     coupling: {
       decoupleReady: boolean;      // coupled && stopped — the red decouple button is live
@@ -378,6 +390,7 @@ export class MainScene extends Phaser.Scene {
     activeMission: null,
     missionNavTarget: null,
     examNavTarget: null,
+    gps: null,
     lastMissionCompletion: null,
     coupling: { decoupleReady: false, coupledName: null, blocked: null, notice: null, noticeKind: 'info', noticeSeq: 0, noticeDurationMs: 3500 },
   };
@@ -3389,6 +3402,73 @@ export class MainScene extends Phaser.Scene {
       }
       const missionNavTarget = this.getActiveMissionNavTarget();
       const examNavTarget = this.getActiveExamNavTarget();
+
+      // Sync automatic GPS destination with active exam or mission (automatically active during missions/exams)
+      if (examNavTarget) {
+        const legKey = `exam:${examNavTarget.licenseId}:${examNavTarget.phase}`;
+        const label =
+          examNavTarget.phase === 'recouple'
+            ? `Reengatar ${examNavTarget.trailerLabel ?? 'atrelado'}`
+            : `Doca do Exame (${examNavTarget.licenseId})`;
+        this.gpsSystem.syncAutoDestination(
+          {
+            x: examNavTarget.x,
+            y: examNavTarget.y,
+            label,
+            subtitle: examNavTarget.targetHubName,
+            kind: 'exam',
+            colorHex: examNavTarget.colorHex,
+          },
+          legKey,
+        );
+      } else if (missionNavTarget) {
+        const activeM = this.missionSystem.getActiveMission();
+        const legKey = `mission:${activeM?.mission.id ?? 'active'}:${missionNavTarget.phase}:${missionNavTarget.needsPupOnly ? 'pup' : 'lead'}`;
+        const label =
+          missionNavTarget.phase === 'pickup'
+            ? `Recolher ${missionNavTarget.trailerLabel}`
+            : `Entregar · ${missionNavTarget.targetHubName}`;
+        const subtitle =
+          missionNavTarget.phase === 'pickup'
+            ? missionNavTarget.pickupHubName
+            : missionNavTarget.targetDockLabel;
+        this.gpsSystem.syncAutoDestination(
+          {
+            x: missionNavTarget.x,
+            y: missionNavTarget.y,
+            label,
+            subtitle,
+            kind: 'mission',
+            colorHex: missionNavTarget.phase === 'pickup' ? 0xf59e0b : 0x10b981,
+          },
+          legKey,
+        );
+      } else {
+        this.gpsSystem.syncAutoDestination(null, null);
+      }
+
+      // Throttled GPS route update (~8Hz) or immediate when destination needs first solve
+      const gpsSnapBefore = this.gpsSystem.getSnapshot();
+      const gpsNeedsImmediate =
+        this.gpsSystem.getEffectiveDestination().dest !== null && gpsSnapBefore.path.length < 2;
+      if (gpsNeedsImmediate || time - this.lastGpsUpdateAt >= 120) {
+        this.lastGpsUpdateAt = time;
+        const gpsRes = this.gpsSystem.update(
+          this.roadNetwork,
+          tx,
+          ty,
+          this.truck.body.angle,
+          this.truck.layer,
+          time,
+          this.truck.speedKmh,
+          this.truck.isReversing,
+        );
+        if (gpsRes.arrivedLabel) {
+          this.setCouplingNotice(`Chegou ao destino GPS: ${gpsRes.arrivedLabel}`, 'success', 4500);
+          this.audio.playRefuelEnd();
+        }
+      }
+
       this.renderMissionWorldMarker(time, missionNavTarget, examNavTarget);
 
       // H1: Throttled autosave of active truck pose, fuel, damage & wear every 5 seconds
@@ -3472,6 +3552,7 @@ export class MainScene extends Phaser.Scene {
         activeMission: this.missionSystem.getActiveMission(),
         missionNavTarget,
         examNavTarget,
+        gps: this.gpsSystem.getHudState(),
         lastMissionCompletion: this.missionSystem.getLastCompletion(),
         coupling: this.computeCouplingState(time),
       };
@@ -3856,29 +3937,118 @@ export class MainScene extends Phaser.Scene {
       return;
     }
 
+    // Active mission objective marker
     const target = nav ?? this.getActiveMissionNavTarget();
     const active = this.missionSystem?.getActiveMission();
-    if (!target || !active) return;
+    if (target && active) {
+      const color = target.phase === 'pickup' ? 0xf59e0b : 0x10b981;
 
-    const color = target.phase === 'pickup' ? 0xf59e0b : 0x10b981;
+      if (target.phase === 'pickup') {
+        g.lineStyle(3.5, color, 0.65 + 0.35 * pulse);
+        g.strokeCircle(target.x, target.y, 56 + 10 * pulse);
+        g.lineStyle(2, 0xfef3c7, 0.5 + 0.3 * pulse);
+        g.strokeCircle(target.x, target.y, 38 + 4 * pulse);
+      } else {
+        const td = active.mission.targetDock;
+        g.lineStyle(3, color, 0.55 + 0.4 * pulse);
+        g.strokeRoundedRect(td.x - td.width / 2, td.y - td.height / 2, td.width, td.height, 8);
+        g.fillStyle(color, 0.08 + 0.08 * pulse);
+        g.fillRoundedRect(td.x - td.width / 2, td.y - td.height / 2, td.width, td.height, 8);
+      }
 
-    if (target.phase === 'pickup') {
-      g.lineStyle(3.5, color, 0.65 + 0.35 * pulse);
-      g.strokeCircle(target.x, target.y, 56 + 10 * pulse);
-      g.lineStyle(2, 0xfef3c7, 0.5 + 0.3 * pulse);
-      g.strokeCircle(target.x, target.y, 38 + 4 * pulse);
-    } else {
-      const td = active.mission.targetDock;
-      g.lineStyle(3, color, 0.55 + 0.4 * pulse);
-      g.strokeRoundedRect(td.x - td.width / 2, td.y - td.height / 2, td.width, td.height, 8);
-      g.fillStyle(color, 0.08 + 0.08 * pulse);
-      g.fillRoundedRect(td.x - td.width / 2, td.y - td.height / 2, td.width, td.height, 8);
+      if (target.distPx > 180) {
+        this.drawDirectionalGpsChevron(g, tx, ty, target.x, target.y, color);
+      }
     }
 
-    // Crisp directional GPS chevron around truck pointing toward the current step's objective
-    if (target.distPx > 180) {
-      this.drawDirectionalGpsChevron(g, tx, ty, target.x, target.y, color);
+    // Manual / POI GPS destination ring & directional chevron in world space
+    const gpsSnap = this.gpsSystem?.getSnapshot();
+    if (gpsSnap?.active && gpsSnap.destination && !gpsSnap.isAutoMission) {
+      const d = gpsSnap.destination;
+      const col = d.colorHex ?? 0x22d3ee;
+      g.lineStyle(3.2, col, 0.65 + 0.32 * pulse);
+      g.strokeCircle(d.x, d.y, 52 + 10 * pulse);
+      g.fillStyle(col, 0.14 + 0.08 * pulse);
+      g.fillCircle(d.x, d.y, 36);
+      g.fillStyle(col, 0.95);
+      g.fillCircle(d.x, d.y, 8);
+
+      // Draw orbiting cyan chevron toward manual GPS target if no mission chevron is already orbiting
+      if (!target || !active) {
+        const directDist = Phaser.Math.Distance.Between(tx, ty, d.x, d.y);
+        if (directDist > 180) {
+          this.drawDirectionalGpsChevron(g, tx, ty, d.x, d.y, col);
+        }
+      }
     }
+  }
+
+  /** Sets a manual GPS destination (custom map pin or selected POI) and solves its road route immediately. */
+  public setManualGpsDestination(dest: {
+    x: number;
+    y: number;
+    label: string;
+    subtitle?: string;
+    kind?: 'manual_pin' | 'poi';
+    colorHex?: number;
+    poiId?: string;
+  }): void {
+    this.gpsSystem.setManualDestination(dest);
+    if (this.truck && this.roadNetwork) {
+      const now = this.time?.now ?? performance.now();
+      this.gpsSystem.update(
+        this.roadNetwork,
+        this.truck.body.position.x,
+        this.truck.body.position.y,
+        this.truck.body.angle,
+        this.truck.layer,
+        now,
+        this.truck.speedKmh,
+        this.truck.isReversing,
+      );
+      this.lastGpsUpdateAt = now;
+      this.telemetry.gps = this.gpsSystem.getHudState();
+    }
+    this.setCouplingNotice(`GPS definido: ${dest.label}`, 'info', 3000);
+  }
+
+  /** Cancels the currently active GPS route (clears manual pin/POI or mutes active mission/exam GPS leg). */
+  public cancelGpsDestination(): void {
+    const res = this.gpsSystem.cancelDestination();
+    this.telemetry.gps = this.gpsSystem.getHudState();
+    if (res.clearedManual || res.mutedAuto) {
+      this.setCouplingNotice('Destino GPS cancelado', 'info', 2500);
+    }
+  }
+
+  /** Restores automatic GPS routing for an active mission or exam if previously cancelled/overridden. */
+  public resumeAutoGpsDestination(): void {
+    this.gpsSystem.resumeAutoDestination();
+    if (this.truck && this.roadNetwork) {
+      const now = this.time?.now ?? performance.now();
+      this.gpsSystem.update(
+        this.roadNetwork,
+        this.truck.body.position.x,
+        this.truck.body.position.y,
+        this.truck.body.angle,
+        this.truck.layer,
+        now,
+        this.truck.speedKmh,
+        this.truck.isReversing,
+      );
+      this.lastGpsUpdateAt = now;
+      this.telemetry.gps = this.gpsSystem.getHudState();
+    }
+  }
+
+  public getGpsRouteSnapshot(): GpsRouteSnapshot {
+    return this.gpsSystem.getSnapshot();
+  }
+
+  public getWorldPois(): GpsPoiItem[] {
+    if (!this.world || !this.garageSystem) return [];
+    const activeTruckId = this.reputationSystem?.getActiveTruck()?.id ?? this.telemetry.activeTruckId;
+    return collectWorldPois(this.world, this.garageSystem, this.reputationSystem ?? null, activeTruckId);
   }
 
 
