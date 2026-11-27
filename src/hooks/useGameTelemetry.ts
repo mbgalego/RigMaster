@@ -64,6 +64,7 @@ export function createInitialTelemetry(): GameTelemetry {
     hubReputation: { harbor: 0, shipyard: 0, industrial: 0, historic: 0, serra: 0 },
     activeMission: null,
     missionNavTarget: null,
+    examNavTarget: null,
     lastMissionCompletion: null,
     coupling: {
       decoupleReady: false,
@@ -96,6 +97,7 @@ export function cloneTelemetrySnapshot(t: GameTelemetry): GameTelemetry {
     hubReputation: { ...t.hubReputation },
     activeMission: t.activeMission ? { ...t.activeMission } : null,
     missionNavTarget: t.missionNavTarget ? { ...t.missionNavTarget } : null,
+    examNavTarget: t.examNavTarget ? { ...t.examNavTarget, dockPos: { ...t.examNavTarget.dockPos } } : null,
     coupling: { ...t.coupling },
   };
 }
@@ -256,6 +258,21 @@ export function hasTelemetryChanged(prev: GameTelemetry | null, next: GameTeleme
         pnav.pickupHubName !== nnav.pickupHubName ||
         pnav.hasWrongTrailerCoupled !== nnav.hasWrongTrailerCoupled ||
         pnav.needsPupOnly !== nnav.needsPupOnly))
+  ) {
+    return true;
+  }
+
+  const penav = prev.examNavTarget;
+  const nenav = next.examNavTarget;
+  if (
+    (penav === null) !== (nenav === null) ||
+    (penav &&
+      nenav &&
+      (penav.licenseId !== nenav.licenseId ||
+        penav.phase !== nenav.phase ||
+        penav.colorHex !== nenav.colorHex ||
+        Math.round(penav.distPx / 50) !== Math.round(nenav.distPx / 50) ||
+        penav.targetHubName !== nenav.targetHubName))
   ) {
     return true;
   }

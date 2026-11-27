@@ -506,19 +506,28 @@ export class MinimapScene extends Phaser.Scene {
       g.strokeRect(rx1, ry1, rx2 - rx1, ry2 - ry1);
     }
 
-    // Exam target marker (pulsing cyan beacon or edge-clamped directional arrow)
-    const examDock = mainScene.getExamDockWorld();
-    if (examDock) {
-      const ex = toMapX(examDock.x);
-      const ey = toMapY(examDock.y);
-      const pulse = 0.55 + Math.sin(time * 0.005) * 0.35;
-      if (isInside(ex, ey, 5)) {
-        g.lineStyle(2, 0x22d3ee, pulse);
-        g.strokeCircle(ex, ey, 5.5);
-        g.fillStyle(0x22d3ee, pulse);
-        g.fillCircle(ex, ey, 2.5);
+    // Exam target marker (emerald/amber pulsing beacon or edge-clamped directional arrow)
+    const examNav = mainScene.getActiveExamNavTarget();
+    if (examNav) {
+      const pulse = 0.55 + Math.sin(time * 0.006) * 0.35;
+      if (examNav.phase === 'recouple') {
+        // Subtle secondary emerald ring on exam dock when inside local radar
+        const dx = toMapX(examNav.dockPos.x);
+        const dy = toMapY(examNav.dockPos.y);
+        if (isInside(dx, dy, 4)) {
+          g.lineStyle(1.3, 0x10b981, 0.5);
+          g.strokeCircle(dx, dy, 4.5);
+        }
+      }
+      const ex = toMapX(examNav.x);
+      const ey = toMapY(examNav.y);
+      if (isInside(ex, ey, 6)) {
+        g.lineStyle(2.2, examNav.colorHex, pulse);
+        g.strokeCircle(ex, ey, 6.5);
+        g.fillStyle(examNav.colorHex, 0.95);
+        g.fillCircle(ex, ey, 3);
       } else {
-        this.drawEdgeArrow(g, img.x, img.y, w, ex, ey, 0x22d3ee, Math.min(1, pulse + 0.15));
+        this.drawEdgeArrow(g, img.x, img.y, w, ex, ey, examNav.colorHex, Math.min(1, pulse + 0.15));
       }
     }
 
@@ -559,8 +568,8 @@ export class MinimapScene extends Phaser.Scene {
       }
     }
 
-    // Active mission objective marker (in-view pulsing beacon OR edge-clamped directional arrow)
-    const nav = mainScene.getActiveMissionNavTarget();
+    // Active mission objective marker (suppressed while an exam is active so only exam GPS shows)
+    const nav = examNav ? null : mainScene.getActiveMissionNavTarget();
     if (nav) {
       const pulse = 0.55 + Math.sin(time * 0.006) * 0.35;
       if (nav.phase === 'pickup') {

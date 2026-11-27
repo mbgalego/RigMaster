@@ -5,6 +5,8 @@ import { ReputationSystem, type FleetTruckState, type GameMode } from '../system
 import { WeatherSystem } from '../systems/WeatherSystem';
 import { TRUCK_CATALOG } from '../systems/TruckCatalog';
 import type { ActiveMissionState, MissionNavTarget } from '../systems/MissionSystem';
+import type { ExamStatus } from '../systems/LicenseSystem';
+import type { ExamNavTarget } from '../systems/ExamController';
 import { World } from '../world/World';
 import type { MainScene } from '../scenes/MainScene';
 
@@ -19,6 +21,8 @@ interface WorldMapModalProps {
   hubReputation: Record<HubId, number>;
   activeMission: ActiveMissionState | null;
   missionNavTarget: MissionNavTarget | null;
+  activeExam?: ExamStatus | null;
+  examNavTarget?: ExamNavTarget | null;
   initialFocusTruckId?: string | null;
   onSwapTruck: (truckId: string, remoteSandbox: boolean) => void;
 }
@@ -68,6 +72,8 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
   hubReputation,
   activeMission,
   missionNavTarget,
+  activeExam,
+  examNavTarget,
   initialFocusTruckId,
   onSwapTruck,
 }) => {
@@ -804,8 +810,118 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                 </g>
               ))}
 
+              {/* Active License Exam Route & Target (Emerald dock or Amber recouple) */}
+              {activeExam?.active && (() => {
+                const enav = examNavTarget ?? scene?.getActiveExamNavTarget() ?? null;
+                if (!enav) return null;
+                const isRecouple = enav.phase === 'recouple';
+                if (isRecouple) {
+                  return (
+                    <g data-testid="world-map-exam-recouple-route" pointerEvents="none">
+                      <line
+                        x1={enav.x}
+                        y1={enav.y}
+                        x2={enav.dockPos.x}
+                        y2={enav.dockPos.y}
+                        stroke="#34d399"
+                        strokeWidth={28 * s}
+                        strokeDasharray={`${110 * s} ${130 * s}`}
+                        opacity={0.45}
+                      />
+                      <circle
+                        cx={enav.dockPos.x}
+                        cy={enav.dockPos.y}
+                        r={165 * s}
+                        fill="#10b981"
+                        fillOpacity={0.14}
+                        stroke="#34d399"
+                        strokeWidth={28 * s}
+                        opacity={0.65}
+                      />
+                      <text
+                        x={enav.dockPos.x}
+                        y={enav.dockPos.y - 250 * s}
+                        textAnchor="middle"
+                        fill="#6ee7b7"
+                        fontSize={210 * s}
+                        fontWeight="600"
+                        opacity={0.85}
+                      >
+                        Doca do Exame
+                      </text>
+                      <line
+                        x1={activeTruckPos.x}
+                        y1={activeTruckPos.y}
+                        x2={enav.x}
+                        y2={enav.y}
+                        stroke="#f59e0b"
+                        strokeWidth={48 * s}
+                        strokeDasharray={`${160 * s} ${110 * s}`}
+                        opacity={0.92}
+                      />
+                      <circle
+                        cx={enav.x}
+                        cy={enav.y}
+                        r={240 * s}
+                        fill="#f59e0b"
+                        fillOpacity={0.25}
+                        stroke="#fbbf24"
+                        strokeWidth={44 * s}
+                      />
+                      <text
+                        x={enav.x}
+                        y={enav.y - 310 * s}
+                        textAnchor="middle"
+                        fill="#fde68a"
+                        fontSize={240 * s}
+                        fontWeight="700"
+                      >
+                        Reengatar
+                      </text>
+                    </g>
+                  );
+                }
+
+                const strokeCol = enav.phase === 'align' ? '#fbbf24' : '#34d399';
+                const fillCol = enav.phase === 'align' ? '#f59e0b' : '#10b981';
+                const textCol = enav.phase === 'align' ? '#fde68a' : '#6ee7b7';
+                return (
+                  <g data-testid="world-map-exam-route" pointerEvents="none">
+                    <line
+                      x1={activeTruckPos.x}
+                      y1={activeTruckPos.y}
+                      x2={enav.dockPos.x}
+                      y2={enav.dockPos.y}
+                      stroke={strokeCol}
+                      strokeWidth={48 * s}
+                      strokeDasharray={`${160 * s} ${120 * s}`}
+                      opacity={0.92}
+                    />
+                    <circle
+                      cx={enav.dockPos.x}
+                      cy={enav.dockPos.y}
+                      r={230 * s}
+                      fill={fillCol}
+                      fillOpacity={0.25}
+                      stroke={strokeCol}
+                      strokeWidth={44 * s}
+                    />
+                    <text
+                      x={enav.dockPos.x}
+                      y={enav.dockPos.y - 300 * s}
+                      textAnchor="middle"
+                      fill={textCol}
+                      fontSize={240 * s}
+                      fontWeight="700"
+                    >
+                      Doca do Exame ({enav.licenseId})
+                    </text>
+                  </g>
+                );
+              })()}
+
               {/* Active Mission Route & Target (Step 1 Pickup in Amber → Step 2 Delivery in Emerald) */}
-              {activeMission && (() => {
+              {!activeExam?.active && activeMission && (() => {
                 const nav = missionNavTarget ?? scene?.getActiveMissionNavTarget() ?? null;
                 const deliveryPos = nav?.deliveryPos ?? {
                   x: activeMission.mission.targetDock.x,
@@ -1053,7 +1169,29 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
               )}
             </div>
 
-            {activeMission && (() => {
+            {activeExam?.active && (() => {
+              const enav = examNavTarget ?? scene?.getActiveExamNavTarget() ?? null;
+              if (!enav) return null;
+              return (
+                <div className="border-t border-slate-800 pt-3 text-xs space-y-1">
+                  <div className={`font-semibold ${enav.phase === 'dock' ? 'text-emerald-300' : 'text-amber-300'}`}>
+                    Exame Ativo · Classe {enav.licenseId}
+                  </div>
+                  <div className="text-slate-200">{enav.examTitle}</div>
+                  {enav.phase === 'recouple' && (
+                    <div className="text-amber-200/90">
+                      Reengatar: {enav.trailerLabel ?? 'Atrelado do exame'}
+                    </div>
+                  )}
+                  <div className="text-slate-400">
+                    Doca do Exame: {enav.targetHubName} ·{' '}
+                    {enav.distPx < 1000 ? `${Math.round(enav.distPx)} m` : `${(enav.distPx / 1000).toFixed(1)} km`}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {!activeExam?.active && activeMission && (() => {
               const nav = missionNavTarget ?? scene?.getActiveMissionNavTarget() ?? null;
               return (
                 <div className="border-t border-slate-800 pt-3 text-xs space-y-1">

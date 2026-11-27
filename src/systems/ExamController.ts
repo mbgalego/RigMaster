@@ -4,6 +4,23 @@ import type { GarageSystem, WeatherModifier } from './GarageSystem';
 import type { RoadNetwork } from './RoadNetwork';
 import type { World } from '../world/World';
 
+export interface ExamNavTarget {
+  licenseId: LicenseId;
+  /** 'recouple' (amber) if exam trailer is decoupled; 'align' (amber) inside dock before alignment/reverse met; 'dock' (emerald) driving to/holding in exam dock. */
+  phase: 'recouple' | 'align' | 'dock';
+  colorHex: number;
+  x: number;
+  y: number;
+  distPx: number;
+  dockPos: { x: number; y: number };
+  targetHubName: string;
+  trailerLabel: string | null;
+  requireReverse: boolean;
+  reversedDuringExam: boolean;
+  maxCollisions: number;
+  examTitle: string;
+}
+
 export interface ExamSyncCallbacks {
   getTotalRigCollisions: () => number;
   onExamPrepared: () => void;
@@ -73,7 +90,9 @@ export class ExamController {
         this.prepareExamTargetDock(lic.exam.targetDock);
       }
       if (this.examDockWorld) {
-        this.renderExamTargetMarker(this.examDockWorld, time);
+        const needsAdjustInDock = exam.inDockZone && exam.dockHoldSec <= 0;
+        const accentColor = needsAdjustInDock ? 0xf59e0b : 0x10b981;
+        this.renderExamTargetMarker(this.examDockWorld, time, accentColor);
       }
     } else if (this.preparedExamId) {
       if (this.preExamWeather !== null) {
@@ -114,16 +133,21 @@ export class ExamController {
     };
   }
 
-  private renderExamTargetMarker(td: LicenseExam['targetDock'], time: number): void {
+  private renderExamTargetMarker(
+    td: LicenseExam['targetDock'],
+    time: number,
+    accentColor: number = 0x10b981,
+  ): void {
     if (!this.examTargetMarker) {
       this.examTargetMarker = this.scene.add.graphics();
       this.examTargetMarker.setDepth(12);
+      this.examTargetMarker.setLighting(false);
     }
     if (!this.examTargetLabel) {
       this.examTargetLabel = this.scene.add.text(td.x, td.y - td.height / 2 - 34, 'DOCA DO EXAME', {
         fontFamily: 'monospace',
         fontSize: '22px',
-        color: '#22d3ee',
+        color: '#34d399',
         backgroundColor: '#0f172acc',
         padding: { x: 8, y: 4 },
       });
@@ -133,11 +157,14 @@ export class ExamController {
 
     const g = this.examTargetMarker;
     g.clear();
-    const pulse = 0.55 + Math.sin(time * 0.005) * 0.25;
-    g.lineStyle(4, 0x22d3ee, pulse);
-    g.strokeRect(td.x - (td.width + 40) / 2, td.y - (td.height + 40) / 2, td.width + 40, td.height + 40);
-    g.lineStyle(2, 0x22d3ee, 0.5);
-    g.strokeRect(td.x - td.width / 2, td.y - td.height / 2, td.width, td.height);
+    const pulse = 0.5 + 0.5 * Math.sin(time * 0.006);
+    g.fillStyle(accentColor, 0.08 + 0.08 * pulse);
+    g.fillRoundedRect(td.x - td.width / 2, td.y - td.height / 2, td.width, td.height, 8);
+    g.lineStyle(3.5, accentColor, 0.55 + 0.4 * pulse);
+    g.strokeRoundedRect(td.x - (td.width + 32) / 2, td.y - (td.height + 32) / 2, td.width + 32, td.height + 32, 10);
+    g.lineStyle(3, accentColor, 0.75 + 0.25 * pulse);
+    g.strokeRoundedRect(td.x - td.width / 2, td.y - td.height / 2, td.width, td.height, 8);
+    this.examTargetLabel.setColor(accentColor === 0xf59e0b ? '#fbbf24' : '#34d399');
     this.examTargetLabel.setPosition(td.x, td.y - td.height / 2 - 34);
   }
 

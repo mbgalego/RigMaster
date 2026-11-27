@@ -23,27 +23,84 @@
         position: fixed;
         inset: 0;
         display: flex;
-        flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 14px;
-        background: #0c0f17;
+        padding: 16px;
+        background-color: #0c0f17;
+        background-image:
+          radial-gradient(circle at 50% 35%, rgba(14, 165, 233, 0.12), transparent 60%),
+          linear-gradient(rgba(148, 163, 184, 0.04) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(148, 163, 184, 0.04) 1px, transparent 1px);
+        background-size: 100% 100%, 32px 32px, 32px 32px;
         color: #cbd5e1;
       }
+      #boot-card {
+        width: 100%;
+        max-width: 448px;
+        box-sizing: border-box;
+        padding: 22px 24px;
+        border-radius: 16px;
+        border: 1px solid rgba(6, 182, 212, 0.35);
+        background: rgba(2, 6, 23, 0.95);
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      #boot-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      #boot-title {
+        font-size: 18px;
+        font-weight: 900;
+        letter-spacing: -0.02em;
+        color: #ffffff;
+        line-height: 1.15;
+      }
+      #boot-sub {
+        font-size: 11px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #94a3b8;
+        margin-top: 2px;
+      }
       #boot-spinner {
-        width: 34px;
-        height: 34px;
-        border: 3px solid rgba(56, 189, 248, 0.2);
+        width: 24px;
+        height: 24px;
+        border: 2.5px solid rgba(56, 189, 248, 0.2);
         border-top-color: #38bdf8;
         border-radius: 50%;
         animation: rig-spin 0.8s linear infinite;
+        flex-shrink: 0;
+      }
+      #boot-track {
+        height: 10px;
+        width: 100%;
+        border-radius: 999px;
+        background: #0f172a;
+        border: 1px solid #1e293b;
+        overflow: hidden;
+      }
+      #boot-bar {
+        height: 100%;
+        width: 18%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #06b6d4, #38bdf8, #34d399);
+        animation: rig-pulse-bar 1.3s ease-in-out infinite;
       }
       @keyframes rig-spin { to { transform: rotate(360deg); } }
+      @keyframes rig-pulse-bar {
+        0%, 100% { width: 14%; opacity: 0.75; }
+        50% { width: 32%; opacity: 1; }
+      }
       #boot-error {
         display: none;
-        max-width: 440px;
-        padding: 16px;
-        border-radius: 12px;
+        padding: 12px 14px;
+        border-radius: 10px;
         border: 1px solid rgba(248, 113, 113, 0.35);
         background: rgba(30, 41, 59, 0.9);
         text-align: center;
@@ -51,7 +108,7 @@
         line-height: 1.5;
       }
       #boot-error button {
-        margin-top: 12px;
+        margin-top: 10px;
         padding: 8px 16px;
         border-radius: 8px;
         border: none;
@@ -65,11 +122,20 @@
   <body>
     <div id="root">
       <div id="boot-splash">
-        <div id="boot-spinner"></div>
-        <div id="boot-status" style="font-size:14px;font-weight:600;letter-spacing:0.03em;">A carregar RigMaster…</div>
-        <div id="boot-error">
-          <div id="boot-error-msg" style="color:#fca5a5;word-break:break-word;"></div>
-          <button type="button" onclick="window.location.replace(window.location.pathname + '?_r=' + Date.now())">Recarregar</button>
+        <div id="boot-card">
+          <div id="boot-head">
+            <div>
+              <div id="boot-title">RIGMASTER</div>
+              <div id="boot-sub">Paint &amp; Drive Simulator</div>
+            </div>
+            <div id="boot-spinner"></div>
+          </div>
+          <div id="boot-track"><div id="boot-bar"></div></div>
+          <div id="boot-status" style="font-size:12px;font-weight:500;color:#e2e8f0;">A preparar módulos do simulador…</div>
+          <div id="boot-error">
+            <div id="boot-error-msg" style="color:#fca5a5;word-break:break-word;"></div>
+            <button type="button" onclick="window.location.replace(window.location.pathname + '?_r=' + Date.now())">Recarregar</button>
+          </div>
         </div>
       </div>
     </div>

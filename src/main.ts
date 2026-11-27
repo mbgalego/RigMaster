@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { createGameConfig, GameConfigOptions } from './config';
 import { MainScene } from './scenes/MainScene';
 import { EditorScene } from './scenes/EditorScene';
+import { BootProgress } from './systems/BootProgress';
 
 let gameInstance: Phaser.Game | null = null;
 let resizeCleanup: (() => void) | null = null;
@@ -47,6 +48,8 @@ export function initGame(container: string | HTMLElement, options?: Partial<Game
     gameInstance.destroy(true);
     gameInstance = null;
   }
+
+  BootProgress.reset();
 
   const parentEl = resolveContainerEl(container);
   const initW = parentEl?.clientWidth || window.innerWidth || 1280;

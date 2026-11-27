@@ -31,8 +31,10 @@ import type { UpgradeSlot } from './systems/TruckCatalog';
 import { ReputationSystem, type GameMode } from './systems/ReputationSystem';
 import { MissionSystem } from './systems/MissionSystem';
 import { SpriteRegistry } from './systems/SpriteRegistry';
+import { BootProgress, type BootProgressState } from './systems/BootProgress';
 import { TouchControls } from './components/TouchControls';
 import { TopDrivingBar, DrivingOverlays } from './components/GameHUD';
+import { LoadingOverlay } from './components/LoadingOverlay';
 import { MissionsModal } from './components/MissionsModal';
 import { FleetGarageModal } from './components/FleetGarageModal';
 import { WorkshopUpgradesModal } from './components/WorkshopUpgradesModal';
@@ -107,6 +109,11 @@ export default function App() {
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [cameraZoom, setCameraZoom] = useState<number>(1.0);
   const lastZoomRef = useRef<number>(1.0);
+  const [bootState, setBootState] = useState<BootProgressState>(() => BootProgress.getState());
+
+  useEffect(() => {
+    return BootProgress.subscribe(setBootState);
+  }, []);
 
   useEffect(() => {
     const handleFsChange = () => setIsFullscreen(!!document.fullscreenElement);
@@ -293,7 +300,8 @@ export default function App() {
   // When any modal/overlay is open, the Phaser canvas must not capture pointer events,
   // otherwise clicks/taps on HTML buttons (e.g. "Continuar" do exame) are swallowed by the game.
   const modalOpen = Boolean(
-    showLicenseModal ||
+    !bootState.ready ||
+      showLicenseModal ||
       showGarageModal ||
       showMissionsModal ||
       showMissionEditorModal ||
@@ -302,7 +310,7 @@ export default function App() {
       showWorldMapModal ||
       showJsonModal ||
       telemetry.lastMissionCompletion ||
-      (activeExam && (activeExam.active || activeExam.isPassed || activeExam.isFailed))
+      (activeExam && (activeExam.isPassed || activeExam.isFailed))
   );
 
   // Restore focus to previously focused control when a modal closes
@@ -615,6 +623,10 @@ export default function App() {
   const handleStartExam = (licenseId: LicenseId) => {
     const licSys = LicenseSystem.getInstance();
     licSys.startExam(licenseId);
+    prevFocusedRef.current = null;
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
     setShowLicenseModal(false);
 
     // Switch to the exam's vehicle directly (bypassing the license gate that the exam itself grants)
@@ -1385,64 +1397,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* ACTIVE LICENSE EXAM STATUS BANNER */}
-      {activeExam && activeExam.active && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 bg-slate-950/95 border border-cyan-400 px-5 py-2.5 rounded-lg shadow-2xl shadow-cyan-500/30 z-30 flex items-center gap-5">
-          <div>
-            <div className="text-[10px] uppercase font-mono tracking-widest text-cyan-400">EXAME EM CURSO</div>
-            <div className="text-sm font-bold text-white">Classe {activeExam.licenseId}</div>
-          </div>
-
-          <div className="flex items-center gap-4 text-xs font-mono">
-            <div>
-              <span className="text-slate-400">Tempo:</span>{' '}
-              <span className="text-amber-300 font-bold">{Math.ceil(activeExam.remainingTime)}s</span>
-            </div>
-            <div>
-              <span className="text-slate-400">Colisões:</span>{' '}
-              <span className={activeExam.collisionCount > 0 ? 'text-red-400 font-bold' : 'text-emerald-400'}>
-                {activeExam.collisionCount}
-              </span>
-            </div>
-            {activeExam.maxGForce !== null && (
-              <div data-testid="exam-g-meter">
-                <span className="text-slate-400">G-Meter:</span>{' '}
-                <span
-                  className={
-                    activeExam.currentGForce > activeExam.maxGForce
-                      ? 'text-red-400 font-bold'
-                      : activeExam.currentGForce > activeExam.maxGForce * 0.75
-                        ? 'text-amber-300 font-bold'
-                        : 'text-emerald-400 font-bold'
-                  }
-                >
-                  {activeExam.currentGForce.toFixed(2)}g / {activeExam.maxGForce.toFixed(1)}g
-                </span>
-              </div>
-            )}
-            <div>
-              <span className="text-slate-400">Doca:</span>{' '}
-              {activeExam.inDockZone ? (
-                <span className="text-emerald-400 font-bold">
-                  {activeExam.dockHoldSec > 0
-                    ? `A alinhar… ${activeExam.dockHoldSec.toFixed(1)}s / 1.5s`
-                    : 'Na Área da Doca'}
-                </span>
-              ) : (
-                <span className="text-slate-400">Em aproximação</span>
-              )}
-            </div>
-          </div>
-
-          <button
-            onClick={() => LicenseSystem.getInstance().cancelExam()}
-            className="text-xs bg-red-950 text-red-300 px-2 py-1 rounded border border-red-800 hover:bg-red-900"
-          >
-            Cancelar
-          </button>
-        </div>
-      )}
-
       {/* EXAM RESULT POPUP */}
       {activeExam && (activeExam.isPassed || activeExam.isFailed) && (
         <div className="absolute inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4 pointer-events-none">
@@ -1483,7 +1437,7 @@ export default function App() {
         </div>
       )}
 
-      {/* DRIVING MODE OVERLAYS (minimap hotspot, active mission, completion summary, truck swap, toasts) */}
+      {/* DRIVING MODE OVERLAYS (minimap hotspot, active exam, active mission, completion summary, truck swap, toasts) */}
       <DrivingOverlays
         isEditorMode={isEditorMode}
         modalOpen={modalOpen}
@@ -1497,6 +1451,7 @@ export default function App() {
           setIsMenuOpen(false);
         }}
         onCancelMission={handleCancelMission}
+        onCancelExam={() => LicenseSystem.getInstance().cancelExam()}
         onSwapTruck={handleSwapTruck}
       />
 
@@ -2801,6 +2756,8 @@ export default function App() {
         hubReputation={telemetry.hubReputation}
         activeMission={telemetry.activeMission}
         missionNavTarget={telemetry.missionNavTarget}
+        activeExam={activeExam}
+        examNavTarget={telemetry.examNavTarget}
         initialFocusTruckId={mapFocusTruckId}
         onSwapTruck={handleSwapTruck}
       />
@@ -2840,6 +2797,8 @@ export default function App() {
           if (scene) scene.tryRepair();
         }}
       />
+      {/* STARTUP ASSET & WORLD LOADING OVERLAY (hides empty HUD until map renders) */}
+      <LoadingOverlay state={bootState} />
     </div>
   );
 }

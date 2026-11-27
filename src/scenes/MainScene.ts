@@ -42,7 +42,8 @@ import {
 import { ParkedTruckManager } from '../systems/ParkedTruckManager';
 import { AudioEngine } from '../systems/AudioEngine';
 import { WeatherRenderer } from '../systems/WeatherRenderer';
-import { ExamController } from '../systems/ExamController';
+import { ExamController, type ExamNavTarget } from '../systems/ExamController';
+import { BootProgress, getAssetCategoryMessage } from '../systems/BootProgress';
 import { COLLISION_CAT, COLLISION_MASK } from '../physics/CollisionLayers';
 import {
   TruckDamageState,
@@ -301,6 +302,7 @@ export class MainScene extends Phaser.Scene {
     hubReputation: Record<HubId, number>;
     activeMission: ActiveMissionState | null;
     missionNavTarget: MissionNavTarget | null;
+    examNavTarget: ExamNavTarget | null;
     lastMissionCompletion: MissionCompletionResult | null;
     coupling: {
       decoupleReady: boolean;      // coupled && stopped — the red decouple button is live
@@ -367,19 +369,61 @@ export class MainScene extends Phaser.Scene {
     hubReputation: { harbor: 0, shipyard: 0, industrial: 0, historic: 0, serra: 0 },
     activeMission: null,
     missionNavTarget: null,
+    examNavTarget: null,
     lastMissionCompletion: null,
     coupling: { decoupleReady: false, coupledName: null, blocked: null, notice: null, noticeKind: 'info', noticeSeq: 0, noticeDurationMs: 3500 },
   };
+
+  private bootFramesRendered: number = 0;
 
   constructor() {
     super({ key: 'MainScene' });
   }
 
   public preload() {
+    this.bootFramesRendered = 0;
+    let loadedFiles = 0;
+    let totalFiles = 0;
+    let lastCategoryMsg = 'A carregar recursos gráficos…';
+
+    const onProgress = (ratio: number) => {
+      totalFiles = Math.max(totalFiles, this.load.totalToLoad);
+      BootProgress.setAssetProgress(ratio, loadedFiles, totalFiles, lastCategoryMsg);
+    };
+    const onFileComplete = (key: string) => {
+      loadedFiles++;
+      totalFiles = Math.max(totalFiles, this.load.totalToLoad);
+      lastCategoryMsg = getAssetCategoryMessage(key);
+      const ratio = totalFiles > 0 ? loadedFiles / totalFiles : 1;
+      BootProgress.setAssetProgress(ratio, loadedFiles, totalFiles, lastCategoryMsg);
+    };
+    const onFileError = () => {
+      loadedFiles++;
+      totalFiles = Math.max(totalFiles, this.load.totalToLoad);
+    };
+    const onComplete = () => {
+      this.load.off(Phaser.Loader.Events.PROGRESS, onProgress);
+      this.load.off(Phaser.Loader.Events.FILE_COMPLETE, onFileComplete);
+      this.load.off(Phaser.Loader.Events.FILE_LOAD_ERROR, onFileError);
+      BootProgress.setWorldStage(80, 'A construir ilha, estradas e física…');
+    };
+
+    this.load.on(Phaser.Loader.Events.PROGRESS, onProgress);
+    this.load.on(Phaser.Loader.Events.FILE_COMPLETE, onFileComplete);
+    this.load.on(Phaser.Loader.Events.FILE_LOAD_ERROR, onFileError);
+    this.load.once(Phaser.Loader.Events.COMPLETE, onComplete);
+
     SpriteRegistry.preload(this);
+    totalFiles = this.load.totalToLoad;
+    if (totalFiles > 0) {
+      BootProgress.setAssetProgress(0, 0, totalFiles, 'A carregar texturas de terreno e estradas…');
+    } else {
+      BootProgress.setWorldStage(80, 'A construir ilha, estradas e física…');
+    }
   }
 
   public create() {
+    BootProgress.setWorldStage(84, 'A construir ilha, estradas e física…');
     this.licenseSystem = LicenseSystem.getInstance();
     this.garageSystem = GarageSystem.getInstance();
     this.timeOfDaySystem = TimeOfDaySystem.getInstance();
@@ -790,6 +834,8 @@ export class MainScene extends Phaser.Scene {
     };
     this.events.once('shutdown', cleanupWeatherSubs);
     this.events.once('destroy', cleanupWeatherSubs);
+
+    BootProgress.setRenderStage();
   }
 
   /**
@@ -3196,7 +3242,8 @@ export class MainScene extends Phaser.Scene {
         }
       }
       const missionNavTarget = this.getActiveMissionNavTarget();
-      this.renderMissionWorldMarker(time, missionNavTarget);
+      const examNavTarget = this.getActiveExamNavTarget();
+      this.renderMissionWorldMarker(time, missionNavTarget, examNavTarget);
 
       // H1: Throttled autosave of active truck pose, fuel, damage & wear every 5 seconds
       if (time - this.lastFleetAutosaveAt >= 5000) {
@@ -3274,6 +3321,7 @@ export class MainScene extends Phaser.Scene {
         hubReputation: this.reputationSystem.getAllHubReputation(),
         activeMission: this.missionSystem.getActiveMission(),
         missionNavTarget,
+        examNavTarget,
         lastMissionCompletion: this.missionSystem.getLastCompletion(),
         coupling: this.computeCouplingState(time),
       };
@@ -3309,6 +3357,13 @@ export class MainScene extends Phaser.Scene {
           }
         : null,
     );
+
+    if (this.bootFramesRendered < 2 && this.truck && this.world) {
+      this.bootFramesRendered++;
+      if (this.bootFramesRendered >= 2) {
+        BootProgress.markReady();
+      }
+    }
   }
 
   private normalizeAngleDiffDeg(actualRad: number, requiredDeg: number): number {
@@ -3507,18 +3562,139 @@ export class MainScene extends Phaser.Scene {
     };
   }
 
-  /** Draws active mission target highlight (pickup trailer in amber, delivery dock in emerald) & directional GPS chevron. */
-  private renderMissionWorldMarker(time: number, nav?: MissionNavTarget | null): void {
+  /**
+   * Single source of truth for active license exam navigation (world GPS chevron, MinimapScene,
+   * WorldMapModal, and HUD banner) using the same emerald/amber system as missions:
+   * - Amber ('recouple'): if the required exam trailer (or bitrem pup) is decoupled, points to it.
+   * - Amber ('align'): inside the exam dock zone while alignment or reverse requirement isn't met yet.
+   * - Emerald ('dock'): driving toward the exam target dock (or aligned & holding inside it).
+   */
+  public getActiveExamNavTarget(): ExamNavTarget | null {
+    const exam = this.licenseSystem?.getActiveExam();
+    if (!exam || !exam.active || !exam.licenseId || !this.truck || this.isEditorMode) return null;
+
+    const lic = this.licenseSystem.getLicense(exam.licenseId);
+    const td = this.examController?.getExamDockWorld() || lic.exam.targetDock;
+    const dockPos = { x: td.x, y: td.y };
+    const tx = this.truck.body.position.x;
+    const ty = this.truck.body.position.y;
+    const targetHubId = this.garageSystem.findHubForPosition(dockPos.x, dockPos.y);
+    const targetHubName = this.garageSystem.getHub(targetHubId).name;
+
+    // Detect if the required exam trailer (or bitrem pup) was decoupled during the exam
+    const isBitrem = lic.exam.vehicleType === 'bitrem';
+    const expectedLeadType: TrailerType =
+      lic.exam.vehicleType === 'bitrem' ? 'bitrem_lead' : lic.exam.vehicleType;
+    const missingLead = this.trailer?.type !== expectedLeadType;
+    const missingPup = isBitrem && !missingLead && this.pupTrailer?.type !== 'bitrem_pup';
+
+    if (missingLead || missingPup) {
+      const searchType: TrailerType = missingPup ? 'bitrem_pup' : expectedLeadType;
+      const mgr = TrailerManager.getInstance(this);
+      let nearestTrailer: Trailer | null = null;
+      let bestDist = Infinity;
+      for (const tr of mgr.loose) {
+        if (tr.type !== searchType) continue;
+        const d = Phaser.Math.Distance.Between(tx, ty, tr.body.position.x, tr.body.position.y);
+        if (d < bestDist) {
+          bestDist = d;
+          nearestTrailer = tr;
+        }
+      }
+      if (nearestTrailer) {
+        return {
+          licenseId: exam.licenseId,
+          phase: 'recouple',
+          colorHex: 0xf59e0b,
+          x: nearestTrailer.body.position.x,
+          y: nearestTrailer.body.position.y,
+          distPx: bestDist,
+          dockPos,
+          targetHubName,
+          trailerLabel: TRAILER_TYPE_LABELS[searchType] ?? searchType,
+          requireReverse: lic.exam.requireReverse,
+          reversedDuringExam: exam.reversedDuringExam,
+          maxCollisions: lic.exam.maxCollisions,
+          examTitle: lic.exam.title,
+        };
+      }
+    }
+
+    const needsAdjustInDock = exam.inDockZone && exam.dockHoldSec <= 0;
+    return {
+      licenseId: exam.licenseId,
+      phase: needsAdjustInDock ? 'align' : 'dock',
+      colorHex: needsAdjustInDock ? 0xf59e0b : 0x10b981,
+      x: dockPos.x,
+      y: dockPos.y,
+      distPx: Phaser.Math.Distance.Between(tx, ty, dockPos.x, dockPos.y),
+      dockPos,
+      targetHubName,
+      trailerLabel: null,
+      requireReverse: lic.exam.requireReverse,
+      reversedDuringExam: exam.reversedDuringExam,
+      maxCollisions: lic.exam.maxCollisions,
+      examTitle: lic.exam.title,
+    };
+  }
+
+  /** Draws crisp directional GPS chevron orbiting the truck toward a world target. */
+  private drawDirectionalGpsChevron(
+    g: Phaser.GameObjects.Graphics,
+    tx: number,
+    ty: number,
+    targetX: number,
+    targetY: number,
+    color: number,
+  ): void {
+    const ang = Math.atan2(targetY - ty, targetX - tx);
+    const r = 82;
+    const px = tx + Math.cos(ang) * r;
+    const py = ty + Math.sin(ang) * r;
+    const tipX = tx + Math.cos(ang) * (r + 16);
+    const tipY = ty + Math.sin(ang) * (r + 16);
+    const perpX = -Math.sin(ang) * 8;
+    const perpY = Math.cos(ang) * 8;
+    g.lineStyle(2, 0x0f172a, 0.9);
+    g.fillStyle(color, 0.92);
+    g.fillTriangle(tipX, tipY, px + perpX, py + perpY, px - perpX, py - perpY);
+    g.strokeTriangle(tipX, tipY, px + perpX, py + perpY, px - perpX, py - perpY);
+  }
+
+  /** Draws active exam or mission target highlight & directional green/amber GPS chevron around truck. */
+  private renderMissionWorldMarker(
+    time: number,
+    nav?: MissionNavTarget | null,
+    examNav?: ExamNavTarget | null,
+  ): void {
     const g = this.missionMarkerGraphics;
     if (!g) return;
     g.clear();
-    const target = nav ?? this.getActiveMissionNavTarget();
-    const active = this.missionSystem?.getActiveMission();
-    if (!target || !active || this.isEditorMode || !this.truck) return;
+    if (this.isEditorMode || !this.truck) return;
 
     const pulse = 0.5 + 0.5 * Math.sin(time * 0.006);
     const tx = this.truck.body.position.x;
     const ty = this.truck.body.position.y;
+
+    // Active license exam takes priority over any background mission (matching HUD & Minimap)
+    const activeExamNav = examNav !== undefined ? examNav : this.getActiveExamNavTarget();
+    if (activeExamNav) {
+      if (activeExamNav.phase === 'recouple') {
+        g.lineStyle(3.5, activeExamNav.colorHex, 0.65 + 0.35 * pulse);
+        g.strokeCircle(activeExamNav.x, activeExamNav.y, 56 + 10 * pulse);
+        g.lineStyle(2, 0xfef3c7, 0.5 + 0.3 * pulse);
+        g.strokeCircle(activeExamNav.x, activeExamNav.y, 38 + 4 * pulse);
+      }
+      if (activeExamNav.distPx > 180) {
+        this.drawDirectionalGpsChevron(g, tx, ty, activeExamNav.x, activeExamNav.y, activeExamNav.colorHex);
+      }
+      return;
+    }
+
+    const target = nav ?? this.getActiveMissionNavTarget();
+    const active = this.missionSystem?.getActiveMission();
+    if (!target || !active) return;
+
     const color = target.phase === 'pickup' ? 0xf59e0b : 0x10b981;
 
     if (target.phase === 'pickup') {
@@ -3536,18 +3712,7 @@ export class MainScene extends Phaser.Scene {
 
     // Crisp directional GPS chevron around truck pointing toward the current step's objective
     if (target.distPx > 180) {
-      const ang = Math.atan2(target.y - ty, target.x - tx);
-      const r = 82;
-      const px = tx + Math.cos(ang) * r;
-      const py = ty + Math.sin(ang) * r;
-      const tipX = tx + Math.cos(ang) * (r + 16);
-      const tipY = ty + Math.sin(ang) * (r + 16);
-      const perpX = -Math.sin(ang) * 8;
-      const perpY = Math.cos(ang) * 8;
-      g.lineStyle(2, 0x0f172a, 0.9);
-      g.fillStyle(color, 0.92);
-      g.fillTriangle(tipX, tipY, px + perpX, py + perpY, px - perpX, py - perpY);
-      g.strokeTriangle(tipX, tipY, px + perpX, py + perpY, px - perpX, py - perpY);
+      this.drawDirectionalGpsChevron(g, tx, ty, target.x, target.y, color);
     }
   }
 

@@ -129,6 +129,7 @@ export interface DrivingOverlaysProps {
   onDismissToast: (id: number) => void;
   onOpenWorldMap: () => void;
   onCancelMission: () => void;
+  onCancelExam: () => void;
   onSwapTruck: (truckId: string, teleport: boolean) => void;
 }
 
@@ -146,6 +147,7 @@ export const DrivingOverlays: React.FC<DrivingOverlaysProps> = React.memo(
     onDismissToast,
     onOpenWorldMap,
     onCancelMission,
+    onCancelExam,
     onSwapTruck,
   }) => {
     const am = telemetry.activeMission;
@@ -156,6 +158,16 @@ export const DrivingOverlays: React.FC<DrivingOverlaysProps> = React.memo(
         ? `${Math.round(nav.distPx)} m`
         : `${(nav.distPx / 1000).toFixed(1)} km`
       : null;
+
+    const examActive = Boolean(activeExam && activeExam.active);
+    const examNav = telemetry.examNavTarget;
+    const isExamAmber = examNav?.phase === 'recouple' || examNav?.phase === 'align';
+    const examDistLabel = examNav
+      ? examNav.distPx < 1000
+        ? `${Math.round(examNav.distPx)} m`
+        : `${(examNav.distPx / 1000).toFixed(1)} km`
+      : null;
+    const hasTopBanner = Boolean(examActive || am);
 
     return (
       <>
@@ -175,8 +187,93 @@ export const DrivingOverlays: React.FC<DrivingOverlaysProps> = React.memo(
           </button>
         )}
 
+        {/* ACTIVE LICENSE EXAM COMPACT BANNER (positioned clear of the top-right Minimap on all screen widths) */}
+        {!isEditorMode && activeExam && activeExam.active && (
+          <div
+            data-testid="active-exam-banner"
+            className={`absolute top-[58px] left-2 right-[134px] sm:right-[170px] lg:left-1/2 lg:right-auto lg:-translate-x-1/2 lg:max-w-[calc(100vw-360px)] bg-slate-950/92 border ${
+              isExamAmber ? 'border-amber-500/60' : 'border-emerald-500/60'
+            } px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-lg shadow-xl z-30`}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span
+                    className={`text-[10px] font-bold uppercase tracking-wide shrink-0 ${
+                      isExamAmber ? 'text-amber-400' : 'text-emerald-400'
+                    }`}
+                  >
+                    <span className="sm:hidden">Exame {activeExam.licenseId}</span>
+                    <span className="hidden sm:inline">Exame · Classe {activeExam.licenseId}</span>
+                  </span>
+                  {examNav?.examTitle && (
+                    <span className="text-[11px] sm:text-xs font-semibold text-white truncate">
+                      {examNav.examTitle}
+                    </span>
+                  )}
+                </div>
+                <div
+                  className={`text-[10px] sm:text-[11px] leading-snug truncate ${
+                    isExamAmber ? 'text-amber-200/95' : 'text-emerald-200/90'
+                  }`}
+                >
+                  {examNav?.phase === 'recouple'
+                    ? `Reengatar ${examNav.trailerLabel ?? 'atrelado'}${examDistLabel ? ` · ${examDistLabel}` : ''}`
+                    : activeExam.inDockZone && activeExam.dockHoldSec > 0
+                      ? `Manter alinhado na Doca (${activeExam.dockHoldSec.toFixed(1)}s/1.5s)`
+                      : activeExam.inDockZone && examNav?.requireReverse && !activeExam.reversedDuringExam
+                        ? 'Engrene marcha-atrás (R) na Doca'
+                        : activeExam.inDockZone
+                          ? `Alinhar na Doca (${Math.abs(Math.round(activeExam.dockAlignmentDeg))}°)`
+                          : `Doca do Exame${examNav?.targetHubName ? ` · ${examNav.targetHubName}` : ''}${examDistLabel ? ` · ${examDistLabel}` : ''}`}
+                </div>
+                <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 mt-0.5 text-[10px] sm:text-xs font-mono tabular-nums">
+                  <span className={activeExam.remainingTime <= 15 ? 'text-red-400 font-bold' : 'text-amber-300 font-semibold'}>
+                    {Math.ceil(activeExam.remainingTime)}s
+                  </span>
+                  <span className={activeExam.collisionCount > 0 ? 'text-red-400 font-semibold' : 'text-slate-300'}>
+                    Col {activeExam.collisionCount}
+                    {examNav ? `/${examNav.maxCollisions}` : ''}
+                  </span>
+                  {activeExam.maxGForce !== null && (
+                    <span
+                      data-testid="exam-g-meter"
+                      className={
+                        activeExam.currentGForce > activeExam.maxGForce
+                          ? 'text-red-400 font-bold'
+                          : activeExam.currentGForce > activeExam.maxGForce * 0.75
+                            ? 'text-amber-300 font-bold'
+                            : 'text-emerald-400 font-semibold'
+                      }
+                    >
+                      G {activeExam.currentGForce.toFixed(2)}/{activeExam.maxGForce.toFixed(1)}g
+                    </span>
+                  )}
+                  {examNav?.requireReverse && !activeExam.reversedDuringExam && (
+                    <span className="text-amber-300 font-semibold">Ré obrig.</span>
+                  )}
+                  {activeExam.inDockZone && activeExam.dockHoldSec > 0 && (
+                    <span className="text-emerald-400 font-semibold">
+                      Doca {activeExam.dockHoldSec.toFixed(1)}s/1.5s
+                    </span>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label="Cancelar exame"
+                onClick={onCancelExam}
+                className="shrink-0 text-[10px] sm:text-xs px-1.5 py-0.5 sm:px-2.5 sm:py-1 rounded bg-slate-900 hover:bg-red-950 text-red-300 border border-slate-700 hover:border-red-800 transition-colors whitespace-nowrap"
+              >
+                <span className="sm:hidden">✕</span>
+                <span className="hidden sm:inline">Cancelar</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ACTIVE MISSION COMPACT BANNER (positioned clear of the top-right Minimap on all screen widths) */}
-        {!isEditorMode && am && !(activeExam && activeExam.active) && (
+        {!isEditorMode && am && !examActive && (
           <div
             data-testid="active-mission-banner"
             className={`absolute top-[58px] left-2 right-[134px] sm:right-[170px] lg:left-1/2 lg:right-auto lg:-translate-x-1/2 lg:max-w-[calc(100vw-360px)] bg-slate-950/92 border ${
@@ -345,7 +442,7 @@ export const DrivingOverlays: React.FC<DrivingOverlaysProps> = React.memo(
         {!isEditorMode && (
           <div
             className={`absolute ${
-              telemetry.activeMission ? 'top-[132px] sm:top-[140px] lg:top-[132px]' : 'top-[58px]'
+              hasTopBanner ? 'top-[132px] sm:top-[140px] lg:top-[132px]' : 'top-[58px]'
             } left-2 right-[134px] sm:right-[170px] lg:inset-x-0 z-40 flex flex-col items-start lg:items-center gap-1.5 pointer-events-none lg:px-4`}
           >
             {telemetry.fuelPercent <= 20 && !telemetry.isOutOfFuel && (
