@@ -2709,6 +2709,19 @@ export class MainScene extends Phaser.Scene {
         this.currentGForce = 0;
         this.peakGForce = 0;
       },
+      getDynamicObstacles: () => {
+        const obs: Array<{ x: number; y: number; r: number }> = [];
+        const mgr = TrailerManager.getInstance(this);
+        for (const tr of mgr.loose) {
+          obs.push({ x: tr.body.position.x, y: tr.body.position.y, r: 120 });
+        }
+        if (this.parkedTruckManager) {
+          for (const parked of this.parkedTruckManager.getAll()) {
+            obs.push({ x: parked.fleet.x, y: parked.fleet.y, r: 90 });
+          }
+        }
+        return obs;
+      },
     });
 
     // Keep Matter bridge ramp walls / deck guardrails synced with roadNetwork edits
@@ -3373,29 +3386,44 @@ export class MainScene extends Phaser.Scene {
     return diffDeg;
   }
 
+  /** Signed deviation to the nearest parallel heading (mod 180° -> [-90°, +90°]) for open roadside bays. */
+  private normalizeAxisAngleDiffDeg(actualRad: number, requiredDeg: number): number {
+    let diffDeg = Phaser.Math.RadToDeg(actualRad) - requiredDeg;
+    while (diffDeg > 90) diffDeg -= 180;
+    while (diffDeg < -90) diffDeg += 180;
+    return diffDeg;
+  }
+
   private checkDockAlignment(): { inZone: boolean; alignmentDeg: number } {
     const checkBody = this.trailer?.body || this.truck.body;
 
     // During an exam only the exam's target dock counts for the pass condition.
+    // Evaluate in the dock's rotated local frame and accept either parallel heading
+    // along the bay axis (open roadside exam bays can be entered from either direction).
     // For bitrem rigs, BOTH lead and pup trailers must be inside the dock zone and aligned.
     const exam = this.licenseSystem.getActiveExam();
     if (exam.active && exam.licenseId) {
       const td = this.examController?.getExamDockWorld() || this.licenseSystem.getLicense(exam.licenseId).exam.targetDock;
-      const radius = Math.max(td.width, td.height) / 2 + 25;
-      const dist = Phaser.Math.Distance.Between(checkBody.position.x, checkBody.position.y, td.x, td.y);
-      if (dist < radius) {
-        const leadDiff = this.normalizeAngleDiffDeg(checkBody.angle, td.requiredAngleDeg);
+      const angleRad = Phaser.Math.DegToRad(td.requiredAngleDeg);
+      const cos = Math.cos(-angleRad);
+      const sin = Math.sin(-angleRad);
+      const maxLx = td.width * 0.5 + 26;
+      const maxLy = td.height * 0.5 + 28;
+      const isInsideRotatedDock = (px: number, py: number): boolean => {
+        const dx = px - td.x;
+        const dy = py - td.y;
+        const lx = dx * cos - dy * sin;
+        const ly = dx * sin + dy * cos;
+        return Math.abs(lx) <= maxLx && Math.abs(ly) <= maxLy;
+      };
+
+      if (isInsideRotatedDock(checkBody.position.x, checkBody.position.y)) {
+        const leadDiff = this.normalizeAxisAngleDiffDeg(checkBody.angle, td.requiredAngleDeg);
         if (this.trailer && this.pupTrailer) {
-          const pupDist = Phaser.Math.Distance.Between(
-            this.pupTrailer.body.position.x,
-            this.pupTrailer.body.position.y,
-            td.x,
-            td.y,
-          );
-          if (pupDist >= radius) {
+          if (!isInsideRotatedDock(this.pupTrailer.body.position.x, this.pupTrailer.body.position.y)) {
             return { inZone: false, alignmentDeg: 999 };
           }
-          const pupDiff = this.normalizeAngleDiffDeg(this.pupTrailer.body.angle, td.requiredAngleDeg);
+          const pupDiff = this.normalizeAxisAngleDiffDeg(this.pupTrailer.body.angle, td.requiredAngleDeg);
           const worstDiff = Math.abs(leadDiff) >= Math.abs(pupDiff) ? leadDiff : pupDiff;
           return { inZone: true, alignmentDeg: Math.round(worstDiff) };
         }

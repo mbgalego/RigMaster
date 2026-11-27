@@ -3,6 +3,8 @@ import type { LicenseSystem, LicenseExam, LicenseId } from './LicenseSystem';
 import type { GarageSystem, WeatherModifier } from './GarageSystem';
 import type { RoadNetwork } from './RoadNetwork';
 import type { World } from '../world/World';
+import { getBuildingApronExtent } from '../world/WorldObjects';
+import { findClearExamDockPlacement, type DynamicObstacleCircle } from './ExamDockPlacement';
 
 export interface ExamNavTarget {
   licenseId: LicenseId;
@@ -24,11 +26,12 @@ export interface ExamNavTarget {
 export interface ExamSyncCallbacks {
   getTotalRigCollisions: () => number;
   onExamPrepared: () => void;
+  getDynamicObstacles?: () => DynamicObstacleCircle[];
 }
 
 /**
- * Orchestrates license exam target dock placement (road-snapped shoulder prefab),
- * pulsing world marker + label, Exam X rain weather override/restore, and
+ * Orchestrates license exam target dock placement (obstacle-free road-shoulder prefab),
+ * pulsing rotated world marker + label, Exam X rain weather override/restore, and
  * collision baseline tracking.
  */
 export class ExamController {
@@ -44,6 +47,7 @@ export class ExamController {
   private preExamWeather: WeatherModifier | null = null;
   private examCollisionBaseline: number = 0;
   private examDockWorld: LicenseExam['targetDock'] | null = null;
+  private placedTempDockBounds: { x: number; y: number; r: number } | null = null;
 
   constructor(
     scene: Phaser.Scene,
@@ -68,8 +72,8 @@ export class ExamController {
   }
 
   /**
-   * Ensures the active exam has a visible marker and a physically painted dock at its
-   * target coordinates; applies & restores Exam X rain weather cleanly.
+   * Ensures the active exam has a visible marker and a physically painted dock at an
+   * unobstructed roadside location; applies & restores Exam X rain weather cleanly.
    */
   public syncExamTarget(time: number, callbacks: ExamSyncCallbacks): void {
     const exam = this.licenseSystem.getActiveExam();
@@ -87,7 +91,7 @@ export class ExamController {
           }
           this.garageSystem.setActiveModifier('rain');
         }
-        this.prepareExamTargetDock(lic.exam.targetDock);
+        this.prepareExamTargetDock(lic.exam.targetDock, callbacks.getDynamicObstacles?.() ?? []);
       }
       if (this.examDockWorld) {
         const needsAdjustInDock = exam.inDockZone && exam.dockHoldSec <= 0;
@@ -102,7 +106,7 @@ export class ExamController {
       }
       this.preparedExamId = null;
       this.examDockWorld = null;
-      this.world.objects.removeExamDock();
+      this.clearPlacedTempDock();
       this.examTargetMarker?.destroy();
       this.examTargetMarker = null;
       this.examTargetLabel?.destroy();
@@ -110,26 +114,49 @@ export class ExamController {
     }
   }
 
-  private prepareExamTargetDock(td: LicenseExam['targetDock']): void {
-    const np = this.roadNetwork.query(td.x, td.y, 4096);
-    let cx = td.x;
-    let cy = td.y;
-    let angle = Phaser.Math.DegToRad(td.requiredAngleDeg);
-    if (np) {
-      const off = np.width / 2 + Math.min(td.width, td.height) / 2 + 24;
-      cx = np.px + -np.ty * off;
-      cy = np.py + np.tx * off;
-      angle = Math.atan2(np.ty, np.tx) + Math.PI / 2;
+  private clearPlacedTempDock(): void {
+    const prev = this.placedTempDockBounds;
+    this.placedTempDockBounds = null;
+    this.world.objects.removeExamDock();
+    if (prev) {
+      this.world.terrain.invalidateRegion(
+        prev.x - prev.r,
+        prev.y - prev.r,
+        prev.x + prev.r,
+        prev.y + prev.r,
+        true,
+      );
     }
-    this.world.objects.addExamDock(cx, cy, td.width, td.height, angle);
+  }
+
+  private prepareExamTargetDock(
+    td: LicenseExam['targetDock'],
+    dynamicObstacles: DynamicObstacleCircle[],
+  ): void {
+    this.clearPlacedTempDock();
+
+    const placed = findClearExamDockPlacement(td, this.roadNetwork, this.world.objects.objects, {
+      spawnPoint: this.world.spawnPoint,
+      isDryLand: (x, y) => this.world.terrain.coastMetric(x, y) >= 100,
+      getBuildingApron: (o) => getBuildingApronExtent(o as Parameters<typeof getBuildingApronExtent>[0]),
+      dynamicObstacles,
+    });
+
+    if (!placed.usedExistingDock) {
+      this.world.objects.addExamDock(placed.x, placed.y, placed.width, placed.height, placed.angleRad);
+      const r = Math.hypot(placed.width, placed.height) * 0.5 + 96;
+      this.placedTempDockBounds = { x: placed.x, y: placed.y, r };
+      // Ensure any previously baked procedural terrain trees inside the new dock area are cleared
+      this.world.terrain.invalidateRegion(placed.x - r, placed.y - r, placed.x + r, placed.y + r, true);
+    }
 
     this.examDockWorld = {
-      x: cx,
-      y: cy,
-      width: td.width,
-      height: td.height,
-      requiredAngleDeg: td.requiredAngleDeg,
-      angleToleranceDeg: td.angleToleranceDeg,
+      x: placed.x,
+      y: placed.y,
+      width: placed.width,
+      height: placed.height,
+      requiredAngleDeg: placed.requiredAngleDeg,
+      angleToleranceDeg: placed.angleToleranceDeg,
     };
   }
 
@@ -138,13 +165,17 @@ export class ExamController {
     time: number,
     accentColor: number = 0x10b981,
   ): void {
+    const angleRad = Phaser.Math.DegToRad(td.requiredAngleDeg);
+    const visualHalfH =
+      (Math.abs(Math.sin(angleRad)) * td.width + Math.abs(Math.cos(angleRad)) * td.height) * 0.5;
+
     if (!this.examTargetMarker) {
       this.examTargetMarker = this.scene.add.graphics();
       this.examTargetMarker.setDepth(12);
       this.examTargetMarker.setLighting(false);
     }
     if (!this.examTargetLabel) {
-      this.examTargetLabel = this.scene.add.text(td.x, td.y - td.height / 2 - 34, 'DOCA DO EXAME', {
+      this.examTargetLabel = this.scene.add.text(td.x, td.y - visualHalfH - 28, 'DOCA DO EXAME', {
         fontFamily: 'monospace',
         fontSize: '22px',
         color: '#34d399',
@@ -157,15 +188,23 @@ export class ExamController {
 
     const g = this.examTargetMarker;
     g.clear();
+    g.setPosition(td.x, td.y);
+    g.setRotation(angleRad);
+
     const pulse = 0.5 + 0.5 * Math.sin(time * 0.006);
-    g.fillStyle(accentColor, 0.08 + 0.08 * pulse);
-    g.fillRoundedRect(td.x - td.width / 2, td.y - td.height / 2, td.width, td.height, 8);
+    g.fillStyle(accentColor, 0.09 + 0.08 * pulse);
+    g.fillRoundedRect(-td.width / 2, -td.height / 2, td.width, td.height, 8);
     g.lineStyle(3.5, accentColor, 0.55 + 0.4 * pulse);
-    g.strokeRoundedRect(td.x - (td.width + 32) / 2, td.y - (td.height + 32) / 2, td.width + 32, td.height + 32, 10);
-    g.lineStyle(3, accentColor, 0.75 + 0.25 * pulse);
-    g.strokeRoundedRect(td.x - td.width / 2, td.y - td.height / 2, td.width, td.height, 8);
+    g.strokeRoundedRect(-(td.width + 28) / 2, -(td.height + 28) / 2, td.width + 28, td.height + 28, 10);
+    g.lineStyle(3, accentColor, 0.78 + 0.22 * pulse);
+    g.strokeRoundedRect(-td.width / 2, -td.height / 2, td.width, td.height, 8);
+
+    // Subtle longitudinal center alignment guide inside the rotated dock
+    g.lineStyle(2, accentColor, 0.45 + 0.3 * pulse);
+    g.lineBetween(0, -td.height * 0.34, 0, td.height * 0.34);
+
     this.examTargetLabel.setColor(accentColor === 0xf59e0b ? '#fbbf24' : '#34d399');
-    this.examTargetLabel.setPosition(td.x, td.y - td.height / 2 - 34);
+    this.examTargetLabel.setPosition(td.x, td.y - visualHalfH - 28);
   }
 
   public destroy(): void {
@@ -174,6 +213,7 @@ export class ExamController {
       this.preExamWeather = null;
       this.garageSystem.setActiveModifier(restore);
     }
+    this.clearPlacedTempDock();
     this.examTargetMarker?.destroy();
     this.examTargetMarker = null;
     this.examTargetLabel?.destroy();

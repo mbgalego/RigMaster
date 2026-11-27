@@ -63,6 +63,12 @@ import {
   radToDeg,
 } from '../src/physics/kingpinMath';
 import { SaveManager, SAVE_KEYS, SAVE_SCHEMA_VERSION } from '../src/systems/SaveManager';
+import {
+  findClearExamDockPlacement,
+  obbIntersects,
+  type ExamWorldObjectLike,
+} from '../src/systems/ExamDockPlacement';
+import fs from 'fs';
 
 let failures = 0;
 let passed = 0;
@@ -596,6 +602,101 @@ function check(name: string, ok: boolean, detail: string = ''): void {
       goodRes.restoredKeys === 2 &&
       restoredLicenses.includes('CE'),
     `restored=${goodRes.restoredKeys}, licenses=${restoredLicenses.join(',')}`,
+  );
+}
+
+// ============================================================================
+// 10. ExamDockPlacement: obstacle-free placement across all 4 exams on rigworld.json
+// ============================================================================
+{
+  const rawWorld = JSON.parse(fs.readFileSync('src/world/rigworld.json', 'utf8')) as {
+    spawn: { x: number; y: number };
+    roads: unknown[];
+    objects: Array<{
+      id?: string;
+      type: string;
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      angle?: number;
+      variant?: string;
+      params?: Record<string, any>;
+    }>;
+  };
+  const rn = new RoadNetwork();
+  rn.fromJSON(rawWorld.roads);
+
+  const worldObjs: ExamWorldObjectLike[] = rawWorld.objects.map((o) => ({
+    ...o,
+    angle: ((Number(o.angle) || 0) * Math.PI) / 180,
+  }));
+
+  // Expand all objects (including compound parts) to assert ZERO overlaps
+  const expandedObjs: Array<{ x: number; y: number; w: number; h: number; angle: number; id: string; type: string }> = [];
+  for (const o of worldObjs) {
+    if (o.type === 'compound' && Array.isArray(o.params?.parts)) {
+      const c = Math.cos(o.angle);
+      const s = Math.sin(o.angle);
+      for (let i = 0; i < o.params.parts.length; i++) {
+        const p = o.params.parts[i];
+        expandedObjs.push({
+          id: `${o.id}#p${i}`,
+          type: p.type,
+          x: o.x + c * p.x - s * p.y,
+          y: o.y + s * p.x + c * p.y,
+          w: p.w,
+          h: p.h,
+          angle: o.angle + (p.angle || 0),
+        });
+      }
+    } else {
+      expandedObjs.push({ id: o.id ?? o.type, type: o.type, x: o.x, y: o.y, w: o.w, h: o.h, angle: o.angle });
+    }
+  }
+
+  const licSys = LicenseSystem.getInstance();
+  const examIds: Array<'C' | 'CE' | 'H' | 'X'> = ['C', 'CE', 'H', 'X'];
+  const examPlacements: Record<string, ReturnType<typeof findClearExamDockPlacement>> = {};
+  let allClear = true;
+  const details: string[] = [];
+
+  for (const id of examIds) {
+    const td = licSys.getLicense(id).exam.targetDock;
+    const placed = findClearExamDockPlacement(td, rn, worldObjs, {
+      spawnPoint: rawWorld.spawn,
+    });
+    examPlacements[id] = placed;
+    const box = { x: placed.x, y: placed.y, w: placed.width, h: placed.height, angle: placed.angleRad };
+    const overlapping = expandedObjs.filter((o) => obbIntersects(box, o, 4, 4));
+    const centerRoad = rn.query(placed.x, placed.y, 260);
+    const overlapsRoad = Boolean(centerRoad && centerRoad.dist < centerRoad.width * 0.5);
+    const angleDiff = Math.abs((((placed.angleRad * 180) / Math.PI - placed.requiredAngleDeg + 540) % 360) - 180);
+    if (overlapping.length > 0 || overlapsRoad || angleDiff > 1.5) {
+      allClear = false;
+    }
+    details.push(
+      `${id}@(${placed.x},${placed.y},${placed.requiredAngleDeg}°,hits=${overlapping.length},onRoad=${overlapsRoad})`,
+    );
+  }
+
+  check(
+    'ExamDockPlacement: all 4 license exams (C, CE, H, X) resolve clear of all rigworld.json objects, compound parts & roads',
+    allClear,
+    details.join(' | '),
+  );
+
+  // Dynamic obstacle avoidance: blocking Exam C's chosen spot relocates it cleanly
+  const firstC = examPlacements.C;
+  const relocatedC = findClearExamDockPlacement(licSys.getLicense('C').exam.targetDock, rn, worldObjs, {
+    spawnPoint: rawWorld.spawn,
+    dynamicObstacles: [{ x: firstC.x, y: firstC.y, r: 120 }],
+  });
+  const shiftedDist = Math.hypot(relocatedC.x - firstC.x, relocatedC.y - firstC.y);
+  check(
+    'ExamDockPlacement: dynamically avoids loose trailers/parked trucks occupying the preferred shoulder',
+    shiftedDist > 120,
+    `shiftedBy=${Math.round(shiftedDist)}px`,
   );
 }
 
