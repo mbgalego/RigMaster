@@ -24,6 +24,7 @@ interface WorldMapModalProps {
   activeExam?: ExamStatus | null;
   examNavTarget?: ExamNavTarget | null;
   initialFocusTruckId?: string | null;
+  initialFocusPoint?: { x: number; y: number; zoom?: number } | null;
   onSwapTruck: (truckId: string, remoteSandbox: boolean) => void;
 }
 
@@ -75,6 +76,7 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
   activeExam,
   examNavTarget,
   initialFocusTruckId,
+  initialFocusPoint,
   onSwapTruck,
 }) => {
   const [selectedTruckId, setSelectedTruckId] = useState<string | null>(initialFocusTruckId ?? null);
@@ -105,13 +107,17 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
     if (open) {
       setHasOpened(true);
       setSelectedTruckId(initialFocusTruckId ?? null);
-      setCamera(DEFAULT_CAMERA);
+      if (initialFocusPoint) {
+        setCamera(clampCamera(initialFocusPoint.zoom ?? 2.6, initialFocusPoint.x, initialFocusPoint.y));
+      } else {
+        setCamera(DEFAULT_CAMERA);
+      }
       pointersRef.current.clear();
       dragStateRef.current = null;
       pinchStartRef.current = null;
       setIsDragging(false);
     }
-  }, [open, initialFocusTruckId]);
+  }, [open, initialFocusTruckId, initialFocusPoint]);
 
   const [hubsVersion, setHubsVersion] = useState(0);
   useEffect(() => GarageSystem.getInstance().subscribe(() => setHubsVersion((v) => v + 1)), []);
@@ -158,6 +164,11 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
 
   const repairBays = useMemo(
     () => (open && scene?.world?.objects ? scene.world.objects.repairBays : []),
+    [open, scene],
+  );
+
+  const drivingSchoolZones = useMemo(
+    () => (open && scene?.world?.objects ? scene.world.objects.drivingSchoolZones : []),
     [open, scene],
   );
 
@@ -810,6 +821,57 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                 </g>
               ))}
 
+              {/* Driving School ("Escola de Camionagem") landmark marker */}
+              {drivingSchoolZones.map((school) => (
+                <g key={`ds-${school.buildingId}`} data-testid="world-map-driving-school" pointerEvents="none">
+                  <circle
+                    cx={school.x}
+                    cy={school.y}
+                    r={320 * s}
+                    fill="#facc15"
+                    fillOpacity={0.14}
+                    stroke="#facc15"
+                    strokeWidth={34 * s}
+                    strokeOpacity={0.9}
+                  />
+                  <rect
+                    x={school.x - 135 * s}
+                    y={school.y - 135 * s}
+                    width={270 * s}
+                    height={270 * s}
+                    rx={48 * s}
+                    fill="#0284c7"
+                    stroke="#fde047"
+                    strokeWidth={32 * s}
+                  />
+                  <text
+                    x={school.x}
+                    y={school.y + 72 * s}
+                    textAnchor="middle"
+                    fill="#fef9c3"
+                    fontSize={210 * s}
+                    fontWeight="900"
+                    fontFamily="monospace"
+                  >
+                    E
+                  </text>
+                  <text
+                    x={school.x}
+                    y={school.y - 380 * s}
+                    textAnchor="middle"
+                    fill="#fde047"
+                    fontSize={265 * s}
+                    fontWeight="800"
+                    style={{ paintOrder: 'stroke' }}
+                    stroke="#0b1927"
+                    strokeWidth={55 * s}
+                    strokeLinejoin="round"
+                  >
+                    Escola de Camionagem
+                  </text>
+                </g>
+              ))}
+
               {/* Active License Exam Route & Target (Emerald dock or Amber recouple) */}
               {activeExam?.active && (() => {
                 const enav = examNavTarget ?? scene?.getActiveExamNavTarget() ?? null;
@@ -1134,6 +1196,7 @@ export const WorldMapModal: React.FC<WorldMapModalProps> = ({
                   <div>Estrada castanha — Terra batida</div>
                   <div>Traço âmbar — Viadutos (Piso 1)</div>
                   <div>Verde / Âmbar — Oficinas / Bombas</div>
+                  <div>Ícone azul/amarelo [E] — Escola de Camionagem</div>
                   <div>Rota âmbar / verde — Recolha / Entrega</div>
                   <div>Hélice branca — Torres Eólicas (Serra NW)</div>
                   <div>Índigo / Azul / Névoa — Trovoada, chuva, nevoeiro e nuvens</div>

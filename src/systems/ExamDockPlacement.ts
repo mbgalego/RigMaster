@@ -75,6 +75,7 @@ const SOLID_OBSTACLE_TYPES = new Set<string>([
   'pine_tree',
   'crane',
   'trailer',
+  'static_truck',
 ]);
 
 const YARD_BASE_TYPES = new Set<string>(['pad_asphalt', 'pad_dirt']);

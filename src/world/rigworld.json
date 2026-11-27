@@ -1,5 +1,5 @@
 {
-  "version": 7,
+  "version": 8,
   "name": "RigWorld",
   "worldW": 13824,
   "worldH": 10240,
@@ -6256,6 +6256,377 @@
       "w": 150,
       "h": 110,
       "angle": -90
+    },
+    {
+      "id": "wo_ds_1",
+      "type": "pad_asphalt",
+      "x": 4860,
+      "y": 2140,
+      "angle": 0,
+      "w": 1460,
+      "h": 1360
+    },
+    {
+      "id": "wo_ds_2",
+      "type": "road_entry",
+      "x": 5648,
+      "y": 2260,
+      "angle": -90,
+      "w": 240,
+      "h": 140,
+      "params": {
+        "lanes": 2,
+        "island": true
+      }
+    },
+    {
+      "id": "wo_ds_3",
+      "type": "road_entry",
+      "x": 4950,
+      "y": 2920,
+      "angle": 0,
+      "w": 240,
+      "h": 224,
+      "params": {
+        "lanes": 2
+      }
+    },
+    {
+      "id": "wo_ds_4",
+      "type": "building",
+      "x": 4860,
+      "y": 1610,
+      "angle": 0,
+      "w": 380,
+      "h": 210,
+      "variant": "driving_school"
+    },
+    {
+      "id": "wo_ds_5",
+      "type": "parking_lot",
+      "x": 5340,
+      "y": 1610,
+      "angle": 0,
+      "w": 380,
+      "h": 200
+    },
+    {
+      "id": "wo_ds_6",
+      "type": "static_truck",
+      "x": 4320,
+      "y": 1615,
+      "angle": 180,
+      "w": 44,
+      "h": 118,
+      "variant": "school_rigid_4x2"
+    },
+    {
+      "id": "wo_ds_7",
+      "type": "static_truck",
+      "x": 4440,
+      "y": 1615,
+      "angle": 180,
+      "w": 44,
+      "h": 118,
+      "variant": "school_rigid_4x2"
+    },
+    {
+      "id": "wo_ds_8",
+      "type": "static_truck",
+      "x": 4240,
+      "y": 1920,
+      "angle": 90,
+      "w": 44,
+      "h": 110,
+      "variant": "tipper_6x4"
+    },
+    {
+      "id": "wo_ds_9",
+      "type": "static_truck",
+      "x": 4240,
+      "y": 2050,
+      "angle": 90,
+      "w": 44,
+      "h": 120,
+      "variant": "flatbed_crane_6x2"
+    },
+    {
+      "id": "wo_ds_10",
+      "type": "static_truck",
+      "x": 4240,
+      "y": 2180,
+      "angle": 90,
+      "w": 46,
+      "h": 116,
+      "variant": "concrete_mixer_8x4"
+    },
+    {
+      "id": "wo_ds_11",
+      "type": "static_truck",
+      "x": 4240,
+      "y": 2310,
+      "angle": 90,
+      "w": 44,
+      "h": 116,
+      "variant": "american_longnose_6x4"
+    },
+    {
+      "id": "wo_ds_12",
+      "type": "parking_pad",
+      "x": 4380,
+      "y": 2600,
+      "angle": 0,
+      "w": 110,
+      "h": 310,
+      "variant": "asphalt"
+    },
+    {
+      "id": "wo_ds_13",
+      "type": "parking_pad",
+      "x": 4520,
+      "y": 2600,
+      "angle": 0,
+      "w": 110,
+      "h": 310,
+      "variant": "asphalt"
+    },
+    {
+      "id": "wo_ds_14",
+      "type": "parking_pad",
+      "x": 4675,
+      "y": 2575,
+      "angle": 0,
+      "w": 120,
+      "h": 360,
+      "variant": "concrete"
+    },
+    {
+      "id": "wo_ds_15",
+      "type": "parking_pad",
+      "x": 5265,
+      "y": 2575,
+      "angle": 0,
+      "w": 125,
+      "h": 380,
+      "variant": "hazard"
+    },
+    {
+      "id": "wo_ds_16",
+      "type": "parking_pad",
+      "x": 5440,
+      "y": 2600,
+      "angle": 0,
+      "w": 115,
+      "h": 310,
+      "variant": "concrete"
+    },
+    {
+      "id": "wo_ds_17",
+      "type": "parking_pad",
+      "x": 5420,
+      "y": 1960,
+      "angle": 0,
+      "w": 120,
+      "h": 290,
+      "variant": "hazard"
+    },
+    {
+      "id": "wo_ds_18",
+      "type": "trailer",
+      "x": 4380,
+      "y": 2610,
+      "angle": 0,
+      "w": 46,
+      "h": 220,
+      "params": {
+        "trailer": "standard"
+      }
+    },
+    {
+      "id": "wo_ds_19",
+      "type": "trailer",
+      "x": 4520,
+      "y": 2610,
+      "angle": 0,
+      "w": 46,
+      "h": 220,
+      "params": {
+        "trailer": "reefer"
+      }
+    },
+    {
+      "id": "wo_ds_20",
+      "type": "trailer",
+      "x": 4675,
+      "y": 2580,
+      "angle": 0,
+      "w": 46,
+      "h": 310,
+      "params": {
+        "trailer": "long_cargo"
+      }
+    },
+    {
+      "id": "wo_ds_21",
+      "type": "trailer",
+      "x": 5265,
+      "y": 2495,
+      "angle": 0,
+      "w": 46,
+      "h": 155,
+      "params": {
+        "trailer": "bitrem_lead"
+      }
+    },
+    {
+      "id": "wo_ds_22",
+      "type": "trailer",
+      "x": 5265,
+      "y": 2670,
+      "angle": 0,
+      "w": 46,
+      "h": 155,
+      "params": {
+        "trailer": "bitrem_pup"
+      }
+    },
+    {
+      "id": "wo_ds_23",
+      "type": "trailer",
+      "x": 5440,
+      "y": 2610,
+      "angle": 0,
+      "w": 46,
+      "h": 220,
+      "params": {
+        "trailer": "fragile_glass"
+      }
+    },
+    {
+      "id": "wo_ds_24",
+      "type": "wall",
+      "x": 4860,
+      "y": 1468,
+      "angle": 0,
+      "w": 1440,
+      "h": 16,
+      "variant": "chain_fence"
+    },
+    {
+      "id": "wo_ds_25",
+      "type": "wall",
+      "x": 4138,
+      "y": 2140,
+      "angle": 90,
+      "w": 1320,
+      "h": 16,
+      "variant": "chain_fence"
+    },
+    {
+      "id": "wo_ds_26",
+      "type": "wall",
+      "x": 5582,
+      "y": 1796,
+      "angle": 90,
+      "w": 640,
+      "h": 16,
+      "variant": "chain_fence"
+    },
+    {
+      "id": "wo_ds_27",
+      "type": "wall",
+      "x": 5582,
+      "y": 2604,
+      "angle": 90,
+      "w": 400,
+      "h": 16,
+      "variant": "chain_fence"
+    },
+    {
+      "id": "wo_ds_28",
+      "type": "wall",
+      "x": 4476,
+      "y": 2812,
+      "angle": 0,
+      "w": 660,
+      "h": 16,
+      "variant": "chain_fence"
+    },
+    {
+      "id": "wo_ds_29",
+      "type": "wall",
+      "x": 5334,
+      "y": 2812,
+      "angle": 0,
+      "w": 480,
+      "h": 16,
+      "variant": "chain_fence"
+    },
+    {
+      "id": "wo_ds_30",
+      "type": "lamp",
+      "x": 4590,
+      "y": 1500,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_ds_31",
+      "type": "lamp",
+      "x": 5115,
+      "y": 1500,
+      "angle": 90,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_ds_32",
+      "type": "lamp",
+      "x": 4175,
+      "y": 2460,
+      "angle": 0,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_ds_33",
+      "type": "lamp",
+      "x": 5545,
+      "y": 2415,
+      "angle": 180,
+      "w": 14,
+      "h": 14
+    },
+    {
+      "id": "wo_ds_34",
+      "type": "sign",
+      "x": 5555,
+      "y": 2115,
+      "angle": 0,
+      "w": 22,
+      "h": 22,
+      "variant": "speed_30"
+    },
+    {
+      "id": "wo_ds_35",
+      "type": "sign",
+      "x": 5115,
+      "y": 1740,
+      "angle": 0,
+      "w": 22,
+      "h": 22,
+      "variant": "parking"
+    },
+    {
+      "id": "wo_ds_36",
+      "type": "sign",
+      "x": 5105,
+      "y": 2855,
+      "angle": 0,
+      "w": 22,
+      "h": 22,
+      "variant": "yield"
     }
   ],
   "worldMinX": -6144,

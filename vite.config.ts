@@ -9,6 +9,15 @@ import {defineConfig, type Plugin} from 'vite';
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 const phaserMinPath = path.resolve(rootDir, 'node_modules/phaser/dist/phaser.esm.min.js');
 const viteDepsDir = path.resolve(rootDir, 'node_modules/.vite/deps');
+const publicAssetsDir = path.resolve(rootDir, 'public/assets');
+
+const IMAGE_MIME: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+};
 
 /**
  * Prevents AI Studio dev-proxy failure modes:
@@ -17,7 +26,9 @@ const viteDepsDir = path.resolve(rootDir, 'node_modules/.vite/deps');
  *    compression and without Vite's `504 Outdated Optimize Dep` check (which the preview nginx
  *    intercepts via `error_page 504 = /warmup.html` and turns into `200 text/html`, silently
  *    breaking `<script type="module">`).
- * 3. Strips multi-hundred-KB inline base64 sourcemaps from `/src/*` dev responses (cutting cold
+ * 3. Serves `/assets/*` images directly with browser caching (`max-age=3600`) so reloads don't
+ *    re-download all 85 sprite PNGs through the dev proxy.
+ * 4. Strips multi-hundred-KB inline base64 sourcemaps from `/src/*` dev responses (cutting cold
  *    boot payload by ~3× on mobile/Cloud Run) and sets `Cache-Control: no-store` so refreshes
  *    always load fresh module graphs.
  */
@@ -74,6 +85,25 @@ function rigmasterDevStabilityPlugin(): Plugin {
           if (fullPath.startsWith(viteDepsDir + path.sep) && fs.existsSync(fullPath)) {
             sendCachedFile(fullPath, 'no-cache', acceptsGzip, res);
             return;
+          }
+        }
+
+        // 3. Fast-path static sprite/tile images with clean Content-Type & browser cache
+        if (pathname.startsWith('/assets/')) {
+          const rel = pathname.slice('/assets/'.length);
+          const fullPath = path.resolve(publicAssetsDir, rel);
+          const ext = path.extname(fullPath).toLowerCase();
+          const mime = IMAGE_MIME[ext];
+          if (mime && fullPath.startsWith(publicAssetsDir + path.sep) && fs.existsSync(fullPath)) {
+            const stat = fs.statSync(fullPath);
+            if (stat.isFile()) {
+              res.statusCode = 200;
+              res.setHeader('Content-Type', mime);
+              res.setHeader('Content-Length', stat.size);
+              res.setHeader('Cache-Control', 'public, max-age=3600');
+              fs.createReadStream(fullPath).pipe(res);
+              return;
+            }
           }
         }
 

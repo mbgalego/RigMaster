@@ -4,6 +4,7 @@ import { WorldTerrain } from './WorldTerrain';
 import { COLLISION_CAT, COLLISION_MASK } from '../physics/CollisionLayers';
 import type { FlatSurfacePatterns, SolidSpriteImages } from './StaticWorldChunks';
 import { SpriteRegistry } from '../systems/SpriteRegistry';
+import { getSchoolTruckSpec } from '../systems/SchoolTruckCatalog';
 import { IntersectionSystem } from '../systems/IntersectionSystem';
 
 export interface FlatSurfaceTarget {
@@ -71,6 +72,7 @@ export type WObjType =
   | 'rock_outcrop'    // alpine granite boulder formation (solid)
   | 'pine_tree'       // alpine conifer tree (small solid trunk)
   | 'hub_sign'        // editable HUB neon/totem marker (params: hubId, name, badge, color, regionRadius, specialization?, description?)
+  | 'static_truck'    // solid parked specialized truck (variant: school_rigid_4x2|tipper_6x4|flatbed_crane_6x2|concrete_mixer_8x4|american_longnose_6x4)
   | 'exam_dock'       // TEMP exam target platform (never serialized)
   | 'compound';       // composto: agrupa vários sub-objetos com posições relativas (params.parts)
 
@@ -169,6 +171,22 @@ export function compoundPartWorldObject(compound: WorldObject, index: number): W
 
 interface DockZone { x: number; y: number; width: number; height: number; requiredAngle: number; id: string; }
 export interface RepairBay { x: number; y: number; width: number; height: number; angle: number; garageId: string; }
+export interface DrivingSchoolZone {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  angle: number;
+  buildingId: string;
+  buildingX: number;
+  buildingY: number;
+  buildingW: number;
+  buildingH: number;
+  examSpawnX: number;
+  examSpawnY: number;
+  /** Spawn heading in degrees (matching World.spawnPoint.angle). */
+  examSpawnAngleDeg: number;
+}
 
 const OBJ_CELL = 1024;
 const CHUNK_PX = 2048;
@@ -176,7 +194,7 @@ const CHUNK_PX = 2048;
 const SOLID_TYPES = new Set<WObjType>([
   'wall', 'jersey_barrier', 'building', 'container_stack', 'silo',
   'gas_pump', 'air_water', 'price_sign', 'hub_sign', 'lamp', 'sign', 'traffic_light', 'roundabout',
-  'dock_wall', 'wind_turbine', 'log_pile', 'rock_outcrop', 'pine_tree', 'compound',
+  'dock_wall', 'wind_turbine', 'log_pile', 'rock_outcrop', 'pine_tree', 'static_truck', 'compound',
 ]);
 
 /** Tipos desenhados na camada FLATS (sob os sólidos) — ver render(). */
@@ -496,6 +514,8 @@ export class WorldObjects {
   private lightClock = 0;
   private cachedRepairBays: RepairBay[] = [];
   private cachedRepairBaysVersion = -1;
+  private cachedDrivingSchoolZones: DrivingSchoolZone[] = [];
+  private cachedDrivingSchoolZonesVersion = -1;
   private cachedHubSigns: WorldObject[] = [];
   private cachedHubSignsVersion = -1;
   private cachedGasPumps: WorldObject[] = [];
@@ -775,6 +795,55 @@ export class WorldObjects {
     this.cachedRepairBays = bays;
     this.cachedRepairBaysVersion = this.version;
     return bays;
+  }
+
+  /** Reception & exam-departure zones anchored to every 'driving_school' headquarters building. */
+  public get drivingSchoolZones(): DrivingSchoolZone[] {
+    if (this.cachedDrivingSchoolZonesVersion === this.version) {
+      return this.cachedDrivingSchoolZones;
+    }
+    const zones: DrivingSchoolZone[] = [];
+    const pushSchool = (sObj: WorldObject) => {
+      if (sObj.type !== 'building' || sObj.variant !== 'driving_school') return;
+      const c = Math.cos(sObj.angle);
+      const s = Math.sin(sObj.angle);
+      const bayDepth = 126;
+      const ly = sObj.h / 2 + bayDepth * 0.5 + 12;
+      const spawnLx = 90;
+      const spawnLy = sObj.h / 2 + 605;
+      const examAngleDeg = Math.round(Phaser.Math.RadToDeg(sObj.angle + Math.PI) * 10) / 10;
+      zones.push({
+        x: Math.round(sObj.x - s * ly),
+        y: Math.round(sObj.y + c * ly),
+        width: Math.min(Math.max(180, sObj.w - 40), 280),
+        height: bayDepth,
+        angle: sObj.angle,
+        buildingId: sObj.id,
+        buildingX: sObj.x,
+        buildingY: sObj.y,
+        buildingW: sObj.w,
+        buildingH: sObj.h,
+        examSpawnX: Math.round(sObj.x + c * spawnLx - s * spawnLy),
+        examSpawnY: Math.round(sObj.y + s * spawnLx + c * spawnLy),
+        examSpawnAngleDeg: examAngleDeg,
+      });
+    };
+    for (const o of this.objects) {
+      if (o.type === 'building' && o.variant === 'driving_school') {
+        pushSchool(o);
+      } else if (o.type === 'compound') {
+        const parts = compoundParts(o);
+        for (let i = 0; i < parts.length; i++) {
+          if (parts[i].type === 'building' && parts[i].variant === 'driving_school') {
+            const partObj = compoundPartWorldObject(o, i);
+            if (partObj) pushSchool(partObj);
+          }
+        }
+      }
+    }
+    this.cachedDrivingSchoolZones = zones;
+    this.cachedDrivingSchoolZonesVersion = this.version;
+    return zones;
   }
 
   public get parkingPads(): ParkingPadSpec[] {
@@ -5167,6 +5236,20 @@ export class WorldObjects {
               const svcH = 115;
               g.lineStyle(1.5, 0x38bdf8, 0.28);
               g.strokeRect(o.x - svcW / 2, y0 + o.h + 10, svcW, svcH);
+            } else if (o.variant === 'driving_school') {
+              const svcW = Math.min(Math.max(180, o.w - 40), 280);
+              const svcH = 126;
+              // Reception bay painted markings & safety bollards on the +Y canopy side
+              g.fillStyle(0x0284c7, 0.14);
+              g.fillRect(o.x - svcW / 2, y0 + o.h + 12, svcW, svcH);
+              g.lineStyle(2, 0xfacc15, 0.65);
+              g.strokeRect(o.x - svcW / 2, y0 + o.h + 12, svcW, svcH);
+              g.lineStyle(1.5, 0x38bdf8, 0.48);
+              g.strokeRect(o.x - svcW / 2 + 8, y0 + o.h + 20, svcW - 16, svcH - 16);
+              for (const bx of [o.x - svcW / 2 - 6, o.x + svcW / 2 + 6]) {
+                g.fillStyle(0xfacc15, 1);
+                g.fillCircle(bx, y0 + o.h + 6, 4);
+              }
             } else if (o.variant === 'convenience_store') {
               const doorW = Math.min(54, o.w * 0.24);
               for (const bx of [o.x - doorW / 2 - 12, o.x + doorW / 2 + 12, x0 + 52, x0 + o.w - 52]) {
@@ -5177,6 +5260,7 @@ export class WorldObjects {
 
             const directional =
               o.variant === 'garage' ||
+              o.variant === 'driving_school' ||
               o.variant === 'warehouse_docks' ||
               o.variant === 'convenience_store' ||
               o.variant === 'restaurant' ||
@@ -6710,6 +6794,40 @@ export class WorldObjects {
             // Placa triangular de perigo (fallback genérico)
             drawDangerTri();
           }
+          break;
+        }
+        case 'static_truck': {
+          const truckKey = SpriteRegistry.getStaticTruckKey(o.variant);
+          const truckImg = truckKey ? solidTex?.images[truckKey] : undefined;
+          if (truckImg && solidTex) {
+            const ctx = solidTex.ctx;
+            ctx.save();
+            ctx.translate(o.x, o.y);
+            if (o.angle !== 0) ctx.rotate(o.angle);
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
+            ctx.shadowBlur = 8;
+            ctx.shadowOffsetX = 4;
+            ctx.shadowOffsetY = 6;
+            ctx.drawImage(truckImg, -o.w / 2, -o.h / 2, o.w, o.h);
+            ctx.restore();
+            solidTex.markUsed();
+            break;
+          }
+          // Procedural vector fallback if sprite is unavailable
+          const spec = getSchoolTruckSpec(o.variant);
+          g.fillStyle(0x000000, 0.28);
+          g.fillRoundedRect(x0 + 3, y0 + 4, o.w, o.h, 5);
+          // Chassis / rear body
+          g.fillStyle(spec.accentColor, 1);
+          g.fillRoundedRect(x0 + 2, y0 + o.h * 0.32, o.w - 4, o.h * 0.66, 4);
+          // Front cab
+          g.fillStyle(spec.cabColor, 1);
+          g.fillRoundedRect(x0 + 2, y0 + 2, o.w - 4, o.h * 0.34, 5);
+          // Windshield
+          g.fillStyle(0x0f172a, 0.9);
+          g.fillRoundedRect(x0 + 6, y0 + 7, o.w - 12, 10, 2);
+          g.lineStyle(1.5, 0x0f172a, 0.85);
+          g.strokeRoundedRect(x0 + 2, y0 + 2, o.w - 4, o.h - 4, 5);
           break;
         }
         case 'traffic_light': {

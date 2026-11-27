@@ -161,8 +161,11 @@ export class MainScene extends Phaser.Scene {
   private nearbyRepairBay: { x: number; y: number; garageId: string } | null = null;
   /** The repair bay currently servicing the vehicle. */
   private repairingBay: { x: number; y: number } | null = null;
+  /** Nearest driving school reception zone within interaction range. */
+  private nearbyDrivingSchool: { x: number; y: number; dist: number; buildingId: string } | null = null;
   /** Highlight pulse phase for the nearby pump/repair bay (0..1). */
   private static readonly REPAIR_BAY_RADIUS = 160;
+  private static readonly DRIVING_SCHOOL_RADIUS = 220;
   private static readonly REPAIR_MAX_SPEED_KMH = 3;
   private static readonly TRUCK_SWAP_RADIUS = 160;
   /** OBB/SAT-verified, bitrem-safe pickup bays per hub for guaranteed mission trailer spawning. */
@@ -233,6 +236,7 @@ export class MainScene extends Phaser.Scene {
   // Dynamic HUB neon sign overlays + labels (driven by editable `hub_sign` world objects)
   private hubSignsGraphics: Phaser.GameObjects.Graphics | null = null;
   private hubSignTexts: Map<string, Phaser.GameObjects.Text> = new Map();
+  private drivingSchoolTexts: Map<string, Phaser.GameObjects.Text> = new Map();
 
   // Minimap (rendered in dedicated MinimapScene with locked zoom = 1)
   private minimapVisible: boolean = true;
@@ -288,6 +292,8 @@ export class MainScene extends Phaser.Scene {
     fuelPrice: number;
     nearbyPump: { x: number; y: number } | null;
     nearbyRepairBay: { x: number; y: number } | null;
+    nearbyDrivingSchool: { x: number; y: number; dist: number } | null;
+    drivingSchoolPos: { x: number; y: number; dist: number } | null;
     gameMode: GameMode;
     activeTruckId: string;
     activeTruckType: TruckType;
@@ -355,6 +361,8 @@ export class MainScene extends Phaser.Scene {
     fuelPrice: 1.749,
     nearbyPump: null,
     nearbyRepairBay: null,
+    nearbyDrivingSchool: null,
+    drivingSchoolPos: null,
     gameMode: 'career',
     activeTruckId: 'truck_iveco_daily_4x2',
     activeTruckType: 'iveco_daily_4x2',
@@ -618,6 +626,10 @@ export class MainScene extends Phaser.Scene {
       this.staticWorldChunks = null;
       this.worldLightPools?.destroy();
       this.worldLightPools = null;
+      for (const txt of this.drivingSchoolTexts.values()) {
+        txt.destroy();
+      }
+      this.drivingSchoolTexts.clear();
       this.world?.destroy();
       this.parkedTruckManager?.destroyAll();
       TrailerManager.resetInstance();
@@ -728,6 +740,31 @@ export class MainScene extends Phaser.Scene {
         }
       }
 
+      // Tap / click on the Driving School reception bay (or building) to open license exams
+      for (const school of this.world.drivingSchoolZones) {
+        const dx = worldPt.x - school.x;
+        const dy = worldPt.y - school.y;
+        const cos = Math.cos(-school.angle);
+        const sin = Math.sin(-school.angle);
+        const lx = dx * cos - dy * sin;
+        const ly = dx * sin + dy * cos;
+        const pad = 26 / cam.zoom;
+        const inBay = Math.abs(lx) <= school.width / 2 + pad && Math.abs(ly) <= school.height / 2 + pad;
+        const bdx = worldPt.x - school.buildingX;
+        const bdy = worldPt.y - school.buildingY;
+        const blx = bdx * cos - bdy * sin;
+        const bly = bdx * sin + bdy * cos;
+        const inBuilding = Math.abs(blx) <= school.buildingW / 2 + pad && Math.abs(bly) <= school.buildingH / 2 + pad;
+        if (!inBay && !inBuilding) continue;
+        const distToSchool = Phaser.Math.Distance.Between(tx, ty, school.x, school.y);
+        if (this.truck.layer === 0 && distToSchool <= MainScene.DRIVING_SCHOOL_RADIUS) {
+          this.events.emit('open-driving-school');
+        } else {
+          this.setCouplingNotice('Conduza até à receção da Escola de Camionagem para fazer exames', 'info');
+        }
+        return;
+      }
+
       // Tap / click on an unlocked parked fleet truck to take control
       const tappedTruck = this.parkedTruckManager?.findAtPoint(worldPt.x, worldPt.y, 64);
       if (tappedTruck) {
@@ -782,10 +819,16 @@ export class MainScene extends Phaser.Scene {
         this.tryRefuel();
       });
 
-      // Repair at a garage service bay with E
+      // Repair at a garage service bay or open Driving School exams with E
       this.input.keyboard.on('keydown-E', (event: KeyboardEvent) => {
         if (this.isTypingInInput(event) || this.isEditorMode) return;
-        this.tryRepair();
+        if (this.nearbyRepairBay) {
+          this.tryRepair();
+        } else if (this.nearbyDrivingSchool) {
+          this.events.emit('open-driving-school');
+        } else {
+          this.tryRepair();
+        }
       });
 
       // Swap into nearby parked fleet truck with T
@@ -984,6 +1027,74 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
+  /** Renders a crisp floating academy roof banner above every Driving School headquarters building. */
+  private drawDrivingSchoolSigns(view: Phaser.Geom.Rectangle) {
+    const zones = this.world.drivingSchoolZones;
+    const M = 260;
+    const vx0 = view.x - M;
+    const vy0 = view.y - M;
+    const vx1 = view.x + view.width + M;
+    const vy1 = view.y + view.height + M;
+    const activeIds = new Set<string>();
+
+    for (const z of zones) {
+      activeIds.add(z.buildingId);
+      const inView = z.buildingX >= vx0 && z.buildingX <= vx1 && z.buildingY >= vy0 && z.buildingY <= vy1;
+      const existing = this.drivingSchoolTexts.get(z.buildingId);
+      if (!inView) {
+        if (existing && existing.visible) existing.setVisible(false);
+        continue;
+      }
+      const lx = z.buildingX;
+      const ly = z.buildingY - z.buildingH / 2 - 26;
+      if (!existing) {
+        const txt = this.add.text(lx, ly, 'ESCOLA DE CAMIONAGEM', {
+          fontFamily: 'monospace',
+          fontSize: '13px',
+          fontStyle: 'bold',
+          color: '#fde047',
+          backgroundColor: '#020617cc',
+          padding: { x: 8, y: 4 },
+          stroke: '#020617',
+          strokeThickness: 3,
+        }).setOrigin(0.5).setDepth(13);
+        this.drivingSchoolTexts.set(z.buildingId, txt);
+      } else {
+        if (existing.x !== lx || existing.y !== ly) existing.setPosition(lx, ly);
+        if (!existing.visible) existing.setVisible(true);
+      }
+    }
+
+    for (const [id, txt] of this.drivingSchoolTexts.entries()) {
+      if (!activeIds.has(id)) {
+        txt.destroy();
+        this.drivingSchoolTexts.delete(id);
+      }
+    }
+  }
+
+  /** Returns the exam departure spawn pose inside the nearest Driving School yard, if one exists. */
+  public getDrivingSchoolExamSpawn(): { x: number; y: number; angle: number } | null {
+    const zones = this.world?.drivingSchoolZones ?? [];
+    if (zones.length === 0) return null;
+    const tx = this.truck?.body?.position?.x ?? this.world.spawnPoint.x;
+    const ty = this.truck?.body?.position?.y ?? this.world.spawnPoint.y;
+    let best = zones[0];
+    let bestD = Phaser.Math.Distance.Between(tx, ty, best.x, best.y);
+    for (let i = 1; i < zones.length; i++) {
+      const d = Phaser.Math.Distance.Between(tx, ty, zones[i].x, zones[i].y);
+      if (d < bestD) {
+        best = zones[i];
+        bestD = d;
+      }
+    }
+    return {
+      x: best.examSpawnX,
+      y: best.examSpawnY,
+      angle: best.examSpawnAngleDeg,
+    };
+  }
+
   /** Single source of truth for syncing live active truck state (pose, fuel, damage, wear) into ReputationSystem. */
   public syncActiveTruckStateToFleet(persist: boolean = false): void {
     if (!this.truck || !this.reputationSystem || !this.garageSystem) return;
@@ -1010,7 +1121,10 @@ export class MainScene extends Phaser.Scene {
     return base + hitchDelta;
   }
 
-  public spawnVehicleRig(configType: VehicleConfigType, options: { repair?: boolean } = {}) {
+  public spawnVehicleRig(
+    configType: VehicleConfigType,
+    options: { repair?: boolean; spawnOverride?: { x: number; y: number; angle: number } } = {},
+  ) {
     this.currentVehicleConfig = configType;
 
     // Destroy existing trailers and joints
@@ -1031,7 +1145,7 @@ export class MainScene extends Phaser.Scene {
       this.trailer = null;
     }
 
-    const spawn = this.world.spawnPoint;
+    const spawn = options.spawnOverride ?? this.world.spawnPoint;
     const spawnAngleRad = Phaser.Math.DegToRad(spawn.angle || 0);
 
     if (!this.truck) {
@@ -1169,7 +1283,7 @@ export class MainScene extends Phaser.Scene {
   private static readonly RECOVERY_SOLID_TYPES = new Set([
     'building', 'wall', 'jersey_barrier', 'container_stack',
     'silo', 'crane', 'dock_wall', 'gas_pump', 'air_water',
-    'price_sign', 'lamp', 'sign', 'traffic_light', 'roundabout',
+    'price_sign', 'lamp', 'sign', 'traffic_light', 'roundabout', 'static_truck',
   ]);
 
   /** Checks whether a candidate recovery point is clear of all static ground-level world solids. */
@@ -2733,6 +2847,7 @@ export class MainScene extends Phaser.Scene {
 
     // Neon hub signs for dominated regional hubs (viewport-culled & memoized)
     this.drawHubSigns(time, liveView);
+    this.drawDrivingSchoolSigns(liveView);
 
     this.renderStaticWorldAndRoads(cam, liveView);
     // Gas pump highlight (nearby / refuelling)
@@ -3158,9 +3273,10 @@ export class MainScene extends Phaser.Scene {
         );
       }
 
-      // Gas pump, garage repair bay & parked fleet truck proximity detection
+      // Gas pump, garage repair bay, driving school & parked fleet truck proximity detection
       this.nearbyPump = null;
       this.nearbyRepairBay = null;
+      this.nearbyDrivingSchool = null;
       this.nearbySwapTruck = null;
       const tx = this.truck.body.position.x;
       const ty = this.truck.body.position.y;
@@ -3176,6 +3292,23 @@ export class MainScene extends Phaser.Scene {
       const reachableBay = this.findReachableRepairBay();
       if (reachableBay) {
         this.nearbyRepairBay = { x: reachableBay.x, y: reachableBay.y, garageId: reachableBay.garageId };
+      }
+      let nearestSchoolPos: { x: number; y: number; dist: number } | null = null;
+      let nearestSchoolDist = Infinity;
+      for (const school of this.world.drivingSchoolZones) {
+        const d = Phaser.Math.Distance.Between(tx, ty, school.x, school.y);
+        if (d < nearestSchoolDist) {
+          nearestSchoolDist = d;
+          nearestSchoolPos = { x: school.x, y: school.y, dist: Math.round(d) };
+          if (this.truck.layer === 0 && d <= MainScene.DRIVING_SCHOOL_RADIUS) {
+            this.nearbyDrivingSchool = {
+              x: school.x,
+              y: school.y,
+              dist: Math.round(d),
+              buildingId: school.buildingId,
+            };
+          }
+        }
       }
       const nearbyFleet = this.parkedTruckManager?.findNearby(
         tx,
@@ -3316,6 +3449,10 @@ export class MainScene extends Phaser.Scene {
         fuelPrice: 1.749,
         nearbyPump: this.nearbyPump,
         nearbyRepairBay: this.nearbyRepairBay ? { x: this.nearbyRepairBay.x, y: this.nearbyRepairBay.y } : null,
+        nearbyDrivingSchool: this.nearbyDrivingSchool
+          ? { x: this.nearbyDrivingSchool.x, y: this.nearbyDrivingSchool.y, dist: this.nearbyDrivingSchool.dist }
+          : null,
+        drivingSchoolPos: nearestSchoolPos,
         gameMode: this.reputationSystem.getGameMode(),
         activeTruckId: activeFleetRec.id,
         activeTruckType: this.truck.truckType,
@@ -4601,6 +4738,41 @@ export class MainScene extends Phaser.Scene {
         g.lineStyle(isActive ? 4.5 : 2.5, bayCol, isActive ? 0.95 : 0.75);
         g.beginPath();
         g.arc(bay.x, bay.y, ringR, 0, Math.PI * 2);
+        g.strokePath();
+      }
+    }
+
+    // Driving School reception bay highlight (always softly pulses when visible, brightens within interaction range)
+    if (this.truck.layer === 0) {
+      for (const school of this.world.drivingSchoolZones) {
+        if (school.x + 200 < view.x - M || school.x - 200 > view.x + view.width + M ||
+            school.y + 200 < view.y - M || school.y - 200 > view.y + view.height + M) continue;
+        const dist = Phaser.Math.Distance.Between(tx, ty, school.x, school.y);
+        const isNear = dist <= MainScene.DRIVING_SCHOOL_RADIUS;
+        ensureCleared();
+        const hw = school.width / 2;
+        const hh = school.height / 2;
+        const c = Math.cos(school.angle);
+        const s = Math.sin(school.angle);
+        const toW = (lx: number, ly: number) => ({ x: school.x + lx * c - ly * s, y: school.y + lx * s + ly * c });
+        const corners = [toW(-hw, -hh), toW(hw, -hh), toW(hw, hh), toW(-hw, hh)];
+        const pulse = Math.sin(this.pumpPulsePhase * Math.PI * 2) * 0.5 + 0.5;
+        const col = isNear ? 0x22d3ee : 0xfacc15;
+        const alpha = isNear ? 0.8 + pulse * 0.2 : 0.45 + pulse * 0.2;
+
+        g.lineStyle(isNear ? 3.5 : 2, col, alpha);
+        g.beginPath();
+        g.moveTo(corners[0].x, corners[0].y);
+        g.lineTo(corners[1].x, corners[1].y);
+        g.lineTo(corners[2].x, corners[2].y);
+        g.lineTo(corners[3].x, corners[3].y);
+        g.closePath();
+        g.strokePath();
+
+        const ringR = isNear ? 36 + pulse * 8 : 26 + pulse * 4;
+        g.lineStyle(isNear ? 3 : 2, col, isNear ? 0.9 : 0.55);
+        g.beginPath();
+        g.arc(school.x, school.y, ringR, 0, Math.PI * 2);
         g.strokePath();
       }
     }

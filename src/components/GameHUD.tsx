@@ -131,6 +131,7 @@ export interface DrivingOverlaysProps {
   onCancelMission: () => void;
   onCancelExam: () => void;
   onSwapTruck: (truckId: string, teleport: boolean) => void;
+  onOpenDrivingSchool: () => void;
 }
 
 /**
@@ -149,6 +150,7 @@ export const DrivingOverlays: React.FC<DrivingOverlaysProps> = React.memo(
     onCancelMission,
     onCancelExam,
     onSwapTruck,
+    onOpenDrivingSchool,
   }) => {
     const am = telemetry.activeMission;
     const nav = telemetry.missionNavTarget;
@@ -434,6 +436,28 @@ export const DrivingOverlays: React.FC<DrivingOverlaysProps> = React.memo(
               }`}
             >
               Assumir Controlo (T)
+            </button>
+          </div>
+        )}
+
+        {/* DRIVING SCHOOL RECEPTION PROMPT (when in the school reception bay) */}
+        {!isEditorMode && !modalOpen && !examActive && telemetry.nearbyDrivingSchool && !telemetry.nearbySwapTruck && (
+          <div
+            data-testid="driving-school-prompt"
+            className="fixed bottom-24 left-1/2 -translate-x-1/2 z-30 bg-slate-950/95 border border-amber-400/70 px-4 py-2 rounded-lg shadow-xl flex items-center gap-3"
+          >
+            <div className="text-xs">
+              <div className="font-bold text-amber-300">Escola de Camionagem</div>
+              <div className="text-[11px] text-slate-300">
+                Zona de Receção · Exames práticos de cartas
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onOpenDrivingSchool}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-400 hover:bg-amber-300 text-slate-950 transition-colors whitespace-nowrap"
+            >
+              Abrir Exames (E)
             </button>
           </div>
         )}

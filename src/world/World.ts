@@ -33,7 +33,7 @@ export class World {
 
   // --- Draft autosave (localStorage) — protege as edições do editor ---
   private static readonly DRAFT_KEY = 'rigmaster_world_draft';
-  private static readonly OFFICIAL_VERSION = 7;
+  private static readonly OFFICIAL_VERSION = 8;
   private lastSavedVersion = -1;
 
   /** Snapshot do mundo no início da sessão de editor (para o botão Cancelar). */
@@ -134,6 +134,7 @@ export class World {
 
   public get dockZones() { return this.objects.dockZones; }
   public get repairBays() { return this.objects.repairBays; }
+  public get drivingSchoolZones() { return this.objects.drivingSchoolZones; }
   public get parkingPads() { return this.objects.parkingPads; }
 
   public update(delta: number) {
@@ -243,13 +244,18 @@ export class World {
               .filter((o: any) => o?.type === 'hub_sign' && typeof o?.params?.hubId === 'string')
               .map((o: any) => o.params.hubId),
           );
+          const hasDrivingSchool = objects.some(
+            (o: any) => o?.type === 'building' && o?.variant === 'driving_school',
+          );
           for (const o of official.objects) {
             const inNw = Number(o?.x) < -100 || Number(o?.y) < -100;
             const isMissingOfficialHubSign =
               o?.type === 'hub_sign' &&
               typeof o?.params?.hubId === 'string' &&
               !existingHubIds.has(o.params.hubId);
-            if ((inNw || isMissingOfficialHubSign) && !existingObjIds.has(o.id)) {
+            const isDrivingSchoolAsset =
+              !hasDrivingSchool && typeof o?.id === 'string' && o.id.startsWith('wo_ds_');
+            if ((inNw || isMissingOfficialHubSign || isDrivingSchoolAsset) && !existingObjIds.has(o.id)) {
               objects.push(o);
               existingObjIds.add(o.id);
               if (isMissingOfficialHubSign) existingHubIds.add(o.params.hubId);

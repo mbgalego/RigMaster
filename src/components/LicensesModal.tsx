@@ -1,5 +1,5 @@
 import React from 'react';
-import { Award, CheckCircle, AlertTriangle, Play } from 'lucide-react';
+import { Award, CheckCircle, AlertTriangle, Play, MapPin, GraduationCap } from 'lucide-react';
 import { LicenseSystem, type LicenseId, type LicenseInfo } from '../systems/LicenseSystem';
 import { SpriteRegistry } from '../systems/SpriteRegistry';
 
@@ -8,6 +8,10 @@ export interface LicensesModalProps {
   onClose: () => void;
   licenses: LicenseInfo[];
   onStartExam: (id: LicenseId) => void;
+  atDrivingSchool: boolean;
+  drivingSchoolDistPx: number | null;
+  isSandbox: boolean;
+  onLocateDrivingSchool: () => void;
 }
 
 export const LicensesModal: React.FC<LicensesModalProps> = ({
@@ -15,14 +19,26 @@ export const LicensesModal: React.FC<LicensesModalProps> = ({
   onClose,
   licenses,
   onStartExam,
+  atDrivingSchool,
+  drivingSchoolDistPx,
+  isSandbox,
+  onLocateDrivingSchool,
 }) => {
   if (!open) return null;
+
+  const canStartExam = atDrivingSchool || isSandbox;
+  const distText =
+    drivingSchoolDistPx !== null
+      ? drivingSchoolDistPx < 1000
+        ? `${Math.round(drivingSchoolDistPx)} m`
+        : `${(drivingSchoolDistPx / 1000).toFixed(1)} km`
+      : null;
 
   return (
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Sistema de Licenças"
+      aria-label="Escola de Camionagem — Sistema de Licenças"
       className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[60] flex items-center justify-center p-2 sm:p-4"
       onClick={onClose}
     >
@@ -36,9 +52,11 @@ export const LicensesModal: React.FC<LicensesModalProps> = ({
               <Award className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
             <div className="min-w-0">
-              <h2 className="text-base sm:text-xl font-black text-white leading-snug">SISTEMA DE LICENÇAS</h2>
+              <h2 className="text-base sm:text-xl font-black text-white leading-snug">
+                ESCOLA DE CAMIONAGEM — LICENÇAS
+              </h2>
               <p className="text-[11px] sm:text-xs text-slate-400">
-                Provas práticas de manobra para desbloqueio de veículos.
+                Conduza até à Escola de Camionagem para realizar provas práticas e desbloquear novas categorias.
               </p>
             </div>
           </div>
@@ -49,6 +67,67 @@ export const LicensesModal: React.FC<LicensesModalProps> = ({
           >
             ✕
           </button>
+        </div>
+
+        {/* Driving School Location Gate Banner */}
+        <div
+          data-testid="driving-school-gate-banner"
+          className={`mb-3 sm:mb-4 p-2.5 sm:p-3 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shrink-0 ${
+            atDrivingSchool
+              ? 'bg-emerald-950/50 border-emerald-500/50 text-emerald-200'
+              : isSandbox
+                ? 'bg-cyan-950/40 border-cyan-500/40 text-cyan-200'
+                : 'bg-amber-950/45 border-amber-500/50 text-amber-100'
+          }`}
+        >
+          <div className="flex items-start sm:items-center gap-2.5 min-w-0">
+            <GraduationCap
+              className={`w-5 h-5 shrink-0 mt-0.5 sm:mt-0 ${
+                atDrivingSchool ? 'text-emerald-400' : isSandbox ? 'text-cyan-400' : 'text-amber-400'
+              }`}
+            />
+            <div className="min-w-0 text-xs">
+              {atDrivingSchool ? (
+                <>
+                  <div className="font-bold text-emerald-300">Na Escola de Camionagem — pronto para exame</div>
+                  <div className="text-[11px] text-emerald-200/80">
+                    O veículo de exame será preparado na pista de partida da escola.
+                  </div>
+                </>
+              ) : isSandbox ? (
+                <>
+                  <div className="font-bold text-cyan-300">
+                    Modo Sandbox — acesso remoto aos exames{distText ? ` (Escola a ${distText})` : ''}
+                  </div>
+                  <div className="text-[11px] text-cyan-200/80">
+                    No Modo Carreira precisa de se deslocar até à Escola de Camionagem para tirar as cartas.
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="font-bold text-amber-300">
+                    Desloque-se até à Escola de Camionagem para iniciar um exame
+                    {distText ? ` · ${distText}` : ''}
+                  </div>
+                  <div className="text-[11px] text-amber-200/80">
+                    Estacione junto à receção do edifício da Escola de Camionagem (zona central norte).
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {!atDrivingSchool && (
+            <button
+              type="button"
+              data-testid="btn-locate-driving-school"
+              onClick={onLocateDrivingSchool}
+              className="px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shrink-0 transition-colors"
+            >
+              <MapPin className="w-3.5 h-3.5" />
+              Ver Escola no Mapa
+            </button>
+          )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 overflow-y-auto overscroll-contain flex-1 min-h-0 pr-0.5 sm:pr-1">
@@ -114,15 +193,23 @@ export const LicensesModal: React.FC<LicensesModalProps> = ({
                 </div>
 
                 <button
+                  type="button"
+                  disabled={!canStartExam}
                   onClick={() => onStartExam(lic.id)}
                   className={`w-full py-2 rounded text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                    isPassed
-                      ? 'bg-slate-800 text-cyan-300 hover:bg-slate-700'
-                      : 'bg-cyan-500 hover:bg-cyan-400 text-black font-black shadow-lg shadow-cyan-500/20'
+                    !canStartExam
+                      ? 'bg-slate-900 text-slate-500 border border-slate-800 cursor-not-allowed'
+                      : isPassed
+                        ? 'bg-slate-800 text-cyan-300 hover:bg-slate-700'
+                        : 'bg-cyan-500 hover:bg-cyan-400 text-black font-black shadow-lg shadow-cyan-500/20'
                   }`}
                 >
                   <Play className="w-3.5 h-3.5" />
-                  {isPassed ? 'Repetir Exame Prático' : 'Realizar Exame Prático'}
+                  {!canStartExam
+                    ? 'Vá à Escola de Camionagem'
+                    : isPassed
+                      ? 'Repetir Exame Prático'
+                      : 'Realizar Exame Prático'}
                 </button>
               </div>
             );
@@ -142,3 +229,4 @@ export const LicensesModal: React.FC<LicensesModalProps> = ({
     </div>
   );
 };
+

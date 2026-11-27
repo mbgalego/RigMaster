@@ -132,6 +132,7 @@ export default function App() {
   const [showWorkshopModal, setShowWorkshopModal] = useState<boolean>(false);
   const [showWorldMapModal, setShowWorldMapModal] = useState<boolean>(false);
   const [mapFocusTruckId, setMapFocusTruckId] = useState<string | null>(null);
+  const [mapFocusPoint, setMapFocusPoint] = useState<{ x: number; y: number; zoom?: number } | null>(null);
   const [showJsonModal, setShowJsonModal] = useState<boolean>(false);
   const [jsonContent, setJsonContent] = useState<string>('');
   const [jsonError, setJsonError] = useState<string | null>(null);
@@ -209,6 +210,7 @@ export default function App() {
   const prevOutOfFuel = useRef(telemetry.isOutOfFuel);
   const prevNearbyPump = useRef(telemetry.nearbyPump);
   const prevNearbyRepairBay = useRef(telemetry.nearbyRepairBay);
+  const prevNearbyDrivingSchool = useRef(telemetry.nearbyDrivingSchool);
   const prevJackknifed = useRef(telemetry.isJackknifed);
   const prevCargoHealth = useRef(telemetry.cargoHealth);
   const prevEngineHealth = useRef(telemetry.truckDamage.engine);
@@ -255,6 +257,15 @@ export default function App() {
     prevNearbyRepairBay.current = telemetry.nearbyRepairBay;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [telemetry.nearbyRepairBay, telemetry.truckHealth, telemetry.trailerHealth]);
+
+  // Nearby driving school reception → toast
+  useEffect(() => {
+    if (!prevNearbyDrivingSchool.current && telemetry.nearbyDrivingSchool) {
+      addToast('Escola de Camionagem — prima E ou toque na receção para exames de carta', 'info', 3600);
+    }
+    prevNearbyDrivingSchool.current = telemetry.nearbyDrivingSchool;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [telemetry.nearbyDrivingSchool]);
 
   // Jackknife → toast
   useEffect(() => {
@@ -350,6 +361,7 @@ export default function App() {
       if ((e.key === 'm' || e.key === 'M') && !isEditorMode) {
         e.preventDefault();
         setMapFocusTruckId(null);
+        setMapFocusPoint(null);
         setShowWorldMapModal((v) => !v);
       }
     };
@@ -395,10 +407,20 @@ export default function App() {
     let lastTelemetrySnap: MainScene['telemetry'] | null = null;
     let lastEditorFlag: boolean | null = null;
     let lastExamSnap: ExamStatus | null = null;
+    let attachedSchoolScene: MainScene | null = null;
+    const onOpenDrivingSchool = () => {
+      setIsMenuOpen(false);
+      setShowLicenseModal(true);
+    };
     const interval = setInterval(() => {
       const scene = getMainScene();
       const edScene = getEditorScene();
       if (scene) {
+        if (attachedSchoolScene !== scene) {
+          attachedSchoolScene?.events.off('open-driving-school', onOpenDrivingSchool);
+          scene.events.on('open-driving-school', onOpenDrivingSchool);
+          attachedSchoolScene = scene;
+        }
         if (scene.world?.restoredFromDraft) {
           scene.world.restoredFromDraft = false;
           addToast('Mapa restaurado a partir do browser storage', 'success', 4000);
@@ -429,6 +451,8 @@ export default function App() {
 
     return () => {
       clearInterval(interval);
+      attachedSchoolScene?.events.off('open-driving-school', onOpenDrivingSchool);
+      attachedSchoolScene = null;
       for (const timerId of toastTimersRef.current) {
         window.clearTimeout(timerId);
       }
@@ -619,8 +643,16 @@ export default function App() {
     GarageSystem.getInstance().setActiveModifier('clear');
   };
 
-  // Start Exam
+  // Start Exam (requires being at the Driving School in Career mode; spawns exam rig inside school yard)
   const handleStartExam = (licenseId: LicenseId) => {
+    const isSandboxMode = ReputationSystem.getInstance().isSandbox();
+    const scene = getMainScene();
+    const atSchool = Boolean(scene?.telemetry?.nearbyDrivingSchool ?? telemetry.nearbyDrivingSchool);
+    if (!isSandboxMode && !atSchool) {
+      addToast('Tem de se deslocar até à Escola de Camionagem para iniciar um exame', 'blocked', 3800);
+      return;
+    }
+
     const licSys = LicenseSystem.getInstance();
     licSys.startExam(licenseId);
     prevFocusedRef.current = null;
@@ -629,11 +661,17 @@ export default function App() {
     }
     setShowLicenseModal(false);
 
-    // Switch to the exam's vehicle directly (bypassing the license gate that the exam itself grants)
+    // Spawn the exam vehicle inside the Driving School's departure lane (bypassing license gate)
     const lic = licSys.getLicense(licenseId);
     if (lic) {
-      handleSelectVehicle(lic.exam.vehicleType, true);
-      handleReset(true);
+      setVehicleConfig(lic.exam.vehicleType);
+      if (scene) {
+        const schoolSpawn = scene.getDrivingSchoolExamSpawn();
+        scene.spawnVehicleRig(lic.exam.vehicleType, {
+          repair: true,
+          spawnOverride: schoolSpawn ?? undefined,
+        });
+      }
     }
   };
 
@@ -1447,12 +1485,17 @@ export default function App() {
         onDismissToast={(id) => setToasts((cur) => cur.filter((x) => x.id !== id))}
         onOpenWorldMap={() => {
           setMapFocusTruckId(null);
+          setMapFocusPoint(null);
           setShowWorldMapModal(true);
           setIsMenuOpen(false);
         }}
         onCancelMission={handleCancelMission}
         onCancelExam={() => LicenseSystem.getInstance().cancelExam()}
         onSwapTruck={handleSwapTruck}
+        onOpenDrivingSchool={() => {
+          setIsMenuOpen(false);
+          setShowLicenseModal(true);
+        }}
       />
 
 
@@ -2645,6 +2688,16 @@ export default function App() {
         onClose={() => setShowLicenseModal(false)}
         licenses={licenses}
         onStartExam={handleStartExam}
+        atDrivingSchool={Boolean(telemetry.nearbyDrivingSchool)}
+        drivingSchoolDistPx={telemetry.drivingSchoolPos?.dist ?? null}
+        isSandbox={telemetry.gameMode === 'sandbox'}
+        onLocateDrivingSchool={() => {
+          setShowLicenseModal(false);
+          setMapFocusTruckId(null);
+          const pos = telemetry.drivingSchoolPos;
+          setMapFocusPoint(pos ? { x: pos.x, y: pos.y, zoom: 2.6 } : null);
+          setShowWorldMapModal(true);
+        }}
       />
 
       {/* GARAGE & REGIONAL HUBS MODAL */}
@@ -2688,6 +2741,7 @@ export default function App() {
         onCancelMission={handleCancelMission}
         onOpenWorldMap={() => {
           setMapFocusTruckId(null);
+          setMapFocusPoint(null);
           setShowWorldMapModal(true);
         }}
       />
@@ -2719,6 +2773,7 @@ export default function App() {
         onOpenWorkshop={() => setShowWorkshopModal(true)}
         onOpenWorldMap={(focusId) => {
           setMapFocusTruckId(focusId ?? null);
+          setMapFocusPoint(null);
           setShowWorldMapModal(true);
         }}
       />
@@ -2743,7 +2798,10 @@ export default function App() {
 
       <WorldMapModal
         open={showWorldMapModal}
-        onClose={() => setShowWorldMapModal(false)}
+        onClose={() => {
+          setShowWorldMapModal(false);
+          setMapFocusPoint(null);
+        }}
         scene={getMainScene()}
         gameMode={telemetry.gameMode}
         activeTruckId={telemetry.activeTruckId}
@@ -2759,6 +2817,7 @@ export default function App() {
         activeExam={activeExam}
         examNavTarget={telemetry.examNavTarget}
         initialFocusTruckId={mapFocusTruckId}
+        initialFocusPoint={mapFocusPoint}
         onSwapTruck={handleSwapTruck}
       />
 

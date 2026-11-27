@@ -81,6 +81,12 @@ export function createGameConfig(options: GameConfigOptions): Phaser.Types.Core.
       // plus a spare so a third finger never steals a pointer.
       activePointers: 3,
     },
+    loader: {
+      // Match HTTP/1.1 per-origin concurrency (6) so reverse proxies / dev servers
+      // never drop or replace parallel PNG fetches with HTML warmup fallback pages.
+      maxParallelDownloads: 6,
+      timeout: 20000,
+    },
     fps: {
       target: 60,
       forceSetTimeOut: false,

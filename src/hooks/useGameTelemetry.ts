@@ -50,6 +50,8 @@ export function createInitialTelemetry(): GameTelemetry {
     fuelPrice: 1.749,
     nearbyPump: null,
     nearbyRepairBay: null,
+    nearbyDrivingSchool: null,
+    drivingSchoolPos: null,
     gameMode: 'career',
     activeTruckId: 'iveco_daily_4x2',
     activeTruckType: 'iveco_daily_4x2',
@@ -91,6 +93,8 @@ export function cloneTelemetrySnapshot(t: GameTelemetry): GameTelemetry {
     },
     nearbyPump: t.nearbyPump ? { ...t.nearbyPump } : null,
     nearbyRepairBay: t.nearbyRepairBay ? { ...t.nearbyRepairBay } : null,
+    nearbyDrivingSchool: t.nearbyDrivingSchool ? { ...t.nearbyDrivingSchool } : null,
+    drivingSchoolPos: t.drivingSchoolPos ? { ...t.drivingSchoolPos } : null,
     activeTruckUpgrades: { ...t.activeTruckUpgrades },
     truckWear: { ...t.truckWear },
     nearbySwapTruck: t.nearbySwapTruck ? { ...t.nearbySwapTruck } : null,
@@ -206,6 +210,23 @@ export function hasTelemetryChanged(prev: GameTelemetry | null, next: GameTeleme
     (prev.nearbyRepairBay &&
       next.nearbyRepairBay &&
       (prev.nearbyRepairBay.x !== next.nearbyRepairBay.x || prev.nearbyRepairBay.y !== next.nearbyRepairBay.y))
+  ) {
+    return true;
+  }
+  if (
+    (prev.nearbyDrivingSchool === null) !== (next.nearbyDrivingSchool === null) ||
+    (prev.nearbyDrivingSchool &&
+      next.nearbyDrivingSchool &&
+      (prev.nearbyDrivingSchool.x !== next.nearbyDrivingSchool.x ||
+        prev.nearbyDrivingSchool.y !== next.nearbyDrivingSchool.y))
+  ) {
+    return true;
+  }
+  if (
+    (prev.drivingSchoolPos === null) !== (next.drivingSchoolPos === null) ||
+    (prev.drivingSchoolPos &&
+      next.drivingSchoolPos &&
+      Math.round(prev.drivingSchoolPos.dist / 50) !== Math.round(next.drivingSchoolPos.dist / 50))
   ) {
     return true;
   }

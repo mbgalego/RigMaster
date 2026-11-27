@@ -134,6 +134,7 @@ export const CREATE_CATALOG: EditorCatalogCategory[] = [
       { spec: { type: 'building', w: 360, h: 278, variant: 'hospital', label: 'Hospital' }, icon: Cross },
       { spec: { type: 'building', w: 360, h: 278, variant: 'hospital', params: { exteriorParking: true }, label: 'Hospital c/ Estacionamento' }, icon: Cross },
       { spec: { type: 'building', w: 320, h: 185, variant: 'school', label: 'Escola' }, icon: GraduationCap },
+      { spec: { type: 'building', w: 380, h: 210, variant: 'driving_school', label: 'Escola Camionagem' }, icon: GraduationCap },
       { spec: { type: 'building', w: 360, h: 170, variant: 'supermarket', params: { exteriorParking: true }, label: 'Supermercado' }, icon: ShoppingCart },
       { spec: { type: 'building', w: 540, h: 328, variant: 'hypermarket', params: { exteriorParking: true }, label: 'Hipermercado' }, icon: ShoppingCart },
       { spec: { type: 'building', w: 250, h: 210, variant: 'town_hall', label: 'Câmara Municipal' }, icon: Landmark },
@@ -187,6 +188,18 @@ export const CREATE_CATALOG: EditorCatalogCategory[] = [
       { spec: { type: 'trailer', w: 46, h: 155, params: { trailer: 'bitrem_tanker_pup' }, label: 'Bitrem Cist. Tr. (H)' }, icon: Fuel },
       { spec: { type: 'trailer', w: 46, h: 220, params: { trailer: 'fragile_glass' }, label: 'Vidro Óptico (X)' }, icon: Truck },
       { spec: { type: 'trailer', w: 46, h: 225, params: { trailer: 'tanker_hazmat' }, label: 'Cisterna ADR (X)' }, icon: AlertTriangle },
+    ],
+  },
+  {
+    id: 'camioes',
+    label: 'Camiões',
+    icon: Truck,
+    items: [
+      { spec: { type: 'static_truck', w: 44, h: 118, variant: 'school_rigid_4x2', label: 'Camião Escola 4×2' }, icon: GraduationCap },
+      { spec: { type: 'static_truck', w: 44, h: 110, variant: 'tipper_6x4', label: 'Basculante 6×4' }, icon: Truck },
+      { spec: { type: 'static_truck', w: 44, h: 120, variant: 'flatbed_crane_6x2', label: 'Plataforma Grua 6×2' }, icon: Truck },
+      { spec: { type: 'static_truck', w: 46, h: 116, variant: 'concrete_mixer_8x4', label: 'Betoneira 8×4' }, icon: Truck },
+      { spec: { type: 'static_truck', w: 44, h: 116, variant: 'american_longnose_6x4', label: 'Long-Nose 6×4' }, icon: Truck },
     ],
   },
   {

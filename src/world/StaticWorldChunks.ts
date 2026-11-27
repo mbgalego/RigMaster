@@ -3,9 +3,11 @@ import { WorldTerrain } from './WorldTerrain';
 import {
   BUILDING_ASSET_KEYS,
   STATIC_PROP_SOLID_KEYS,
+  STATIC_TRUCK_ASSET_KEYS,
   SpriteRegistry,
   type BuildingAssetKey,
   type PropAssetKey,
+  type StaticTruckAssetKey,
 } from '../systems/SpriteRegistry';
 
 /**
@@ -35,7 +37,7 @@ export interface FlatSurfacePatterns {
 }
 
 export type SolidSpriteImages = Partial<
-  Record<BuildingAssetKey | PropAssetKey, HTMLImageElement | HTMLCanvasElement>
+  Record<BuildingAssetKey | PropAssetKey | StaticTruckAssetKey, HTMLImageElement | HTMLCanvasElement>
 >;
 
 export interface StaticChunkScratches {
@@ -268,7 +270,7 @@ export class StaticWorldChunks {
 
     const loadedSolids: SolidSpriteImages = {};
     let loadedSolidCount = 0;
-    for (const key of [...BUILDING_ASSET_KEYS, ...STATIC_PROP_SOLID_KEYS]) {
+    for (const key of [...BUILDING_ASSET_KEYS, ...STATIC_PROP_SOLID_KEYS, ...STATIC_TRUCK_ASSET_KEYS]) {
       const img = SpriteRegistry.getSourceImage(this.scene, key);
       if (img) {
         loadedSolids[key] = img;

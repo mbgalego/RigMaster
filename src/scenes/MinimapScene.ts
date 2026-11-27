@@ -293,6 +293,7 @@ export class MinimapScene extends Phaser.Scene {
       let sz = px;
       if (o.type === 'dock' || o.type === 'exam_dock') { color = '#eab308'; sz = px + 1; }
       else if (o.type === 'parking_pad') color = '#94a3b8';
+      else if (o.type === 'building' && o.variant === 'driving_school') { color = '#facc15'; sz = px + 3; }
       else if (o.type === 'building' || o.type === 'silo') color = '#475569';
       else if (o.type === 'gas_pump') { color = '#34d058'; sz = px + 1; }
       else if (o.type === 'wind_turbine') { color = '#e0f2fe'; sz = px + 2; }
@@ -566,6 +567,17 @@ export class MinimapScene extends Phaser.Scene {
         g.fillPath();
         g.strokePath();
       }
+    }
+
+    // Driving School beacon inside local radar window
+    for (const school of mainScene.world.drivingSchoolZones) {
+      const sx = toMapX(school.x);
+      const sy = toMapY(school.y);
+      if (!isInside(sx, sy, 5)) continue;
+      g.fillStyle(0xfacc15, 0.95);
+      g.lineStyle(1.4, 0x0284c7, 1);
+      g.fillCircle(sx, sy, 4.2);
+      g.strokeCircle(sx, sy, 4.2);
     }
 
     // Active mission objective marker (suppressed while an exam is active so only exam GPS shows)

@@ -67,7 +67,8 @@ export type BuildingAssetKey =
   | 'building_farm_pasture'
   | 'building_farm_crops'
   | 'building_crop_field'
-  | 'building_crop_wheat';
+  | 'building_crop_wheat'
+  | 'building_driving_school';
 
 export const BUILDING_ASSET_KEYS: readonly BuildingAssetKey[] = [
   'building_warehouse_big',
@@ -107,6 +108,7 @@ export const BUILDING_ASSET_KEYS: readonly BuildingAssetKey[] = [
   'building_farm_crops',
   'building_crop_field',
   'building_crop_wheat',
+  'building_driving_school',
 ] as const;
 
 export type PropAssetKey =
@@ -164,13 +166,29 @@ export const TRAFFIC_ASSET_KEYS: readonly TrafficAssetKey[] = [
   'traffic_truck_rigid',
 ] as const;
 
+export type StaticTruckAssetKey =
+  | 'static_truck_school_rigid_4x2'
+  | 'static_truck_tipper_6x4'
+  | 'static_truck_flatbed_crane_6x2'
+  | 'static_truck_concrete_mixer_8x4'
+  | 'static_truck_american_longnose_6x4';
+
+export const STATIC_TRUCK_ASSET_KEYS: readonly StaticTruckAssetKey[] = [
+  'static_truck_school_rigid_4x2',
+  'static_truck_tipper_6x4',
+  'static_truck_flatbed_crane_6x2',
+  'static_truck_concrete_mixer_8x4',
+  'static_truck_american_longnose_6x4',
+] as const;
+
 export type SpriteAssetKey =
   | TileAssetKey
   | TruckAssetKey
   | TrailerAssetKey
   | BuildingAssetKey
   | PropAssetKey
-  | TrafficAssetKey;
+  | TrafficAssetKey
+  | StaticTruckAssetKey;
 
 export interface SpriteAssetEntry {
   key: SpriteAssetKey;
@@ -261,6 +279,7 @@ export const AVAILABLE_SPRITES: readonly SpriteAssetEntry[] = [
   { key: 'building_farm_crops', url: '/assets/sprites/buildings/farm_crops.png', category: 'building' },
   { key: 'building_crop_field', url: '/assets/sprites/buildings/crop_field.png', category: 'building' },
   { key: 'building_crop_wheat', url: '/assets/sprites/buildings/crop_wheat.png', category: 'building' },
+  { key: 'building_driving_school', url: '/assets/sprites/buildings/driving_school.png', category: 'building' },
 
   // Phase D3.2 — Containers, Vegetation, Rocks & Industrial/Service Station Props (12/12 — RGBA PNG)
   { key: 'prop_container_base', url: '/assets/sprites/props/container_base.png', category: 'prop' },
@@ -281,6 +300,13 @@ export const AVAILABLE_SPRITES: readonly SpriteAssetEntry[] = [
   { key: 'traffic_car_sedan', url: '/assets/sprites/vehicles/traffic/car_sedan.png', category: 'traffic' },
   { key: 'traffic_van_delivery', url: '/assets/sprites/vehicles/traffic/van_delivery.png', category: 'traffic' },
   { key: 'traffic_truck_rigid', url: '/assets/sprites/vehicles/traffic/truck_rigid.png', category: 'traffic' },
+
+  // Driving School Specialized Trucks (RGBA PNG, facing UP / North — ready for future driving)
+  { key: 'static_truck_school_rigid_4x2', url: '/assets/sprites/vehicles/trucks/school_rigid_4x2.png', category: 'truck' },
+  { key: 'static_truck_tipper_6x4', url: '/assets/sprites/vehicles/trucks/tipper_6x4.png', category: 'truck' },
+  { key: 'static_truck_flatbed_crane_6x2', url: '/assets/sprites/vehicles/trucks/flatbed_crane_6x2.png', category: 'truck' },
+  { key: 'static_truck_concrete_mixer_8x4', url: '/assets/sprites/vehicles/trucks/concrete_mixer_8x4.png', category: 'truck' },
+  { key: 'static_truck_american_longnose_6x4', url: '/assets/sprites/vehicles/trucks/american_longnose_6x4.png', category: 'truck' },
 ] as const;
 
 /**
@@ -362,6 +388,155 @@ export const CERTIFICATE_BADGE_SPRITES: Record<CertificateId, string> = {
 export interface TruckMenuPreview {
   url: string;
   kind: 'sideview' | 'topdown';
+}
+
+/**
+ * Resilient Phaser Loader File for PNG/JPEG sprites.
+ *
+ * Unlike Phaser's default XHR ImageFile (which blindly passes any HTTP 200 response—including
+ * reverse-proxy HTML warmup/504 fallback pages—straight to `Image` and fails permanently with
+ * `Failed to process file: image "..."`), this loader:
+ * 1. Verifies HTTP 2xx AND an `image/*` Content-Type before decoding.
+ * 2. Retries transient network/proxy/decode failures up to 4 times with exponential backoff
+ *    and cache-busting query params.
+ * 3. Cleans up cleanly via `AbortController` if the game/scene is destroyed mid-load.
+ */
+class ResilientImageFile extends Phaser.Loader.File {
+  private abortController: AbortController | null = null;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private isDestroyed = false;
+
+  constructor(loader: Phaser.Loader.LoaderPlugin, key: string, url: string) {
+    super(loader, {
+      type: 'image',
+      cache: false,
+      extension: 'png',
+      key,
+      url,
+    });
+  }
+
+  public override load(): void {
+    this.state = Phaser.Loader.FILE_LOADING;
+    this.src = typeof this.url === 'string' ? this.url : '';
+    void this.fetchAndDecode(0);
+  }
+
+  private isLoaderAlive(): boolean {
+    const loader = this.loader as unknown as {
+      scene?: Phaser.Scene;
+      systems?: { game?: { pendingDestroy?: boolean } };
+      inflight?: Set<Phaser.Loader.File>;
+    } | null;
+    return Boolean(
+      !this.isDestroyed &&
+        loader &&
+        loader.scene &&
+        loader.systems?.game &&
+        !loader.systems.game.pendingDestroy &&
+        loader.inflight,
+    );
+  }
+
+  private async fetchAndDecode(attempt: number): Promise<void> {
+    if (!this.isLoaderAlive()) return;
+    const maxAttempts = 4;
+    const reqUrl =
+      attempt === 0
+        ? this.src
+        : `${this.src}${this.src.includes('?') ? '&' : '?'}retry=${attempt}`;
+
+    this.abortController?.abort();
+    const ctrl = new AbortController();
+    this.abortController = ctrl;
+
+    try {
+      const res = await fetch(reqUrl, {
+        signal: ctrl.signal,
+        cache: attempt === 0 ? 'default' : 'no-store',
+      });
+      if (!this.isLoaderAlive()) return;
+
+      const contentType = (res.headers.get('content-type') || '').toLowerCase();
+      if (!res.ok || (contentType && !contentType.startsWith('image/'))) {
+        throw new Error(`HTTP ${res.status} (${contentType || 'unknown'})`);
+      }
+
+      const blob = await res.blob();
+      if (!this.isLoaderAlive()) return;
+      if (blob.size < 32) {
+        throw new Error(`Empty image blob (${blob.size} bytes)`);
+      }
+
+      const img = await this.decodeBlob(blob);
+      if (!this.isLoaderAlive()) return;
+
+      this.data = img;
+      this.state = Phaser.Loader.FILE_LOADED;
+      this.loader.nextFile(this, true);
+    } catch (err) {
+      if (ctrl.signal.aborted || !this.isLoaderAlive()) return;
+      if (attempt + 1 < maxAttempts) {
+        const delayMs = 350 * Math.pow(2, attempt);
+        this.retryTimer = setTimeout(() => {
+          this.retryTimer = null;
+          void this.fetchAndDecode(attempt + 1);
+        }, delayMs);
+        return;
+      }
+      console.warn(
+        `[SpriteRegistry] Falha ao carregar textura "${this.key}" (${this.src}) após ${maxAttempts} tentativas — a usar fallback vetorial.`,
+        err instanceof Error ? err.message : '',
+      );
+      this.data = null;
+      this.state = Phaser.Loader.FILE_FAILED;
+      this.loader.nextFile(this, false);
+    }
+  }
+
+  private decodeBlob(blob: Blob): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const objUrl = URL.createObjectURL(blob);
+      const img = new Image();
+      if (this.crossOrigin) img.crossOrigin = this.crossOrigin;
+      img.onload = () => {
+        URL.revokeObjectURL(objUrl);
+        if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+          resolve(img);
+        } else {
+          reject(new Error('Decoded image has zero dimensions'));
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(objUrl);
+        reject(new Error('Image element decode failed'));
+      };
+      img.src = objUrl;
+    });
+  }
+
+  public override onProcess(): void {
+    this.state = Phaser.Loader.FILE_PROCESSING;
+    this.onProcessComplete();
+  }
+
+  public override addToCache(): void {
+    const tm = this.loader?.textureManager;
+    if (this.data && tm && !tm.exists(this.key)) {
+      tm.addImage(this.key, this.data as HTMLImageElement);
+    }
+  }
+
+  public override destroy(): void {
+    this.isDestroyed = true;
+    if (this.retryTimer !== null) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
+    this.abortController?.abort();
+    this.abortController = null;
+    super.destroy();
+  }
 }
 
 export class SpriteRegistry {
@@ -450,6 +625,26 @@ export class SpriteRegistry {
         return 'building_crop_field';
       case 'crop_wheat':
         return 'building_crop_wheat';
+      case 'driving_school':
+        return 'building_driving_school';
+      default:
+        return null;
+    }
+  }
+
+  /** Resolves a specialized static truck variant to its StaticTruckAssetKey. */
+  public static getStaticTruckKey(variant?: string): StaticTruckAssetKey | null {
+    switch (variant ?? 'school_rigid_4x2') {
+      case 'school_rigid_4x2':
+        return 'static_truck_school_rigid_4x2';
+      case 'tipper_6x4':
+        return 'static_truck_tipper_6x4';
+      case 'flatbed_crane_6x2':
+        return 'static_truck_flatbed_crane_6x2';
+      case 'concrete_mixer_8x4':
+        return 'static_truck_concrete_mixer_8x4';
+      case 'american_longnose_6x4':
+        return 'static_truck_american_longnose_6x4';
       default:
         return null;
     }
@@ -492,20 +687,13 @@ export class SpriteRegistry {
 
   /**
    * Queues all available 2D sprite and tile textures inside `MainScene.preload()`.
-   * Any load error is caught gracefully so procedural vector fallbacks always keep the game playable.
+   * Uses `ResilientImageFile` so transient proxy errors/HTML warmup pages are retried
+   * automatically and procedural vector fallbacks always keep the game playable.
    */
   public static preload(scene: Phaser.Scene): void {
-    const onLoadError = (file: Phaser.Loader.File) => {
-      console.warn(`[SpriteRegistry] Falha ao carregar textura "${file.key}" (${file.url}) — a usar fallback vetorial.`);
-    };
-    scene.load.on(Phaser.Loader.Events.FILE_LOAD_ERROR, onLoadError);
-    scene.load.once(Phaser.Loader.Events.COMPLETE, () => {
-      scene.load.off(Phaser.Loader.Events.FILE_LOAD_ERROR, onLoadError);
-    });
-
     for (const entry of AVAILABLE_SPRITES) {
       if (!scene.textures.exists(entry.key)) {
-        scene.load.image(entry.key, entry.url);
+        scene.load.addFile(new ResilientImageFile(scene.load, entry.key, entry.url));
       }
     }
   }
